@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.splitzy.app"
+      "bundleIdentifier": "com.splitzy.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -47,6 +50,16 @@
         }
       ],
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "expo-navigation-bar": {
+        "enforceContrast": false,
+        "style": "light",
+        "hidden": true
+      },
+      "eas": {
+        "projectId": "bc0bb695-d19f-44ed-af2e-4ec21899a49a"
+      }
+    }
   }
 }
