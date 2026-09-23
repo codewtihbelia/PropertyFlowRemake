@@ -5986,3 +5986,4 @@
 {"_e":"metro:bundling:progress","_t":1790131523348,"id":"1","progress":0.999,"total":1007,"current":1007}
 {"_e":"metro:bundling:progress","_t":1790131523462,"id":"1","progress":0.999,"total":1018,"current":1018}
 {"_e":"metro:bundling:done","_t":1790131523848,"id":"1","total":1018,"ms":22426.2276}
+{"_e":"metro:client_log","_t":1790132150391,"level":"log","data":["[PushNotification] Running in Expo Go on Android. Remote push notifications are disabled by Expo Go (SDK 53+). Using development token."]}
