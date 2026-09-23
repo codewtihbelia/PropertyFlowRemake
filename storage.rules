@@ -1,0 +1,40 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isImageOrPdf() {
+      return request.resource.contentType.matches('image/.*') ||
+             request.resource.contentType == 'application/pdf';
+    }
+
+    function isValidSize(maxBytes) {
+      return request.resource.size < maxBytes;
+    }
+
+    // Profile photos
+    match /avatars/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId
+                   && isImageOrPdf() && isValidSize(5 * 1024 * 1024);
+    }
+
+    // Payment proof uploads
+    match /payment_proofs/{householdId}/{paymentId}/{fileName} {
+      allow read: if isAuthenticated() &&
+                  firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.householdId == householdId;
+      allow write: if isAuthenticated()
+                   && isImageOrPdf() && isValidSize(10 * 1024 * 1024);
+    }
+
+    // Support ticket attachments
+    match /support/{ticketId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && isImageOrPdf() && isValidSize(10 * 1024 * 1024);
+    }
+  }
+}

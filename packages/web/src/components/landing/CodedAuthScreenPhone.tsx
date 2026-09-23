@@ -1,0 +1,292 @@
+import React, { useState } from "react";
+
+interface CodedAuthScreenPhoneProps {
+  onSignIn?: () => void;
+  onSignUp?: () => void;
+}
+
+/**
+ * CodedAuthScreenPhone
+ * 100% Coded Vector UI matching Splitzy Auth Screen:
+ * - Dynamic status bar with notch, time 9:41, wifi/battery indicators
+ * - Blue Splitzy icon with z-symbol badge
+ * - "Splitzy" brand title with black + blue split typography
+ * - Subtitle: "Manage, split bills, and track group expenses effortlessly."
+ * - Segmented tabs: "Sign In" vs "Sign Up"
+ * - Clean input boxes with icons (@ alex.rivera@example.com, lock + eye toggle)
+ * - Blue primary button with arrow: "Sign In →"
+ * - Bottom royal-blue curved wave container:
+ *   - "OR CONTINUE WITH" divider
+ *   - White "Continue with Google" pill button
+ *   - Black "Continue with Apple" pill button
+ *   - Terms & Privacy notice
+ *   - "Don't have an account? Sign up" prompt
+ */
+export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
+  onSignIn,
+  onSignUp,
+}) => {
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("alex.rivera@example.com");
+  const [password, setPassword] = useState("••••••••••••");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      if (tab === "signin") {
+        onSignIn?.();
+      } else {
+        onSignUp?.();
+      }
+    }, 400);
+  };
+
+  return (
+    <div className="relative mx-auto w-[310px] sm:w-[325px] h-[660px] bg-slate-900 rounded-[44px] p-3 shadow-2xl ring-1 ring-slate-800/80 select-none">
+      {/* Phone Screen Canvas */}
+      <div className="w-full h-full bg-blue-600 rounded-[36px] overflow-hidden flex flex-col relative shadow-inner">
+        {/* Upper White Section */}
+        <div className="p-4 pt-3 w-full bg-white flex flex-col items-center">
+          {/* Status Bar */}
+          <div className="flex items-center justify-between w-full pt-1 pb-1 px-1">
+            <span className="text-[11px] font-bold text-slate-800">9:41</span>
+
+            {/* Island Notch */}
+            <div className="w-20 h-3.5 bg-slate-900 rounded-full mx-auto" />
+
+            {/* Status Icons */}
+            <div className="flex items-center gap-1.5 text-slate-800 text-[10px]">
+              <span className="font-bold">●</span>
+              <span className="text-xs">📶</span>
+              <span className="text-[11px]">🔋</span>
+            </div>
+          </div>
+
+          {/* Logo Badge */}
+          <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shadow-[0_8px_20px_rgba(37,99,235,0.35)] mt-3 mb-2">
+            <svg
+              className="w-8 h-8 text-white"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path d="M19 7h-8.2l3.6-3.6L13 2 7 8l6 6 1.4-1.4L10.8 9H19V7zm-14 10h8.2l-3.6 3.6L11 22l6-6-6-6-1.4 1.4 3.6 3.6H5v2z" />
+            </svg>
+          </div>
+
+          {/* Brand Header */}
+          <div className="flex items-baseline text-2xl font-black tracking-tight">
+            <span className="text-slate-900">Split</span>
+            <span className="text-blue-600">zy</span>
+          </div>
+          <p className="text-[11px] text-slate-500 text-center leading-tight mt-1 max-w-[220px]">
+            Manage, split bills, and track group expenses effortlessly.
+          </p>
+
+          {/* Segmented Control */}
+          <div className="w-full grid grid-cols-2 bg-slate-100/90 p-1 rounded-xl mt-3 mb-3 border border-slate-200/60">
+            <button
+              type="button"
+              onClick={() => setTab("signin")}
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                tab === "signin"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("signup")}
+              className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
+                tab === "signup"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="w-full space-y-2.5">
+            {/* Email Field */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                Email Address
+              </label>
+              <div className="relative flex items-center">
+                <span className="absolute left-3 text-slate-400 text-xs">
+                  @
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 text-xs text-slate-900 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                  placeholder="alex.rivera@example.com"
+                />
+              </div>
+            </div>
+
+            {/* Password Field */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-bold text-slate-700">
+                  Password
+                </label>
+                {tab === "signin" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      alert("Password reset link will be sent to your email.")
+                    }
+                    className="text-[10px] font-bold text-blue-600 hover:underline"
+                  >
+                    Forgot?
+                  </button>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <span className="absolute left-3 text-slate-400 text-xs">
+                  🔒
+                </span>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-8 pr-8 py-2 text-xs text-slate-900 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                  placeholder="••••••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 text-slate-400 hover:text-slate-600 text-xs"
+                >
+                  {showPassword ? "👁️" : "👁️"}
+                </button>
+              </div>
+            </div>
+
+            {/* Submit Action Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-xl text-xs font-bold shadow-[0_4px_14px_rgba(37,99,235,0.35)] flex items-center justify-center gap-1.5 transition-all"
+            >
+              <span>{tab === "signin" ? "Sign In" : "Sign Up"}</span>
+              <span className="text-sm font-bold">→</span>
+            </button>
+          </form>
+        </div>
+
+        {/* ================= Bottom Blue Wave Section ================= */}
+        <div className="relative overflow-hidden w-full flex-1 bg-blue-600 flex flex-col justify-between">
+          {/* Organic Fluid S-Curve SVG Wave */}
+          <div className="w-full h-11 relative overflow-hidden bg-white -mb-px">
+            <svg
+              viewBox="0 0 320 44"
+              className="w-full h-full block"
+              preserveAspectRatio="none"
+            >
+              <path
+                d="M 0,26 C 40,8 100,5 160,20 C 220,35 270,30 320,12 L 320,44 L 0,44 Z"
+                fill="#2563EB"
+              />
+            </svg>
+          </div>
+
+          <div className="relative bg-blue-600 text-white pt-1 pb-6 px-5 flex-1 flex flex-col justify-between">
+            {/* OR CONTINUE WITH Divider */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex-1 h-px bg-white/20" />
+              <span className="text-[9px] tracking-wider font-extrabold text-white/80">
+                OR CONTINUE WITH
+              </span>
+              <div className="flex-1 h-px bg-white/20" />
+            </div>
+
+            {/* Continue with Google */}
+            <button
+              type="button"
+              onClick={() =>
+                alert("Google Sign-in connected with Firebase Authentication.")
+              }
+              className="w-full bg-white hover:bg-slate-50 text-slate-900 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-2 transition-transform active:scale-[0.98]"
+            >
+              {/* Google G multi-color icon */}
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.15z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.27a7.2 7.2 0 0 1 0-4.54V6.58H1.25a11.96 11.96 0 0 0 0 10.84l4.03-3.15z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.93 6.72-4.93z"
+                />
+              </svg>
+              <span>Continue with Google</span>
+            </button>
+
+            {/* Continue with Apple */}
+            <button
+              type="button"
+              onClick={() =>
+                alert("Apple Sign-In is configured for iOS devices.")
+              }
+              className="w-full bg-slate-950 hover:bg-slate-900 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-3 transition-transform active:scale-[0.98]"
+            >
+              <span className="text-sm"></span>
+              <span>Continue with Apple</span>
+            </button>
+
+            {/* Terms & Privacy */}
+            <p className="text-[9.5px] text-white/75 text-center leading-tight mb-2.5">
+              By continuing, you agree to Splitzy's{" "}
+              <a
+                href="#terms"
+                className="underline font-bold text-white hover:text-white/90"
+              >
+                Terms of Service
+              </a>{" "}
+              and{" "}
+              <a
+                href="#privacy"
+                className="underline font-bold text-white hover:text-white/90"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
+
+            {/* Don't have an account? Sign up */}
+            <div className="text-center text-[11px] text-white/90 font-medium">
+              {tab === "signin"
+                ? "Don't have an account? "
+                : "Already have an account? "}
+              <button
+                type="button"
+                onClick={() => setTab(tab === "signin" ? "signup" : "signin")}
+                className="font-black text-white underline hover:opacity-90 cursor-pointer ml-1"
+              >
+                {tab === "signin" ? "Sign up" : "Sign in"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

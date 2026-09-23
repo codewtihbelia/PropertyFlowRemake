@@ -1,0 +1,10 @@
+{
+  "version": 0,
+  "bundler": "metro",
+  "fileMetadata": {
+    "android": {
+      "bundle": "_expo/static/js/android/AppEntry-bc05abbf254b5712d69aca8d91bedb8a.hbc",
+      "assets": []
+    }
+  }
+}

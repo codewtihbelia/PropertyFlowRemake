@@ -1,0 +1,345 @@
+import React, { useState, useEffect } from "react";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { HouseholdProvider } from "./contexts/HouseholdContext";
+import { NotificationProvider } from "./contexts/NotificationContext";
+import { Header } from "./components/common/Header";
+import { Sidebar } from "./components/common/Sidebar";
+
+// Auth & Onboarding Views
+import { OnboardingView } from "./views/auth/OnboardingView";
+import { AuthView } from "./views/auth/AuthView";
+
+// Host Views
+import { HostDashboard } from "./views/host/HostDashboard";
+import { HostHousehold } from "./views/host/HostHousehold";
+import { HostBilling } from "./views/host/HostBilling";
+import { HostAttendance } from "./views/host/HostAttendance";
+import { HostPayments } from "./views/host/HostPayments";
+import { HostRedistribution } from "./views/host/HostRedistribution";
+import { HostReports } from "./views/host/HostReports";
+import { HostCommunication } from "./views/host/HostCommunication";
+import { HostAuditLogs } from "./views/host/HostAuditLogs";
+import { HostSettings } from "./views/host/HostSettings";
+
+// Client Views
+import { ClientDashboard } from "./views/client/ClientDashboard";
+import { ClientBills } from "./views/client/ClientBills";
+import { ClientPayments } from "./views/client/ClientPayments";
+import { ClientAttendance } from "./views/client/ClientAttendance";
+import { ClientProfile } from "./views/client/ClientProfile";
+
+// Super Admin Views
+import { SuperAdminDashboard } from "./views/admin/SuperAdminDashboard";
+import { SuperAdminHostApplications } from "./views/admin/SuperAdminHostApplications";
+import { SuperAdminHouseholds } from "./views/admin/SuperAdminHouseholds";
+import { SuperAdminUsers } from "./views/admin/SuperAdminUsers";
+import { SuperAdminVersions } from "./views/admin/SuperAdminVersions";
+import { SuperAdminSupport } from "./views/admin/SuperAdminSupport";
+import { ClientHostApplication } from "./views/client/ClientHostApplication";
+import { LandingPage } from "./views/landing/LandingPage";
+
+type WebFlow = "landing" | "onboarding" | "auth" | "app";
+
+const MainLayout: React.FC = () => {
+  const {
+    currentUser,
+    isHost,
+    isSuperAdmin,
+    role,
+    signOut,
+    isAuthenticated,
+    loading,
+    isEmailVerified,
+    sendVerificationEmail,
+    reloadUser,
+  } = useAuth();
+  const [currentTab, setCurrentTab] = useState<string>("host_dashboard");
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [authInitialMode, setAuthInitialMode] = useState<
+    "signin" | "register" | "forgot"
+  >("signin");
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [checkingVerificationStatus, setCheckingVerificationStatus] =
+    useState<boolean>(false);
+  const [dismissVerifyBanner, setDismissVerifyBanner] =
+    useState<boolean>(false);
+
+  // Initialize flow: default to landing page
+  const [webFlow, setWebFlow] = useState<WebFlow>(() => {
+    if (
+      typeof window !== "undefined" &&
+      (window.location.hash === "#portal" || window.location.hash === "#app")
+    ) {
+      return "app";
+    }
+    return "landing";
+  });
+
+  // Synchronize default tab on role switch
+  useEffect(() => {
+    if (isSuperAdmin) {
+      setCurrentTab("admin_dashboard");
+    } else if (isHost) {
+      setCurrentTab("host_dashboard");
+    } else {
+      setCurrentTab("client_dashboard");
+    }
+  }, [role, isSuperAdmin, isHost]);
+
+  // Landing Screen View (Default for /web)
+  if (webFlow === "landing") {
+    return (
+      <LandingPage
+        onOpenApp={() => {
+          if (currentUser?.uid) {
+            setWebFlow("app");
+          } else {
+            setAuthInitialMode("signin");
+            setWebFlow("auth");
+          }
+        }}
+        onOpenAuth={(mode) => {
+          setAuthInitialMode(mode || "signin");
+          setWebFlow("auth");
+        }}
+      />
+    );
+  }
+
+  // Onboarding Screen View
+  if (webFlow === "onboarding") {
+    return (
+      <OnboardingView
+        onComplete={() => {
+          localStorage.setItem("splitzy_onboarding_completed", "true");
+          setWebFlow(currentUser?.uid ? "app" : "auth");
+        }}
+      />
+    );
+  }
+
+  // Auth Screen View
+  if (webFlow === "auth") {
+    return (
+      <AuthView
+        initialMode={authInitialMode}
+        onSuccess={() => {
+          setWebFlow("app");
+          if (typeof window !== "undefined") {
+            window.location.hash = "portal";
+          }
+        }}
+        onBackToLanding={() => setWebFlow("landing")}
+      />
+    );
+  }
+
+  // STRICT AUTH GUARD: Only authenticated users can access the application portal
+  if (webFlow === "app") {
+    const hasActiveUser = Boolean(currentUser?.uid || auth.currentUser?.uid);
+
+    if (loading && !hasActiveUser) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 font-sans">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-700 to-indigo-600 flex items-center justify-center text-white font-black text-2xl shadow-xl shadow-brand-500/25 animate-pulse mb-4">
+            S
+          </div>
+          <div className="text-base font-bold text-slate-800">
+            Verifying session...
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            Authenticating with Firebase Cloud
+          </div>
+        </div>
+      );
+    }
+
+    if (!hasActiveUser) {
+      return (
+        <AuthView
+          initialMode="signin"
+          onSuccess={() => {
+            setWebFlow("app");
+            if (typeof window !== "undefined") {
+              window.location.hash = "portal";
+            }
+          }}
+          onBackToLanding={() => setWebFlow("landing")}
+        />
+      );
+    }
+  }
+
+  const renderContent = () => {
+    // Super Admin Routes
+    if (isSuperAdmin) {
+      switch (currentTab) {
+        case "admin_host_applications":
+          return <SuperAdminHostApplications />;
+        case "admin_households":
+          return <SuperAdminHouseholds />;
+        case "admin_users":
+          return <SuperAdminUsers />;
+        case "admin_versions":
+          return <SuperAdminVersions />;
+        case "admin_support":
+          return <SuperAdminSupport />;
+        case "admin_logs":
+          return <HostAuditLogs />;
+        case "admin_dashboard":
+        default:
+          return <SuperAdminDashboard onNavigate={setCurrentTab} />;
+      }
+    }
+
+    // Host Routes
+    if (isHost) {
+      switch (currentTab) {
+        case "host_household":
+          return <HostHousehold />;
+        case "host_billing":
+          return <HostBilling />;
+        case "host_attendance":
+          return <HostAttendance />;
+        case "host_payments":
+          return <HostPayments />;
+        case "host_redistribution":
+          return <HostRedistribution />;
+        case "host_reports":
+          return <HostReports />;
+        case "host_messages":
+        case "host_announcements":
+          return <HostCommunication />;
+        case "host_logs":
+          return <HostAuditLogs />;
+        case "host_settings":
+          return <HostSettings />;
+        case "host_dashboard":
+        default:
+          return <HostDashboard onNavigate={setCurrentTab} />;
+      }
+    }
+
+    // Client Routes (Payor & Non-Payor)
+    switch (currentTab) {
+      case "client_host_application":
+        return <ClientHostApplication onNavigate={setCurrentTab} />;
+      case "client_bills":
+        return (
+          <ClientBills onPayClick={() => setCurrentTab("client_payments")} />
+        );
+      case "client_payments":
+        return <ClientPayments />;
+      case "client_attendance":
+        return <ClientAttendance />;
+      case "client_messages":
+      case "client_announcements":
+        return <HostCommunication />;
+      case "client_profile":
+        return <ClientProfile />;
+      case "client_dashboard":
+      default:
+        return <ClientDashboard onNavigate={setCurrentTab} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      <Header
+        onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        onSignOut={async () => {
+          await signOut();
+          setWebFlow("landing");
+        }}
+      />
+
+      {/* Unverified Email In-App Notice */}
+      {currentUser.uid && !isEmailVerified && !dismissVerifyBanner && (
+        <div className="bg-amber-500/10 border-b border-amber-300 text-amber-900 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <span>
+              Your email address (<strong>{currentUser.email}</strong>) is not
+              verified yet. Please confirm your account to secure receipts.
+            </span>
+          </div>
+          <div className="flex items-center gap-3 ml-auto">
+            {resendStatus && (
+              <span className="text-emerald-700 font-semibold">
+                {resendStatus}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await sendVerificationEmail();
+                  setResendStatus("Link sent!");
+                  setTimeout(() => setResendStatus(null), 4000);
+                } catch {
+                  setResendStatus("Error sending link.");
+                }
+              }}
+              className="font-bold underline text-amber-800 hover:text-amber-950 cursor-pointer"
+            >
+              Resend Verification Link
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setCheckingVerificationStatus(true);
+                const verified = await reloadUser();
+                setCheckingVerificationStatus(false);
+                if (verified) {
+                  setResendStatus("Verified! Thank you.");
+                } else {
+                  setResendStatus("Not verified yet.");
+                  setTimeout(() => setResendStatus(null), 3000);
+                }
+              }}
+              disabled={checkingVerificationStatus}
+              className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer disabled:opacity-75 transition text-[11px]"
+            >
+              {checkingVerificationStatus ? "Checking..." : "I've Verified"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissVerifyBanner(true)}
+              className="text-amber-700 hover:text-amber-950 font-bold ml-1 cursor-pointer"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
+        <Sidebar
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+        />
+
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto min-w-0">
+          {renderContent()}
+        </main>
+      </div>
+    </div>
+  );
+};
+
+export function App() {
+  return (
+    <AuthProvider>
+      <HouseholdProvider>
+        <NotificationProvider>
+          <MainLayout />
+        </NotificationProvider>
+      </HouseholdProvider>
+    </AuthProvider>
+  );
+}
+
+export default App;

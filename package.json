@@ -1,0 +1,23 @@
+{
+  "name": "propertyflow-remake",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace=@propertyflow/web run dev",
+    "build": "npm --workspace=@propertyflow/web run build",
+    "lint": "npm --workspace=@propertyflow/web run build",
+    "dev:web": "npm --workspace=@propertyflow/web run dev",
+    "build:web": "npm --workspace=@propertyflow/web run build",
+    "dev:mobile": "npm --workspace=@propertyflow/mobile run start",
+    "test": "npm --workspace=@propertyflow/shared run test",
+    "build:shared": "npm --workspace=@propertyflow/shared run build"
+  },
+  "devDependencies": {
+    "@react-native/babel-plugin-codegen": "^0.86.3",
+    "@react-native/codegen": "^0.86.3",
+    "typescript": "^5.4.5"
+  }
+}

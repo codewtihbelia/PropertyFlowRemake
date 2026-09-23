@@ -1,0 +1,30 @@
+{
+  "name": "@propertyflow/mobile",
+  "version": "1.0.0",
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@propertyflow/shared": "file:../shared",
+    "expo": "~52.0.49",
+    "expo-auth-session": "~57.0.12",
+    "expo-crypto": "~57.0.3",
+    "expo-image-picker": "~16.0.6",
+    "expo-notifications": "~0.29.13",
+    "expo-status-bar": "~2.0.1",
+    "react": "18.3.1",
+    "react-native": "0.76.7",
+    "react-native-safe-area-context": "~5.7.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@types/react": "~18.3.12",
+    "babel-preset-expo": "^57.0.12",
+    "typescript": "^5.4.5"
+  },
+  "private": true
+}

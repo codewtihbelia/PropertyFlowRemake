@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Splitzy",
+    "slug": "splitzy-mobile",
+    "scheme": "splitzy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F8FAFC",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2782EA"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.splitzy.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2782EA"
+      },
+      "package": "com.splitzy.app",
+      "navigationBar": {
+        "visible": "sticky-immersive"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2563EB"
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "hidden": true,
+          "style": "light",
+          "enforceContrast": false
+        }
+      ],
+      "expo-status-bar"
+    ]
+  }
+}
