@@ -55,9 +55,11 @@ export function calculateHouseholdBilling(
     existingAdjustments = [],
   } = input;
 
-  const activeMembers = members.filter((m) => m.status === "ACTIVE");
+  const activeMembers = members.filter(
+    (m) => m.status === "ACTIVE" || !m.status,
+  );
   const memberMap = new Map<string, HouseholdMember>(
-    members.map((m) => [m.userId, m]),
+    members.map((m) => [m.userId || m.memberId, m]),
   );
 
   // Track member aggregates
@@ -71,14 +73,25 @@ export function calculateHouseholdBilling(
   const memberWaterDays = new Map<string, number>();
 
   for (const m of members) {
-    memberRent.set(m.userId, 0);
-    memberInternet.set(m.userId, 0);
-    memberElectricity.set(m.userId, 0);
-    memberWater.set(m.userId, 0);
-    memberCustom.set(m.userId, 0);
-    memberAdjustments.set(m.userId, 0);
-    memberItems.set(m.userId, []);
-    memberWaterDays.set(m.userId, 0);
+    const id = m.userId || m.memberId;
+    memberRent.set(id, 0);
+    memberInternet.set(id, 0);
+    memberElectricity.set(id, 0);
+    memberWater.set(id, 0);
+    memberCustom.set(id, 0);
+    memberAdjustments.set(id, 0);
+    memberItems.set(id, []);
+    memberWaterDays.set(id, 0);
+    if (m.userId && m.userId !== id) {
+      memberRent.set(m.userId, 0);
+      memberInternet.set(m.userId, 0);
+      memberElectricity.set(m.userId, 0);
+      memberWater.set(m.userId, 0);
+      memberCustom.set(m.userId, 0);
+      memberAdjustments.set(m.userId, 0);
+      memberItems.set(m.userId, []);
+      memberWaterDays.set(m.userId, 0);
+    }
   }
 
   let rentTotalCentavos = 0;
@@ -97,22 +110,38 @@ export function calculateHouseholdBilling(
       charge.chargeType === "ELECTRICITY" ||
       charge.distributionMethod === "PAYORS_ONLY"
     ) {
-      return activeMembers
+      const payors = activeMembers
         .filter((m) => m.role === "PAYOR")
-        .map((m) => m.userId);
+        .map((m) => m.userId || m.memberId);
+      if (payors.length > 0) return payors;
+      const eligible = activeMembers
+        .filter((m) => m.role !== "NON_PAYOR")
+        .map((m) => m.userId || m.memberId);
+      return eligible.length > 0
+        ? eligible
+        : activeMembers.map((m) => m.userId || m.memberId);
     }
 
     switch (charge.distributionMethod) {
       case "ALL_MEMBERS":
-        return activeMembers.map((m) => m.userId);
+        return activeMembers.map((m) => m.userId || m.memberId);
       case "SELECTED_MEMBERS":
       case "EQUAL_SPLIT":
-      default:
-        return charge.participantUserIds && charge.participantUserIds.length > 0
-          ? charge.participantUserIds
-          : activeMembers
-              .filter((m) => m.role === "PAYOR")
-              .map((m) => m.userId);
+      default: {
+        if (charge.participantUserIds && charge.participantUserIds.length > 0) {
+          return charge.participantUserIds;
+        }
+        const payors = activeMembers
+          .filter((m) => m.role === "PAYOR")
+          .map((m) => m.userId || m.memberId);
+        if (payors.length > 0) return payors;
+        const eligible = activeMembers
+          .filter((m) => m.role !== "NON_PAYOR")
+          .map((m) => m.userId || m.memberId);
+        return eligible.length > 0
+          ? eligible
+          : activeMembers.map((m) => m.userId || m.memberId);
+      }
     }
   };
 
@@ -380,21 +409,39 @@ export function calculateHouseholdBilling(
 
   // Build final member bills
   const memberBills: MemberBill[] = members.map((m) => {
-    const r = memberRent.get(m.userId) || 0;
-    const i = memberInternet.get(m.userId) || 0;
-    const e = memberElectricity.get(m.userId) || 0;
-    const w = memberWater.get(m.userId) || 0;
-    const c = memberCustom.get(m.userId) || 0;
-    const a = memberAdjustments.get(m.userId) || 0;
+    const id = m.userId || m.memberId;
+    const r =
+      (m.userId ? memberRent.get(m.userId) : undefined) ??
+      memberRent.get(id) ??
+      0;
+    const i =
+      (m.userId ? memberInternet.get(m.userId) : undefined) ??
+      memberInternet.get(id) ??
+      0;
+    const e =
+      (m.userId ? memberElectricity.get(m.userId) : undefined) ??
+      memberElectricity.get(id) ??
+      0;
+    const w =
+      (m.userId ? memberWater.get(m.userId) : undefined) ??
+      memberWater.get(id) ??
+      0;
+    const c =
+      (m.userId ? memberCustom.get(m.userId) : undefined) ??
+      memberCustom.get(id) ??
+      0;
+    const a =
+      (m.userId ? memberAdjustments.get(m.userId) : undefined) ??
+      memberAdjustments.get(id) ??
+      0;
     const totalDue = r + i + e + w + c + a;
 
     return {
-      billId: `${billingCycle.billingCycleId}_${m.userId}`,
+      billId: `${billingCycle.billingCycleId}_${id}`,
       householdId: billingCycle.householdId,
       billingCycleId: billingCycle.billingCycleId,
-      userId: m.userId,
-      userName:
-        m.displayName || memberMap.get(m.userId)?.displayName || "Resident",
+      userId: id,
+      userName: m.displayName || memberMap.get(id)?.displayName || "Resident",
       userRole: m.role,
       rentCentavos: r,
       internetCentavos: i,
@@ -406,8 +453,14 @@ export function calculateHouseholdBilling(
       paidCentavos: 0,
       outstandingCentavos: totalDue,
       status: totalDue === 0 ? "PAID" : "UNPAID",
-      items: memberItems.get(m.userId) || [],
-      waterDaysPresent: memberWaterDays.get(m.userId) || 0,
+      items:
+        (m.userId ? memberItems.get(m.userId) : undefined) ||
+        memberItems.get(id) ||
+        [],
+      waterDaysPresent:
+        (m.userId ? memberWaterDays.get(m.userId) : undefined) ??
+        memberWaterDays.get(id) ??
+        0,
       finalizedAt: new Date().toISOString(),
     };
   });

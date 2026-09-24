@@ -8,7 +8,9 @@ import {
   Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
+import { getCategoryMeta } from "../services/categoryService";
 
 interface ExpenseDetailsScreenProps {
   expense: {
@@ -25,6 +27,14 @@ interface ExpenseDetailsScreenProps {
     isPaid?: boolean;
     receiptUrl?: string;
     notes?: string;
+    splitDetails?: Array<{
+      userId: string;
+      displayName: string;
+      shareCentavos: number;
+      percentage?: number;
+      isExempt?: boolean;
+      note?: string;
+    }>;
   };
   onBack: () => void;
 }
@@ -38,41 +48,70 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
     expense.status === "Paid" ||
     expense.isPaid === true;
 
-  // Sample split participants
-  const participants = [
-    {
-      name: "Alice Santos",
-      role: "Host / Payor",
-      shareCents: Math.round(expense.amountCents / 4),
-      status: "Paid",
-    },
-    {
-      name: "Bea Alonzo",
-      role: "Payor",
-      shareCents: Math.round(expense.amountCents / 4),
-      status: "Pending",
-    },
-    {
-      name: "Charlie Cruz",
-      role: "Payor",
-      shareCents: Math.round(expense.amountCents / 4),
-      status: "Pending",
-    },
-    {
-      name: "Dennis Tan",
-      role: "Payor",
-      shareCents: expense.amountCents - Math.round(expense.amountCents / 4) * 3,
-      status: "Pending",
-    },
-  ];
+  const catMeta = getCategoryMeta(expense.categoryLabel || expense.title);
+  const displayEmoji =
+    expense.icon && expense.icon.length <= 4 && !expense.icon.includes("-")
+      ? expense.icon
+      : catMeta.emoji;
+
+  // Real split participants from bill or fallback
+  const participants =
+    expense.splitDetails && expense.splitDetails.length > 0
+      ? expense.splitDetails.map((s) => ({
+          name: s.displayName || "Roommate",
+          role: s.isExempt ? "Non-Payor (Exempt)" : "Payor",
+          shareCents: s.shareCentavos,
+          status: isExpensePaid ? "Paid" : s.isExempt ? "Exempt" : "Pending",
+          isExempt: s.isExempt,
+          note: s.note,
+        }))
+      : [
+          {
+            name: "Alice Santos",
+            role: "Host / Payor",
+            shareCents: Math.round(expense.amountCents / 4),
+            status: isExpensePaid ? "Paid" : "Pending",
+            isExempt: false,
+            note: undefined,
+          },
+          {
+            name: "Bea Alonzo",
+            role: "Payor",
+            shareCents: Math.round(expense.amountCents / 4),
+            status: isExpensePaid ? "Paid" : "Pending",
+            isExempt: false,
+            note: undefined,
+          },
+          {
+            name: "Charlie Cruz",
+            role: "Payor",
+            shareCents: Math.round(expense.amountCents / 4),
+            status: isExpensePaid ? "Paid" : "Pending",
+            isExempt: false,
+            note: undefined,
+          },
+          {
+            name: "Dennis Tan",
+            role: "Payor",
+            shareCents:
+              expense.amountCents - Math.round(expense.amountCents / 4) * 3,
+            status: isExpensePaid ? "Paid" : "Pending",
+            isExempt: false,
+            note: undefined,
+          },
+        ];
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backBtnText}>←</Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
+          <Feather name="arrow-left" size={20} color="#0F172A" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Expense Details</Text>
+        <Text style={styles.headerTitle}>Bill Details</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -82,22 +121,44 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
       >
         {/* Main Expense Hero Card */}
         <View style={styles.heroCard}>
-          <View style={styles.heroIconWrap}>
-            <Text style={{ fontSize: 32 }}>{expense.icon}</Text>
+          <View
+            style={[styles.heroIconWrap, { backgroundColor: catMeta.bgColor }]}
+          >
+            <Ionicons
+              name={catMeta.ionicon as any}
+              size={32}
+              color={catMeta.color}
+            />
           </View>
           <Text style={styles.heroTitle}>{expense.title}</Text>
           <Text style={styles.heroAmount}>
             {formatPesos(expense.amountCents)}
           </Text>
           <View style={styles.tagWrap}>
-            <Text style={styles.categoryTag}>{expense.categoryLabel}</Text>
+            <View
+              style={[
+                styles.categoryTagWrap,
+                {
+                  backgroundColor: catMeta.bgColor,
+                  borderColor: catMeta.color,
+                },
+              ]}
+            >
+              <Text style={[styles.categoryTag, { color: catMeta.color }]}>
+                {expense.categoryLabel}
+              </Text>
+            </View>
             <Text style={styles.cycleTag}>{expense.cycle}</Text>
             <Text
               style={[
                 styles.statusBadge,
                 isExpensePaid
                   ? styles.statusPaid
-                  : { backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#B91C1C" },
+                  : {
+                      backgroundColor: "#FEF2F2",
+                      borderColor: "#FECACA",
+                      color: "#B91C1C",
+                    },
               ]}
             >
               {isExpensePaid ? "PAID" : "UNPAID BILL"}
@@ -127,7 +188,10 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             <View
               style={[
                 styles.paidMethodBadge,
-                !isExpensePaid && { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
+                !isExpensePaid && {
+                  backgroundColor: "#FEF2F2",
+                  borderColor: "#FECACA",
+                },
               ]}
             >
               <Text
@@ -154,9 +218,24 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
               <View style={styles.userInitials}>
                 <Text style={styles.userInitialsText}>{p.name.charAt(0)}</Text>
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, paddingRight: 6 }}>
                 <Text style={styles.splitUserName}>{p.name}</Text>
                 <Text style={styles.splitUserRole}>{p.role}</Text>
+                {p.note && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 2,
+                    }}
+                  >
+                    <Feather name="info" size={11} color="#0284C7" />
+                    <Text style={{ fontSize: 11, color: "#0284C7" }}>
+                      {p.note}
+                    </Text>
+                  </View>
+                )}
               </View>
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={styles.splitAmount}>
@@ -167,7 +246,13 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                     styles.statusBadge,
                     p.status === "Paid"
                       ? styles.statusPaid
-                      : styles.statusPending,
+                      : p.status === "Exempt"
+                        ? {
+                            backgroundColor: "#F1F5F9",
+                            borderColor: "#E2E8F0",
+                            color: "#64748B",
+                          }
+                        : styles.statusPending,
                   ]}
                 >
                   {p.status}
@@ -188,7 +273,12 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             />
           ) : (
             <View style={styles.receiptPlaceholder}>
-              <Text style={{ fontSize: 24, marginBottom: 4 }}>🧾</Text>
+              <Feather
+                name="file-text"
+                size={26}
+                color="#94A3B8"
+                style={{ marginBottom: 6 }}
+              />
               <Text style={styles.placeholderText}>
                 Official Document Uploaded
               </Text>
@@ -269,15 +359,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 12,
   },
-  tagWrap: { flexDirection: "row", gap: 8 },
-  categoryTag: {
-    backgroundColor: "#F1F5F9",
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "700",
+  tagWrap: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  categoryTagWrap: {
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
+    borderWidth: 1,
+  },
+  categoryTag: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   cycleTag: {
     backgroundColor: "#EFF6FF",

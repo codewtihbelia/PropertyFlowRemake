@@ -23,7 +23,10 @@ service cloud.firestore {
     }
     
     function isUser(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isAuthenticated() && (
+        request.auth.uid == userId ||
+        userId == ('mem_' + request.auth.uid)
+      );
     }
 
     function isHouseholdHost(householdId) {
@@ -40,6 +43,7 @@ service cloud.firestore {
     function isHouseholdMember(householdId) {
       return isAuthenticated() && (
         exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/households/$(householdId)/members/$('mem_' + request.auth.uid)) ||
         (hasUserDoc() && 'householdId' in getUserData() && getUserData().householdId == householdId) ||
         isHouseholdHost(householdId) ||
         isSuperAdmin()
@@ -55,20 +59,16 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if isUser(userId) || isSuperAdmin() || (
-        isAuthenticated() &&
-        hasUserDoc() &&
-        'householdId' in getUserData() &&
-        resource.data.householdId != null &&
-        getUserData().householdId == resource.data.householdId
-      );
+      allow read: if isUser(userId) || isSuperAdmin() || isAuthenticated();
       allow create: if isAuthenticated() && (
         isSuperAdmin() ||
         request.auth.uid == userId
       );
       allow update: if isAuthenticated() && (
         request.auth.uid == userId ||
-        isSuperAdmin()
+        isSuperAdmin() ||
+        (resource.data.pendingHouseholdId != null && isHouseholdHost(resource.data.pendingHouseholdId)) ||
+        (resource.data.householdId != null && isHouseholdHost(resource.data.householdId))
       );
       allow delete: if isSuperAdmin();
 
@@ -105,73 +105,89 @@ service cloud.firestore {
 
     // Households collection
     match /households/{householdId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAuthenticated();
-      allow update: if isHost(householdId);
+      allow update: if isHost(householdId) || isHouseholdMember(householdId) || isSuperAdmin();
       allow delete: if isSuperAdmin();
 
       // Subcollection: members
       match /members/{memberId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update: if isHost(householdId) || isSuperAdmin() || (isUser(memberId) && exists(/databases/$(database)/documents/households/$(householdId)));
-        allow delete: if isHost(householdId) || isSuperAdmin();
+        allow read: if true;
+        allow create, update: if isHost(householdId) || isSuperAdmin() || isUser(memberId) || (request.auth.uid != null && request.resource.data.userId == request.auth.uid);
+        allow delete: if isHost(householdId) || isSuperAdmin() || isUser(memberId);
       }
 
       // Subcollection: billingCycles
       match /billingCycles/{cycleId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update: if isHost(householdId);
-        allow delete: if isHost(householdId);
+        allow read: if true;
+        allow create, update: if isHost(householdId) || isSuperAdmin();
+        allow delete: if isHost(householdId) || isSuperAdmin();
       }
 
       // Subcollection: charges
       match /charges/{chargeId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update, delete: if isHost(householdId);
+        allow read: if true;
+        allow create, update, delete: if isHost(householdId) || isSuperAdmin() || isHouseholdMember(householdId);
       }
 
       // Subcollection: memberBills
       match /memberBills/{billId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update: if isHost(householdId);
+        allow read: if true;
+        allow create, update: if isHost(householdId) || isSuperAdmin();
         allow delete: if false; // Financial snapshot preservation
       }
 
       // Subcollection: waterAttendance
       match /waterAttendance/{recordId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update: if isHouseholdMember(householdId) && (
+        allow read: if true;
+        allow create, update: if isAuthenticated() && (
+          isHouseholdMember(householdId) ||
           isHost(householdId) ||
-          (request.resource.data.userId == request.auth.uid && request.resource.data.locked != true)
+          isSuperAdmin() ||
+          request.resource.data.userId == request.auth.uid ||
+          isUser(request.resource.data.userId) ||
+          (resource != null && (resource.data.userId == request.auth.uid || isUser(resource.data.userId)))
         );
-        allow delete: if isHost(householdId);
+        allow delete: if isHost(householdId) || isSuperAdmin();
+      }
+
+      // Subcollection: systemSettings (e.g. water config: 5/person/day)
+      match /systemSettings/{settingId} {
+        allow read: if true;
+        allow create, update, delete: if isHost(householdId) || isSuperAdmin() || isHouseholdMember(householdId);
+      }
+
+      // Subcollection: electricityConfig
+      match /electricityConfig/{configId} {
+        allow read: if true;
+        allow create, update, delete: if isHost(householdId) || isSuperAdmin();
       }
 
       // Subcollection: payments
       match /payments/{paymentId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create: if isHouseholdMember(householdId) && request.resource.data.userId == request.auth.uid;
+        allow read: if true;
+        allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isHouseholdMember(householdId));
         allow update: if isHost(householdId) || isSuperAdmin();
         allow delete: if false; // Financial records must never be deleted
       }
 
-      // Subcollection: mobile proposedUI expense log (only hosts can create/update/delete expenses)
+      // Subcollection: expenses
       match /expenses/{expenseId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update, delete: if isHost(householdId) || isSuperAdmin();
+        allow read: if true;
+        allow create, update, delete: if isHost(householdId) || isSuperAdmin() || isHouseholdMember(householdId);
       }
 
       // Subcollection: adjustments
       match /adjustments/{adjustmentId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create: if isHost(householdId);
+        allow read: if true;
+        allow create: if isHost(householdId) || isSuperAdmin();
         allow update, delete: if false; // Immutable financial adjustment history
       }
 
       // Subcollection: announcements
       match /announcements/{announcementId} {
-        allow read: if isHouseholdMember(householdId);
-        allow create, update, delete: if isHost(householdId);
+        allow read: if true;
+        allow create, update, delete: if isHost(householdId) || isSuperAdmin();
       }
     }
 
@@ -256,7 +272,7 @@ service cloud.firestore {
 
     // System Settings
     match /systemSettings/{settingId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isSuperAdmin();
     }
   }

@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   StyleSheet,
   Text,
   View,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth } from "../firebase/config";
@@ -19,10 +20,27 @@ interface CycleDate {
   isWeekend: boolean;
 }
 
-const generateCycleDates = (startStr: string, endStr: string): CycleDate[] => {
+const generateCycleDates = (
+  startStr?: string,
+  endStr?: string,
+): CycleDate[] => {
   const dates: CycleDate[] = [];
-  const start = new Date(startStr);
-  const end = new Date(endStr);
+  const now = new Date();
+
+  let start = startStr
+    ? new Date(startStr)
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  let end = endStr
+    ? new Date(endStr)
+    : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  if (isNaN(start.getTime())) {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  if (isNaN(end.getTime()) || end < start) {
+    end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  }
+
   const cur = new Date(start);
   const monthNames = [
     "Jan",
@@ -40,8 +58,13 @@ const generateCycleDates = (startStr: string, endStr: string): CycleDate[] => {
   ];
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-  while (cur <= end) {
-    const iso = cur.toISOString().split("T")[0];
+  let safety = 0;
+  while (cur <= end && safety < 60) {
+    safety++;
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, "0");
+    const d = String(cur.getDate()).padStart(2, "0");
+    const iso = `${y}-${m}-${d}`;
     dates.push({
       iso,
       dayNum: cur.getDate(),
@@ -63,6 +86,9 @@ export const AttendanceScreen: React.FC<{
   const [cycles, setCycles] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
   const [presentDates, setPresentDates] = useState<string[]>([]);
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const isBatchingRef = useRef<boolean>(false);
+  const [isBatching, setIsBatching] = useState<boolean>(false);
   const currentUser = auth.currentUser;
   const activeUserId = userId || currentUser?.uid || "";
   const resolvedHouseholdId = householdId || profile?.householdId || "";
@@ -83,7 +109,8 @@ export const AttendanceScreen: React.FC<{
         : [],
     [activeCycle],
   );
-  const ratePerDayPesos = (waterConfig?.rateCentavosPerPersonPerDay || 0) / 100;
+  const ratePerDayPesos =
+    ((waterConfig?.rateCentavosPerPersonPerDay ?? 500) || 500) / 100;
 
   useEffect(() => {
     let mounted = true;
@@ -120,10 +147,23 @@ export const AttendanceScreen: React.FC<{
       resolvedBillingCycleId,
       activeUserId,
       (markedDates) => {
-        const present = Object.entries(markedDates)
+        if (isBatchingRef.current) return;
+        const serverPresent = Object.entries(markedDates)
           .filter(([, status]) => status === "PRESENT")
           .map(([date]) => date);
-        setPresentDates(present);
+
+        setPresentDates((prev) => {
+          // Keep optimistic state for any date currently pending write
+          const merged = new Set(serverPresent);
+          for (const pendingIso of inFlightRef.current) {
+            if (prev.includes(pendingIso)) {
+              merged.add(pendingIso);
+            } else {
+              merged.delete(pendingIso);
+            }
+          }
+          return Array.from(merged);
+        });
       },
     );
   }, [activeUserId, resolvedBillingCycleId, resolvedHouseholdId]);
@@ -131,53 +171,102 @@ export const AttendanceScreen: React.FC<{
   const toggleDay = async (iso: string) => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
-    const nextStatus = presentDates.includes(iso) ? "ABSENT" : "PRESENT";
+    if (inFlightRef.current.has(iso) || isBatchingRef.current) return;
+
+    const isCurrentlyPresent = presentDates.includes(iso);
+    const nextStatus = isCurrentlyPresent ? "ABSENT" : "PRESENT";
+
+    inFlightRef.current.add(iso);
+
+    // Immediate zero-latency UI update
     setPresentDates((prev) =>
       nextStatus === "PRESENT"
-        ? [...prev, iso]
+        ? prev.includes(iso)
+          ? prev
+          : [...prev, iso]
         : prev.filter((date) => date !== iso),
     );
-    await mobileDataService.toggleAttendance(
-      resolvedHouseholdId,
-      resolvedBillingCycleId,
-      activeUserId,
-      iso,
-      nextStatus,
-    );
+
+    try {
+      await mobileDataService.toggleAttendance(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+        activeUserId,
+        iso,
+        nextStatus,
+      );
+    } catch (err) {
+      console.warn("[AttendanceScreen] toggleDay failed, rolling back:", err);
+      // Safe rollback to prior status on failure
+      setPresentDates((prev) =>
+        isCurrentlyPresent
+          ? prev.includes(iso)
+            ? prev
+            : [...prev, iso]
+          : prev.filter((d) => d !== iso),
+      );
+    } finally {
+      inFlightRef.current.delete(iso);
+    }
   };
 
   const markAll = async () => {
-    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
+    if (
+      !resolvedHouseholdId ||
+      !resolvedBillingCycleId ||
+      !activeUserId ||
+      isBatchingRef.current
+    )
       return;
-    setPresentDates(cycleDates.map((d) => d.iso));
-    await Promise.all(
-      cycleDates.map((d) =>
-        mobileDataService.toggleAttendance(
-          resolvedHouseholdId,
-          resolvedBillingCycleId,
-          activeUserId,
-          d.iso,
-          "PRESENT",
-        ),
-      ),
-    );
+    setIsBatching(true);
+    isBatchingRef.current = true;
+    const prevDates = [...presentDates];
+    const allIsos = cycleDates.map((d) => d.iso);
+    setPresentDates(allIsos);
+
+    try {
+      await mobileDataService.bulkToggleAttendance(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+        activeUserId,
+        cycleDates.map((d) => ({ date: d.iso, status: "PRESENT" as const })),
+      );
+    } catch (err) {
+      console.warn("[AttendanceScreen] markAll error:", err);
+      setPresentDates(prevDates);
+    } finally {
+      setIsBatching(false);
+      isBatchingRef.current = false;
+    }
   };
 
   const clearAll = async () => {
-    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
+    if (
+      !resolvedHouseholdId ||
+      !resolvedBillingCycleId ||
+      !activeUserId ||
+      isBatchingRef.current
+    )
       return;
+    setIsBatching(true);
+    isBatchingRef.current = true;
+    const prevDates = [...presentDates];
     setPresentDates([]);
-    await Promise.all(
-      cycleDates.map((d) =>
-        mobileDataService.toggleAttendance(
-          resolvedHouseholdId,
-          resolvedBillingCycleId,
-          activeUserId,
-          d.iso,
-          "ABSENT",
-        ),
-      ),
-    );
+
+    try {
+      await mobileDataService.bulkToggleAttendance(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+        activeUserId,
+        cycleDates.map((d) => ({ date: d.iso, status: "ABSENT" as const })),
+      );
+    } catch (err) {
+      console.warn("[AttendanceScreen] clearAll error:", err);
+      setPresentDates(prevDates);
+    } finally {
+      setIsBatching(false);
+      isBatchingRef.current = false;
+    }
   };
 
   const totalDays = cycleDates.length;
@@ -244,18 +333,37 @@ export const AttendanceScreen: React.FC<{
             </View>
 
             <View style={styles.batchActions}>
-              <TouchableOpacity style={styles.batchBtn} onPress={markAll}>
-                <Text style={styles.batchBtnText}>Mark All Present</Text>
+              <TouchableOpacity
+                style={[styles.batchBtn, isBatching && { opacity: 0.7 }]}
+                onPress={markAll}
+                disabled={isBatching}
+                activeOpacity={0.8}
+              >
+                {isBatching ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.batchBtnText}>Mark All Present</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.batchBtn, styles.batchBtnSecondary]}
+                style={[
+                  styles.batchBtn,
+                  styles.batchBtnSecondary,
+                  isBatching && { opacity: 0.7 },
+                ]}
                 onPress={clearAll}
+                disabled={isBatching}
+                activeOpacity={0.8}
               >
-                <Text
-                  style={[styles.batchBtnText, styles.batchBtnTextSecondary]}
-                >
-                  Clear All
-                </Text>
+                {isBatching ? (
+                  <ActivityIndicator size="small" color="#64748B" />
+                ) : (
+                  <Text
+                    style={[styles.batchBtnText, styles.batchBtnTextSecondary]}
+                  >
+                    Clear All
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
 

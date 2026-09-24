@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   transparentBg: {
-    backgroundColor: "rgba(248, 250, 252, 0.85)",
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
   },
   solidBg: {
     backgroundColor: "#F8FAFC",

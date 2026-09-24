@@ -50,8 +50,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   >("auth");
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("alex.rivera@example.com");
-  const [password, setPassword] = useState("••••••••••••");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -113,7 +113,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         name.trim() ||
         fbUser.email ||
         "Resident";
-      const userRole = existingProfile?.role || fallbackRole;
+      const userRole =
+        existingProfile?.role === "SUPER_ADMIN"
+          ? "SUPER_ADMIN"
+          : existingProfile?.role === "HOST" ||
+              existingProfile?.hostApplicationStatus === "APPROVED"
+            ? "HOST"
+            : existingProfile?.role || fallbackRole;
 
       // Non-blocking sync to cloud so dashboard navigation is immediate
       mobileDataService
@@ -453,7 +459,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   />
                   <TextInput
                     style={styles.textInput}
-                    placeholder="Alex Rivera"
+                    placeholder="Rommel Belia"
                     placeholderTextColor="#94A3B8"
                     value={name}
                     onChangeText={setName}
@@ -475,7 +481,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="alex.rivera@example.com"
+                  placeholder="rommel.belia@example.com"
                   placeholderTextColor="#94A3B8"
                   value={email}
                   onChangeText={setEmail}
@@ -594,9 +600,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 <ActivityIndicator color="#0F172A" size="small" />
               ) : (
                 <View style={styles.socialButtonInner}>
-                  {/* Google 'G' Icon */}
+                  {/* Google*/}
                   <View style={styles.googleGContainer}>
-                    <Text style={styles.googleGLetter}>G</Text>
+                    <Image
+                      source={assets.google}
+                      style={styles.googleLogo}
+                      resizeMode="cover"
+                    />
                   </View>
                   <Text style={styles.socialButtonTextDark}>
                     Continue with Google
@@ -612,7 +622,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               activeOpacity={0.88}
             >
               <View style={styles.socialButtonInner}>
-                <Ionicons name="logo-apple" size={19} color="#FFFFFF" />
+                <Ionicons name="logo-apple" size={22} color="#FFFFFF" />
                 <Text style={styles.socialButtonTextLight}>
                   Continue with Apple
                 </Text>
@@ -972,9 +982,12 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#EA4335",
     justifyContent: "center",
     alignItems: "center",
+  },
+  googleLogo: {
+    width: 18,
+    height: 18,
   },
   googleGLetter: {
     color: "#FFFFFF",

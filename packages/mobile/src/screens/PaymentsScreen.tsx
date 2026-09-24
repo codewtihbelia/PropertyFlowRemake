@@ -16,7 +16,7 @@ import { formatPesos } from "@propertyflow/shared";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
 import { auth } from "../firebase/config";
 import { mobileDataService } from "../services/firebaseDataService";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 
 export interface PaymentsScreenProps {
@@ -281,7 +281,12 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             style={styles.uploadBox}
             onPress={handlePickReceipt}
           >
-            <Text style={{ fontSize: 28, marginBottom: 4 }}>+</Text>
+            <Feather
+              name="upload-cloud"
+              size={28}
+              color="#2563EB"
+              style={{ marginBottom: 6 }}
+            />
             <Text style={styles.uploadText}>Upload Receipt / Screenshot</Text>
             <Text style={styles.uploadSub}>
               Tap to select image to store securely

@@ -2,7 +2,12 @@ import React, { useState, useEffect } from "react";
 import { auth } from "../../firebase/config";
 import { useAuth } from "../../contexts/AuthContext";
 import { firebaseDataService } from "../../services/firebaseDataService";
-import { HostApplication, UserProfile } from "@splitzy/shared";
+import {
+  HostApplication,
+  UserProfile,
+  Household,
+  HOST_MANAGEMENT_TYPES,
+} from "@propertyflow/shared";
 import {
   Building2,
   ShieldCheck,
@@ -17,8 +22,20 @@ import {
   DollarSign,
   ArrowRight,
   Sparkles,
-  RefreshCw,
+  Users,
+  Briefcase,
+  HelpCircle,
+  Info,
 } from "lucide-react";
+
+const DEFAULT_MANAGEMENT_TYPES = [
+  "Primary Leaseholder / Master Tenant",
+  "Property Owner / Landlord",
+  "Property Manager / Co-living Operator",
+  "Roommate Coordinator / Flat Lead",
+  "Sublessor / Flat Representative",
+  "Other / Independent Household Host",
+];
 
 export const ClientHostApplication: React.FC<{
   onNavigate?: (tab: string) => void;
@@ -26,24 +43,39 @@ export const ClientHostApplication: React.FC<{
   const { currentUser: authUser, loading: authLoading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [application, setApplication] = useState<HostApplication | null>(null);
+  const [households, setHouseholds] = useState<Household[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Form inputs
+  // Exactly requested form fields:
+  // 1. full name
+  // 2. contact number
+  // 3. property address
+  // 4. host management type with dropdowns
+  // 5. select roommate group (optional)
+  // 6. unit, apt or floor (optional)
+  // 7. est monthly bills
+  // 8. why do you want to become a host
+  // 9. property experience
   const [applicantName, setApplicantName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [propertyAddress, setPropertyAddress] = useState("");
+  const [managementType, setManagementType] = useState<string>(
+    DEFAULT_MANAGEMENT_TYPES[0],
+  );
+  const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>("");
+  const [roommateGroupName, setRoommateGroupName] = useState<string>("");
   const [unitOrRoom, setUnitOrRoom] = useState("");
   const [monthlyRentOrShare, setMonthlyRentOrShare] = useState<string>("");
   const [reasonForApplying, setReasonForApplying] = useState("");
   const [experience, setExperience] = useState("");
 
   const effectiveUid = authUser?.uid || auth.currentUser?.uid;
+  const managementTypesList = HOST_MANAGEMENT_TYPES || DEFAULT_MANAGEMENT_TYPES;
 
   useEffect(() => {
-    // If auth is still loading and we have no UID, keep waiting briefly
     if (authLoading && !effectiveUid) {
       return;
     }
@@ -53,10 +85,9 @@ export const ClientHostApplication: React.FC<{
       return;
     }
 
-    // Safety timeout: ensure loading state never hangs indefinitely
     const safetyTimer = setTimeout(() => {
       setLoading(false);
-    }, 2000);
+    }, 2500);
 
     // Load user profile
     firebaseDataService.getUserProfile(effectiveUid).then((p) => {
@@ -66,26 +97,53 @@ export const ClientHostApplication: React.FC<{
           p.fullName || p.displayName || authUser?.fullName || "",
         );
         if (p.phoneNumber) setPhoneNumber(p.phoneNumber);
+        if (p.householdId) {
+          setSelectedHouseholdId(p.householdId);
+          setRoommateGroupName(
+            p.householdName || p.apartmentName || "Current Household",
+          );
+        }
       } else if (authUser) {
         setProfile(authUser);
         setApplicantName(authUser.fullName || authUser.displayName || "");
         if (authUser.phoneNumber) setPhoneNumber(authUser.phoneNumber);
+        if (authUser.householdId) {
+          setSelectedHouseholdId(authUser.householdId);
+          setRoommateGroupName(
+            authUser.householdName ||
+              authUser.apartmentName ||
+              "Current Household",
+          );
+        }
       }
     });
 
     // Listen to real-time host application status
-    const unsubscribe = firebaseDataService.listenToUserHostApplication(
+    const unsubscribeApp = firebaseDataService.listenToUserHostApplication(
       effectiveUid,
       (app) => {
         clearTimeout(safetyTimer);
         setApplication(app);
+        if (app) {
+          if (app.managementType) setManagementType(app.managementType);
+          if (app.selectedHouseholdId)
+            setSelectedHouseholdId(app.selectedHouseholdId);
+          if (app.roommateGroupName)
+            setRoommateGroupName(app.roommateGroupName);
+        }
         setLoading(false);
       },
     );
 
+    // Listen to available households / roommate groups
+    const unsubscribeHh = firebaseDataService.listenToHouseholds((list) => {
+      setHouseholds(list || []);
+    });
+
     return () => {
       clearTimeout(safetyTimer);
-      unsubscribe();
+      unsubscribeApp();
+      unsubscribeHh();
     };
   }, [effectiveUid, authLoading]);
 
@@ -95,10 +153,24 @@ export const ClientHostApplication: React.FC<{
       setErrorMsg("You must be signed in to submit a host application.");
       return;
     }
-    if (!propertyAddress.trim() || !reasonForApplying.trim()) {
-      setErrorMsg(
-        "Please provide the property address and reason for applying.",
-      );
+    if (!applicantName.trim()) {
+      setErrorMsg("Please enter your full name.");
+      return;
+    }
+    if (!phoneNumber.trim()) {
+      setErrorMsg("Please enter your contact phone number.");
+      return;
+    }
+    if (!propertyAddress.trim()) {
+      setErrorMsg("Please provide the property address.");
+      return;
+    }
+    if (!managementType.trim()) {
+      setErrorMsg("Please select a host management type.");
+      return;
+    }
+    if (!reasonForApplying.trim()) {
+      setErrorMsg("Please explain why you want to become a host.");
       return;
     }
 
@@ -107,27 +179,34 @@ export const ClientHostApplication: React.FC<{
     setSuccessMsg(null);
 
     try {
+      const parsedBills = monthlyRentOrShare.trim()
+        ? parseFloat(monthlyRentOrShare.replace(/[^0-9.]/g, ""))
+        : undefined;
+
       await firebaseDataService.submitHostApplication({
         userId: effectiveUid,
         userEmail:
           auth.currentUser?.email || authUser?.email || profile?.email || "",
         applicantEmail:
           auth.currentUser?.email || authUser?.email || profile?.email || "",
-        applicantName:
-          applicantName.trim() ||
-          authUser?.displayName ||
-          profile?.displayName ||
-          "Resident Applicant",
+        applicantName: applicantName.trim(),
         phoneNumber: phoneNumber.trim(),
         applicantPhone: phoneNumber.trim(),
         propertyAddress: propertyAddress.trim(),
+        managementType: managementType.trim(),
+        selectedHouseholdId: selectedHouseholdId.trim(),
+        roommateGroupName: roommateGroupName.trim(),
         unitOrRoom: unitOrRoom.trim(),
-        monthlyRentOrShare: monthlyRentOrShare
-          ? parseFloat(monthlyRentOrShare)
-          : undefined,
+        monthlyRentOrShare: isNaN(parsedBills as number)
+          ? undefined
+          : parsedBills,
+        estimatedMonthlyBills: isNaN(parsedBills as number)
+          ? undefined
+          : parsedBills,
         reason: reasonForApplying.trim(),
         reasonForApplying: reasonForApplying.trim(),
         experience: experience.trim(),
+        propertyExperience: experience.trim(),
         status: "PENDING",
       });
 
@@ -153,7 +232,11 @@ export const ClientHostApplication: React.FC<{
   }
 
   const isAlreadyHost =
-    profile?.role === "HOST" || profile?.role === "SUPER_ADMIN";
+    profile?.role === "HOST" ||
+    profile?.role === "SUPER_ADMIN" ||
+    profile?.hostApplicationStatus === "APPROVED" ||
+    authUser?.role === "HOST" ||
+    authUser?.hostApplicationStatus === "APPROVED";
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -168,8 +251,8 @@ export const ClientHostApplication: React.FC<{
             Host Admin Application
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Apply to manage your own household, billing policies, attendance
-            logs, and roommate utility splits.
+            Apply to create roommate groups, manage billing policies, attendance
+            logs, and automated utility breakdowns.
           </p>
         </div>
 
@@ -200,9 +283,9 @@ export const ClientHostApplication: React.FC<{
             </h3>
           </div>
           <p className="text-xs text-emerald-800 leading-relaxed">
-            Your account has full privileges to configure household utilities,
-            verify member receipts, and track attendance. You can access the
-            Host management tools from the main sidebar.
+            Your account has full privileges to create roommate groups,
+            configure utilities, verify member receipts, and track attendance.
+            You can manage your household from the main navigation.
           </p>
           {onNavigate && (
             <button
@@ -247,43 +330,75 @@ export const ClientHostApplication: React.FC<{
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 text-xs space-y-2 text-slate-600">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 text-xs space-y-2.5 text-slate-600">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <span className="font-bold text-slate-800">Full Name: </span>
+                <span>{application.applicantName}</span>
+              </div>
+              <div>
+                <span className="font-bold text-slate-800">
+                  Contact Number:{" "}
+                </span>
+                <span>
+                  {application.phoneNumber ||
+                    application.applicantPhone ||
+                    "Not provided"}
+                </span>
+              </div>
               <div>
                 <span className="font-bold text-slate-800">
                   Property Address:{" "}
                 </span>
                 <span>{application.propertyAddress}</span>
               </div>
+              {application.managementType && (
+                <div>
+                  <span className="font-bold text-slate-800">
+                    Host Management Type:{" "}
+                  </span>
+                  <span className="text-brand-600 font-semibold">
+                    {application.managementType}
+                  </span>
+                </div>
+              )}
+              <div>
+                <span className="font-bold text-slate-800">
+                  Roommate Group:{" "}
+                </span>
+                <span>
+                  {application.roommateGroupName ||
+                    (application.selectedHouseholdId
+                      ? `Group #${application.selectedHouseholdId}`
+                      : "None (Will create after approval)")}
+                </span>
+              </div>
               {application.unitOrRoom && (
                 <div>
                   <span className="font-bold text-slate-800">
-                    Unit / Room:{" "}
+                    Unit, Apt or Floor:{" "}
                   </span>
                   <span>{application.unitOrRoom}</span>
                 </div>
               )}
-              {(application.phoneNumber || application.applicantPhone) && (
-                <div>
-                  <span className="font-bold text-slate-800">Contact: </span>
-                  <span>
-                    {application.phoneNumber || application.applicantPhone}
-                  </span>
-                </div>
-              )}
-              {application.monthlyRentOrShare && (
+              {(application.estimatedMonthlyBills ||
+                application.monthlyRentOrShare) && (
                 <div>
                   <span className="font-bold text-slate-800">
-                    Est. Monthly Share:{" "}
+                    Est. Monthly Bills:{" "}
                   </span>
-                  <span>${application.monthlyRentOrShare}</span>
+                  <span className="text-emerald-700 font-semibold">
+                    ₱
+                    {application.estimatedMonthlyBills ||
+                      application.monthlyRentOrShare}
+                  </span>
                 </div>
               )}
             </div>
 
             <div className="pt-2 border-t border-slate-200/60">
               <span className="font-bold text-slate-800">
-                Reason for Applying:{" "}
+                Why do you want to become a host:{" "}
               </span>
               <p className="mt-1 italic text-slate-700">
                 {application.reasonForApplying ||
@@ -291,6 +406,17 @@ export const ClientHostApplication: React.FC<{
                   "No statement provided"}
               </p>
             </div>
+
+            {(application.propertyExperience || application.experience) && (
+              <div className="pt-2 border-t border-slate-200/60">
+                <span className="font-bold text-slate-800">
+                  Property Experience:{" "}
+                </span>
+                <p className="mt-1 text-slate-700">
+                  {application.propertyExperience || application.experience}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="p-3 bg-amber-50/70 border border-amber-200/60 rounded-xl text-amber-900 text-[11px] flex items-center gap-2">
@@ -329,9 +455,8 @@ export const ClientHostApplication: React.FC<{
               <span>Host Application Questionnaire</span>
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              Please complete this brief application to request Host Admin
-              access. All fields are confidential and reviewed only by Splitzy
-              Super Administrators.
+              Complete this application to request Host Admin access. Non-hosts
+              cannot create roommate groups until approved.
             </p>
           </div>
 
@@ -351,11 +476,11 @@ export const ClientHostApplication: React.FC<{
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Full Name */}
+              {/* 1. Full Name */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Applicant Full Name</span>
+                  <span>Full Name *</span>
                 </label>
                 <input
                   type="text"
@@ -367,27 +492,28 @@ export const ClientHostApplication: React.FC<{
                 />
               </div>
 
-              {/* Phone Number */}
+              {/* 2. Contact Number */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Contact Phone Number</span>
+                  <span>Contact Number *</span>
                 </label>
                 <input
                   type="tel"
+                  required
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="e.g. +1 (555) 234-5678"
+                  placeholder="e.g. +63 917 123 4567"
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
                 />
               </div>
             </div>
 
-            {/* Property Address */}
+            {/* 3. Property Address */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Home className="w-3.5 h-3.5 text-slate-400" />
-                <span>Managed Property Address *</span>
+                <span>Property Address *</span>
               </label>
               <input
                 type="text"
@@ -400,63 +526,158 @@ export const ClientHostApplication: React.FC<{
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Unit or Room */}
+              {/* 4. Host Management Type with dropdowns */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Unit, Apt, or Floor (Optional)
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Host Management Type *</span>
                 </label>
+                <select
+                  required
+                  value={managementType}
+                  onChange={(e) => setManagementType(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition cursor-pointer"
+                >
+                  {managementTypesList.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Designate your role in property operations.
+                </p>
+              </div>
+
+              {/* 5. Select Roommate Group (Optional) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Select Roommate Group</span>
+                  </label>
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded-md">
+                    Optional
+                  </span>
+                </div>
+                <select
+                  value={selectedHouseholdId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedHouseholdId(id);
+                    const found = households.find(
+                      (h) => (h.householdId || (h as any).id) === id,
+                    );
+                    if (found) {
+                      setRoommateGroupName(
+                        found.householdName ||
+                          found.apartmentName ||
+                          "Household Group",
+                      );
+                      if (!propertyAddress.trim() && found.address) {
+                        setPropertyAddress(found.address);
+                      }
+                    } else {
+                      setRoommateGroupName("");
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition cursor-pointer"
+                >
+                  <option value="">
+                    None / Not in a group yet (Create after approval)
+                  </option>
+                  {households.map((h) => {
+                    const hId = h.householdId || (h as any).id;
+                    const hName =
+                      h.householdName || h.apartmentName || "Household";
+                    return (
+                      <option key={hId} value={hId}>
+                        {hName} {h.address ? `(${h.address})` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <Info className="w-3.5 h-3.5 text-brand-500 shrink-0 mt-0.5" />
+                  <span>
+                    Users cannot create groups if they are not a host. You may
+                    link an existing group or create one after approval.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 6. Unit, Apt or Floor (Optional) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Unit, Apt or Floor
+                  </label>
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded-md">
+                    Optional
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={unitOrRoom}
                   onChange={(e) => setUnitOrRoom(e.target.value)}
-                  placeholder="e.g. Apt 4B"
+                  placeholder="e.g. Unit 402, 4th Floor"
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
                 />
               </div>
 
-              {/* Monthly Rent or Utility Share */}
+              {/* 7. Est. Monthly Bills */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Est. Monthly Household Rent/Expenses</span>
+                  <span>Est. Monthly Bills</span>
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={monthlyRentOrShare}
-                  onChange={(e) => setMonthlyRentOrShare(e.target.value)}
-                  placeholder="e.g. 2400"
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
-                />
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    ₱
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={monthlyRentOrShare}
+                    onChange={(e) => setMonthlyRentOrShare(e.target.value)}
+                    placeholder="e.g. 15000"
+                    className="w-full pl-8 pr-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Estimated combined utility and rent expenses.
+                </p>
               </div>
             </div>
 
-            {/* Why do you want to become a Host? */}
+            {/* 8. Why do you want to become a host */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Why do you want to become a Host Admin? *
+                Why do you want to become a host *
               </label>
               <textarea
                 rows={3}
                 required
                 value={reasonForApplying}
                 onChange={(e) => setReasonForApplying(e.target.value)}
-                placeholder="Explain why you are applying (e.g. I am the primary leaseholder and manage utility payments for 4 roommates)..."
+                placeholder="Explain why you want to become a host (e.g. I am organizing bill splits, water attendance, and payments for 5 roommates)..."
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
               />
             </div>
 
-            {/* Experience / Notes */}
+            {/* 9. Property Experience */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Previous Household or Property Experience (Optional)
+                Property Experience
               </label>
               <textarea
                 rows={2}
                 value={experience}
                 onChange={(e) => setExperience(e.target.value)}
-                placeholder="Any prior experience with utility management, sub-leasing, or accounting..."
+                placeholder="Describe your prior experience with tenancy management, expense tracking, or property maintenance..."
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition"
               />
             </div>

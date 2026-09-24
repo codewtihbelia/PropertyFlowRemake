@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { HouseholdProvider } from "./contexts/HouseholdContext";
+import { HouseholdProvider, useHousehold } from "./contexts/HouseholdContext";
 import { NotificationProvider } from "./contexts/NotificationContext";
 import { Header } from "./components/common/Header";
 import { Sidebar } from "./components/common/Sidebar";
+import { auth } from "./firebase/config";
 
 // Auth & Onboarding Views
 import { OnboardingView } from "./views/auth/OnboardingView";
 import { AuthView } from "./views/auth/AuthView";
+
+// Alias Auth to AuthView to resolve any "Cannot find name Auth" references
+export const Auth = AuthView;
 
 // Host Views
 import { HostDashboard } from "./views/host/HostDashboard";
@@ -75,16 +79,38 @@ const MainLayout: React.FC = () => {
     return "landing";
   });
 
+  const { household, members } = useHousehold();
+
+  const isUserHost = Boolean(
+    isHost ||
+    currentUser.role === "HOST" ||
+    currentUser.hostApplicationStatus === "APPROVED" ||
+    (household.hostId && household.hostId === currentUser.uid) ||
+    members.some(
+      (m) =>
+        (m.userId === currentUser.uid ||
+          m.memberId === currentUser.uid ||
+          m.memberId === `mem_${currentUser.uid}`) &&
+        m.role === "HOST",
+    ),
+  );
+
   // Synchronize default tab on role switch
   useEffect(() => {
     if (isSuperAdmin) {
       setCurrentTab("admin_dashboard");
-    } else if (isHost) {
-      setCurrentTab("host_dashboard");
+    } else if (isUserHost) {
+      setCurrentTab((prev) =>
+        prev === "client_dashboard" || prev === "client_host_application"
+          ? "host_dashboard"
+          : prev,
+      );
     } else {
-      setCurrentTab("client_dashboard");
+      setCurrentTab((prev) =>
+        prev.startsWith("host_") ? "client_dashboard" : prev,
+      );
     }
-  }, [role, isSuperAdmin, isHost]);
+  }, [role, isSuperAdmin, isUserHost]);
 
   // Landing Screen View (Default for /web)
   if (webFlow === "landing") {
@@ -193,7 +219,7 @@ const MainLayout: React.FC = () => {
     }
 
     // Host Routes
-    if (isHost) {
+    if (isUserHost) {
       switch (currentTab) {
         case "host_household":
           return <HostHousehold />;
@@ -214,6 +240,18 @@ const MainLayout: React.FC = () => {
           return <HostAuditLogs />;
         case "host_settings":
           return <HostSettings />;
+        case "client_bills":
+          return (
+            <ClientBills onPayClick={() => setCurrentTab("client_payments")} />
+          );
+        case "client_payments":
+          return <ClientPayments />;
+        case "client_attendance":
+          return <ClientAttendance />;
+        case "client_profile":
+          return <ClientProfile />;
+        case "client_dashboard":
+          return <ClientDashboard onNavigate={setCurrentTab} />;
         case "host_dashboard":
         default:
           return <HostDashboard onNavigate={setCurrentTab} />;

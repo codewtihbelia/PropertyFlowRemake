@@ -212,15 +212,24 @@ export const AuthView: React.FC<AuthViewProps> = ({
         user.email ||
         "Resident";
       const now = new Date().toISOString();
+      const preservedRole =
+        existing?.role === "SUPER_ADMIN"
+          ? "SUPER_ADMIN"
+          : existing?.role === "HOST" ||
+              existing?.hostApplicationStatus === "APPROVED"
+            ? "HOST"
+            : existing?.role || "PAYOR";
 
       await firebaseDataService.saveUserProfile({
         uid: user.uid,
         fullName: existing?.fullName || displayName,
         displayName,
         email: user.email || email.trim(),
-        role: existing?.role || "PAYOR",
+        role: preservedRole,
         accountStatus: existing?.accountStatus || "ACTIVE",
         householdId: existing?.householdId,
+        hostApplicationStatus: existing?.hostApplicationStatus,
+        hostApplicationId: existing?.hostApplicationId,
         createdDate: existing?.createdDate || now,
         updatedDate: now,
         lastLogin: now,

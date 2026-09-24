@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, View, Text } from "react-native";
+import { Ionicons, Feather } from "@expo/vector-icons";
 
 /**
  * OnboardingIllustration1
@@ -114,13 +115,13 @@ export const OnboardingIllustration2: React.FC = () => {
         {/* Roommate avatar badge pill */}
         <View style={styles.membersPill}>
           <View style={[styles.miniMemberDot, { backgroundColor: "#38BDF8" }]}>
-            <Text style={styles.miniMemberText}>👤</Text>
+            <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
           <View style={[styles.miniMemberDot, { backgroundColor: "#818CF8" }]}>
-            <Text style={styles.miniMemberText}>👤</Text>
+            <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
           <View style={[styles.miniMemberDot, { backgroundColor: "#FB923C" }]}>
-            <Text style={styles.miniMemberText}>👤</Text>
+            <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
         </View>
       </View>
@@ -132,7 +133,7 @@ export const OnboardingIllustration2: React.FC = () => {
 
       {/* Satellite Floating Badge: Smiley (Top-Right) */}
       <View style={[styles.satelliteCard, styles.satSmiley]}>
-        <Text style={{ fontSize: 13 }}>🙂</Text>
+        <Ionicons name="happy-outline" size={16} color="#059669" />
       </View>
 
       {/* Satellite Floating Badge: Analytics Bar Chart (Right) */}
@@ -164,7 +165,7 @@ export const OnboardingIllustration2: React.FC = () => {
           { backgroundColor: "#2563EB" },
         ]}
       >
-        <Text style={{ fontSize: 11, color: "#FFFFFF" }}>💳</Text>
+        <Ionicons name="card-outline" size={14} color="#FFFFFF" />
       </View>
 
       {/* Satellite Floating Badge: Receipt List (Bottom-Left) */}
@@ -228,7 +229,7 @@ export const OnboardingIllustration3: React.FC = () => {
             { backgroundColor: "#EFF6FF", borderColor: "#38BDF8" },
           ]}
         >
-          <Text style={{ fontSize: 16 }}>👤</Text>
+          <Ionicons name="person" size={18} color="#0284C7" />
         </View>
         <View
           style={[styles.avatarSmallAnchor, { backgroundColor: "#38BDF8" }]}
@@ -243,7 +244,7 @@ export const OnboardingIllustration3: React.FC = () => {
             { backgroundColor: "#FFF1F2", borderColor: "#FB7185" },
           ]}
         >
-          <Text style={{ fontSize: 16 }}>👩</Text>
+          <Ionicons name="person" size={18} color="#E11D48" />
         </View>
         <View
           style={[styles.avatarSmallAnchor, { backgroundColor: "#FB7185" }]}

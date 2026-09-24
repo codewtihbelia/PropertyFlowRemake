@@ -49,7 +49,8 @@
           "enforceContrast": false
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-font"
     ],
     "extra": {
       "expo-navigation-bar": {

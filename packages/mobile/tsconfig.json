@@ -1,15 +1,42 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "DOM",
+      "ESNext"
+    ],
+    "module": "preserve",
+    "moduleDetection": "force",
     "moduleResolution": "bundler",
-    "ignoreDeprecations": "5.0",
-    "baseUrl": ".",
+    "customConditions": [
+      "react-native"
+    ],
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "ESNext",
+    "strict": true,
     "paths": {
-      "@propertyflow/shared": ["../shared/src"],
+      "@propertyflow/shared": [
+        "../shared/src"
+      ],
+      "@splitzy/shared": [
+        "../shared/src"
+      ],
       "@firebase/auth": [
-        "node_modules/firebase/node_modules/@firebase/auth/dist/index.d.ts"
+        "./node_modules/firebase/node_modules/@firebase/auth/dist/index.d.ts"
       ]
     }
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js",
+    "jest.config.js",
+    "android",
+    "ios"
+  ],
+  "extends": "expo/tsconfig.base"
 }

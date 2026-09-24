@@ -5,8 +5,13 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { doc, setDoc } from "firebase/firestore";
-import { BillingCycle, Household, HouseholdMember } from "@propertyflow/shared";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  BillingCycle,
+  Charge,
+  Household,
+  HouseholdMember,
+} from "@propertyflow/shared";
 import { db } from "../firebase/config";
 import { firebaseDataService } from "../services/firebaseDataService";
 import { getAppState, saveAppState } from "../services/store";
@@ -26,7 +31,7 @@ interface HouseholdContextType {
   }) => Promise<string>;
   joinHousehold: (
     codeOrId: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; isPending?: boolean; error?: string }>;
   updateHousehold: (updates: Partial<Household>) => Promise<void>;
   inviteMember: (
     email: string,
@@ -38,6 +43,8 @@ interface HouseholdContextType {
     newRole: HouseholdMember["role"],
   ) => Promise<void>;
   deactivateMember: (memberId: string) => Promise<void>;
+  approveJoinRequest: (memberId: string) => Promise<boolean>;
+  rejectJoinRequest: (memberId: string, reason: string) => Promise<boolean>;
 }
 
 const HouseholdContext = createContext<HouseholdContextType | undefined>(
@@ -68,6 +75,46 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState<boolean>(
     Boolean(householdId) || authLoading,
   );
+
+  // Real-time listener for join request approval / rejection
+  useEffect(() => {
+    if (
+      !currentUser.uid ||
+      currentUser.joinRequestStatus !== "PENDING" ||
+      !currentUser.pendingHouseholdId
+    ) {
+      return;
+    }
+    const memRef = doc(
+      db,
+      `households/${currentUser.pendingHouseholdId}/members`,
+      currentUser.uid,
+    );
+    const unsub = onSnapshot(memRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status === "ACTIVE") {
+          updateProfile({
+            householdId: currentUser.pendingHouseholdId,
+            joinRequestStatus: "APPROVED",
+            pendingHouseholdId: undefined,
+            householdName: data.householdName || undefined,
+          }).catch(() => {});
+        } else if (data.status === "REJECTED") {
+          updateProfile({
+            joinRequestStatus: "REJECTED",
+            joinRejectionReason: data.rejectionReason || "Declined by host",
+            pendingHouseholdId: undefined,
+          }).catch(() => {});
+        }
+      }
+    });
+    return () => unsub();
+  }, [
+    currentUser.uid,
+    currentUser.joinRequestStatus,
+    currentUser.pendingHouseholdId,
+  ]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -104,6 +151,13 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         } else {
           setHousehold(nextHousehold);
+          if (
+            nextHousehold.hostId === currentUser.uid &&
+            currentUser.role !== "HOST" &&
+            currentUser.role !== "SUPER_ADMIN"
+          ) {
+            updateProfile({ role: "HOST" }).catch(() => {});
+          }
         }
       },
     );
@@ -114,6 +168,20 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
         const s = getAppState();
         s.members[householdId] = m;
         saveAppState(s);
+        const myMem = m.find(
+          (mem) =>
+            mem.userId === currentUser.uid ||
+            mem.memberId === currentUser.uid ||
+            mem.memberId === `mem_${currentUser.uid}`,
+        );
+        if (
+          myMem &&
+          myMem.role === "HOST" &&
+          currentUser.role !== "HOST" &&
+          currentUser.role !== "SUPER_ADMIN"
+        ) {
+          updateProfile({ role: "HOST" }).catch(() => {});
+        }
       },
     );
     const unsubscribeCycles = firebaseDataService.listenToBillingCycles(
@@ -192,6 +260,67 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
       },
     );
 
+    const unsubscribeWaterAttendance =
+      firebaseDataService.listenToWaterAttendance(householdId, (att) => {
+        const s = getAppState();
+        s.waterAttendance[householdId] = att;
+        saveAppState(s);
+      });
+
+    const unsubscribeWaterConfig = firebaseDataService.listenToWaterConfig(
+      householdId,
+      (wc) => {
+        if (wc) {
+          const s = getAppState();
+          s.waterConfigs[householdId] = wc;
+          saveAppState(s);
+        }
+      },
+    );
+
+    const unsubscribeElectricityConfigs =
+      firebaseDataService.listenToElectricityConfigs(householdId, (configs) => {
+        const s = getAppState();
+        s.electricityConfigs[householdId] = configs;
+        saveAppState(s);
+      });
+
+    const unsubscribeMemberBills = firebaseDataService.listenToMemberBills(
+      householdId,
+      (bills) => {
+        const s = getAppState();
+        s.memberBills[householdId] = bills;
+        saveAppState(s);
+      },
+    );
+
+    const unsubscribePayments = firebaseDataService.listenToPayments(
+      householdId,
+      (pmts) => {
+        const s = getAppState();
+        s.payments[householdId] = pmts;
+        saveAppState(s);
+      },
+    );
+
+    const unsubscribeAdjustments = firebaseDataService.listenToAdjustments(
+      householdId,
+      (adjs) => {
+        const s = getAppState();
+        s.adjustments[householdId] = adjs;
+        saveAppState(s);
+      },
+    );
+
+    const unsubscribeAnnouncements = firebaseDataService.listenToAnnouncements(
+      householdId,
+      (anns) => {
+        const s = getAppState();
+        s.announcements[householdId] = anns;
+        saveAppState(s);
+      },
+    );
+
     return () => {
       clearTimeout(safetyTimer);
       unsubscribeHousehold();
@@ -199,6 +328,13 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
       unsubscribeCycles();
       unsubscribeCharges();
       unsubscribeExpenses();
+      unsubscribeWaterAttendance();
+      unsubscribeWaterConfig();
+      unsubscribeElectricityConfigs();
+      unsubscribeMemberBills();
+      unsubscribePayments();
+      unsubscribeAdjustments();
+      unsubscribeAnnouncements();
     };
   }, [householdId, authLoading, currentUser.uid]);
 
@@ -277,6 +413,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
       startDate: cycleStart,
       endDate: cycleEnd,
       status: "ACTIVE",
+      createdBy: currentUser.uid,
       dueDate: new Date(now.getFullYear(), now.getMonth(), 15).toISOString(),
       cutoffDate: cycleEnd,
       totalBilledCentavos: 0,
@@ -302,7 +439,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const joinHousehold = async (
     codeOrId: string,
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; isPending?: boolean; error?: string }> => {
     if (!currentUser.uid) {
       return { success: false, error: "Please sign in first." };
     }
@@ -312,16 +449,57 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
       email: currentUser.email,
     });
     if (res.success && res.household) {
-      setHousehold(res.household);
       await updateProfile({
-        householdId: res.household.householdId,
-        householdName: res.household.householdName,
-        apartmentName: res.household.apartmentName,
-        role: "PAYOR",
+        pendingHouseholdId: res.household.householdId,
+        pendingHouseholdName:
+          res.household.householdName || res.household.apartmentName,
+        joinRequestStatus: "PENDING",
+        joinRejectionReason: undefined,
       });
-      return { success: true };
+      return { success: true, isPending: true };
     }
-    return { success: false, error: res.error || "Failed to join group." };
+    return {
+      success: false,
+      error: res.error || "Failed to send join request.",
+    };
+  };
+
+  const approveJoinRequest = async (memberId: string): Promise<boolean> => {
+    if (!householdId) return false;
+    const ok = await firebaseDataService.approveJoinRequest(
+      householdId,
+      memberId,
+    );
+    if (ok) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.memberId === memberId ? { ...m, status: "ACTIVE" } : m,
+        ),
+      );
+    }
+    return ok;
+  };
+
+  const rejectJoinRequest = async (
+    memberId: string,
+    reason: string,
+  ): Promise<boolean> => {
+    if (!householdId) return false;
+    const ok = await firebaseDataService.rejectJoinRequest(
+      householdId,
+      memberId,
+      reason,
+    );
+    if (ok) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.memberId === memberId
+            ? { ...m, status: "REJECTED", rejectionReason: reason }
+            : m,
+        ),
+      );
+    }
+    return ok;
   };
 
   const updateHousehold = async (updates: Partial<Household>) => {
@@ -424,6 +602,8 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
         inviteMember,
         changeMemberRole,
         deactivateMember,
+        approveJoinRequest,
+        rejectJoinRequest,
       }}
     >
       {children}

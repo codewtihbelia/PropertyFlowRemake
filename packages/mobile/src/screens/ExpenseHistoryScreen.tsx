@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   Text,
@@ -6,156 +6,275 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { formatPesos } from "@propertyflow/shared";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import { auth } from "../firebase/config";
+import {
+  mobileDataService,
+  MobileExpense,
+} from "../services/firebaseDataService";
+import { getCategoryMeta } from "../services/categoryService";
 
-interface ExpenseItem {
+export interface ExpenseItem {
   id: string;
   title: string;
-  category:
-    | "rent"
-    | "electricity"
-    | "water"
-    | "internet"
-    | "groceries"
-    | "other";
+  category: string;
   categoryLabel: string;
   icon: string;
+  emoji: string;
+  categoryColor: string;
+  categoryBgColor: string;
   amountCents: number;
   date: string;
   payer: string;
   splitMethod: string;
   cycle: string;
+  status?: "UNPAID" | "PAID";
+  isPaid?: boolean;
   receiptUrl?: string;
   notes?: string;
+  splitDetails?: any[];
 }
-
-const SAMPLE_EXPENSES: ExpenseItem[] = [
-  {
-    id: "exp_1",
-    title: "Unit 402 Rent (August)",
-    category: "rent",
-    categoryLabel: "Rent",
-    icon: "🏠",
-    amountCents: 1400000,
-    date: "Aug 13, 2026",
-    payer: "Alice Santos (Host)",
-    splitMethod: "4 Payors Equal (₱3,500.00 each)",
-    cycle: "Aug 13 – Sep 12",
-    notes: "Official landlord rent payment.",
-  },
-  {
-    id: "exp_2",
-    title: "Meralco Electricity (Sub-meter 140 kWh)",
-    category: "electricity",
-    categoryLabel: "Electricity",
-    icon: "⚡",
-    amountCents: 224000,
-    date: "Aug 18, 2026",
-    payer: "Alice Santos",
-    splitMethod: "4 Payors Equal (₱560.00 each)",
-    cycle: "Aug 13 – Sep 12",
-    notes:
-      "Sub-meter reading: Previous 1210.4, Current 1350.4 (140.0 kWh @ ₱16.00/kWh).",
-  },
-  {
-    id: "exp_3",
-    title: "Fiber Internet 300 Mbps",
-    category: "internet",
-    categoryLabel: "Internet",
-    icon: "📶",
-    amountCents: 150000,
-    date: "Aug 20, 2026",
-    payer: "Bea Alonzo",
-    splitMethod: "4 Payors Equal (₱375.00 each)",
-    cycle: "Aug 13 – Sep 12",
-    notes: "PLDT Home Fiber Monthly Subscription.",
-  },
-  {
-    id: "exp_4",
-    title: "Daily Water Attendance (31 Days)",
-    category: "water",
-    categoryLabel: "Water",
-    icon: "💧",
-    amountCents: 98500,
-    date: "Aug 25, 2026",
-    payer: "Alice Santos",
-    splitMethod: "Per-Day Present (₱5.00/day/person)",
-    cycle: "Aug 13 – Sep 12",
-    notes: "Calculated from roommate daily attendance matrix.",
-  },
-  {
-    id: "exp_5",
-    title: "Household Cleaning & Supplies",
-    category: "groceries",
-    categoryLabel: "Groceries",
-    icon: "🛒",
-    amountCents: 125000,
-    date: "Aug 28, 2026",
-    payer: "Charlie Cruz",
-    splitMethod: "Equal Split",
-    cycle: "Aug 13 – Sep 12",
-    notes: "Detergent, trash bags, dish soap, mop refills.",
-  },
-];
 
 interface ExpenseHistoryScreenProps {
   onBack: () => void;
   onSelectExpense: (expense: ExpenseItem) => void;
+  onAddExpensePress?: () => void;
 }
 
 export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   onBack,
   onSelectExpense,
+  onAddExpensePress,
 }) => {
   const [activeTab, setActiveTab] = useState<"chronological" | "by_category">(
     "chronological",
   );
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategoryFilter, setSelectedCategoryFilter] =
-    useState<string>("all");
+  const [showSearch, setShowSearch] = useState(false);
+  const [liveExpenses, setLiveExpenses] = useState<ExpenseItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [householdId, setHouseholdId] = useState<string | null>(null);
 
-  const filteredExpenses = SAMPLE_EXPENSES.filter((item) => {
-    const matchesSearch =
-      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.payer.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory =
-      selectedCategoryFilter === "all" ||
-      item.category === selectedCategoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  const currentUser = auth.currentUser;
 
-  const categories = [
-    { id: "all", label: "All" },
-    { id: "rent", label: "🏠 Rent" },
-    { id: "electricity", label: "⚡ Power" },
-    { id: "internet", label: "📶 Internet" },
-    { id: "water", label: "💧 Water" },
-    { id: "groceries", label: "🛒 Supplies" },
-  ];
+  const loadData = async (isManualRefresh = false) => {
+    if (!currentUser?.uid) {
+      setLoading(false);
+      return;
+    }
+    if (isManualRefresh) setRefreshing(true);
+    else setLoading(true);
 
-  // Group expenses by category for 'by_category' tab
-  const categoriesList = [
-    "rent",
-    "electricity",
-    "internet",
-    "water",
-    "groceries",
-    "other",
-  ] as const;
+    try {
+      const profile = await mobileDataService.getUserProfile(currentUser.uid);
+      const hid = profile?.householdId;
+      if (hid) {
+        setHouseholdId(hid);
+      }
+    } catch (err) {
+      console.warn("[ExpenseHistoryScreen] load profile error:", err);
+    } finally {
+      if (isManualRefresh) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [currentUser?.uid]);
+
+  useEffect(() => {
+    if (!householdId) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const unsub = mobileDataService.listenToExpenses(
+      householdId,
+      (data: MobileExpense[]) => {
+        if (!data) {
+          setLiveExpenses([]);
+          setLoading(false);
+          return;
+        }
+
+        const mapped: ExpenseItem[] = data.map((exp) => {
+          const meta = getCategoryMeta(exp.category);
+          const isPaid = exp.status === "PAID" || exp.isPaid === true;
+
+          return {
+            id: exp.id,
+            title: exp.title,
+            category: meta.id.toLowerCase(),
+            categoryLabel: exp.category || meta.name,
+            icon: meta.featherIcon,
+            emoji: meta.emoji,
+            categoryColor: meta.color,
+            categoryBgColor: meta.bgColor,
+            amountCents: exp.amountCents,
+            date: exp.date,
+            payer: exp.payerName || "Host",
+            splitMethod: exp.splitMethod || "Equal Split",
+            cycle: exp.billingCycleId || "Current Cycle",
+            status: isPaid ? "PAID" : "UNPAID",
+            isPaid,
+            receiptUrl: exp.receiptUrl,
+            notes: exp.notes,
+            splitDetails: exp.splitDetails,
+          };
+        });
+
+        // Sort by newest date first
+        mapped.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+        );
+
+        setLiveExpenses(mapped);
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      unsub();
+    };
+  }, [householdId]);
+
+  const handleRefresh = () => {
+    loadData(true);
+  };
+
+  const filteredExpenses = useMemo(() => {
+    if (!searchQuery.trim()) return liveExpenses;
+    const q = searchQuery.toLowerCase().trim();
+    return liveExpenses.filter(
+      (item) =>
+        item.title.toLowerCase().includes(q) ||
+        item.payer.toLowerCase().includes(q) ||
+        item.categoryLabel.toLowerCase().includes(q),
+    );
+  }, [liveExpenses, searchQuery]);
+
+  const formatExpenseDate = (dateStr: string) => {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const monthNames = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      return `${d.getDate()} ${monthNames[d.getMonth()]}`;
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const formatAmount = (cents: number) => {
+    const val = (Math.abs(cents) / 100).toFixed(2);
+    return `-₱${val}`;
+  };
+
+  const renderCategoryIcon = (iconName: string, item?: ExpenseItem) => {
+    const meta = getCategoryMeta(item?.categoryLabel || iconName);
+    return (
+      <Feather
+        name={meta.featherIcon as any}
+        size={18}
+        color={meta.color || "#475569"}
+      />
+    );
+  };
+
+  // Group by categories for the By Category view
+  const categorizedExpenses = useMemo(() => {
+    const groups: Record<string, ExpenseItem[]> = {};
+    filteredExpenses.forEach((exp) => {
+      const cat = exp.categoryLabel || "Other";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(exp);
+    });
+    return groups;
+  }, [filteredExpenses]);
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Top Header matching screen.png */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backBtnText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Expense History</Text>
-        <View style={{ width: 36 }} />
+        <View style={styles.headerLeft}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={onBack}
+            activeOpacity={0.7}
+          >
+            <Feather name="chevron-left" size={24} color="#0F172A" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Bill History</Text>
+        </View>
+
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => setShowSearch(!showSearch)}
+            activeOpacity={0.7}
+          >
+            <Feather name="search" size={20} color="#0F172A" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={handleRefresh}
+            activeOpacity={0.7}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color="#2563EB" />
+            ) : (
+              <Feather name="rotate-cw" size={20} color="#0F172A" />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Tabs: Chronological vs By Category matching proposedUI */}
+      {/* Expandable Search Input */}
+      {showSearch && (
+        <View style={styles.searchBarContainer}>
+          <Feather
+            name="search"
+            size={16}
+            color="#64748B"
+            style={{ marginRight: 8 }}
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by title, payer or category..."
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Feather name="x" size={16} color="#64748B" />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Segmented Tab Switcher matching screen.png */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[
@@ -163,6 +282,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
             activeTab === "chronological" && styles.tabBtnActive,
           ]}
           onPress={() => setActiveTab("chronological")}
+          activeOpacity={0.8}
         >
           <Text
             style={[
@@ -173,12 +293,14 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
             Chronological
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[
             styles.tabBtn,
             activeTab === "by_category" && styles.tabBtnActive,
           ]}
           onPress={() => setActiveTab("by_category")}
+          activeOpacity={0.8}
         >
           <Text
             style={[
@@ -191,244 +313,406 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Search Input */}
-      <View style={styles.searchWrap}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="🔍  Search by title or payer..."
-          placeholderTextColor="#94A3B8"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      {/* Filter Chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoryChips}
-      >
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={cat.id}
-            style={[
-              styles.chip,
-              selectedCategoryFilter === cat.id && styles.chipActive,
-            ]}
-            onPress={() => setSelectedCategoryFilter(cat.id)}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                selectedCategoryFilter === cat.id && styles.chipTextActive,
-              ]}
-            >
-              {cat.label}
+      {/* Content Area */}
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="small" color="#2563EB" />
+          <Text style={styles.loadingText}>Loading expense history...</Text>
+        </View>
+      ) : liveExpenses.length === 0 ? (
+        /* Clean Empty State as requested (no hardcoded data) */
+        <ScrollView
+          contentContainerStyle={styles.emptyScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="receipt-outline" size={32} color="#2563EB" />
+            </View>
+            <Text style={styles.emptyTitle}>No Bills Yet</Text>
+            <Text style={styles.emptySubtitle}>
+              No household bills have been recorded for this household yet. Once
+              your host records a bill or payments are settled, they will appear
+              here.
             </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {activeTab === "chronological" ? (
-          <View>
-            <Text style={styles.monthHeader}>August 2026</Text>
-            {filteredExpenses.map((exp) => (
+            {onAddExpensePress && (
               <TouchableOpacity
-                key={exp.id}
-                style={styles.card}
-                onPress={() => onSelectExpense(exp)}
+                style={styles.emptyActionBtn}
+                onPress={onAddExpensePress}
+                activeOpacity={0.85}
               >
-                <View style={styles.cardIconWrap}>
-                  <Text style={{ fontSize: 22 }}>{exp.icon}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{exp.title}</Text>
-                  <Text style={styles.cardSubtitle}>
-                    {exp.date} · Paid by {exp.payer}
-                  </Text>
-                  <Text style={styles.cardSplit}>{exp.splitMethod}</Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.cardAmount}>
-                    {formatPesos(exp.amountCents)}
-                  </Text>
-                  <Text style={styles.cardChevron}>›</Text>
-                </View>
+                <Text style={styles.emptyActionBtnText}>+ Record A Bill</Text>
               </TouchableOpacity>
-            ))}
+            )}
           </View>
-        ) : (
-          <View>
-            {categoriesList.map((catKey) => {
-              const catItems = filteredExpenses.filter(
-                (e) => e.category === catKey,
-              );
-              if (catItems.length === 0) return null;
-              const totalCategoryCents = catItems.reduce(
-                (acc, cur) => acc + cur.amountCents,
-                0,
-              );
+        </ScrollView>
+      ) : filteredExpenses.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Text style={styles.emptySearchTitle}>No results found</Text>
+          <Text style={styles.emptySubtitle}>
+            No expenses matched "{searchQuery}". Try a different keyword.
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {activeTab === "chronological" ? (
+            <View>
+              {/* Recent Expenses Section matching screen.png */}
+              <Text style={styles.sectionHeader}>Recent Expenses</Text>
 
-              return (
-                <View key={catKey} style={styles.categoryGroup}>
-                  <View style={styles.categoryHeader}>
-                    <Text style={styles.categoryGroupTitle}>
-                      {catItems[0]?.icon} {catItems[0]?.categoryLabel}
-                    </Text>
-                    <Text style={styles.categoryGroupTotal}>
-                      {formatPesos(totalCategoryCents)}
+              {filteredExpenses.slice(0, 3).map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.itemRow}
+                  onPress={() =>
+                    onSelectExpense({ ...item, icon: item.emoji || item.icon })
+                  }
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.iconCircle,
+                      { backgroundColor: item.categoryBgColor || "#F1F5F9" },
+                    ]}
+                  >
+                    {renderCategoryIcon(item.icon, item)}
+                  </View>
+
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemTitle}>{item.title}</Text>
+                    <Text style={styles.itemSubtitle}>
+                      {formatExpenseDate(item.date)} • Paid by {item.payer}
                     </Text>
                   </View>
-                  {catItems.map((exp) => (
-                    <TouchableOpacity
-                      key={exp.id}
-                      style={styles.card}
-                      onPress={() => onSelectExpense(exp)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{exp.title}</Text>
-                        <Text style={styles.cardSubtitle}>
-                          {exp.date} · {exp.payer}
-                        </Text>
-                      </View>
-                      <Text style={styles.cardAmount}>
-                        {formatPesos(exp.amountCents)}
+
+                  <Text style={styles.itemAmount}>
+                    {formatAmount(item.amountCents)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              {/* By Categories Section matching screen.png */}
+              <Text style={[styles.sectionHeader, { marginTop: 24 }]}>
+                By Categories
+              </Text>
+
+              {filteredExpenses.map((item) => (
+                <TouchableOpacity
+                  key={`bycat_${item.id}`}
+                  style={styles.itemRow}
+                  onPress={() =>
+                    onSelectExpense({ ...item, icon: item.emoji || item.icon })
+                  }
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.iconCircle,
+                      { backgroundColor: item.categoryBgColor || "#F1F5F9" },
+                    ]}
+                  >
+                    {renderCategoryIcon(item.icon, item)}
+                  </View>
+
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemTitle}>{item.title}</Text>
+                    <Text style={styles.itemSubtitle}>
+                      {formatExpenseDate(item.date)} • Paid by {item.payer}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.itemAmount}>
+                    {formatAmount(item.amountCents)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            /* By Category Tab View */
+            <View>
+              {Object.keys(categorizedExpenses).map((categoryName) => {
+                const groupItems = categorizedExpenses[categoryName];
+                const groupTotalCents = groupItems.reduce(
+                  (sum, e) => sum + e.amountCents,
+                  0,
+                );
+
+                return (
+                  <View key={categoryName} style={styles.categoryBlock}>
+                    <View style={styles.categoryHeaderRow}>
+                      <Text style={styles.sectionHeader}>{categoryName}</Text>
+                      <Text style={styles.categoryTotalAmount}>
+                        {formatAmount(groupTotalCents)}
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              );
-            })}
-          </View>
-        )}
-      </ScrollView>
+                    </View>
+
+                    {groupItems.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.itemRow}
+                        onPress={() =>
+                          onSelectExpense({
+                            ...item,
+                            icon: item.emoji || item.icon,
+                          })
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <View
+                          style={[
+                            styles.iconCircle,
+                            {
+                              backgroundColor:
+                                item.categoryBgColor || "#F1F5F9",
+                            },
+                          ]}
+                        >
+                          {renderCategoryIcon(item.icon, item)}
+                        </View>
+
+                        <View style={styles.itemInfo}>
+                          <Text style={styles.itemTitle}>{item.title}</Text>
+                          <Text style={styles.itemSubtitle}>
+                            {formatExpenseDate(item.date)} • Paid by{" "}
+                            {item.payer}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.itemAmount}>
+                          {formatAmount(item.amountCents)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  container: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F1F5F9",
-    alignItems: "center",
+    width: 32,
+    height: 32,
     justifyContent: "center",
+    alignItems: "center",
+    marginRight: 6,
   },
-  backBtnText: { fontSize: 20, color: "#0F172A", fontWeight: "bold" },
-  headerTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  headerIconBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  searchBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    height: 42,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#0F172A",
+    paddingVertical: 0,
+  },
+  // Tab Switcher matching screen.png
   tabContainer: {
     flexDirection: "row",
     backgroundColor: "#F1F5F9",
-    borderRadius: 12,
+    borderRadius: 14,
     marginHorizontal: 20,
-    marginTop: 14,
+    marginVertical: 10,
     padding: 4,
   },
   tabBtn: {
     flex: 1,
     paddingVertical: 10,
     alignItems: "center",
-    borderRadius: 8,
+    justifyContent: "center",
+    borderRadius: 10,
   },
   tabBtnActive: {
-    backgroundColor: "#FFFFFF",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: "#2563EB",
   },
-  tabBtnText: { fontSize: 13, fontWeight: "700", color: "#64748B" },
-  tabBtnTextActive: { color: "#2563EB" },
-  searchWrap: { marginHorizontal: 20, marginTop: 12 },
-  searchInput: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  tabBtnText: {
     fontSize: 14,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  tabBtnTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  // Sections and Lists matching screen.png
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 40,
+  },
+  sectionHeader: {
+    fontSize: 15,
+    fontWeight: "700",
     color: "#0F172A",
+    marginBottom: 12,
+    marginTop: 4,
   },
-  categoryChips: { paddingHorizontal: 20, paddingVertical: 10, gap: 8 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+  categoryBlock: {
+    marginBottom: 20,
   },
-  chipActive: { backgroundColor: "#2563EB", borderColor: "#2563EB" },
-  chipText: { fontSize: 12, fontWeight: "600", color: "#64748B" },
-  chipTextActive: { color: "#FFFFFF", fontWeight: "bold" },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
-  monthHeader: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#64748B",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  card: {
+  categoryHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
-    shadowColor: "#000",
-    shadowOpacity: 0.02,
-    shadowRadius: 4,
-    elevation: 1,
+    justifyContent: "space-between",
+    marginBottom: 4,
   },
-  cardIconWrap: {
+  categoryTotalAmount: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  iconCircle: {
     width: 44,
     height: 44,
-    borderRadius: 12,
-    backgroundColor: "#EFF6FF",
+    borderRadius: 22,
+    backgroundColor: "#F0F7FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 2,
+  },
+  itemSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "400",
+  },
+  itemAmount: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  // Center / Loading / Empty States
+  centerContainer: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    paddingHorizontal: 32,
+    paddingTop: 60,
   },
-  cardTitle: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
-  cardSubtitle: { fontSize: 12, color: "#64748B", marginTop: 2 },
-  cardSplit: {
-    fontSize: 11,
-    color: "#2563EB",
-    marginTop: 2,
-    fontWeight: "600",
+  loadingText: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 10,
+    fontWeight: "500",
   },
-  cardAmount: { fontSize: 15, fontWeight: "900", color: "#0F172A" },
-  cardChevron: { fontSize: 18, color: "#94A3B8", marginTop: 4 },
-  categoryGroup: { marginBottom: 16 },
-  categoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  emptyScrollContent: {
+    flexGrow: 1,
     alignItems: "center",
-    marginBottom: 8,
-    marginTop: 6,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 40,
   },
-  categoryGroupTitle: { fontSize: 14, fontWeight: "800", color: "#0F172A" },
-  categoryGroupTotal: { fontSize: 14, fontWeight: "800", color: "#2563EB" },
+  emptyCard: {
+    alignItems: "center",
+    maxWidth: 320,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 20,
+    padding: 24,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#EFF6FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 19,
+  },
+  emptyActionBtn: {
+    marginTop: 18,
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  emptyActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  emptySearchTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 6,
+  },
 });

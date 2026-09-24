@@ -7,6 +7,7 @@ import {
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 
 interface SettleDuesScreenProps {
@@ -19,19 +20,41 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   onPayPress,
 }) => {
   const dues = [
-    { id: "1", name: "Apartment Room Rent", amount: 3500.0, status: "PAID" },
-    { id: "2", name: "Fiber Internet 300Mbps", amount: 375.0, status: "PAID" },
+    {
+      id: "1",
+      name: "Apartment Room Rent",
+      amount: 3500.0,
+      status: "PAID",
+      icon: "home",
+      color: "#2563EB",
+      bg: "#EFF6FF",
+    },
+    {
+      id: "2",
+      name: "Fiber Internet 300Mbps",
+      amount: 375.0,
+      status: "PAID",
+      icon: "wifi",
+      color: "#8B5CF6",
+      bg: "#F5F3FF",
+    },
     {
       id: "3",
       name: "Electricity Sub-Meter (140 kWh)",
       amount: 219.5,
       status: "UNPAID",
+      icon: "flash",
+      color: "#F59E0B",
+      bg: "#FEF3C7",
     },
     {
       id: "4",
       name: "Water Attendance (25 days)",
       amount: 125.0,
       status: "PAID",
+      icon: "water",
+      color: "#0284C7",
+      bg: "#E0F2FE",
     },
   ];
 
@@ -41,8 +64,12 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backBtnText}>‹</Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
+          <Feather name="arrow-left" size={20} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settle Dues</Text>
         <View style={{ width: 32 }} />
@@ -71,16 +98,14 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
           {dues.map((item) => (
             <View key={item.id} style={styles.dueItem}>
               <View style={styles.dueItemLeft}>
-                <View style={styles.dueIconWrap}>
-                  <Text style={{ fontSize: 18 }}>
-                    {item.name.includes("Rent")
-                      ? "🏠"
-                      : item.name.includes("Internet")
-                        ? "📶"
-                        : item.name.includes("Electricity")
-                          ? "⚡"
-                          : "💧"}
-                  </Text>
+                <View
+                  style={[styles.dueIconWrap, { backgroundColor: item.bg }]}
+                >
+                  <Ionicons
+                    name={item.icon as any}
+                    size={18}
+                    color={item.color}
+                  />
                 </View>
                 <View>
                   <Text style={styles.dueName}>{item.name}</Text>

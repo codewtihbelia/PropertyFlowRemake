@@ -13,16 +13,21 @@ export interface HostApplication {
   userEmail?: string;
   applicantPhone?: string;
   phoneNumber?: string;
+  managementType?: string;
+  selectedHouseholdId?: string;
+  roommateGroupName?: string;
   propertyName?: string;
   householdName?: string;
   propertyAddress: string;
   unitOrRoom?: string;
   monthlyRentOrShare?: number;
+  estimatedMonthlyBills?: number;
   city?: string;
   estimatedRoommates?: number;
   reason: string;
   reasonForApplying?: string;
   experience?: string;
+  propertyExperience?: string;
   status: HostApplicationStatus;
   reviewedBy?: string;
   reviewerName?: string;
@@ -43,6 +48,12 @@ export interface UserProfile {
   role: UserRole;
   accountStatus: AccountStatus;
   householdId?: string;
+  householdName?: string;
+  apartmentName?: string;
+  pendingHouseholdId?: string;
+  pendingHouseholdName?: string;
+  joinRequestStatus?: "PENDING" | "APPROVED" | "REJECTED";
+  joinRejectionReason?: string;
   hostApplicationStatus?: HostApplicationStatus;
   hostApplicationId?: string;
   createdDate: string;
@@ -76,8 +87,11 @@ export interface HouseholdMember {
   displayName: string;
   email: string;
   profilePicture?: string;
-  status: "ACTIVE" | "INACTIVE" | "REMOVED";
+  status: "ACTIVE" | "INACTIVE" | "REMOVED" | "PENDING" | "REJECTED";
   joinedDate: string;
+  requestedDate?: string;
+  rejectionReason?: string;
+  householdName?: string;
   notes?: string;
 }
 
@@ -111,10 +125,14 @@ export interface BillingCycle {
   endDate: string; // YYYY-MM-DD
   status: BillingCycleStatus;
   notes?: string;
-  createdBy: string;
+  createdBy?: string;
   createdDate: string;
   finalizedDate?: string;
   closedDate?: string;
+  dueDate?: string;
+  cutoffDate?: string;
+  totalBilledCentavos?: number;
+  totalCollectedCentavos?: number;
 }
 
 export type ChargeType =

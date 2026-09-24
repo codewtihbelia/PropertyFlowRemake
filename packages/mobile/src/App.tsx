@@ -34,6 +34,7 @@ import { ReportScreen } from "./screens/ReportScreen";
 import { ManageGroupScreen } from "./screens/ManageGroupScreen";
 import { HostApplicationScreen } from "./screens/HostApplicationScreen";
 import { registerForPushNotificationsAsync } from "./services/pushNotificationService";
+import { mobileDataService } from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
 
 type RootFlow = "splash" | "onboarding" | "auth" | "main";
@@ -105,8 +106,8 @@ const NAV_ITEMS: NavItemConfig[] = [
     key: "profile",
     label: "Settings",
     renderIcon: (active) => (
-      <Feather
-        name="hexagon"
+      <Ionicons
+        name={active ? "settings" : "settings-outline"}
         size={20}
         color={active ? "#FFFFFF" : "#64748B"}
       />
@@ -232,6 +233,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       <View style={{ flex: 1, backgroundColor: "#2563EB" }}>
         <AuthScreen
           onLoginSuccess={(user) => {
+            mobileDataService.clearCache();
             registerForPushNotificationsAsync(user.uid);
             const displayName = user.displayName || user.email || "Resident";
             setCurrentUser({
@@ -240,6 +242,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               email: user.email,
               avatar: displayName.charAt(0).toUpperCase(),
             });
+            setCurrentTab("home");
+            setOverlayScreen("none");
+            setBillsInitialSubView("overview");
             setRootFlow("main");
           }}
         />
@@ -277,6 +282,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return (
       <ExpenseHistoryScreen
         onBack={() => setOverlayScreen("none")}
+        onAddExpensePress={() => setOverlayScreen("add_expense")}
         onSelectExpense={(expense) => {
           setSelectedExpense(expense);
           setOverlayScreen("expense_details");
@@ -303,6 +309,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       <ManageGroupScreen
         onBack={() => setOverlayScreen("none")}
         onOpenAddExpense={() => setOverlayScreen("add_expense")}
+        onOpenHostApplication={() => setOverlayScreen("host_application")}
         currentUser={currentUser}
         initialView={manageGroupInitialView}
       />
@@ -320,6 +327,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           <ManageGroupScreen
             onBack={() => setCurrentTab("home")}
             onOpenAddExpense={() => setOverlayScreen("add_expense")}
+            onOpenHostApplication={() => setOverlayScreen("host_application")}
             currentUser={currentUser}
             initialView={manageGroupInitialView}
           />
@@ -348,12 +356,16 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenOnboarding={() => setRootFlow("onboarding")}
             onSignOut={async () => {
               await auth.signOut();
+              mobileDataService.clearCache();
               setCurrentUser({
                 name: "Resident",
                 role: "Member",
                 email: "",
                 avatar: "R",
               });
+              setCurrentTab("home");
+              setOverlayScreen("none");
+              setBillsInitialSubView("overview");
               setRootFlow("auth");
             }}
           />
@@ -385,6 +397,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setOverlayScreen("manage_group");
             }}
             onOpenReports={() => setOverlayScreen("reports")}
+            onOpenHostApplication={() => setOverlayScreen("host_application")}
           />
         );
     }

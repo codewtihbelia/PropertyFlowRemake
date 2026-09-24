@@ -8,7 +8,7 @@ import { UserProfile, UserRole } from "@propertyflow/shared";
 import { auth } from "../firebase/config";
 import { firebaseDataService } from "../services/firebaseDataService";
 
-interface AuthContextType {
+export interface AuthContextType {
   currentUser: UserProfile;
   isAuthenticated: boolean;
   isEmailVerified: boolean;
@@ -37,7 +37,9 @@ const emptyUser: UserProfile = {
   updatedDate: "",
 };
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined,
+);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -69,6 +71,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           firebaseUser.uid,
         );
         const now = new Date().toISOString();
+        const role =
+          existing?.role === "SUPER_ADMIN"
+            ? "SUPER_ADMIN"
+            : existing?.role === "HOST" ||
+                existing?.hostApplicationStatus === "APPROVED"
+              ? "HOST"
+              : existing?.role || "PAYOR";
+
         const profile: UserProfile = {
           uid: firebaseUser.uid,
           fullName:
@@ -82,12 +92,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             firebaseUser.email ||
             "Resident",
           email: existing?.email || firebaseUser.email || "",
-          role: existing?.role || "PAYOR",
+          role,
           accountStatus: existing?.accountStatus || "ACTIVE",
           householdId: existing?.householdId,
           phoneNumber: existing?.phoneNumber,
           profilePicture:
             existing?.profilePicture || firebaseUser.photoURL || undefined,
+          hostApplicationStatus: existing?.hostApplicationStatus,
+          hostApplicationId: existing?.hostApplicationId,
           createdDate: existing?.createdDate || now,
           updatedDate: now,
           lastLogin: now,
@@ -201,7 +213,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const isAuthenticated = !loading && Boolean(currentUser.uid);
-  const isHost = currentUser.role === "HOST";
+  const isHost =
+    currentUser.role === "HOST" ||
+    currentUser.hostApplicationStatus === "APPROVED";
   const isPayor = currentUser.role === "PAYOR";
   const isNonPayor = currentUser.role === "NON_PAYOR";
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
@@ -231,8 +245,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 };
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within an AuthProvider");
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
   return context;
 }
+
+export default useAuth;

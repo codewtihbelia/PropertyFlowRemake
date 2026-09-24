@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,6 +10,7 @@ import {
   StatusBar,
   Modal,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
@@ -19,18 +20,22 @@ import {
   MobileExpense,
 } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
+import { getCategoryMeta } from "../services/categoryService";
 
 interface ManageGroupScreenProps {
   onBack: () => void;
   onOpenAddExpense?: () => void;
-  currentUser?: { name: string; avatar: string };
+  onOpenHostApplication?: () => void;
+  currentUser?: { name: string; avatar: string; uid?: string };
   initialView?: "details" | "edit" | "create" | "join";
 }
 
 interface Participant {
   id: string;
+  userId?: string;
   name: string;
   avatar: string;
+  profilePicture?: string;
   role: string;
   status: "Pending" | "Settled";
   statusDate?: string;
@@ -42,6 +47,7 @@ interface Participant {
 export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   onBack,
   onOpenAddExpense,
+  onOpenHostApplication,
   currentUser = { name: "Resident", avatar: "R" },
   initialView = "details",
 }) => {
@@ -49,10 +55,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     "details" | "edit" | "create" | "success" | "join"
   >(initialView);
   const [showMenu, setShowMenu] = useState(false);
+  const [showHostRequiredModal, setShowHostRequiredModal] = useState(false);
 
   // Household & Profile state with cache initialization
-  const cachedProfile = mobileDataService.getCachedProfile();
-  const cachedHousehold = mobileDataService.getCachedHousehold();
+  const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
+  const cachedHousehold = cachedProfile
+    ? mobileDataService.getCachedHousehold()
+    : null;
   const [profile, setProfile] = useState<any | null>(() => cachedProfile);
   const [household, setHousehold] = useState<any | null>(() => cachedHousehold);
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
@@ -60,6 +69,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   const [selectedCycleId, setSelectedCycleId] = useState<string>("");
   const [cloudMembers, setCloudMembers] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
+  const [userPhotosMap, setUserPhotosMap] = useState<Record<string, string>>(
+    {},
+  );
   const [loading, setLoading] = useState(false);
 
   // Modals
@@ -117,10 +129,68 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       "",
   );
 
+  // Pending Join Requests & Reject Modal State
+  const [rejectingMember, setRejectingMember] = useState<any | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(
+    null,
+  );
+
   const firebaseUser = auth.currentUser;
   const householdId = profile?.householdId || household?.householdId || "";
   const isHost =
-    profile?.role === "HOST" || profile?.hostApplicationStatus === "APPROVED";
+    profile?.role === "HOST" ||
+    profile?.role === "SUPER_ADMIN" ||
+    profile?.hostApplicationStatus === "APPROVED";
+
+  const handleApproveRequest = async (memberId: string) => {
+    if (!householdId) return;
+    try {
+      setProcessingRequestId(memberId);
+      const success = await mobileDataService.approveJoinRequest(
+        householdId,
+        memberId,
+      );
+      if (success) {
+        Alert.alert(
+          "Approved",
+          "The roommate has been approved and added to the household.",
+        );
+      } else {
+        Alert.alert("Error", "Failed to approve join request.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to approve join request.");
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleRejectRequest = async () => {
+    if (!householdId || !rejectingMember) return;
+    try {
+      setProcessingRequestId(
+        rejectingMember.userId || rejectingMember.memberId,
+      );
+      const reason = rejectReason.trim() || "Declined by room host.";
+      const success = await mobileDataService.rejectJoinRequest(
+        householdId,
+        rejectingMember.userId || rejectingMember.memberId,
+        reason,
+      );
+      if (success) {
+        Alert.alert("Request Declined", "The join request has been declined.");
+        setRejectingMember(null);
+        setRejectReason("");
+      } else {
+        Alert.alert("Error", "Failed to decline request.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to decline request.");
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
 
   // Fetch profile on mount
   useEffect(() => {
@@ -153,16 +223,23 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     };
   }, [firebaseUser?.uid]);
 
-  // Set initial view mode only ONCE on mount
-  const hasAppliedInitialView = useRef(false);
+  // Set initial view mode on mount or when initialView prop changes
   useEffect(() => {
-    if (!hasAppliedInitialView.current) {
-      hasAppliedInitialView.current = true;
-      if (initialView === "create" || (!householdId && isHost)) {
+    if (initialView === "create") {
+      if (profile && !isHost) {
+        setViewMode(householdId ? "details" : "join");
+        setShowHostRequiredModal(true);
+      } else {
         setViewMode("create");
       }
+    } else if (initialView === "join") {
+      setViewMode("join");
+    } else if (initialView === "edit") {
+      setViewMode("edit");
+    } else if (initialView === "details") {
+      setViewMode(householdId ? "details" : isHost ? "create" : "join");
     }
-  }, [initialView, householdId, isHost]);
+  }, [initialView, householdId, isHost, profile]);
 
   // Listen to Household and sub-collections
   useEffect(() => {
@@ -223,6 +300,41 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     );
   }, [householdId, activeCycle?.billingCycleId]);
 
+  // Fetch missing user profile pictures from users collection
+  useEffect(() => {
+    const missingUids = cloudMembers
+      .map((m) => m.userId || m.memberId)
+      .filter((uid) => uid && !uid.startsWith("mem_") && !userPhotosMap[uid]);
+
+    if (missingUids.length === 0) return;
+
+    let active = true;
+    Promise.all(
+      missingUids.map(async (uid) => {
+        try {
+          const uDoc = await mobileDataService.getUserProfile(uid);
+          if (uDoc && (uDoc.profilePicture || uDoc.photoURL)) {
+            return { uid, photo: uDoc.profilePicture || uDoc.photoURL };
+          }
+        } catch {}
+        return null;
+      }),
+    ).then((results) => {
+      if (!active) return;
+      const map: Record<string, string> = {};
+      results.forEach((r) => {
+        if (r) map[r.uid] = r.photo;
+      });
+      if (Object.keys(map).length > 0) {
+        setUserPhotosMap((prev) => ({ ...prev, ...map }));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [cloudMembers]);
+
   const currentGroupName =
     household?.householdName ||
     household?.apartmentName ||
@@ -254,33 +366,69 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       )
     : expenses;
 
+  // Deduplicate bills by user to prevent any duplicate document issues
+  const uniqueBills = useMemo(() => {
+    const map = new Map<string, any>();
+    bills.forEach((b) => {
+      const uid = b.userId || b.billId;
+      if (!map.has(uid) || b.billId?.startsWith("bill_")) {
+        map.set(uid, b);
+      }
+    });
+    return Array.from(map.values());
+  }, [bills]);
+
   // Real amounts calculated from Firestore data (Zero when nothing added, NO hardcoding)
   const totalExpenseCents = currentCycleExpenses.reduce(
     (sum, e) => sum + (e.amountCents || 0),
     0,
   );
-  const totalDuesCents = bills.reduce(
-    (sum, b) => sum + (b.outstandingCentavos || 0),
+  const unpaidCycleExpenses = currentCycleExpenses.filter(
+    (e) => e.status !== "PAID" && !e.isPaid,
+  );
+  const fallbackDuesCents = unpaidCycleExpenses.reduce(
+    (sum, e) => sum + (e.amountCents || 0),
     0,
   );
 
+  const totalDuesCents =
+    uniqueBills.length > 0
+      ? uniqueBills.reduce((sum, b) => sum + (b.outstandingCentavos || 0), 0)
+      : fallbackDuesCents;
+
+  // Separate active participants and pending join requests
+  const activeMembersList = cloudMembers.filter((m) => m.status === "ACTIVE");
+  const pendingRequests = cloudMembers.filter((m) => m.status === "PENDING");
+
+  const myPhoto =
+    profile?.profilePicture || profile?.photoURL || firebaseUser?.photoURL;
+
   // Real participants list from Firestore members
   const participants: Participant[] =
-    cloudMembers.length > 0
-      ? cloudMembers.map((m) => {
-          const userBill = bills.find(
-            (b) => b.userId === (m.userId || m.memberId),
-          );
+    activeMembersList.length > 0
+      ? activeMembersList.map((m) => {
+          const uid = m.userId || m.memberId;
+          const userBill = uniqueBills.find((b) => b.userId === uid);
           const owes = userBill ? userBill.outstandingCentavos || 0 : 0;
           const isSettled = owes <= 0 || m.status === "SETTLED";
           const displayName =
             m.displayName ||
             m.name ||
             (m.role === "HOST" ? "Host" : "Roommate");
+          const isCurrent = uid === firebaseUser?.uid;
+          const photo =
+            (isCurrent && myPhoto) ||
+            m.profilePicture ||
+            m.photoURL ||
+            userPhotosMap[uid] ||
+            undefined;
+
           return {
             id: m.memberId || m.userId || String(Math.random()),
+            userId: uid,
             name: displayName,
             avatar: displayName.charAt(0).toUpperCase(),
+            profilePicture: photo,
             role: m.role || "PAYOR",
             status: isSettled ? "Settled" : "Pending",
             statusDate: activeCycle
@@ -295,10 +443,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         ? [
             {
               id: firebaseUser.uid,
+              userId: firebaseUser.uid,
               name: firebaseUser.displayName || currentUser.name || "Host",
               avatar: (firebaseUser.displayName || currentUser.name || "H")
                 .charAt(0)
                 .toUpperCase(),
+              profilePicture: myPhoto || undefined,
               role: profile?.role === "HOST" ? "HOST" : "PAYOR",
               status: "Settled",
               statusDate: "Current",
@@ -465,6 +615,46 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     }
   };
 
+  const handleToggleMemberRole = (member: Participant) => {
+    if (member.role === "HOST") {
+      Alert.alert("Host Role", "The host cannot change their own role here.");
+      return;
+    }
+    const targetRole = member.role === "NON_PAYOR" ? "PAYOR" : "NON_PAYOR";
+    const roleLabel = targetRole === "PAYOR" ? "Payor" : "Non-Payor";
+    const description =
+      targetRole === "NON_PAYOR"
+        ? `Change ${member.name}'s status to Non-Payor? They will be exempted from rent and shared utility splits.`
+        : `Change ${member.name}'s status to Payor? They will share equally in rent, wifi, and shared bills.`;
+
+    Alert.alert(`Set as ${roleLabel}?`, description, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: `Set ${roleLabel}`,
+        onPress: async () => {
+          if (!householdId) return;
+          try {
+            setLoading(true);
+            await mobileDataService.updateMemberRole(
+              householdId,
+              member.id,
+              member.userId || member.id,
+              targetRole as "PAYOR" | "NON_PAYOR",
+            );
+            setLoading(false);
+            Alert.alert(
+              "Status Updated",
+              `${member.name} is now set as ${roleLabel}.`,
+            );
+          } catch (err: any) {
+            setLoading(false);
+            Alert.alert("Error", err.message || "Failed to update role.");
+          }
+        },
+      },
+    ]);
+  };
+
   const handleRemoveMember = (member: Participant) => {
     if (member.role === "HOST") {
       Alert.alert(
@@ -475,7 +665,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     }
     Alert.alert(
       "Remove Roommate",
-      `Are you sure you want to remove ${member.name} from this group?`,
+      `Are you sure you want to remove ${member.name} from this household?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -483,12 +673,20 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           style: "destructive",
           onPress: async () => {
             if (householdId && member.id) {
-              await mobileDataService.removeMemberFromHousehold(
-                householdId,
-                member.id,
-              );
+              setLoading(true);
+              try {
+                await mobileDataService.removeMemberFromHousehold(
+                  householdId,
+                  member.id,
+                  member.userId,
+                );
+                Alert.alert("Removed", `${member.name} has been removed.`);
+              } catch (err: any) {
+                Alert.alert("Error", err.message || "Failed to remove member.");
+              } finally {
+                setLoading(false);
+              }
             }
-            Alert.alert("Removed", `${member.name} has been removed.`);
           },
         },
       ],
@@ -496,6 +694,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   };
 
   const handleCreateGroup = async () => {
+    if (!isHost) {
+      Alert.alert(
+        "Host Privileges Required",
+        "Only verified Hosts can create household groups. Please submit a host application first.",
+      );
+      return;
+    }
+
     const finalGroupName =
       groupNameInput.trim() ||
       profile?.apartmentName ||
@@ -560,15 +766,17 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
     const result = await mobileDataService.joinHouseholdByCode(code, {
       uid: firebaseUser.uid,
-      displayName: firebaseUser.displayName || currentUser.name,
+      displayName:
+        profile?.displayName || firebaseUser.displayName || currentUser.name,
       email: firebaseUser.email || "",
+      photoURL: profile?.profilePicture || firebaseUser.photoURL || "",
     });
 
     setLoading(false);
     if (result.success) {
       Alert.alert(
-        "Success",
-        `You have joined ${result.household?.householdName || "the group"}!`,
+        "Request Submitted",
+        `Your request to join "${result.household?.householdName || "the household"}" has been sent! The host must approve your request before you can access the group.`,
       );
       setViewMode("details");
     } else {
@@ -689,6 +897,229 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // VIEW: CREATE GROUP
   // --------------------------------------------------------------------------
   if (viewMode === "create") {
+    if (profile && !isHost) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <StatusBar barStyle="dark-content" />
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={styles.circleBackBtn}
+              onPress={handleBackFromCreate}
+            >
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Create Group</Text>
+            <View style={{ width: 42 }} />
+          </View>
+
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              {
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 460,
+                paddingVertical: 32,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            <View
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: "#EFF6FF",
+                borderWidth: 2,
+                borderColor: "#BFDBFE",
+                justifyContent: "center",
+                alignItems: "center",
+                marginBottom: 18,
+              }}
+            >
+              <Feather name="shield" size={36} color="#2563EB" />
+            </View>
+
+            <Text
+              style={{
+                fontSize: 20,
+                fontWeight: "800",
+                color: "#0F172A",
+                marginBottom: 8,
+                textAlign: "center",
+              }}
+            >
+              Host Privileges Required
+            </Text>
+
+            <Text
+              style={{
+                fontSize: 14,
+                color: "#64748B",
+                textAlign: "center",
+                lineHeight: 22,
+                maxWidth: 320,
+                marginBottom: 24,
+              }}
+            >
+              Creating and managing household groups is restricted to verified
+              Property Hosts. Non-hosts can join an existing room with an invite
+              code from their host.
+            </Text>
+
+            <View
+              style={{
+                backgroundColor: "#F8FAFC",
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: "#E2E8F0",
+                padding: 16,
+                width: "100%",
+                maxWidth: 340,
+                marginBottom: 24,
+                gap: 12,
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: 10,
+                }}
+              >
+                <Feather
+                  name="home"
+                  size={16}
+                  color="#2563EB"
+                  style={{ marginTop: 2 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: "#1E293B",
+                    }}
+                  >
+                    Are you the Property Host?
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: "#64748B",
+                      marginTop: 2,
+                      lineHeight: 17,
+                    }}
+                  >
+                    Apply for host status to create households, add roommates,
+                    and split utility expenses.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: 10,
+                }}
+              >
+                <Feather
+                  name="users"
+                  size={16}
+                  color="#059669"
+                  style={{ marginTop: 2 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: "#1E293B",
+                    }}
+                  >
+                    Are you a Resident?
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: "#64748B",
+                      marginTop: 2,
+                      lineHeight: 17,
+                    }}
+                  >
+                    Ask your property host for your household’s 5-character
+                    invite code to join immediately.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={{ width: "100%", maxWidth: 340, gap: 12 }}>
+              <TouchableOpacity
+                style={styles.primaryPillBtn}
+                onPress={() => {
+                  if (onOpenHostApplication) {
+                    onOpenHostApplication();
+                  } else {
+                    Alert.alert(
+                      "Host Application",
+                      "Navigate to Settings / Profile to submit a Host application.",
+                    );
+                  }
+                }}
+              >
+                <Feather
+                  name="shield"
+                  size={16}
+                  color="#FFFFFF"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.primaryPillBtnText}>
+                  Apply to Become a Host
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryPillBtn,
+                  {
+                    backgroundColor: "#EFF6FF",
+                    borderWidth: 1,
+                    borderColor: "#BFDBFE",
+                  },
+                ]}
+                onPress={() => setViewMode("join")}
+              >
+                <Feather
+                  name="hash"
+                  size={16}
+                  color="#2563EB"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+                  Join with Invite Code
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ paddingVertical: 12, alignItems: "center" }}
+                onPress={handleBackFromCreate}
+              >
+                <Text
+                  style={{ fontSize: 13, color: "#64748B", fontWeight: "600" }}
+                >
+                  Cancel & Return
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" />
@@ -881,24 +1312,81 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
           <View style={styles.participantsList}>
             {participants.map((p) => (
-              <View key={p.id} style={styles.participantRow}>
-                <View style={styles.participantAvatar}>
-                  <Text style={styles.participantAvatarText}>{p.avatar}</Text>
+              <View key={p.id} style={styles.participantCard}>
+                <View style={styles.participantRow}>
+                  <View style={styles.participantAvatar}>
+                    {p.profilePicture ? (
+                      <Image
+                        source={{ uri: p.profilePicture }}
+                        style={styles.participantAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.participantAvatarText}>
+                        {p.avatar}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Text style={styles.participantName}>{p.name}</Text>
+                      {p.role === "HOST" ? (
+                        <View style={styles.hostBadge}>
+                          <Text style={styles.hostBadgeText}>HOST</Text>
+                        </View>
+                      ) : p.role === "NON_PAYOR" ? (
+                        <View style={styles.nonPayorBadge}>
+                          <Text style={styles.nonPayorBadgeText}>
+                            NON-PAYOR
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={styles.payorBadge}>
+                          <Text style={styles.payorBadgeText}>PAYOR</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.participantRoleTag}>
+                      {p.role === "HOST"
+                        ? "Host Administrator"
+                        : p.role === "NON_PAYOR"
+                          ? "Non-Payor (Exempt)"
+                          : "Payor (Active Split)"}
+                    </Text>
+                  </View>
+                  {p.role !== "HOST" && (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <TouchableOpacity
+                        style={styles.editModeToggleRoleBtn}
+                        onPress={() => handleToggleMemberRole(p)}
+                      >
+                        <Text style={styles.editModeToggleRoleText}>
+                          {p.role === "NON_PAYOR"
+                            ? "Make Payor"
+                            : "Make Non-Payor"}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteParticipantBtn}
+                        onPress={() => handleRemoveMember(p)}
+                      >
+                        <Feather name="trash-2" size={18} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.participantName}>{p.name}</Text>
-                  <Text style={styles.participantRoleTag}>
-                    {p.role === "HOST" ? "Host" : "Roommate"}
-                  </Text>
-                </View>
-                {p.role !== "HOST" && (
-                  <TouchableOpacity
-                    style={styles.deleteParticipantBtn}
-                    onPress={() => handleRemoveMember(p)}
-                  >
-                    <Feather name="trash-2" size={18} color="#EF4444" />
-                  </TouchableOpacity>
-                )}
               </View>
             ))}
           </View>
@@ -915,6 +1403,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         {renderMenuModal()}
         {renderInviteModal()}
+        {renderHostRequiredModal()}
       </SafeAreaView>
     );
   }
@@ -976,26 +1465,55 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           >
             {isHost
               ? "You haven't created a household group yet. Create your group to invite roommates and organize billing cycles."
-              : "You are not a member of any active household yet. Join with an invite code or contact your host."}
+              : "You are not a member of any active household yet. Join with an invite code from your host, or apply to become a Host to create your own group."}
           </Text>
-          {isHost ? (
+          <View style={{ width: "100%", maxWidth: 320, gap: 12 }}>
+            {isHost ? (
+              <TouchableOpacity
+                style={styles.primaryPillBtn}
+                onPress={() => setViewMode("create")}
+              >
+                <Text style={styles.primaryPillBtnText}>+ Create Group</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.primaryPillBtn}
+                onPress={() =>
+                  onOpenHostApplication
+                    ? onOpenHostApplication()
+                    : setShowHostRequiredModal(true)
+                }
+              >
+                <Feather
+                  name="shield"
+                  size={16}
+                  color="#FFFFFF"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.primaryPillBtnText}>
+                  Apply to Become a Host
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
-              style={styles.primaryPillBtn}
-              onPress={() => setViewMode("create")}
-            >
-              <Text style={styles.primaryPillBtnText}>+ Create Group</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.primaryPillBtn}
+              style={[
+                styles.primaryPillBtn,
+                {
+                  backgroundColor: "#EFF6FF",
+                  borderWidth: 1,
+                  borderColor: "#BFDBFE",
+                },
+              ]}
               onPress={() => setViewMode("join")}
             >
-              <Text style={styles.primaryPillBtnText}>
+              <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
                 Join with Invite Code
               </Text>
             </TouchableOpacity>
-          )}
+          </View>
         </View>
+
+        {renderHostRequiredModal()}
       </SafeAreaView>
     );
   }
@@ -1038,10 +1556,20 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
           <TouchableOpacity
             style={styles.groupPill}
-            onPress={() => setViewMode("create")}
+            onPress={() => {
+              if (!isHost) {
+                setShowHostRequiredModal(true);
+              } else {
+                setViewMode("create");
+              }
+            }}
           >
-            <Text style={styles.groupPillTitle}>+ New Group</Text>
-            <Text style={styles.groupPillSub}>Create or Join</Text>
+            <Text style={styles.groupPillTitle}>
+              {isHost ? "+ New Group" : "+ Add / Join"}
+            </Text>
+            <Text style={styles.groupPillSub}>
+              {isHost ? "Create Group" : "Host Guarded"}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -1250,7 +1778,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         {/* Expenses Section */}
         <View style={styles.sectionRow}>
           <Text style={styles.sectionHeading}>
-            Expenses ({currentCycleExpenses.length})
+            Bills ({currentCycleExpenses.length})
           </Text>
           <TouchableOpacity
             onPress={() =>
@@ -1286,22 +1814,21 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             currentCycleExpenses.slice(0, 5).map((exp) => {
               const isExpensePaid =
                 exp.status === "PAID" || exp.isPaid === true;
+              const catMeta = getCategoryMeta(exp.category);
               return (
                 <View key={exp.id} style={styles.expenseItemRow}>
-                  <Text style={styles.expenseCategoryIcon}>
-                    {exp.category === "Rent"
-                      ? "🏠"
-                      : exp.category === "Groceries"
-                        ? "🛒"
-                        : exp.category === "Electricity"
-                          ? "⚡"
-                          : exp.category === "Water"
-                            ? "💧"
-                            : exp.category === "Wifi" ||
-                                exp.category === "Wifi Bills"
-                              ? "📶"
-                              : "📄"}
-                  </Text>
+                  <View
+                    style={[
+                      styles.expenseCategoryIconWrap,
+                      { backgroundColor: catMeta.bgColor },
+                    ]}
+                  >
+                    <Feather
+                      name={catMeta.featherIcon as any}
+                      size={15}
+                      color={catMeta.color}
+                    />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <View
                       style={{
@@ -1345,6 +1872,111 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           )}
         </View>
 
+        {/* Pending Join Requests (Requires Host Approval) */}
+        {isHost && pendingRequests.length > 0 && (
+          <View style={styles.pendingRequestsContainer}>
+            <View style={styles.pendingRequestsHeader}>
+              <View style={styles.pendingIconWrap}>
+                <Feather name="clock" size={16} color="#D97706" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pendingRequestsTitle}>
+                  Pending Join Requests ({pendingRequests.length})
+                </Text>
+                <Text style={styles.pendingRequestsSubtitle}>
+                  Roommates who used your invite code awaiting approval
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.pendingList}>
+              {pendingRequests.map((req: any) => {
+                const reqId = req.memberId || req.userId;
+                const reqName = req.displayName || req.name || "Applicant";
+                const isProcessing = processingRequestId === reqId;
+
+                return (
+                  <View key={reqId} style={styles.pendingRequestCard}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                        flex: 1,
+                      }}
+                    >
+                      {req.profilePicture || req.photoURL ? (
+                        <Image
+                          source={{ uri: req.profilePicture || req.photoURL }}
+                          style={styles.pendingAvatarImage}
+                        />
+                      ) : (
+                        <View style={styles.pendingAvatarFallback}>
+                          <Text style={styles.pendingAvatarText}>
+                            {reqName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={styles.pendingMemberName}
+                          numberOfLines={1}
+                        >
+                          {reqName}
+                        </Text>
+                        <Text
+                          style={styles.pendingMemberEmail}
+                          numberOfLines={1}
+                        >
+                          {req.email ||
+                            req.phoneNumber ||
+                            "Invite code applicant"}
+                        </Text>
+                        {req.requestedDate && (
+                          <Text style={styles.pendingMemberDate}>
+                            Requested: {formatShortDate(req.requestedDate)}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+
+                    <View style={styles.pendingActionButtonsRow}>
+                      <TouchableOpacity
+                        style={styles.pendingApproveBtn}
+                        disabled={isProcessing}
+                        onPress={() => handleApproveRequest(reqId)}
+                      >
+                        {isProcessing ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <>
+                            <Feather name="check" size={14} color="#FFFFFF" />
+                            <Text style={styles.pendingApproveBtnText}>
+                              Approve
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.pendingRejectBtn}
+                        disabled={isProcessing}
+                        onPress={() => {
+                          setRejectingMember(req);
+                          setRejectReason("");
+                        }}
+                      >
+                        <Feather name="x" size={14} color="#BE123C" />
+                        <Text style={styles.pendingRejectBtnText}>Reject</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {/* Total Participants Section */}
         <View style={[styles.sectionRow, { marginTop: 24 }]}>
           <Text style={styles.sectionHeading}>
@@ -1364,46 +1996,139 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             </View>
           ) : (
             participants.map((p) => (
-              <View key={p.id} style={styles.participantRow}>
-                <View style={styles.participantAvatar}>
-                  <Text style={styles.participantAvatarText}>{p.avatar}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <Text style={styles.participantName}>{p.name}</Text>
-                    {p.role === "HOST" && (
-                      <View style={styles.hostBadge}>
-                        <Text style={styles.hostBadgeText}>HOST</Text>
-                      </View>
+              <View key={p.id} style={styles.participantCard}>
+                <View style={styles.participantRow}>
+                  <View style={styles.participantAvatar}>
+                    {p.profilePicture ? (
+                      <Image
+                        source={{ uri: p.profilePicture }}
+                        style={styles.participantAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={styles.participantAvatarText}>
+                        {p.avatar}
+                      </Text>
                     )}
                   </View>
-                  <View style={styles.statusDotRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
                     <View
-                      style={[
-                        styles.statusDot,
-                        {
-                          backgroundColor:
-                            p.status === "Settled" ? "#10B981" : "#F43F5E",
-                        },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusText,
-                        {
-                          color: p.status === "Settled" ? "#059669" : "#E11D48",
-                        },
-                      ]}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 6,
+                      }}
                     >
-                      {p.status}
+                      <Text style={styles.participantName}>{p.name}</Text>
+                      {p.role === "HOST" ? (
+                        <View style={styles.hostBadge}>
+                          <Text style={styles.hostBadgeText}>HOST</Text>
+                        </View>
+                      ) : p.role === "NON_PAYOR" ? (
+                        <View style={styles.nonPayorBadge}>
+                          <Text style={styles.nonPayorBadgeText}>
+                            NON-PAYOR
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={styles.payorBadge}>
+                          <Text style={styles.payorBadgeText}>PAYOR</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.statusDotRow}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          {
+                            backgroundColor:
+                              p.status === "Settled" ? "#10B981" : "#F43F5E",
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.statusText,
+                          {
+                            color:
+                              p.status === "Settled" ? "#059669" : "#E11D48",
+                          },
+                        ]}
+                      >
+                        {p.status}
+                      </Text>
+                      <Text style={styles.participantSubInfo}>
+                        {p.role === "NON_PAYOR"
+                          ? "• Exempt from bill splits"
+                          : p.role === "HOST"
+                            ? "• Host Admin"
+                            : "• Shares rent & bills"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.participantOwesText}>
+                      {p.role === "NON_PAYOR"
+                        ? "Exempt"
+                        : p.owesCents > 0
+                          ? formatPesos(p.owesCents)
+                          : "Settled"}
+                    </Text>
+                    <Text style={styles.participantOwesSub}>
+                      {p.role === "NON_PAYOR"
+                        ? "Non-Payor"
+                        : p.owesCents > 0
+                          ? "Outstanding"
+                          : "Zero Dues"}
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.participantOwesText}>
-                  {p.owesCents > 0
-                    ? `Owes ${formatPesos(p.owesCents)}`
-                    : "Settled"}
-                </Text>
+
+                {/* Host actions on member: Toggle Payor/Non-Payor & Delete */}
+                {isHost && p.role !== "HOST" && (
+                  <View style={styles.hostActionButtonsRow}>
+                    <TouchableOpacity
+                      style={styles.roleTogglePill}
+                      onPress={() => handleToggleMemberRole(p)}
+                      activeOpacity={0.7}
+                    >
+                      <Feather
+                        name={p.role === "NON_PAYOR" ? "check-circle" : "slash"}
+                        size={13}
+                        color={p.role === "NON_PAYOR" ? "#2563EB" : "#7C3AED"}
+                        style={{ marginRight: 5 }}
+                      />
+                      <Text
+                        style={[
+                          styles.roleTogglePillText,
+                          {
+                            color:
+                              p.role === "NON_PAYOR" ? "#2563EB" : "#7C3AED",
+                          },
+                        ]}
+                      >
+                        {p.role === "NON_PAYOR"
+                          ? "Switch to Payor"
+                          : "Switch to Non-Payor"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.removeMemberPill}
+                      onPress={() => handleRemoveMember(p)}
+                      activeOpacity={0.7}
+                    >
+                      <Feather
+                        name="trash-2"
+                        size={13}
+                        color="#DC2626"
+                        style={{ marginRight: 5 }}
+                      />
+                      <Text style={styles.removeMemberPillText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             ))
           )}
@@ -1452,6 +2177,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
       {/* MODAL: Menu Actions */}
       {renderMenuModal()}
+
+      {/* MODAL: Reject Join Request with Reason */}
+      {renderRejectModal()}
+
+      {/* MODAL: Host Required Guard Modal */}
+      {renderHostRequiredModal()}
     </SafeAreaView>
   );
 
@@ -1730,16 +2461,40 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               <Text style={styles.menuItemText}>Create New Billing Cycle</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setShowMenu(false);
-                setViewMode("create");
-              }}
-            >
-              <Feather name="plus-circle" size={18} color="#0F172A" />
-              <Text style={styles.menuItemText}>Create Another Group</Text>
-            </TouchableOpacity>
+            {isHost ? (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setShowMenu(false);
+                  setViewMode("create");
+                }}
+              >
+                <Feather name="plus-circle" size={18} color="#0F172A" />
+                <Text style={styles.menuItemText}>Create Another Group</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setShowMenu(false);
+                  if (onOpenHostApplication) {
+                    onOpenHostApplication();
+                  } else {
+                    setShowHostRequiredModal(true);
+                  }
+                }}
+              >
+                <Feather name="shield" size={18} color="#2563EB" />
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    { color: "#2563EB", fontWeight: "700" },
+                  ]}
+                >
+                  Apply to Become a Host
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.menuItem}
@@ -1768,6 +2523,312 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+    );
+  }
+
+  function renderRejectModal() {
+    if (!rejectingMember) return null;
+    const reqName =
+      rejectingMember.displayName || rejectingMember.name || "Applicant";
+    const isProcessing = Boolean(processingRequestId);
+
+    return (
+      <Modal
+        visible={Boolean(rejectingMember)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRejectingMember(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.sheetCard}>
+            <View style={styles.sheetHeader}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Feather name="alert-triangle" size={20} color="#BE123C" />
+                <Text style={styles.sheetTitle}>Decline Join Request</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setRejectingMember(null)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                disabled={isProcessing}
+              >
+                <Feather name="x" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sheetSub}>
+              Please provide a reason for declining {reqName}. The applicant
+              will see this reason in their app so they understand why they were
+              not approved.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.textInput,
+                { height: 90, textAlignVertical: "top", paddingTop: 10 },
+              ]}
+              placeholder="e.g. Unit is already at maximum capacity / Room code not intended for this tenant."
+              placeholderTextColor="#94A3B8"
+              multiline
+              numberOfLines={3}
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              autoFocus
+            />
+
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+              <TouchableOpacity
+                style={[styles.secondaryPillBtn, { flex: 1 }]}
+                onPress={() => setRejectingMember(null)}
+                disabled={isProcessing}
+              >
+                <Text style={styles.secondaryPillBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.dangerPillBtn,
+                  { flex: 1 },
+                  (!rejectReason.trim() || isProcessing) && { opacity: 0.6 },
+                ]}
+                onPress={handleRejectRequest}
+                disabled={!rejectReason.trim() || isProcessing}
+              >
+                {isProcessing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.dangerPillBtnText}>
+                    Confirm Rejection
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  function renderHostRequiredModal() {
+    return (
+      <Modal
+        visible={showHostRequiredModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowHostRequiredModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.sheetCard,
+              {
+                maxWidth: 360,
+                alignSelf: "center",
+                borderRadius: 24,
+                padding: 22,
+              },
+            ]}
+          >
+            <View style={{ alignItems: "center" }}>
+              <View
+                style={{
+                  width: 58,
+                  height: 58,
+                  borderRadius: 29,
+                  backgroundColor: "#EFF6FF",
+                  borderWidth: 2,
+                  borderColor: "#BFDBFE",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  marginBottom: 14,
+                }}
+              >
+                <Feather name="shield" size={28} color="#2563EB" />
+              </View>
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontWeight: "800",
+                  color: "#0F172A",
+                  textAlign: "center",
+                  marginBottom: 6,
+                }}
+              >
+                Host Privileges Required
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: "#64748B",
+                  textAlign: "center",
+                  lineHeight: 19,
+                  marginBottom: 18,
+                }}
+              >
+                Creating and managing household groups is restricted to verified
+                Property Hosts. Non-hosts can join an existing room with an
+                invite code.
+              </Text>
+
+              {/* Informational Guidance Box */}
+              <View
+                style={{
+                  backgroundColor: "#F8FAFC",
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: "#E2E8F0",
+                  padding: 12,
+                  width: "100%",
+                  marginBottom: 18,
+                  gap: 10,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: 10,
+                  }}
+                >
+                  <Feather
+                    name="home"
+                    size={16}
+                    color="#2563EB"
+                    style={{ marginTop: 2 }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: "700",
+                        color: "#1E293B",
+                      }}
+                    >
+                      Property Hosts
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: "#64748B",
+                        marginTop: 1,
+                        lineHeight: 15,
+                      }}
+                    >
+                      Apply to get verified. Approved hosts can create household
+                      groups, set rules, and split utilities.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: 10,
+                  }}
+                >
+                  <Feather
+                    name="users"
+                    size={16}
+                    color="#059669"
+                    style={{ marginTop: 2 }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: "700",
+                        color: "#1E293B",
+                      }}
+                    >
+                      Roommates / Residents
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: "#64748B",
+                        marginTop: 1,
+                        lineHeight: 15,
+                      }}
+                    >
+                      Ask your property host for your room’s invite code (e.g.
+                      PF-402) to join immediately.
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryPillBtn,
+                  { width: "100%", marginBottom: 10 },
+                ]}
+                onPress={() => {
+                  setShowHostRequiredModal(false);
+                  if (onOpenHostApplication) {
+                    onOpenHostApplication();
+                  } else {
+                    Alert.alert(
+                      "Host Application",
+                      "Navigate to Settings / Profile to submit a Host application.",
+                    );
+                  }
+                }}
+              >
+                <Feather
+                  name="shield"
+                  size={16}
+                  color="#FFFFFF"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.primaryPillBtnText}>
+                  Apply to Become a Host
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryPillBtn,
+                  {
+                    width: "100%",
+                    backgroundColor: "#EFF6FF",
+                    borderWidth: 1,
+                    borderColor: "#BFDBFE",
+                    marginBottom: 8,
+                  },
+                ]}
+                onPress={() => {
+                  setShowHostRequiredModal(false);
+                  setViewMode("join");
+                }}
+              >
+                <Feather
+                  name="hash"
+                  size={16}
+                  color="#2563EB"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+                  Join with Invite Code
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ paddingVertical: 8 }}
+                onPress={() => setShowHostRequiredModal(false)}
+              >
+                <Text
+                  style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}
+                >
+                  Dismiss
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     );
   }
@@ -2031,8 +3092,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
-  expenseCategoryIcon: {
-    fontSize: 20,
+  expenseCategoryIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 10,
   },
   expenseItemTitle: {
@@ -2080,30 +3145,35 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   participantsList: {
+    gap: 10,
+  },
+  participantCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     padding: 12,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.02,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
   },
   participantRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F8FAFC",
   },
   participantAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "#E2E8F0",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+    overflow: "hidden",
   },
   participantAvatarText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "800",
     color: "#334155",
   },
@@ -2117,12 +3187,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    marginLeft: 6,
   },
   hostBadgeText: {
     fontSize: 9,
     fontWeight: "800",
     color: "#1E40AF",
+  },
+  payorBadge: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  payorBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  nonPayorBadge: {
+    backgroundColor: "#F3E8FF",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  nonPayorBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#7E22CE",
   },
   participantRoleTag: {
     fontSize: 12,
@@ -2132,7 +3223,8 @@ const styles = StyleSheet.create({
   statusDotRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 2,
+    marginTop: 3,
+    flexWrap: "wrap",
   },
   statusDot: {
     width: 6,
@@ -2144,10 +3236,72 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
+  participantSubInfo: {
+    fontSize: 11,
+    color: "#64748B",
+    marginLeft: 4,
+  },
   participantOwesText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "800",
-    color: "#334155",
+    color: "#0F172A",
+  },
+  participantOwesSub: {
+    fontSize: 10,
+    color: "#94A3B8",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  hostActionButtonsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  roleTogglePill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  roleTogglePillText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  removeMemberPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+  },
+  removeMemberPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  editModeToggleRoleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "#F1F5F9",
+  },
+  editModeToggleRoleText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#475569",
   },
   deleteParticipantBtn: {
     padding: 8,
@@ -2382,5 +3536,134 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: "#0F172A",
+  },
+  participantAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  pendingRequestsContainer: {
+    backgroundColor: "#FFFBEB",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    padding: 14,
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  pendingRequestsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  pendingIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingRequestsTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#92400E",
+  },
+  pendingRequestsSubtitle: {
+    fontSize: 11,
+    color: "#B45309",
+    marginTop: 1,
+  },
+  pendingList: {
+    gap: 10,
+  },
+  pendingRequestCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#FEF3C7",
+    gap: 10,
+  },
+  pendingAvatarImage: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  pendingAvatarFallback: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingAvatarText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#92400E",
+  },
+  pendingMemberName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  pendingMemberEmail: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  pendingMemberDate: {
+    fontSize: 10,
+    color: "#94A3B8",
+    marginTop: 2,
+  },
+  pendingActionButtonsRow: {
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "flex-end",
+  },
+  pendingApproveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#059669",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  pendingApproveBtnText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  pendingRejectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#FFF1F2",
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  pendingRejectBtnText: {
+    color: "#BE123C",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  dangerPillBtn: {
+    backgroundColor: "#E11D48",
+    borderRadius: 24,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerPillBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
   },
 });

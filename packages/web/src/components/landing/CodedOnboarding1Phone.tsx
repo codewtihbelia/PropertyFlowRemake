@@ -177,29 +177,113 @@ export const CodedOnboarding1Phone: React.FC<CodedOnboarding1PhoneProps> = ({
 
               {/* Center House Card */}
               <div className="w-28 h-28 rounded-2xl bg-blue-50/80 border border-blue-200 flex flex-col items-center justify-center p-2 shadow-md z-10">
-                <span className="text-2xl mb-1">🏡</span>
+                <svg
+                  className="w-8 h-8 text-blue-600 mb-1"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+                  />
+                </svg>
                 <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-full border border-slate-200">
-                  <span className="text-[10px]">👤</span>
-                  <span className="text-[10px]">👤</span>
-                  <span className="text-[10px]">👤</span>
+                  <div className="w-3.5 h-3.5 rounded-full bg-sky-400 flex items-center justify-center">
+                    <svg
+                      className="w-2 h-2 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
+                  </div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-indigo-400 flex items-center justify-center">
+                    <svg
+                      className="w-2 h-2 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
+                  </div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-amber-400 flex items-center justify-center">
+                    <svg
+                      className="w-2 h-2 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
 
               {/* Orbit Badges */}
               <div className="absolute top-4 left-8 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-md">
-                $
+                ₱
               </div>
-              <div className="absolute top-4 right-8 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xs shadow-sm">
-                🙂
+              <div className="absolute top-4 right-8 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-emerald-600 shadow-sm">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
               </div>
-              <div className="absolute right-3 top-20 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xs shadow-sm">
-                📊
+              <div className="absolute right-3 top-20 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-blue-600 shadow-sm">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
+                </svg>
               </div>
-              <div className="absolute bottom-4 right-8 w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs shadow-sm">
-                💳
+              <div className="absolute bottom-4 right-8 w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                  />
+                </svg>
               </div>
-              <div className="absolute bottom-4 left-8 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xs shadow-sm">
-                🧾
+              <div className="absolute bottom-4 left-8 w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-600 shadow-sm">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
               </div>
             </div>
           )}
@@ -213,18 +297,42 @@ export const CodedOnboarding1Phone: React.FC<CodedOnboarding1PhoneProps> = ({
               {/* Center Dollar Medallion */}
               <div className="w-24 h-24 rounded-full bg-white p-1 flex items-center justify-center shadow-xl ring-4 ring-blue-50 z-10">
                 <div className="w-[84px] h-[84px] rounded-full bg-blue-600 flex items-center justify-center shadow-inner text-white font-extrabold text-4xl">
-                  $
+                  ₱
                 </div>
               </div>
 
               {/* Left Avatar */}
-              <div className="absolute left-3 top-16 w-10 h-10 rounded-full bg-blue-100 border border-sky-400 flex items-center justify-center text-sm shadow-sm">
-                👤
+              <div className="absolute left-3 top-16 w-10 h-10 rounded-full bg-blue-100 border border-sky-400 flex items-center justify-center text-blue-600 shadow-sm">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                  />
+                </svg>
               </div>
 
               {/* Right Avatar */}
-              <div className="absolute right-3 top-16 w-10 h-10 rounded-full bg-rose-100 border border-rose-400 flex items-center justify-center text-sm shadow-sm">
-                👩
+              <div className="absolute right-3 top-16 w-10 h-10 rounded-full bg-rose-100 border border-rose-400 flex items-center justify-center text-rose-600 shadow-sm">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                  />
+                </svg>
               </div>
             </div>
           )}

@@ -15,11 +15,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "typeRoots": ["./node_modules/@types"],
     "paths": {
-      "@/*": ["src/*"],
-      "@propertyflow/shared": ["../shared/src"]
+      "@/*": ["./src/*"],
+      "@propertyflow/shared": ["../shared/src"],
+      "@splitzy/shared": ["../shared/src"]
     }
   },
   "include": ["src"]

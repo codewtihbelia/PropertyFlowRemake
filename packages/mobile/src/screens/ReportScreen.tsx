@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 
 interface ReportScreenProps {
@@ -99,8 +100,12 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({ onBack }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backBtnText}>←</Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
+          <Feather name="arrow-left" size={20} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Monthly Summary</Text>
         <View style={{ width: 36 }} />

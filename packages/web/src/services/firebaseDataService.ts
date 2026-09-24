@@ -12,6 +12,7 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import { updateProfile as updateAuthProfile } from "firebase/auth";
 import { db, auth, functions, firestoreDatabaseId } from "../firebase/config";
 import {
   UserProfile,
@@ -103,17 +104,38 @@ function normalizeHostApplication(docId: string, raw: any): HostApplication {
     userEmail: email,
     applicantPhone,
     phoneNumber: applicantPhone,
+    managementType: (
+      raw?.managementType || "Primary Leaseholder / Master Tenant"
+    ).trim(),
+    selectedHouseholdId: (raw?.selectedHouseholdId || "").trim(),
+    roommateGroupName: (
+      raw?.roommateGroupName ||
+      raw?.householdName ||
+      ""
+    ).trim(),
     propertyName: propName,
     propertyAddress: address,
     unitOrRoom: (raw?.unitOrRoom || "").trim(),
     monthlyRentOrShare: raw?.monthlyRentOrShare
       ? Number(raw.monthlyRentOrShare)
-      : undefined,
+      : raw?.estimatedMonthlyBills
+        ? Number(raw.estimatedMonthlyBills)
+        : undefined,
+    estimatedMonthlyBills: raw?.estimatedMonthlyBills
+      ? Number(raw.estimatedMonthlyBills)
+      : raw?.monthlyRentOrShare
+        ? Number(raw.monthlyRentOrShare)
+        : undefined,
     city: (raw?.city || "").trim(),
     estimatedRoommates: raw?.estimatedRoommates ?? 4,
     reason,
     reasonForApplying: reason,
-    experience: (raw?.experience || "").trim(),
+    experience: (raw?.experience || raw?.propertyExperience || "").trim(),
+    propertyExperience: (
+      raw?.propertyExperience ||
+      raw?.experience ||
+      ""
+    ).trim(),
     status: (raw?.status || "PENDING") as HostApplicationStatus,
     reviewedBy: raw?.reviewedBy,
     reviewerName: raw?.reviewerName,
@@ -133,15 +155,20 @@ export const firebaseDataService = {
     userEmail?: string;
     applicantPhone?: string;
     phoneNumber?: string;
+    managementType?: string;
+    selectedHouseholdId?: string;
+    roommateGroupName?: string;
     propertyName?: string;
     propertyAddress: string;
     unitOrRoom?: string;
     monthlyRentOrShare?: number;
+    estimatedMonthlyBills?: number;
     city?: string;
     estimatedRoommates?: number;
     reason?: string;
     reasonForApplying?: string;
     experience?: string;
+    propertyExperience?: string;
     status?: HostApplicationStatus;
   }): Promise<string> {
     const applicationId = `host_app_${data.userId}`;
@@ -164,6 +191,18 @@ export const firebaseDataService = {
       effectiveAddress ||
       "Proposed Household"
     ).trim();
+    const effectiveBills =
+      data.estimatedMonthlyBills !== undefined
+        ? data.estimatedMonthlyBills
+        : data.monthlyRentOrShare;
+    const effectiveExp = (
+      data.propertyExperience ||
+      data.experience ||
+      ""
+    ).trim();
+    const effectiveMgmtType = (
+      data.managementType || "Primary Leaseholder / Master Tenant"
+    ).trim();
 
     const payload: HostApplication = {
       id: applicationId,
@@ -174,14 +213,19 @@ export const firebaseDataService = {
       userEmail: effectiveEmail,
       applicantPhone: effectivePhone,
       phoneNumber: effectivePhone,
+      managementType: effectiveMgmtType,
+      selectedHouseholdId: (data.selectedHouseholdId || "").trim(),
+      roommateGroupName: (data.roommateGroupName || "").trim(),
       propertyAddress: effectiveAddress,
       unitOrRoom: (data.unitOrRoom || "").trim(),
-      monthlyRentOrShare: data.monthlyRentOrShare,
+      monthlyRentOrShare: effectiveBills,
+      estimatedMonthlyBills: effectiveBills,
       city: (data.city || "").trim(),
       estimatedRoommates: data.estimatedRoommates ?? 4,
       reason: effectiveReason,
       reasonForApplying: effectiveReason,
-      experience: (data.experience || "").trim(),
+      experience: effectiveExp,
+      propertyExperience: effectiveExp,
       status: data.status || "PENDING",
       submittedAt: now,
       createdAt: now,
@@ -388,6 +432,15 @@ export const firebaseDataService = {
         .then(async (snap) => {
           if (!snap.exists()) return null;
           const user = snap.data() as UserProfile;
+
+          // Promote to HOST if user has approved host application
+          if (
+            user.hostApplicationStatus === "APPROVED" &&
+            user.role !== "SUPER_ADMIN"
+          ) {
+            user.role = "HOST";
+          }
+
           if (user.householdId) {
             try {
               const hhSnap = await getDoc(
@@ -395,18 +448,67 @@ export const firebaseDataService = {
               );
               if (!hhSnap.exists()) {
                 // Household was deleted in Firestore! Clean up stale references
+                // IMPORTANT: If user was HOST or has approved host application, preserve their HOST role!
+                const isHost =
+                  user.role === "HOST" ||
+                  user.hostApplicationStatus === "APPROVED";
                 updateDoc(doc(db, "users", uid), {
                   householdId: deleteField(),
                   householdName: deleteField(),
                   apartmentName: deleteField(),
                   updatedDate: new Date().toISOString(),
+                  ...(isHost && user.role !== "SUPER_ADMIN"
+                    ? { role: "HOST" }
+                    : {}),
                 }).catch(() => {});
                 delete (user as any).householdId;
                 delete (user as any).householdName;
                 delete (user as any).apartmentName;
+                if (isHost && user.role !== "SUPER_ADMIN") {
+                  user.role = "HOST";
+                }
+              } else {
+                const hhData = hhSnap.data();
+                if (
+                  hhData &&
+                  hhData.hostId === uid &&
+                  user.role !== "SUPER_ADMIN"
+                ) {
+                  user.role = "HOST";
+                  updateDoc(doc(db, "users", uid), { role: "HOST" }).catch(
+                    () => {},
+                  );
+                }
               }
             } catch (e) {
               console.warn(`[Firestore] household check err:`, e);
+            }
+          } else {
+            // Check if user is host of an existing household
+            try {
+              const qHh = query(
+                collection(db, "households"),
+                where("hostId", "==", uid),
+              );
+              const hhDocs = await getDocs(qHh);
+              if (!hhDocs.empty) {
+                const hhData = hhDocs.docs[0].data();
+                user.householdId = hhData.householdId;
+                user.householdName =
+                  hhData.householdName || hhData.apartmentName;
+                user.apartmentName = hhData.apartmentName;
+                if (user.role !== "SUPER_ADMIN") {
+                  user.role = "HOST";
+                  updateDoc(doc(db, "users", uid), {
+                    householdId: hhData.householdId,
+                    householdName: user.householdName,
+                    apartmentName: user.apartmentName,
+                    role: "HOST",
+                  }).catch(() => {});
+                }
+              }
+            } catch (hhErr) {
+              console.warn(`[Firestore] host query err:`, hhErr);
             }
           }
           return user;
@@ -442,20 +544,44 @@ export const firebaseDataService = {
           return;
         }
         const data = snap.data() as UserProfile;
+        if (
+          data.hostApplicationStatus === "APPROVED" &&
+          data.role !== "SUPER_ADMIN"
+        ) {
+          data.role = "HOST";
+        }
         if (data.householdId) {
           try {
             const hhSnap = await getDoc(
               doc(db, "households", data.householdId),
             );
             if (!hhSnap.exists()) {
+              const isHost =
+                data.role === "HOST" ||
+                data.hostApplicationStatus === "APPROVED";
               delete (data as any).householdId;
               delete (data as any).householdName;
               delete (data as any).apartmentName;
+              if (isHost && data.role !== "SUPER_ADMIN") {
+                data.role = "HOST";
+              }
               updateDoc(ref, {
                 householdId: deleteField(),
                 householdName: deleteField(),
                 apartmentName: deleteField(),
+                ...(isHost && data.role !== "SUPER_ADMIN"
+                  ? { role: "HOST" }
+                  : {}),
               }).catch(() => {});
+            } else {
+              const hhData = hhSnap.data();
+              if (
+                hhData &&
+                hhData.hostId === uid &&
+                data.role !== "SUPER_ADMIN"
+              ) {
+                data.role = "HOST";
+              }
             }
           } catch (e) {
             console.warn("[Firestore] Household existence check err:", e);
@@ -637,8 +763,44 @@ export const firebaseDataService = {
       const nowIso = new Date().toISOString();
       const displayName = user.displayName || user.email || "Resident";
 
-      // 1. Add/Update member record
+      // If user is already the host of this household
+      if (targetHh.hostId === user.uid) {
+        return {
+          success: false,
+          error: "You are already the host of this household.",
+        };
+      }
+
+      // Check existing member record safely
       const memberRef = doc(db, `households/${hhId}/members`, user.uid);
+      let memberSnap: any = null;
+      try {
+        memberSnap = await getDoc(memberRef);
+      } catch (memErr) {
+        console.warn("[Firestore] joinHouseholdByCode member check:", memErr);
+      }
+      if (memberSnap && memberSnap.exists()) {
+        const memData = memberSnap.data();
+        if (memData.status === "ACTIVE") {
+          return {
+            success: false,
+            error: "You are already an active member of this household.",
+          };
+        }
+        if (memData.status === "PENDING") {
+          return {
+            success: true,
+            household: targetHh,
+            error:
+              "Your request to join this household is already awaiting host approval.",
+          };
+        }
+      }
+
+      const applicantPhoto =
+        (user as any).profilePicture || (user as any).photoURL || null;
+
+      // 1. Add/Update member record with status PENDING (requires host approval)
       await setDoc(
         memberRef,
         sanitizeData({
@@ -648,21 +810,26 @@ export const firebaseDataService = {
           role: "PAYOR",
           displayName,
           email: user.email || "",
-          status: "ACTIVE",
-          joinedDate: nowIso.split("T")[0],
+          profilePicture: applicantPhoto,
+          photoURL: applicantPhoto,
+          status: "PENDING",
+          joinedDate: "",
+          requestedDate: nowIso,
+          rejectionReason: null,
         }),
         { merge: true },
       );
 
-      // 2. Update user profile document
+      // 2. Update user profile document with pending status (do not grant full membership until approved)
       const userRef = doc(db, "users", user.uid);
       await setDoc(
         userRef,
         sanitizeData({
-          householdId: hhId,
-          householdName: targetHh.householdName,
-          apartmentName: targetHh.apartmentName,
-          role: "PAYOR",
+          pendingHouseholdId: hhId,
+          pendingHouseholdName:
+            targetHh.householdName || targetHh.apartmentName,
+          joinRequestStatus: "PENDING",
+          joinRejectionReason: null,
           updatedDate: nowIso,
         }),
         { merge: true },
@@ -675,6 +842,132 @@ export const firebaseDataService = {
         success: false,
         error: err.message || "Failed to join household. Please try again.",
       };
+    }
+  },
+
+  async approveJoinRequest(
+    householdId: string,
+    memberId: string,
+  ): Promise<boolean> {
+    try {
+      const nowIso = new Date().toISOString();
+      const memRef = doc(db, `households/${householdId}/members`, memberId);
+      await updateDoc(memRef, {
+        status: "ACTIVE",
+        joinedDate: nowIso.split("T")[0],
+        rejectionReason: null,
+      });
+
+      const hhSnap = await getDoc(doc(db, "households", householdId));
+      const hhData = hhSnap.exists() ? hhSnap.data() : null;
+
+      try {
+        await updateDoc(doc(db, "users", memberId), {
+          householdId,
+          householdName: hhData?.householdName || "",
+          apartmentName: hhData?.apartmentName || "",
+          role: "PAYOR",
+          joinRequestStatus: "APPROVED",
+          pendingHouseholdId: null,
+          joinRejectionReason: null,
+          updatedDate: nowIso,
+        });
+      } catch (uErr) {
+        console.warn(
+          "[approveJoinRequest] Host user doc update deferred to client:",
+          uErr,
+        );
+      }
+      return true;
+    } catch (err) {
+      console.error("[approveJoinRequest] Error:", err);
+      return false;
+    }
+  },
+
+  async rejectJoinRequest(
+    householdId: string,
+    memberId: string,
+    reason: string,
+  ): Promise<boolean> {
+    try {
+      const nowIso = new Date().toISOString();
+      const memRef = doc(db, `households/${householdId}/members`, memberId);
+      await updateDoc(memRef, {
+        status: "REJECTED",
+        rejectionReason: reason || "Declined by host",
+        rejectedDate: nowIso,
+      });
+
+      try {
+        await updateDoc(doc(db, "users", memberId), {
+          joinRequestStatus: "REJECTED",
+          joinRejectionReason: reason || "Declined by host",
+          pendingHouseholdId: null,
+          updatedDate: nowIso,
+        });
+      } catch (uErr) {
+        console.warn(
+          "[rejectJoinRequest] Host user doc update deferred to client:",
+          uErr,
+        );
+      }
+      return true;
+    } catch (err) {
+      console.error("[rejectJoinRequest] Error:", err);
+      return false;
+    }
+  },
+
+  async updateUserProfilePicture(
+    uid: string,
+    photoUrl: string,
+    householdId?: string,
+  ): Promise<boolean> {
+    try {
+      const userRef = doc(db, "users", uid);
+      await setDoc(
+        userRef,
+        {
+          profilePicture: photoUrl,
+          photoURL: photoUrl,
+          updatedDate: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+      if (auth.currentUser && auth.currentUser.uid === uid) {
+        await updateAuthProfile(auth.currentUser, { photoURL: photoUrl }).catch(
+          () => {},
+        );
+      }
+      if (householdId) {
+        const memRef1 = doc(db, `households/${householdId}/members`, uid);
+        await setDoc(
+          memRef1,
+          {
+            profilePicture: photoUrl,
+            photoURL: photoUrl,
+          },
+          { merge: true },
+        ).catch(() => {});
+        const memRef2 = doc(
+          db,
+          `households/${householdId}/members`,
+          `mem_${uid}`,
+        );
+        await setDoc(
+          memRef2,
+          {
+            profilePicture: photoUrl,
+            photoURL: photoUrl,
+          },
+          { merge: true },
+        ).catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      console.error("[updateUserProfilePicture] Error:", err);
+      return false;
     }
   },
 

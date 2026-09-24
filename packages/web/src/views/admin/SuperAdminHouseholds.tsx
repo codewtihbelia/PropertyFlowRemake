@@ -1,21 +1,35 @@
-import React from 'react';
-import { adminService } from '../../services/adminService';
-import { getAppState } from '../../services/store';
-import { Layers, Home, Users } from 'lucide-react';
+import React, { useState } from "react";
+import { adminService } from "../../services/adminService";
+import { getAppState } from "../../services/store";
+import { Layers, Home, Users, Plus } from "lucide-react";
+import { CreateRoomModal } from "../../components/CreateRoomModal";
 
 export const SuperAdminHouseholds: React.FC = () => {
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const households = adminService.getAllHouseholds();
   const state = getAppState();
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 uppercase tracking-wider">
-          <Layers className="w-3.5 h-3.5" />
-          <span>Platform Inventory</span>
+      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 uppercase tracking-wider">
+            <Layers className="w-3.5 h-3.5" />
+            <span>Platform Inventory</span>
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 mt-1">
+            Households Directory
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Manage all registered households and host assignments
+          </p>
         </div>
-        <h2 className="text-2xl font-black text-slate-900 mt-1">Households Directory</h2>
-        <p className="text-xs text-slate-500 mt-0.5">Manage all registered households and host assignments</p>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+        >
+          <Plus className="w-4 h-4" /> Create Household
+        </button>
       </div>
 
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
@@ -38,14 +52,23 @@ export const SuperAdminHouseholds: React.FC = () => {
                 const cycle = state.billingCycles[h.householdId]?.[0];
 
                 return (
-                  <tr key={h.householdId} className="hover:bg-slate-50/60 transition">
-                    <td className="py-3.5 font-bold text-slate-900">{h.householdName}</td>
+                  <tr
+                    key={h.householdId}
+                    className="hover:bg-slate-50/60 transition"
+                  >
+                    <td className="py-3.5 font-bold text-slate-900">
+                      {h.householdName}
+                    </td>
                     <td className="py-3.5 text-slate-600">{h.apartmentName}</td>
                     <td className="py-3.5 text-slate-700">
                       {host?.displayName} ({host?.email})
                     </td>
-                    <td className="py-3.5 font-semibold text-blue-600">{members.length} members</td>
-                    <td className="py-3.5 text-slate-600">{cycle?.name || 'None'}</td>
+                    <td className="py-3.5 font-semibold text-blue-600">
+                      {members.length} members
+                    </td>
+                    <td className="py-3.5 text-slate-600">
+                      {cycle?.name || "None"}
+                    </td>
                     <td className="py-3.5">
                       <span className="px-2.5 py-0.5 rounded-full font-bold text-[10px] bg-emerald-100 text-emerald-800">
                         {h.status}
@@ -58,7 +81,10 @@ export const SuperAdminHouseholds: React.FC = () => {
           </table>
         </div>
       </div>
+      <CreateRoomModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+      />
     </div>
   );
 };
-

@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@propertyflow/shared": path.resolve(__dirname, "../shared/src"),
+      "@splitzy/shared": path.resolve(__dirname, "../shared/src"),
     },
   },
   server: {

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useHousehold } from "../../contexts/HouseholdContext";
 import { JoinHouseholdModal } from "./JoinHouseholdModal";
+import { CreateRoomModal } from "../CreateRoomModal";
 import {
   LayoutDashboard,
   Users,
@@ -38,14 +39,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { isHost, isSuperAdmin, isPayor, isNonPayor, role } = useAuth();
-  const { household } = useHousehold();
+  const { isHost, isSuperAdmin, isPayor, isNonPayor, role, currentUser } =
+    useAuth();
+  const { household, members } = useHousehold();
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const hasGroup = Boolean(
     household.householdId &&
     household.householdName &&
     household.householdName !== "No household connected",
+  );
+
+  const isUserHost = Boolean(
+    isHost ||
+    currentUser.role === "HOST" ||
+    currentUser.hostApplicationStatus === "APPROVED" ||
+    (household.hostId && household.hostId === currentUser.uid) ||
+    members.some(
+      (m) =>
+        (m.userId === currentUser.uid ||
+          m.memberId === currentUser.uid ||
+          m.memberId === `mem_${currentUser.uid}`) &&
+        m.role === "HOST",
+    ),
   );
 
   const getNavItems = () => {
@@ -73,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ];
     }
 
-    if (isHost) {
+    if (isUserHost) {
       return [
         { id: "host_dashboard", label: "Dashboard", icon: LayoutDashboard },
         {
@@ -101,17 +118,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ];
     }
 
-    // Client (Payor or Non-Payor)
-    return [
+    // Client (Payor or Non-Payor resident)
+    const clientItems = [
       {
         id: "client_dashboard",
         label: "Home Dashboard",
         icon: LayoutDashboard,
-      },
-      {
-        id: "client_host_application",
-        label: "Apply for Host Status",
-        icon: Building2,
       },
       { id: "client_bills", label: "My Bills & Breakdown", icon: Receipt },
       {
@@ -128,6 +140,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: "client_announcements", label: "Announcements", icon: Megaphone },
       { id: "client_profile", label: "My Profile & Support", icon: Settings },
     ];
+
+    // Only non-hosts can apply for host status
+    if (!isUserHost) {
+      clientItems.splice(1, 0, {
+        id: "client_host_application",
+        label: "Apply for Host Status",
+        icon: Building2,
+      });
+    }
+
+    return clientItems;
   };
 
   const navItems = getNavItems();
@@ -149,7 +172,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         <div className="p-4 overflow-y-auto">
           <div className="px-3 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {role.replace("_", " ")} MENU
+            {isUserHost
+              ? "HOST / PAYOR MENU"
+              : `${role.replace("_", " ")} MENU`}
           </div>
 
           <nav className="space-y-1 mt-2">
@@ -178,7 +203,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })}
           </nav>
 
-          <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4 text-white" />
+              <span>Create New Group</span>
+            </button>
             <button
               onClick={() => setIsJoinModalOpen(true)}
               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-bold text-blue-700 bg-blue-50/80 hover:bg-blue-100 border border-blue-200/80 transition cursor-pointer"
@@ -200,6 +232,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <JoinHouseholdModal
         isOpen={isJoinModalOpen}
         onClose={() => setIsJoinModalOpen(false)}
+      />
+      <CreateRoomModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
       />
     </>
   );

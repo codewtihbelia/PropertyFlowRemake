@@ -3,6 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useHousehold } from "../../contexts/HouseholdContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { JoinHouseholdModal } from "./JoinHouseholdModal";
+import { CreateRoomModal } from "../CreateRoomModal";
 import {
   Bell,
   Check,
@@ -12,6 +13,7 @@ import {
   LogOut,
   KeyRound,
   Copy,
+  Plus,
 } from "lucide-react";
 
 export const Header: React.FC<{
@@ -19,12 +21,26 @@ export const Header: React.FC<{
   onSignOut?: () => void;
 }> = ({ onMenuToggle, onSignOut }) => {
   const { currentUser } = useAuth();
-  const { household } = useHousehold();
+  const { household, members } = useHousehold();
   const { notifications, unreadCount, markAsRead, markAllAsRead } =
     useNotifications();
   const [showNotifs, setShowNotifs] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  const isUserHost = Boolean(
+    currentUser?.role === "HOST" ||
+    currentUser?.hostApplicationStatus === "APPROVED" ||
+    (household?.hostId && household.hostId === currentUser?.uid) ||
+    members.some(
+      (m) =>
+        (m.userId === currentUser?.uid ||
+          m.memberId === currentUser?.uid ||
+          m.memberId === `mem_${currentUser?.uid}`) &&
+        m.role === "HOST",
+    ),
+  );
 
   const hasGroup = Boolean(
     household?.householdId &&
@@ -83,6 +99,16 @@ export const Header: React.FC<{
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
+        {/* Create Group Action */}
+        <button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition cursor-pointer shadow-xs"
+          title="Create a new household group"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span className="hidden xs:inline">Create Group</span>
+        </button>
+
         {/* Household Code or Join Group Action */}
         {hasGroup && displayCode ? (
           <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 font-mono font-bold text-xs shadow-2xs">
@@ -182,17 +208,29 @@ export const Header: React.FC<{
 
         {/* User Pill & Action Buttons */}
         <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
-          <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm ring-2 ring-blue-500/20">
-            {currentUser?.displayName?.charAt(0) || "U"}
-          </div>
+          {currentUser?.profilePicture || (currentUser as any)?.photoURL ? (
+            <img
+              src={currentUser.profilePicture || (currentUser as any).photoURL}
+              alt={currentUser?.displayName || "User"}
+              className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/20 shadow-xs"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm ring-2 ring-blue-500/20">
+              {currentUser?.displayName?.charAt(0) || "U"}
+            </div>
+          )}
           <div className="hidden sm:block text-left">
             <div className="text-xs font-bold text-slate-900">
               {currentUser?.displayName || "User"}
             </div>
             <div className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">
-              {currentUser?.role
-                ? currentUser.role.replace("_", " ")
-                : "MEMBER"}
+              {isUserHost
+                ? "HOST / PAYOR"
+                : currentUser?.role === "SUPER_ADMIN"
+                  ? "SUPER ADMIN"
+                  : currentUser?.role === "NON_PAYOR"
+                    ? "NON-PAYOR"
+                    : "PAYOR"}
             </div>
           </div>
 
@@ -213,6 +251,10 @@ export const Header: React.FC<{
       <JoinHouseholdModal
         isOpen={isJoinModalOpen}
         onClose={() => setIsJoinModalOpen(false)}
+      />
+      <CreateRoomModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
       />
     </header>
   );

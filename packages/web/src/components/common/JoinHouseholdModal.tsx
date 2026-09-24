@@ -43,13 +43,15 @@ export const JoinHouseholdModal: React.FC<JoinHouseholdModalProps> = ({
     try {
       const result = await joinHousehold(clean);
       if (result.success) {
-        setSuccessMessage("Successfully joined the household!");
+        setSuccessMessage(
+          "Join request sent! The room host must approve your request before you join.",
+        );
         setTimeout(() => {
           setCode("");
           setSuccessMessage(null);
           onClose();
           if (onSuccess) onSuccess();
-        }, 800);
+        }, 1500);
       } else {
         setError(
           result.error ||

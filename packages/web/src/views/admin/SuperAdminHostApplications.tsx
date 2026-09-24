@@ -297,6 +297,12 @@ export const SuperAdminHostApplications: React.FC = () => {
                       app.createdAt || app.submittedAt || Date.now(),
                     ).toLocaleDateString()}
                   </span>
+
+                  {app.managementType && (
+                    <span className="px-2.5 py-1 bg-brand-50 text-brand-700 font-bold text-[10px] rounded-lg border border-brand-200">
+                      {app.managementType}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -312,7 +318,7 @@ export const SuperAdminHostApplications: React.FC = () => {
                   </p>
                   {app.unitOrRoom && (
                     <p className="text-slate-500 text-[11px]">
-                      Unit/Room: {app.unitOrRoom}
+                      Unit/Floor: {app.unitOrRoom}
                     </p>
                   )}
                 </div>
@@ -320,7 +326,7 @@ export const SuperAdminHostApplications: React.FC = () => {
                 <div className="space-y-1">
                   <div className="flex items-center gap-1 text-slate-400 font-semibold text-[11px]">
                     <Phone className="w-3.5 h-3.5" />
-                    <span>Contact Phone</span>
+                    <span>Contact Number</span>
                   </div>
                   <p className="font-bold text-slate-800">
                     {app.phoneNumber || app.applicantPhone || "Not provided"}
@@ -330,22 +336,25 @@ export const SuperAdminHostApplications: React.FC = () => {
                 <div className="space-y-1">
                   <div className="flex items-center gap-1 text-slate-400 font-semibold text-[11px]">
                     <DollarSign className="w-3.5 h-3.5" />
-                    <span>Est. Monthly Rent/Share</span>
+                    <span>Est. Monthly Bills</span>
                   </div>
-                  <p className="font-bold text-slate-800">
-                    {app.monthlyRentOrShare
-                      ? `$${app.monthlyRentOrShare}`
+                  <p className="font-bold text-emerald-700">
+                    {app.estimatedMonthlyBills || app.monthlyRentOrShare
+                      ? `₱${app.estimatedMonthlyBills || app.monthlyRentOrShare}`
                       : "Not specified"}
                   </p>
                 </div>
 
                 <div className="space-y-1">
                   <div className="flex items-center gap-1 text-slate-400 font-semibold text-[11px]">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>User ID</span>
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>Roommate Group</span>
                   </div>
-                  <p className="font-mono text-[11px] text-slate-500 truncate">
-                    {app.userId}
+                  <p className="font-semibold text-slate-800">
+                    {app.roommateGroupName ||
+                      (app.selectedHouseholdId
+                        ? `ID: ${app.selectedHouseholdId}`
+                        : "None (Optional)")}
                   </p>
                 </div>
               </div>
@@ -353,17 +362,19 @@ export const SuperAdminHostApplications: React.FC = () => {
               {/* Reason for applying */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-xs space-y-1">
                 <span className="font-bold text-slate-700">
-                  Reason for Applying:
+                  Why do you want to become a host:
                 </span>
                 <p className="text-slate-600 leading-relaxed italic">
                   {app.reasonForApplying ||
                     app.reason ||
                     "No statement provided"}
                 </p>
-                {app.experience && (
-                  <p className="text-slate-500 text-[11px] mt-1 pt-1 border-t border-slate-200/60">
-                    <strong className="text-slate-600">Experience:</strong>{" "}
-                    {app.experience}
+                {(app.propertyExperience || app.experience) && (
+                  <p className="text-slate-500 text-[11px] mt-1.5 pt-1.5 border-t border-slate-200/60">
+                    <strong className="text-slate-700 font-semibold">
+                      Property Experience:{" "}
+                    </strong>{" "}
+                    {app.propertyExperience || app.experience}
                   </p>
                 )}
               </div>
