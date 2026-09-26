@@ -9,13 +9,18 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { UniversalLoader } from "../components/UniversalLoader";
 import * as ImagePicker from "expo-image-picker";
 import { formatPesos } from "@propertyflow/shared";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
 import { auth } from "../firebase/config";
-import { mobileDataService } from "../services/firebaseDataService";
+import {
+  mobileDataService,
+  isPayorMember,
+} from "../services/firebaseDataService";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 
@@ -43,7 +48,18 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const [profile, setProfile] = useState<any | null>(null);
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const currentUser = auth.currentUser;
+
+  // Fallback safety timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const resolvedHouseholdId = householdId || profile?.householdId || "";
   const activeCycle = useMemo(
@@ -56,6 +72,48 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const resolvedBillingCycleId =
     billingCycleId || activeCycle?.billingCycleId || "";
   const myBill = memberBills.find((bill) => bill.userId === currentUser?.uid);
+
+  const activePayors = useMemo(() => {
+    const list = members.filter(
+      (m) => m.status === "ACTIVE" && isPayorMember(m),
+    );
+    return list.length > 0
+      ? list
+      : members.filter((m) => m.status === "ACTIVE");
+  }, [members]);
+
+  const liveOutstandingCentavos = useMemo(() => {
+    const payorCount = Math.max(1, activePayors.length);
+    const unpaidExpenses = expenses.filter(
+      (e) => e.status !== "PAID" && !e.isPaid,
+    );
+    const liveShare = unpaidExpenses.reduce((sum, e) => {
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
+        : [];
+      const isSplitStale =
+        splitPayors.length > 0 && splitPayors.length !== payorCount;
+      if (
+        !isSplitStale &&
+        e.splitDetails &&
+        Array.isArray(e.splitDetails) &&
+        e.splitDetails.length > 0
+      ) {
+        const mySplit = e.splitDetails.find(
+          (s: any) => s.userId === currentUser?.uid,
+        );
+        if (mySplit && typeof mySplit.shareCentavos === "number") {
+          return sum + mySplit.shareCentavos;
+        }
+      }
+      return sum + Math.round(e.amountCents / payorCount);
+    }, 0);
+    const paidCentavos =
+      myBill && typeof myBill.totalPaidCentavos === "number"
+        ? myBill.totalPaidCentavos
+        : 0;
+    return Math.max(0, liveShare - paidCentavos);
+  }, [activePayors, expenses, currentUser?.uid, myBill]);
 
   useEffect(() => {
     let mounted = true;
@@ -70,10 +128,26 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
   useEffect(() => {
     if (!resolvedHouseholdId) return;
-    return mobileDataService.listenToBillingCycles(
+    const unsubCycles = mobileDataService.listenToBillingCycles(
       resolvedHouseholdId,
       setCycles,
     );
+    const unsubExp = mobileDataService.listenToExpenses(
+      resolvedHouseholdId,
+      (data) => {
+        setExpenses(data);
+        setLoading(false);
+      },
+    );
+    const unsubMem = mobileDataService.listenToHouseholdMembers(
+      resolvedHouseholdId,
+      setMembers,
+    );
+    return () => {
+      unsubCycles();
+      unsubExp();
+      unsubMem();
+    };
   }, [resolvedHouseholdId]);
 
   useEffect(() => {
@@ -86,10 +160,10 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   }, [resolvedBillingCycleId, resolvedHouseholdId]);
 
   useEffect(() => {
-    if (!amount && myBill?.outstandingCentavos > 0) {
-      setAmount((myBill.outstandingCentavos / 100).toFixed(2));
+    if (!amount && liveOutstandingCentavos > 0) {
+      setAmount((liveOutstandingCentavos / 100).toFixed(2));
     }
-  }, [amount, myBill?.outstandingCentavos]);
+  }, [amount, liveOutstandingCentavos]);
 
   const handlePickReceipt = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -178,6 +252,23 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     }
   };
 
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <UniversalLoader
+          text="Loading payment details..."
+          subtitle="Calculating outstanding balance..."
+          transparent={false}
+        />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -192,7 +283,9 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={18} color="#2563EB" />
+            <View style={styles.backIconCircle}>
+              <Ionicons name="arrow-back" size={18} color="#0F172A" />
+            </View>
             <Text style={styles.backText}>Back to Bills Overview</Text>
           </TouchableOpacity>
         )}
@@ -205,9 +298,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
         <View style={styles.dueCard}>
           <Text style={styles.dueLabel}>Current Outstanding Dues</Text>
           <Text style={styles.dueAmount}>
-            {myBill
-              ? formatPesos(myBill.outstandingCentavos || 0)
-              : formatPesos(0)}
+            {formatPesos(liveOutstandingCentavos)}
           </Text>
           <Text style={styles.dueNote}>
             {activeCycle
@@ -281,12 +372,9 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             style={styles.uploadBox}
             onPress={handlePickReceipt}
           >
-            <Feather
-              name="upload-cloud"
-              size={28}
-              color="#2563EB"
-              style={{ marginBottom: 6 }}
-            />
+            <View style={styles.uploadIconWrap}>
+              <Feather name="upload-cloud" size={24} color="#0F172A" />
+            </View>
             <Text style={styles.uploadText}>Upload Receipt / Screenshot</Text>
             <Text style={styles.uploadSub}>
               Tap to select image to store securely
@@ -334,12 +422,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
     paddingVertical: 6,
-    gap: 6,
+    gap: 8,
+  },
+  backIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   backText: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#2563EB",
+    color: "#0F172A",
   },
   title: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
   subtitle: { fontSize: 12, color: "#64748B", marginTop: 2, marginBottom: 16 },
@@ -404,7 +500,7 @@ const styles = StyleSheet.create({
     color: "#0F172A",
   },
   uploadBox: {
-    height: 120,
+    height: 128,
     borderRadius: 14,
     borderWidth: 2,
     borderColor: "#CBD5E1",
@@ -413,7 +509,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F8FAFC",
   },
-  uploadText: { fontSize: 13, fontWeight: "700", color: "#2563EB" },
+  uploadIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  uploadText: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
   uploadSub: { fontSize: 11, color: "#94A3B8", marginTop: 2 },
   imagePreviewContainer: {
     position: "relative",

@@ -20,6 +20,7 @@ import {
   mobileDataService,
   MobileExpense,
   isPayorMember,
+  cleanBillTitle,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -37,6 +38,151 @@ interface HomeScreenProps {
   onOpenReports?: () => void;
   onOpenHostApplication?: () => void;
   currentUser?: { name: string; avatar: string };
+}
+
+/**
+ * Parses date strings (ISO, YYYY-MM-DD, MM/DD/YYYY, or readable string) or Timestamps to midnight Date
+ */
+function parseDateToMidnight(dateVal: any): Date | null {
+  if (!dateVal) return null;
+  if (typeof dateVal?.toDate === "function") {
+    const d = dateVal.toDate();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  if (typeof dateVal?.seconds === "number") {
+    const d = new Date(dateVal.seconds * 1000);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  if (typeof dateVal === "number") {
+    const d = new Date(dateVal);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  if (typeof dateVal === "string") {
+    const trimmed = dateVal.trim();
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      return new Date(
+        parseInt(isoMatch[1], 10),
+        parseInt(isoMatch[2], 10) - 1,
+        parseInt(isoMatch[3], 10),
+      );
+    }
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (slashMatch) {
+      return new Date(
+        parseInt(slashMatch[3], 10),
+        parseInt(slashMatch[1], 10) - 1,
+        parseInt(slashMatch[2], 10),
+      );
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      return new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * Calculates due status badge:
+ * - Red ("Pay now"): due today or overdue (diffDays <= 0)
+ * - Orange ("Due soon"): due in 1 to 3 days (1 <= diffDays <= 3)
+ * - Green ("Due later" / "Due in Xd"): far due (diffDays > 3)
+ */
+export function getBillDueStatus(
+  bill: any,
+  activeCycle?: any,
+  cycles?: any[],
+): {
+  status: "pay_now" | "due_soon" | "due_far";
+  label: string;
+  badgeBg: string;
+  badgeBorder: string;
+  textColor: string;
+  diffDays: number;
+} {
+  const raw = bill?.rawExpense || {};
+  let dueObj: Date | null = null;
+
+  // 1. Direct dueDate on the expense or bill object
+  const directDueDate = bill?.dueDate || raw?.dueDate || raw?.due_date;
+  if (directDueDate) {
+    dueObj = parseDateToMidnight(directDueDate);
+  }
+
+  // 2. Billing cycle associated with the expense
+  const cycleId = bill?.billingCycleId || raw?.billingCycleId;
+  if (!dueObj && cycleId && Array.isArray(cycles)) {
+    const linkedCycle = cycles.find((c) => c.billingCycleId === cycleId);
+    if (linkedCycle) {
+      dueObj = parseDateToMidnight(linkedCycle.dueDate || linkedCycle.endDate);
+    }
+  }
+
+  // 3. Fallback to activeCycle dueDate or endDate
+  if (!dueObj && activeCycle) {
+    dueObj = parseDateToMidnight(activeCycle.dueDate || activeCycle.endDate);
+  }
+
+  // 4. Fallback to expense date if it represents a future target
+  if (!dueObj && (bill?.date || raw?.date)) {
+    const expDate = parseDateToMidnight(bill?.date || raw?.date);
+    if (expDate) {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (expDate.getTime() > today.getTime()) {
+        dueObj = expDate;
+      }
+    }
+  }
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  let diffDays = 0;
+  if (dueObj) {
+    const diffMs = dueObj.getTime() - today.getTime();
+    diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  } else {
+    // If no due date could be found, treat as due now
+    diffDays = 0;
+  }
+
+  if (diffDays <= 0) {
+    // Red: Due now / overdue -> "Pay now"
+    return {
+      status: "pay_now",
+      label: "Pay now",
+      badgeBg: "#FEE2E2",
+      badgeBorder: "#FECACA",
+      textColor: "#DC2626",
+      diffDays,
+    };
+  } else if (diffDays <= 3) {
+    // Orange: Due soon (1-3 days away)
+    return {
+      status: "due_soon",
+      label: "Due soon",
+      badgeBg: "#FEF3C7",
+      badgeBorder: "#FDE68A",
+      textColor: "#D97706",
+      diffDays,
+    };
+  } else {
+    // Green: Far (4+ days away)
+    return {
+      status: "due_far",
+      label: diffDays <= 7 ? `Due in ${diffDays}d` : "Due later",
+      badgeBg: "#DCFCE7",
+      badgeBorder: "#BBF7D0",
+      textColor: "#16A34A",
+      diffDays,
+    };
+  }
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -62,14 +208,45 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [household, setHousehold] = useState<any | null>(
     () => cachedInitialHousehold,
   );
-  const [initialLoading, setInitialLoading] = useState<boolean>(
-    () => !cachedInitialProfile,
-  );
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
+  const dataLoadedRef = useRef({
+    profile: false,
+    expenses: false,
+    cycles: false,
+    members: false,
+  });
+
+  const checkAllLoaded = (hhId?: string) => {
+    const targetHh = hhId ?? (profile?.householdId || household?.householdId);
+    if (!targetHh) {
+      if (dataLoadedRef.current.profile) {
+        setInitialLoading(false);
+      }
+      return;
+    }
+    if (
+      dataLoadedRef.current.profile &&
+      dataLoadedRef.current.expenses &&
+      dataLoadedRef.current.cycles &&
+      dataLoadedRef.current.members
+    ) {
+      setInitialLoading(false);
+    }
+  };
+
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
+  const [expandedWaterBills, setExpandedWaterBills] = useState<
+    Record<string, boolean>
+  >({});
   const [showActivitiesModal, setShowActivitiesModal] =
     useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -108,18 +285,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   };
 
-  const fadeAnim = useRef(
-    new Animated.Value(cachedInitialProfile ? 1 : 0),
-  ).current;
-  const slideAnim = useRef(
-    new Animated.Value(cachedInitialProfile ? 0 : 14),
-  ).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(14)).current;
 
   // Fallback timer for loading screen
   useEffect(() => {
     const timer = setTimeout(() => {
       setInitialLoading(false);
-    }, 1200);
+    }, 2500);
     return () => clearTimeout(timer);
   }, []);
 
@@ -148,7 +321,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     mobileDataService.getUserProfile(firebaseUser.uid).then((nextProfile) => {
       if (mounted) {
         setProfile(nextProfile);
-        setInitialLoading(false);
+        dataLoadedRef.current.profile = true;
+        checkAllLoaded(nextProfile?.householdId);
       }
     });
     const unsubProfile = mobileDataService.listenToUserProfile(
@@ -156,10 +330,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       (nextProfile) => {
         if (mounted) {
           setProfile(nextProfile);
-          setInitialLoading(false);
+          dataLoadedRef.current.profile = true;
           if (!nextProfile?.householdId) {
             setHousehold(null);
           }
+          checkAllLoaded(nextProfile?.householdId);
         }
       },
     );
@@ -176,6 +351,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setCycles([]);
       setMembers([]);
       setPayments([]);
+      checkAllLoaded("");
       return;
     }
     const unsubHousehold = mobileDataService.listenToHousehold(
@@ -184,19 +360,35 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     );
     const unsubExpenses = mobileDataService.listenToExpenses(
       householdId,
-      setExpenses,
+      (data) => {
+        setExpenses(data);
+        dataLoadedRef.current.expenses = true;
+        checkAllLoaded(householdId);
+      },
     );
     const unsubCycles = mobileDataService.listenToBillingCycles(
       householdId,
-      setCycles,
+      (data) => {
+        setCycles(data);
+        dataLoadedRef.current.cycles = true;
+        checkAllLoaded(householdId);
+      },
     );
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       householdId,
-      setMembers,
+      (data) => {
+        setMembers(data);
+        dataLoadedRef.current.members = true;
+        checkAllLoaded(householdId);
+      },
     );
     const unsubPayments = mobileDataService.listenToPayments(
       householdId,
       setPayments,
+    );
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      householdId,
+      setWaterConfig,
     );
     return () => {
       unsubHousehold();
@@ -204,6 +396,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       unsubCycles();
       unsubMembers();
       unsubPayments();
+      unsubWater();
     };
   }, [householdId]);
 
@@ -218,6 +411,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setMemberBills,
     );
   }, [activeCycle?.billingCycleId, householdId]);
+
+  // Real-time Water Attendance for active cycle
+  useEffect(() => {
+    const cycleId = activeCycle?.billingCycleId;
+    if (!householdId || !cycleId) {
+      setCycleAttendance([]);
+      setAttendanceSubmissions({});
+      return;
+    }
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      householdId,
+      cycleId,
+      setCycleAttendance,
+    );
+    const unsubSub = mobileDataService.listenToAttendanceSubmissions(
+      householdId,
+      cycleId,
+      setAttendanceSubmissions,
+    );
+    return () => {
+      unsubAtt();
+      unsubSub();
+    };
+  }, [activeCycle?.billingCycleId, householdId]);
+
+  const getMemberAttendanceDays = (targetUid: string): number => {
+    const fromAtt = cycleAttendance.filter(
+      (a) => a.userId === targetUid && a.status === "PRESENT",
+    ).length;
+    const fromSub = attendanceSubmissions[targetUid]?.daysPresent || 0;
+    return fromAtt > 0 ? fromAtt : fromSub;
+  };
 
   const handleJoinByCode = async () => {
     const clean = joinCodeInput.trim();
@@ -323,17 +548,57 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       // Calculate roommate's specific share for this bill
       let myShareCents = 0;
       if (isCurrentUserPayor) {
+        const isWater = (exp.category || "").toLowerCase().includes("water");
         const mySplit = exp.splitDetails?.find(
           (s: any) => s.userId === firebaseUser?.uid,
         );
-        myShareCents =
-          mySplit?.shareCentavos ?? Math.round(exp.amountCents / payorCount);
+        if (isWater) {
+          const isPersonDayMode =
+            waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+            !waterConfig?.pricingModel;
+          if (isPersonDayMode) {
+            const rate = Number(
+              waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+            );
+            const myDays = getMemberAttendanceDays(firebaseUser?.uid || "");
+            const ownCost = myDays * rate;
+            const totalNonPayorWater = activeMembersList
+              .filter((mem) => !isPayorMember(mem))
+              .reduce((npSum, npMem) => {
+                const npUid = npMem.userId || npMem.memberId;
+                return npSum + getMemberAttendanceDays(npUid) * rate;
+              }, 0);
+            const extraPerPayor =
+              payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
+            myShareCents = ownCost + extraPerPayor;
+          } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+            myShareCents = waterConfig.fixedPerPersonAmountCentavos || 0;
+          } else {
+            myShareCents = Math.round(exp.amountCents / payorCount);
+          }
+        } else {
+          const splitPayors = exp.splitDetails
+            ? exp.splitDetails.filter((s: any) => !s.isExempt)
+            : [];
+          const isSplitStale =
+            splitPayors.length > 0 && splitPayors.length !== payorCount;
+          myShareCents =
+            !isSplitStale &&
+            mySplit &&
+            typeof mySplit.shareCentavos === "number"
+              ? mySplit.shareCentavos
+              : Math.round(exp.amountCents / payorCount);
+        }
       }
+
+      const displayTitle = cleanBillTitle(exp.title, exp.category, group1Title);
 
       return {
         id: exp.id,
         rawExpense: exp,
-        title: exp.title,
+        billingCycleId: exp.billingCycleId,
+        dueDate: (exp as any).dueDate || (exp as any).due_date,
+        title: displayTitle,
         category: exp.category || "General",
         categoryMeta,
         date: exp.date || "Recent",
@@ -346,7 +611,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         status: exp.status || (isPaid ? "PAID" : "UNPAID"),
       };
     });
-  }, [expenses, isCurrentUserPayor, payorCount, firebaseUser?.uid]);
+  }, [
+    expenses,
+    isCurrentUserPayor,
+    payorCount,
+    firebaseUser?.uid,
+    group1Title,
+    waterConfig,
+    cycleAttendance,
+    attendanceSubmissions,
+    activeMembersList,
+  ]);
 
   const allDisplayExpenses = realExpensesMapped;
 
@@ -358,7 +633,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       (exp) =>
         exp.title.toLowerCase().includes(q) ||
         exp.category.toLowerCase().includes(q) ||
-        exp.payerName.toLowerCase().includes(q),
+        exp.payerName.toLowerCase().includes(q) ||
+        (exp.rawExpense?.title &&
+          exp.rawExpense.title.toLowerCase().includes(q)),
     );
   }, [allDisplayExpenses, searchQuery]);
 
@@ -378,7 +655,42 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const liveShareCents = isCurrentUserPayor
     ? unpaidExpenses.reduce((sum, e) => {
+        const isWater = (e.category || "").toLowerCase().includes("water");
+        if (isWater) {
+          const isPersonDayMode =
+            waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+            !waterConfig?.pricingModel;
+          if (isPersonDayMode) {
+            const rate = Number(
+              waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+            );
+            const myDays = getMemberAttendanceDays(firebaseUser?.uid || "");
+            const ownCost = myDays * rate;
+            const totalNonPayorWater = activeMembersList
+              .filter((mem) => !isPayorMember(mem))
+              .reduce((npSum, npMem) => {
+                const npUid = npMem.userId || npMem.memberId;
+                return npSum + getMemberAttendanceDays(npUid) * rate;
+              }, 0);
+            const extraPerPayor =
+              payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
+            return sum + ownCost + extraPerPayor;
+          } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+            return sum + (waterConfig.fixedPerPersonAmountCentavos || 0);
+          } else {
+            return sum + Math.round(e.amountCents / payorCount);
+          }
+        }
+
+        const splitPayors = e.splitDetails
+          ? e.splitDetails.filter(
+              (s: any) => !s.isExempt && s.shareCentavos > 0,
+            )
+          : [];
+        const isSplitStale =
+          splitPayors.length > 0 && splitPayors.length !== payorCount;
         if (
+          !isSplitStale &&
           e.splitDetails &&
           Array.isArray(e.splitDetails) &&
           e.splitDetails.length > 0
@@ -393,15 +705,108 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       }, 0)
     : 0;
 
+  const paidCentavos =
+    myBill && typeof myBill.totalPaidCentavos === "number"
+      ? myBill.totalPaidCentavos
+      : 0;
+  const outstandingCents = isCurrentUserPayor
+    ? Math.max(0, liveShareCents - paidCentavos)
+    : 0;
   const outstandingAmount = !isCurrentUserPayor
     ? "₱0.00"
-    : myBill &&
-        typeof myBill.outstandingCentavos === "number" &&
-        myBill.outstandingCentavos > 0
-      ? formatPesos(myBill.outstandingCentavos)
-      : liveShareCents > 0
-        ? formatPesos(liveShareCents)
-        : "₱0.00";
+    : formatPesos(outstandingCents);
+
+  // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
+  useEffect(() => {
+    if (!householdId || payorCount === 0 || expenses.length === 0) return;
+    const hasStaleSplit = expenses.some((e) => {
+      if (e.status === "PAID" || e.isPaid) return false;
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      if (isWater) {
+        if (
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel
+        ) {
+          if (!e.splitDetails || !Array.isArray(e.splitDetails)) return true;
+          return e.splitDetails.some(
+            (s: any) => !s.isExempt && s.ownWaterCentavos === undefined,
+          );
+        }
+        return false;
+      }
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
+        : [];
+      return splitPayors.length > 0 && splitPayors.length !== payorCount;
+    });
+
+    const isMemberBillStale =
+      myBill &&
+      typeof myBill.outstandingCentavos === "number" &&
+      (myBill.totalPaidCentavos || 0) === 0 &&
+      Math.abs(myBill.outstandingCentavos - liveShareCents) > 100;
+
+    if (hasStaleSplit || isMemberBillStale) {
+      mobileDataService
+        .recalculateUnpaidExpensesForHousehold(householdId)
+        .catch(() => {});
+    }
+  }, [
+    householdId,
+    payorCount,
+    expenses,
+    myBill,
+    liveShareCents,
+    waterConfig?.pricingModel,
+  ]);
+
+  const toggleWaterBillDropdown = (billId: string) => {
+    setExpandedWaterBills((prev) => ({
+      ...prev,
+      [billId]: !prev[billId],
+    }));
+  };
+
+  const getWaterBreakdownForBill = (bill: any) => {
+    const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+    const payors = activeMembersList.filter((m) => isPayorMember(m));
+    const effPayorCount = Math.max(1, payors.length);
+
+    let totalNonPayorWater = 0;
+    const memberDaysMap: Record<string, number> = {};
+
+    activeMembersList.forEach((m) => {
+      const uid = m.userId || m.memberId;
+      const days = getMemberAttendanceDays(uid);
+      memberDaysMap[uid] = days;
+      if (!isPayorMember(m)) {
+        totalNonPayorWater += days * rate;
+      }
+    });
+
+    const extraPerPayor = Math.round(totalNonPayorWater / effPayorCount);
+
+    return activeMembersList.map((m) => {
+      const uid = m.userId || m.memberId;
+      const isPayor = isPayorMember(m);
+      const isCurrent = uid === firebaseUser?.uid;
+      const days = memberDaysMap[uid] || 0;
+      const ownCost = days * rate;
+      const totalShare = isPayor ? ownCost + extraPerPayor : 0;
+
+      return {
+        userId: uid,
+        displayName:
+          m.displayName || m.name || (m.role === "HOST" ? "Host" : "Roommate"),
+        role: m.role || (isPayor ? "PAYOR" : "NON_PAYOR"),
+        daysPresent: days,
+        ownWaterCentavos: isPayor ? ownCost : 0,
+        nonPayorAbsorptionCentavos: isPayor ? extraPerPayor : 0,
+        totalShareCentavos: totalShare,
+        isCurrentUser: isCurrent,
+      };
+    });
+  };
 
   // Dynamic real activities feed combining payments and added bills
   const recentActivities = useMemo(() => {
@@ -468,11 +873,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         myShareStr = `Your share: ${formatPesos(myShareCents)}`;
       }
 
+      const cleanTitle = cleanBillTitle(exp.title, exp.category, group1Title);
+
       if (isPaid) {
         list.push({
           id: `exp_settled_${exp.id}`,
           type: "bill_settled",
-          title: `${payer} Paid ${exp.title}`,
+          title: `${payer} Paid ${cleanTitle}`,
           desc: `${amtStr} settled in full for the household.`,
           timestamp: exp.createdAt || exp.date || "",
           dateFormatted: exp.date || "Recent",
@@ -488,8 +895,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           id: `exp_new_${exp.id}`,
           type: "bill_added",
           title: isMePayer
-            ? `You Added Bill: ${exp.title}`
-            : `${payer} Added Bill: ${exp.title}`,
+            ? `You Added Bill: ${cleanTitle}`
+            : `${payer} Added Bill: ${cleanTitle}`,
           desc: `Total: ${amtStr}${myShareStr ? ` · ${myShareStr}` : ""}.`,
           timestamp: exp.createdAt || exp.date || "",
           dateFormatted: exp.date || "Recent",
@@ -576,9 +983,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         backgroundColor="transparent"
       />
 
-      {/* Semi-transparent loading Splitzy overlay when loading */}
-      {initialLoading && !profile && (
-        <UniversalLoader text="Loading Splitzy..." transparent={true} />
+      {/* Solid loading Splitzy screen to prevent empty state flash */}
+      {initialLoading && (
+        <UniversalLoader
+          text="Loading Splitzy..."
+          subtitle="Preparing household & bills..."
+          transparent={true}
+        />
       )}
 
       <Animated.View
@@ -1015,7 +1426,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   Join a Room
                 </Text>
                 <View style={styles.groupCardLightIconWrap}>
-                  <Feather name="user-plus" size={16} color="#2563EB" />
+                  <Feather name="user-plus" size={16} color="#0F172A" />
                 </View>
               </View>
               <Text style={styles.groupCardLightSubtitle}>
@@ -1023,7 +1434,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </Text>
 
               <View style={styles.joinCodePillPreview}>
-                <Feather name="hash" size={13} color="#2563EB" />
+                <Feather name="hash" size={13} color="#0F172A" />
                 <Text style={styles.joinCodePillText}>Invite Code</Text>
               </View>
 
@@ -1048,16 +1459,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               activeOpacity={0.85}
               onPress={handleCreateGroupPress}
             >
-              <View
-                style={[
-                  styles.groupCardAddIconWrap,
-                  !isHost && { backgroundColor: "#EEF2FF" },
-                ]}
-              >
+              <View style={styles.groupCardAddIconWrap}>
                 <Feather
                   name={isHost ? "plus" : "shield"}
                   size={22}
-                  color="#2563EB"
+                  color="#0F172A"
                 />
               </View>
               <Text style={styles.groupCardAddTitle}>Create Group</Text>
@@ -1139,58 +1545,312 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </View>
             ) : (
               upcomingBills.map((bill) => {
+                const dueInfo = getBillDueStatus(bill, activeCycle, cycles);
+                const isWaterBill = (bill.category || "")
+                  .toLowerCase()
+                  .includes("water");
+                const isExpanded = Boolean(expandedWaterBills[bill.id]);
+                const waterBreakdownItems = isWaterBill
+                  ? getWaterBreakdownForBill(bill)
+                  : [];
+                const waterHouseholdTotal = isWaterBill
+                  ? waterBreakdownItems.reduce(
+                      (acc: number, it: any) =>
+                        acc + (it.totalShareCentavos || 0),
+                      0,
+                    )
+                  : bill.amountCents;
+                const effectiveHouseholdTotal =
+                  waterHouseholdTotal > 0
+                    ? waterHouseholdTotal
+                    : bill.amountCents;
+
                 return (
-                  <TouchableOpacity
+                  <View
                     key={`bill_${bill.id}`}
-                    style={styles.upcomingBillCard}
-                    activeOpacity={0.85}
-                    onPress={() => onNavigate("bills")}
+                    style={
+                      isWaterBill ? styles.waterUpcomingCardWrapper : undefined
+                    }
                   >
-                    {/* Left Icon Container - aligned flex-start with title */}
-                    <View
+                    <TouchableOpacity
                       style={[
-                        styles.upcomingBillIconContainer,
-                        { backgroundColor: bill.categoryMeta.bgColor },
+                        styles.upcomingBillCard,
+                        isWaterBill && {
+                          borderWidth: 0,
+                          borderRadius: 0,
+                          backgroundColor: "#FFFFFF",
+                        },
                       ]}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        if (dueInfo.status === "pay_now" && onOpenSettleDues) {
+                          onOpenSettleDues();
+                        } else {
+                          onNavigate("bills");
+                        }
+                      }}
                     >
-                      <Feather
-                        name={bill.categoryMeta.featherIcon as any}
-                        size={20}
-                        color={bill.categoryMeta.color}
-                      />
-                    </View>
-
-                    {/* Middle Title & Details - aligned flex-start */}
-                    <View style={styles.upcomingBillDetailsWrap}>
-                      <Text style={styles.upcomingBillTitle} numberOfLines={2}>
-                        {bill.title}
-                      </Text>
-                      <Text
-                        style={styles.upcomingBillSubtitle}
-                        numberOfLines={1}
+                      {/* Left Icon Container - aligned flex-start with title */}
+                      <View
+                        style={[
+                          styles.upcomingBillIconContainer,
+                          { backgroundColor: bill.categoryMeta.bgColor },
+                        ]}
                       >
-                        {bill.date} · Billed by {bill.payerName}
-                      </Text>
-                      {isCurrentUserPayor && bill.myShareCents > 0 && (
-                        <Text style={styles.upcomingBillShareText}>
-                          Your share: {bill.myShareFormatted}
-                        </Text>
-                      )}
-                    </View>
+                        <Feather
+                          name={bill.categoryMeta.featherIcon as any}
+                          size={20}
+                          color={bill.categoryMeta.color}
+                        />
+                      </View>
 
-                    {/* Right Column - DUE badge at upper-right, Amount + Status at bottom-right */}
-                    <View style={styles.upcomingBillRightCol}>
-                      <View style={styles.badgeUnpaid}>
-                        <Text style={styles.badgeUnpaidText}>DUE</Text>
-                      </View>
-                      <View style={styles.upcomingBillAmountWrap}>
-                        <Text style={styles.billTotalAmountText}>
-                          {formatPesos(bill.amountCents)}
+                      {/* Middle Title & Details - aligned flex-start */}
+                      <View style={styles.upcomingBillDetailsWrap}>
+                        <Text
+                          style={styles.upcomingBillTitle}
+                          numberOfLines={2}
+                        >
+                          {cleanBillTitle(
+                            bill.title,
+                            bill.category,
+                            group1Title,
+                          )}
                         </Text>
-                        <Text style={styles.billDueLabel}>Unpaid</Text>
+                        <Text
+                          style={styles.upcomingBillSubtitle}
+                          numberOfLines={1}
+                        >
+                          {isWaterBill
+                            ? `${bill.date} · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)}/day attendance`
+                            : `${bill.date} · Added by ${bill.payerName}`}
+                        </Text>
+                        {isCurrentUserPayor && bill.myShareCents > 0 ? (
+                          <Text style={styles.upcomingBillShareText}>
+                            Your share: {bill.myShareFormatted}
+                          </Text>
+                        ) : !isCurrentUserPayor ? (
+                          <Text
+                            style={[
+                              styles.upcomingBillShareText,
+                              { color: "#64748B" },
+                            ]}
+                          >
+                            Exempt (Non-payor)
+                          </Text>
+                        ) : null}
                       </View>
-                    </View>
-                  </TouchableOpacity>
+
+                      {/* Right Column - Dynamic Due status badge at upper-right, Amount at bottom-right */}
+                      <View style={styles.upcomingBillRightCol}>
+                        <TouchableOpacity
+                          style={[
+                            styles.dueBadge,
+                            {
+                              backgroundColor: dueInfo.badgeBg,
+                              borderColor: dueInfo.badgeBorder,
+                            },
+                          ]}
+                          activeOpacity={0.8}
+                          onPress={() => {
+                            if (
+                              dueInfo.status === "pay_now" &&
+                              onOpenSettleDues
+                            ) {
+                              onOpenSettleDues();
+                            } else {
+                              onNavigate("bills");
+                            }
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dueBadgeText,
+                              { color: dueInfo.textColor },
+                            ]}
+                          >
+                            {dueInfo.label}
+                          </Text>
+                        </TouchableOpacity>
+                        <View style={styles.upcomingBillAmountWrap}>
+                          <Text style={styles.billTotalAmountText}>
+                            {isWaterBill
+                              ? formatPesos(effectiveHouseholdTotal)
+                              : formatPesos(bill.amountCents)}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Water Bill Dropdown Button & Detailed Breakdown */}
+                    {isWaterBill && (
+                      <>
+                        <TouchableOpacity
+                          style={styles.waterDropdownButton}
+                          activeOpacity={0.7}
+                          onPress={() => toggleWaterBillDropdown(bill.id)}
+                        >
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
+                          >
+                            <Feather name="droplet" size={13} color="#0284C7" />
+                            <Text style={styles.waterDropdownButtonText}>
+                              {isExpanded
+                                ? "Hide Water Breakdown"
+                                : "View Water Breakdown"}
+                            </Text>
+                          </View>
+                          <Feather
+                            name={isExpanded ? "chevron-up" : "chevron-down"}
+                            size={16}
+                            color="#0284C7"
+                          />
+                        </TouchableOpacity>
+
+                        {isExpanded && (
+                          <View style={styles.waterBreakdownCard}>
+                            <View style={styles.waterBreakdownTopRow}>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 6,
+                                }}
+                              >
+                                <Feather
+                                  name="users"
+                                  size={14}
+                                  color="#0369A1"
+                                />
+                                <Text style={styles.waterBreakdownTitle}>
+                                  Water Split Breakdown
+                                </Text>
+                              </View>
+                              <View style={styles.waterRateTag}>
+                                <Text style={styles.waterRateTagText}>
+                                  ₱
+                                  {(
+                                    (waterConfig?.rateCentavosPerPersonPerDay ??
+                                      500) / 100
+                                  ).toFixed(2)}
+                                  /day
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={styles.waterBreakdownNote}>
+                              Payors pay their own water + water from
+                              non-payors. Non-payors are exempt.
+                            </Text>
+
+                            <View style={styles.waterBreakdownList}>
+                              {waterBreakdownItems.map((item: any) => (
+                                <View
+                                  key={item.userId}
+                                  style={[
+                                    styles.waterBreakdownRow,
+                                    item.isCurrentUser &&
+                                      styles.waterBreakdownRowCurrent,
+                                  ]}
+                                >
+                                  <View style={{ flex: 1, marginRight: 8 }}>
+                                    <View
+                                      style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.waterMemberName,
+                                          item.isCurrentUser &&
+                                            styles.waterMemberNameCurrent,
+                                        ]}
+                                      >
+                                        {item.displayName}
+                                      </Text>
+                                      {item.isCurrentUser && (
+                                        <View style={styles.waterYouBadge}>
+                                          <Text
+                                            style={styles.waterYouBadgeText}
+                                          >
+                                            YOU
+                                          </Text>
+                                        </View>
+                                      )}
+                                      <View
+                                        style={
+                                          item.role === "NON_PAYOR"
+                                            ? styles.waterNonPayorPill
+                                            : item.role === "HOST"
+                                              ? styles.waterHostPill
+                                              : styles.waterPayorPill
+                                        }
+                                      >
+                                        <Text
+                                          style={
+                                            item.role === "NON_PAYOR"
+                                              ? styles.waterNonPayorPillText
+                                              : item.role === "HOST"
+                                                ? styles.waterHostPillText
+                                                : styles.waterPayorPillText
+                                          }
+                                        >
+                                          {item.role === "NON_PAYOR"
+                                            ? "NON-PAYOR"
+                                            : item.role === "HOST"
+                                              ? "HOST"
+                                              : "PAYOR"}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    <Text style={styles.waterMemberMeta}>
+                                      {item.daysPresent} days present ·{" "}
+                                      {item.role === "NON_PAYOR"
+                                        ? "Exempted"
+                                        : `Own: ₱${(item.ownWaterCentavos / 100).toFixed(2)}`}
+                                      {item.nonPayorAbsorptionCentavos > 0 &&
+                                        ` + ₱${(item.nonPayorAbsorptionCentavos / 100).toFixed(2)} non-payor split`}
+                                    </Text>
+                                  </View>
+                                  <View style={{ alignItems: "flex-end" }}>
+                                    <Text
+                                      style={[
+                                        styles.waterMemberAmount,
+                                        item.isCurrentUser &&
+                                          styles.waterMemberAmountCurrent,
+                                      ]}
+                                    >
+                                      {item.role === "NON_PAYOR"
+                                        ? "₱0.00"
+                                        : formatPesos(item.totalShareCentavos)}
+                                    </Text>
+                                    <Text style={styles.waterMemberSub}>
+                                      {item.role === "NON_PAYOR"
+                                        ? "Exempt"
+                                        : "Water Share"}
+                                    </Text>
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+
+                            <View style={styles.waterBreakdownFooter}>
+                              <Text style={styles.waterBreakdownFooterText}>
+                                Water Total:
+                              </Text>
+                              <Text style={styles.waterBreakdownFooterAmount}>
+                                {formatPesos(effectiveHouseholdTotal)}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </>
+                    )}
+                  </View>
                 );
               })
             )}
@@ -1276,7 +1936,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <View style={styles.modalIconWrap}>
-                <Ionicons name="key" size={22} color="#2563EB" />
+                <Ionicons name="key" size={20} color="#0F172A" />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.modalTitle}>Join Household Group</Text>
@@ -1343,7 +2003,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <View style={[styles.modalCard, { maxHeight: "80%" }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalIconWrap}>
-                <Feather name="activity" size={20} color="#2563EB" />
+                <Feather name="activity" size={20} color="#0F172A" />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.modalTitle}>Recent Updates</Text>
@@ -1383,10 +2043,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     <View
                       style={[
                         styles.activityIconCircle,
-                        { backgroundColor: `${act.color}15` },
+                        { backgroundColor: "rgba(15, 23, 42, 0.05)" },
                       ]}
                     >
-                      <Feather name={act.icon} size={16} color={act.color} />
+                      <Feather name={act.icon} size={16} color="#0F172A" />
                     </View>
                     <View style={{ flex: 1, marginLeft: 10, marginRight: 8 }}>
                       <Text style={styles.activityTitle}>{act.title}</Text>
@@ -1672,16 +2332,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
     position: "relative",
   },
   notificationDot: {
@@ -1988,7 +2641,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2051,7 +2704,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 8,
@@ -2083,7 +2736,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 10,
@@ -2113,7 +2766,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -2153,6 +2806,180 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     marginTop: 6,
   },
+  billHouseholdTotalText: {
+    fontSize: 10,
+    color: "#64748B",
+    marginTop: 1,
+    fontWeight: "500",
+  },
+  waterUpcomingCardWrapper: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    overflow: "hidden",
+    shadowColor: "#0284C7",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  waterDropdownButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F0F9FF",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderTopWidth: 1,
+    borderTopColor: "#E0F2FE",
+  },
+  waterDropdownButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0284C7",
+  },
+  waterBreakdownCard: {
+    backgroundColor: "#F8FAFC",
+    padding: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  waterBreakdownTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  waterBreakdownTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0369A1",
+  },
+  waterRateTag: {
+    backgroundColor: "#E0F2FE",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  waterRateTagText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#0284C7",
+  },
+  waterBreakdownNote: {
+    fontSize: 11,
+    color: "#64748B",
+    marginBottom: 10,
+    lineHeight: 15,
+  },
+  waterBreakdownList: {
+    gap: 8,
+  },
+  waterBreakdownRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  waterBreakdownRowCurrent: {
+    backgroundColor: "#F0F9FF",
+    borderColor: "#BAE6FD",
+  },
+  waterMemberName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  waterMemberNameCurrent: {
+    color: "#0369A1",
+    fontWeight: "800",
+  },
+  waterYouBadge: {
+    backgroundColor: "#0284C7",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  waterYouBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  waterPayorPill: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  waterPayorPillText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  waterHostPill: {
+    backgroundColor: "#DBEAFE",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  waterHostPillText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#1E40AF",
+  },
+  waterNonPayorPill: {
+    backgroundColor: "#F3E8FF",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  waterNonPayorPillText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#7E22CE",
+  },
+  waterMemberMeta: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  waterMemberAmount: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  waterMemberAmountCurrent: {
+    color: "#0284C7",
+  },
+  waterMemberSub: {
+    fontSize: 10,
+    color: "#94A3B8",
+    fontWeight: "600",
+    marginTop: 1,
+  },
+  waterBreakdownFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  waterBreakdownFooterText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  waterBreakdownFooterAmount: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
   expenseItemCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -2168,10 +2995,10 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   expenseIconContainer: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
-    backgroundColor: "#F1F5F9",
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
@@ -2226,7 +3053,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -2308,6 +3135,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     color: "#2563EB",
+  },
+  dueBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dueBadgeText: {
+    fontSize: 6,
+    fontWeight: "800",
+    letterSpacing: 0.1,
   },
   badgeUnpaid: {
     backgroundColor: "#FEF3C7",

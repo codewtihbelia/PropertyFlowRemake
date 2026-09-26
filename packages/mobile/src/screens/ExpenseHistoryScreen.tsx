@@ -7,13 +7,16 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { UniversalLoader } from "../components/UniversalLoader";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import {
   mobileDataService,
   MobileExpense,
+  cleanBillTitle,
 } from "../services/firebaseDataService";
 import { getCategoryMeta } from "../services/categoryService";
 
@@ -55,11 +58,20 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [liveExpenses, setLiveExpenses] = useState<ExpenseItem[]>([]);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [householdId, setHouseholdId] = useState<string | null>(null);
 
   const currentUser = auth.currentUser;
+
+  // Fallback safety timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const loadData = async (isManualRefresh = false) => {
     if (!currentUser?.uid) {
@@ -75,11 +87,16 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       if (hid) {
         setHouseholdId(hid);
       }
+      setProfileLoaded(true);
+      if (!hid) {
+        setLoading(false);
+      }
     } catch (err) {
       console.warn("[ExpenseHistoryScreen] load profile error:", err);
+      setProfileLoaded(true);
+      setLoading(false);
     } finally {
       if (isManualRefresh) setRefreshing(false);
-      else setLoading(false);
     }
   };
 
@@ -88,6 +105,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   }, [currentUser?.uid]);
 
   useEffect(() => {
+    if (!profileLoaded) return;
     if (!householdId) {
       setLoading(false);
       return;
@@ -109,7 +127,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
 
           return {
             id: exp.id,
-            title: exp.title,
+            title: cleanBillTitle(exp.title, exp.category),
             category: meta.id.toLowerCase(),
             categoryLabel: exp.category || meta.name,
             icon: meta.featherIcon,
@@ -142,7 +160,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     return () => {
       unsub();
     };
-  }, [householdId]);
+  }, [householdId, profileLoaded]);
 
   const handleRefresh = () => {
     loadData(true);
@@ -213,6 +231,13 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
 
   return (
     <SafeAreaView style={styles.container}>
+      {loading && (
+        <UniversalLoader
+          text="Loading bill history..."
+          subtitle="Fetching past expenses & receipts..."
+          transparent={true}
+        />
+      )}
       {/* Top Header matching screen.png */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -327,7 +352,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         >
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name="receipt-outline" size={32} color="#2563EB" />
+              <Ionicons name="receipt-outline" size={32} color="#0F172A" />
             </View>
             <Text style={styles.emptyTitle}>No Bills Yet</Text>
             <Text style={styles.emptySubtitle}>
@@ -516,11 +541,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   backBtn: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 6,
+    marginRight: 8,
   },
   headerTitle: {
     fontSize: 22,
@@ -531,11 +558,13 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: 10,
   },
   headerIconBtn: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -620,8 +649,8 @@ const styles = StyleSheet.create({
   iconCircle: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: "#F0F7FF",
+    borderRadius: 14,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
@@ -679,7 +708,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,

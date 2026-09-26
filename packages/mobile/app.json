@@ -15,10 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.splitzy.app",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+      "bundleIdentifier": "com.splitzy.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,6 +26,11 @@
       "navigationBar": {
         "visible": "sticky-immersive"
       }
+    },
+    "androidStatusBar": {
+      "translucent": true,
+      "backgroundColor": "#00000000",
+      "barStyle": "dark-content"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -49,18 +51,7 @@
           "enforceContrast": false
         }
       ],
-      "expo-status-bar",
-      "expo-font"
-    ],
-    "extra": {
-      "expo-navigation-bar": {
-        "enforceContrast": false,
-        "style": "light",
-        "hidden": true
-      },
-      "eas": {
-        "projectId": "bc0bb695-d19f-44ed-af2e-4ec21899a49a"
-      }
-    }
+      "expo-status-bar"
+    ]
   }
 }

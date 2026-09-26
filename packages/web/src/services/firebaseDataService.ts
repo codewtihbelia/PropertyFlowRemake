@@ -878,10 +878,87 @@ export const firebaseDataService = {
           uErr,
         );
       }
+
+      await this.recalculateUnpaidExpensesForHousehold(householdId).catch(
+        () => {},
+      );
       return true;
     } catch (err) {
       console.error("[approveJoinRequest] Error:", err);
       return false;
+    }
+  },
+
+  async recalculateUnpaidExpensesForHousehold(
+    householdId: string,
+  ): Promise<number> {
+    try {
+      if (!householdId) return 0;
+      const membersSnap = await getDocs(
+        collection(db, `households/${householdId}/members`),
+      );
+      const activeMembers = membersSnap.docs
+        .map((d) => d.data())
+        .filter((m: any) => m.status === "ACTIVE" || !m.status);
+
+      if (activeMembers.length === 0) return 0;
+      const activePayors = activeMembers.filter(
+        (m: any) => (m.role || "").toUpperCase() !== "NON_PAYOR",
+      );
+      const effectivePayors =
+        activePayors.length > 0 ? activePayors : activeMembers;
+
+      const expSnap = await getDocs(
+        collection(db, `households/${householdId}/expenses`),
+      );
+      let updatedCount = 0;
+
+      for (const d of expSnap.docs) {
+        const expData = d.data();
+        if (expData.isPaid === true || expData.status === "PAID") continue;
+        const payorCount = Math.max(1, effectivePayors.length);
+        const shareCentavos = Math.round(expData.amountCents / payorCount);
+
+        const newSplitDetails = activeMembers.map((m: any) => {
+          const isPayor = (m.role || "").toUpperCase() !== "NON_PAYOR";
+          if (isPayor) {
+            return {
+              userId: m.userId || m.memberId,
+              displayName: m.displayName || "Roommate",
+              shareCentavos,
+              percentage: Math.round((100 / payorCount) * 10) / 10,
+              isPaid: false,
+              isExempt: false,
+              role: m.role || "PAYOR",
+              note: `Fair share among ${payorCount} payors (Non-payors exempt)`,
+            };
+          } else {
+            return {
+              userId: m.userId || m.memberId,
+              displayName: m.displayName || "Roommate",
+              shareCentavos: 0,
+              percentage: 0,
+              isPaid: true,
+              isExempt: true,
+              role: "NON_PAYOR",
+              note: "Exempted (Non-payor)",
+            };
+          }
+        });
+
+        await updateDoc(d.ref, {
+          splitDetails: newSplitDetails,
+          participantUserIds: newSplitDetails
+            .filter((s) => !s.isExempt)
+            .map((s) => s.userId),
+          updatedDate: new Date().toISOString(),
+        });
+        updatedCount++;
+      }
+      return updatedCount;
+    } catch (err) {
+      console.error("[web recalculateUnpaidExpensesForHousehold] Error:", err);
+      return 0;
     }
   },
 

@@ -34,10 +34,6 @@ export const HostDashboard: React.FC<{ onNavigate: (tab: string) => void }> = ({
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
-  if (loading && household.householdId) {
-    return <UniversalLoader text="Loading host dashboard..." />;
-  }
-
   const hasGroup = Boolean(
     household.householdId &&
     household.householdName &&
@@ -95,7 +91,7 @@ export const HostDashboard: React.FC<{ onNavigate: (tab: string) => void }> = ({
   const recentLogs = state.auditLogs.slice(0, 5);
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
       {/* Top Banner */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>

@@ -191,10 +191,11 @@ export interface WaterAttendanceRecord {
 }
 
 export interface WaterConfig {
+  pricingModel?: "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH";
   rateCentavosPerPersonPerDay: number; // default 500 (₱5.00)
-  mode: "BILLING_CYCLE" | "MONTHLY_CUSTOM";
-  pricingModel?: "PER_PERSON_DAY" | "FIXED_MONTHLY";
   fixedMonthlyAmountCentavos?: number;
+  fixedPerPersonAmountCentavos?: number;
+  mode?: "BILLING_CYCLE" | "MONTHLY_CUSTOM";
   customStartDate?: string;
   customEndDate?: string;
 }

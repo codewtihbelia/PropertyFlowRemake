@@ -11,23 +11,35 @@ import {
   Modal,
   ActivityIndicator,
   Image,
+  Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import {
   mobileDataService,
   MobileExpense,
+  cleanBillTitle,
+  isPayorMember,
 } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
+import { WaterSettingsModal } from "../components/WaterSettingsModal";
+import { UniversalLoader } from "../components/UniversalLoader";
 
-interface ManageGroupScreenProps {
+export interface ManageGroupScreenProps {
   onBack: () => void;
   onOpenAddExpense?: () => void;
   onOpenHostApplication?: () => void;
-  currentUser?: { name: string; avatar: string; uid?: string };
+  currentUser?: {
+    name: string;
+    avatar: string;
+    uid?: string;
+    role?: string;
+    email?: string;
+  };
   initialView?: "details" | "edit" | "create" | "join";
+  onLoaded?: () => void;
 }
 
 interface Participant {
@@ -42,6 +54,10 @@ interface Participant {
   owesCents: number;
   email?: string;
   phone?: string;
+  waterShareCents?: number;
+  waterOwnCents?: number;
+  waterNonPayorCents?: number;
+  waterDaysPresent?: number;
 }
 
 export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
@@ -50,12 +66,20 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   onOpenHostApplication,
   currentUser = { name: "Resident", avatar: "R" },
   initialView = "details",
+  onLoaded,
 }) => {
   const [viewMode, setViewMode] = useState<
     "details" | "edit" | "create" | "success" | "join"
   >(initialView);
   const [showMenu, setShowMenu] = useState(false);
   const [showHostRequiredModal, setShowHostRequiredModal] = useState(false);
+
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
+  );
 
   // Household & Profile state with cache initialization
   const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
@@ -73,11 +97,48 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     {},
   );
   const [loading, setLoading] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const dataLoadedRef = useRef({
+    profile: false,
+    expenses: false,
+    cycles: false,
+    members: false,
+  });
+
+  const checkGroupDataLoaded = (targetHhId?: string) => {
+    const hh = targetHhId ?? (profile?.householdId || household?.householdId);
+    if (!hh) {
+      if (dataLoadedRef.current.profile) {
+        setDataLoaded(true);
+        onLoaded?.();
+      }
+      return;
+    }
+    if (
+      dataLoadedRef.current.profile &&
+      dataLoadedRef.current.expenses &&
+      dataLoadedRef.current.cycles &&
+      dataLoadedRef.current.members
+    ) {
+      setDataLoaded(true);
+      onLoaded?.();
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDataLoaded(true);
+      onLoaded?.();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Modals
   const [showCreateCycleModal, setShowCreateCycleModal] = useState(false);
   const [showEditCycleModal, setShowEditCycleModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showWaterSettingsModal, setShowWaterSettingsModal] = useState(false);
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
 
   // Edit Cycle Form State
   const [editCycleName, setEditCycleName] = useState("");
@@ -199,11 +260,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     mobileDataService.getUserProfile(firebaseUser.uid).then((p) => {
       if (mounted && p) {
         setProfile(p);
+        dataLoadedRef.current.profile = true;
         const defaultApt = p.householdName || p.apartmentName || "";
         if (defaultApt) {
           setGroupNameInput((prev: string) => prev || defaultApt);
           setEditGroupName((prev: string) => prev || defaultApt);
         }
+        checkGroupDataLoaded(p.householdId);
       }
     });
     const unsubProfile = mobileDataService.listenToUserProfile(
@@ -211,9 +274,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       (p) => {
         if (mounted && p) {
           setProfile(p);
+          dataLoadedRef.current.profile = true;
           if (!p.householdId) {
             setHousehold(null);
           }
+          checkGroupDataLoaded(p.householdId);
         }
       },
     );
@@ -255,22 +320,36 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     });
     const unsubExp = mobileDataService.listenToExpenses(
       householdId,
-      setExpenses,
+      (expData) => {
+        setExpenses(expData);
+        dataLoadedRef.current.expenses = true;
+        checkGroupDataLoaded(householdId);
+      },
     );
     const unsubCyc = mobileDataService.listenToBillingCycles(
       householdId,
       (loadedCycles) => {
         setCycles(loadedCycles);
+        dataLoadedRef.current.cycles = true;
         if (loadedCycles.length > 0 && !selectedCycleId) {
           const active =
             loadedCycles.find((c) => c.status === "ACTIVE") || loadedCycles[0];
           setSelectedCycleId(active.billingCycleId);
         }
+        checkGroupDataLoaded(householdId);
       },
     );
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
-      setCloudMembers,
+      (memData) => {
+        setCloudMembers(memData);
+        dataLoadedRef.current.members = true;
+        checkGroupDataLoaded(householdId);
+      },
+    );
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      householdId,
+      setWaterConfig,
     );
 
     return () => {
@@ -278,6 +357,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       unsubExp();
       unsubCyc();
       unsubMem();
+      unsubWater();
     };
   }, [householdId]);
 
@@ -299,6 +379,43 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       setBills,
     );
   }, [householdId, activeCycle?.billingCycleId]);
+
+  // Real-time Water Attendance for the active cycle
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
+
+  useEffect(() => {
+    const cycleIdToListen = selectedCycleId || activeCycle?.billingCycleId;
+    if (!householdId || !cycleIdToListen) {
+      setCycleAttendance([]);
+      setAttendanceSubmissions({});
+      return;
+    }
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      householdId,
+      cycleIdToListen,
+      setCycleAttendance,
+    );
+    const unsubSub = mobileDataService.listenToAttendanceSubmissions(
+      householdId,
+      cycleIdToListen,
+      setAttendanceSubmissions,
+    );
+    return () => {
+      unsubAtt();
+      unsubSub();
+    };
+  }, [householdId, selectedCycleId, activeCycle?.billingCycleId]);
+
+  const getMemberAttendanceDays = (targetUid: string): number => {
+    const fromAtt = cycleAttendance.filter(
+      (a) => a.userId === targetUid && a.status === "PRESENT",
+    ).length;
+    const fromSub = attendanceSubmissions[targetUid]?.daysPresent || 0;
+    return fromAtt > 0 ? fromAtt : fromSub;
+  };
 
   // Fetch missing user profile pictures from users collection
   useEffect(() => {
@@ -379,10 +496,30 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   }, [bills]);
 
   // Real amounts calculated from Firestore data (Zero when nothing added, NO hardcoding)
-  const totalExpenseCents = currentCycleExpenses.reduce(
-    (sum, e) => sum + (e.amountCents || 0),
-    0,
-  );
+  // Total Expense card displays the real total paid expenses of the group (not upcoming/unpaid bills)
+  const paidCycleExpenses = useMemo(() => {
+    return currentCycleExpenses.filter(
+      (e) => e.status === "PAID" || e.isPaid === true,
+    );
+  }, [currentCycleExpenses]);
+
+  const totalExpenseCents = useMemo(() => {
+    return currentCycleExpenses.reduce((sum, e) => {
+      const isFullPaid = e.status === "PAID" || e.isPaid === true;
+      if (isFullPaid) {
+        return sum + (e.amountCents || 0);
+      }
+      // If individual splits were marked as paid
+      if (e.splitDetails && Array.isArray(e.splitDetails)) {
+        const paidSplitsSum = e.splitDetails
+          .filter((s: any) => !s.isExempt && s.isPaid === true)
+          .reduce((sSum: number, s: any) => sSum + (s.shareCentavos || 0), 0);
+        return sum + paidSplitsSum;
+      }
+      return sum;
+    }, 0);
+  }, [currentCycleExpenses]);
+
   const unpaidCycleExpenses = currentCycleExpenses.filter(
     (e) => e.status !== "PAID" && !e.isPaid,
   );
@@ -391,14 +528,52 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     0,
   );
 
-  const totalDuesCents =
-    uniqueBills.length > 0
-      ? uniqueBills.reduce((sum, b) => sum + (b.outstandingCentavos || 0), 0)
-      : fallbackDuesCents;
-
   // Separate active participants and pending join requests
   const activeMembersList = cloudMembers.filter((m) => m.status === "ACTIVE");
   const pendingRequests = cloudMembers.filter((m) => m.status === "PENDING");
+  const activePayorsList = activeMembersList.filter(isPayorMember);
+  const payorCount = Math.max(
+    1,
+    activePayorsList.length > 0
+      ? activePayorsList.length
+      : activeMembersList.length,
+  );
+
+  // Auto-heal in ManageGroupScreen if payors changed or water splits need update
+  useEffect(() => {
+    if (!householdId || payorCount === 0 || currentCycleExpenses.length === 0)
+      return;
+    const hasStaleSplit = currentCycleExpenses.some((e) => {
+      if (e.status === "PAID" || e.isPaid) return false;
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      if (isWater) {
+        if (
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel
+        ) {
+          if (!e.splitDetails || !Array.isArray(e.splitDetails)) return true;
+          return e.splitDetails.some(
+            (s: any) => !s.isExempt && s.ownWaterCentavos === undefined,
+          );
+        }
+        return false;
+      }
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
+        : [];
+      return splitPayors.length > 0 && splitPayors.length !== payorCount;
+    });
+    if (hasStaleSplit) {
+      mobileDataService
+        .recalculateUnpaidExpensesForHousehold(householdId)
+        .catch(() => {});
+    }
+  }, [
+    householdId,
+    payorCount,
+    currentCycleExpenses,
+    waterConfig?.pricingModel,
+  ]);
 
   const myPhoto =
     profile?.profilePicture || profile?.photoURL || firebaseUser?.photoURL;
@@ -409,7 +584,97 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       ? activeMembersList.map((m) => {
           const uid = m.userId || m.memberId;
           const userBill = uniqueBills.find((b) => b.userId === uid);
-          const owes = userBill ? userBill.outstandingCentavos || 0 : 0;
+          const isPayor = isPayorMember(m);
+          let owes = 0;
+          let memberWaterShare = 0;
+          let memberWaterOwn = 0;
+          let memberWaterNonPayor = 0;
+          let memberWaterDays = getMemberAttendanceDays(uid);
+
+          if (isPayor) {
+            const liveShare = unpaidCycleExpenses.reduce((sum, e) => {
+              const isWater = (e.category || "")
+                .toLowerCase()
+                .includes("water");
+              if (isWater) {
+                // WATER BILL: Payors pay their OWN water + water from non-payors.
+                // NEVER split other payors' water on this payor!
+                const isPersonDayMode =
+                  waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+                  !waterConfig?.pricingModel;
+
+                if (isPersonDayMode) {
+                  const rate = Number(
+                    waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                  );
+                  const ownCost = memberWaterDays * rate;
+                  const totalNonPayorWater = activeMembersList
+                    .filter((np) => !isPayorMember(np))
+                    .reduce((npSum, np) => {
+                      const npUid = np.userId || np.memberId;
+                      return npSum + getMemberAttendanceDays(npUid) * rate;
+                    }, 0);
+                  const extraPerPayor =
+                    payorCount > 0
+                      ? Math.round(totalNonPayorWater / payorCount)
+                      : 0;
+                  const payorTotal = ownCost + extraPerPayor;
+
+                  memberWaterShare += payorTotal;
+                  memberWaterOwn += ownCost;
+                  memberWaterNonPayor += extraPerPayor;
+                  return sum + payorTotal;
+                } else if (
+                  waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                ) {
+                  const flatRate =
+                    waterConfig.fixedPerPersonAmountCentavos || 0;
+                  memberWaterShare += flatRate;
+                  memberWaterOwn += flatRate;
+                  return sum + flatRate;
+                } else {
+                  // FIXED_MONTHLY household split evenly across payors
+                  const fixedShare = Math.round(
+                    (e.amountCents || 0) / payorCount,
+                  );
+                  memberWaterShare += fixedShare;
+                  memberWaterOwn += fixedShare;
+                  return sum + fixedShare;
+                }
+              }
+
+              // Non-water bills (Rent, Internet, Electricity, Custom)
+              const splitPayors = e.splitDetails
+                ? e.splitDetails.filter(
+                    (s: any) => !s.isExempt && s.shareCentavos > 0,
+                  )
+                : [];
+              const isSplitStale =
+                splitPayors.length > 0 && splitPayors.length !== payorCount;
+              if (
+                !isSplitStale &&
+                e.splitDetails &&
+                Array.isArray(e.splitDetails) &&
+                e.splitDetails.length > 0
+              ) {
+                const s = e.splitDetails.find(
+                  (item: any) => item.userId === uid,
+                );
+                if (s && typeof s.shareCentavos === "number")
+                  return sum + s.shareCentavos;
+              }
+              return sum + Math.round((e.amountCents || 0) / payorCount);
+            }, 0);
+
+            const paid =
+              userBill && typeof userBill.totalPaidCentavos === "number"
+                ? userBill.totalPaidCentavos
+                : 0;
+            owes = Math.max(0, liveShare - paid);
+          } else {
+            // Non-payor member
+            memberWaterDays = getMemberAttendanceDays(uid);
+          }
           const isSettled = owes <= 0 || m.status === "SETTLED";
           const displayName =
             m.displayName ||
@@ -435,6 +700,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               ? formatShortDate(activeCycle.endDate || "")
               : "Current",
             owesCents: owes,
+            waterShareCents: memberWaterShare,
+            waterOwnCents: memberWaterOwn,
+            waterNonPayorCents: memberWaterNonPayor,
+            waterDaysPresent: memberWaterDays,
             email: m.email,
             phone: m.phoneNumber,
           };
@@ -457,6 +726,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             },
           ]
         : [];
+
+  const totalDuesCents = useMemo(() => {
+    return participants.reduce((sum, p) => sum + (p.owesCents || 0), 0);
+  }, [participants]);
 
   // Helper date formatting
   function formatShortDate(dateStr: string) {
@@ -585,6 +858,44 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         },
       ],
     );
+  };
+
+  const handleExpensePress = (exp: MobileExpense) => {
+    if (!householdId) return;
+    const isCurrentlyPaid = exp.status === "PAID" || exp.isPaid === true;
+    const billTitle = cleanBillTitle(exp.title, exp.category);
+    if (isHost) {
+      const nextStatus = isCurrentlyPaid ? "UNPAID" : "PAID";
+      Alert.alert(
+        billTitle,
+        `Amount: ${formatPesos(exp.amountCents)}\nCurrent Status: ${isCurrentlyPaid ? "PAID" : "UNPAID (Upcoming)"}\n\nWould you like to mark this bill as ${nextStatus}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: `Mark as ${nextStatus}`,
+            onPress: async () => {
+              try {
+                await mobileDataService.updateExpenseStatus(
+                  householdId,
+                  exp.id,
+                  !isCurrentlyPaid,
+                );
+              } catch (err: any) {
+                Alert.alert(
+                  "Error",
+                  err.message || "Could not update bill status.",
+                );
+              }
+            },
+          },
+        ],
+      );
+    } else {
+      Alert.alert(
+        billTitle,
+        `Amount: ${formatPesos(exp.amountCents)}\nStatus: ${isCurrentlyPaid ? "PAID" : "UNPAID (Upcoming)"}\nDate: ${formatShortDate(exp.date)}\nAdded by: ${exp.payerName || "Host"}`,
+      );
+    }
   };
 
   const handleInviteRoommate = async () => {
@@ -792,12 +1103,37 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   };
 
   // --------------------------------------------------------------------------
+  // LOADING STATE: Ensure 100% data loaded before displaying screen content
+  // --------------------------------------------------------------------------
+  if (!dataLoaded && !onLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "transparent" }}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <UniversalLoader
+          text="Loading group details..."
+          subtitle="Preparing household & bills..."
+          transparent={true}
+        />
+      </View>
+    );
+  }
+
+  // --------------------------------------------------------------------------
   // VIEW: SUCCESS SCREEN
   // --------------------------------------------------------------------------
   if (viewMode === "success") {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={{ paddingTop: topInset }} />
         <View style={styles.successContainer}>
           <View style={styles.badgeWrapper}>
             <View
@@ -889,7 +1225,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             </TouchableOpacity>
           </View>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -899,17 +1235,23 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   if (viewMode === "create") {
     if (profile && !isHost) {
       return (
-        <SafeAreaView style={styles.container}>
-          <StatusBar barStyle="dark-content" />
-          <View style={styles.navBar}>
-            <TouchableOpacity
-              style={styles.circleBackBtn}
-              onPress={handleBackFromCreate}
-            >
-              <Feather name="chevron-left" size={24} color="#0F172A" />
-            </TouchableOpacity>
-            <Text style={styles.navTitle}>Create Group</Text>
-            <View style={{ width: 42 }} />
+        <View style={styles.container}>
+          <StatusBar
+            barStyle="dark-content"
+            translucent={true}
+            backgroundColor="transparent"
+          />
+          <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+            <View style={styles.navBar}>
+              <TouchableOpacity
+                style={styles.circleBackBtn}
+                onPress={handleBackFromCreate}
+              >
+                <Feather name="chevron-left" size={24} color="#0F172A" />
+              </TouchableOpacity>
+              <Text style={styles.navTitle}>Create Group</Text>
+              <View style={{ width: 42 }} />
+            </View>
           </View>
 
           <ScrollView
@@ -929,15 +1271,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 72,
                 height: 72,
                 borderRadius: 36,
-                backgroundColor: "#EFF6FF",
-                borderWidth: 2,
-                borderColor: "#BFDBFE",
+                backgroundColor: "rgba(15, 23, 42, 0.05)",
                 justifyContent: "center",
                 alignItems: "center",
                 marginBottom: 18,
               }}
             >
-              <Feather name="shield" size={36} color="#2563EB" />
+              <Feather name="shield" size={36} color="#0F172A" />
             </View>
 
             <Text
@@ -1116,22 +1456,28 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </SafeAreaView>
+        </View>
       );
     }
 
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.navBar}>
-          <TouchableOpacity
-            style={styles.circleBackBtn}
-            onPress={handleBackFromCreate}
-          >
-            <Feather name="chevron-left" size={24} color="#0F172A" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>Create Group</Text>
-          <View style={{ width: 42 }} />
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={styles.circleBackBtn}
+              onPress={handleBackFromCreate}
+            >
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Create Group</Text>
+            <View style={{ width: 42 }} />
+          </View>
         </View>
 
         <ScrollView
@@ -1212,7 +1558,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             )}
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -1221,17 +1567,23 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // --------------------------------------------------------------------------
   if (viewMode === "join") {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.navBar}>
-          <TouchableOpacity
-            style={styles.circleBackBtn}
-            onPress={handleBackFromJoin}
-          >
-            <Feather name="chevron-left" size={24} color="#0F172A" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>Join Group</Text>
-          <View style={{ width: 42 }} />
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={styles.circleBackBtn}
+              onPress={handleBackFromJoin}
+            >
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Join Group</Text>
+            <View style={{ width: 42 }} />
+          </View>
         </View>
 
         <View style={[styles.scrollContent, { flex: 1 }]}>
@@ -1259,7 +1611,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             )}
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -1268,22 +1620,28 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // --------------------------------------------------------------------------
   if (viewMode === "edit") {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.navBar}>
-          <TouchableOpacity
-            style={styles.circleBackBtn}
-            onPress={() => setViewMode("details")}
-          >
-            <Feather name="chevron-left" size={24} color="#0F172A" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>Edit Group</Text>
-          <TouchableOpacity
-            style={styles.iconNavBtn}
-            onPress={() => setShowMenu(true)}
-          >
-            <Feather name="more-vertical" size={22} color="#0F172A" />
-          </TouchableOpacity>
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={styles.circleBackBtn}
+              onPress={() => setViewMode("details")}
+            >
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Edit Group</Text>
+            <TouchableOpacity
+              style={styles.iconNavBtn}
+              onPress={() => setShowMenu(true)}
+            >
+              <Feather name="more-vertical" size={22} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView
@@ -1404,21 +1762,27 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         {renderMenuModal()}
         {renderInviteModal()}
         {renderHostRequiredModal()}
-      </SafeAreaView>
+      </View>
     );
   }
 
   // If no household exists, show clean empty state instead of phantom active household
   if (!householdId) {
     return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.navBar}>
-          <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-            <Feather name="chevron-left" size={24} color="#0F172A" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>Manage Group</Text>
-          <View style={{ width: 42 }} />
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Manage Group</Text>
+            <View style={{ width: 42 }} />
+          </View>
         </View>
 
         <View
@@ -1434,13 +1798,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               width: 68,
               height: 68,
               borderRadius: 22,
-              backgroundColor: "#EFF6FF",
+              backgroundColor: "rgba(15, 23, 42, 0.05)",
               justifyContent: "center",
               alignItems: "center",
               marginBottom: 16,
             }}
           >
-            <Feather name="home" size={32} color="#2563EB" />
+            <Feather name="home" size={32} color="#0F172A" />
           </View>
           <Text
             style={{
@@ -1514,7 +1878,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         </View>
 
         {renderHostRequiredModal()}
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -1522,21 +1886,27 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // VIEW: GROUP DETAILS (Default View - Matched to Image)
   // --------------------------------------------------------------------------
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        translucent={true}
+        backgroundColor="transparent"
+      />
 
       {/* Top Header with Circular Back Button */}
-      <View style={styles.navBar}>
-        <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-          <Feather name="chevron-left" size={24} color="#0F172A" />
-        </TouchableOpacity>
-        <Text style={styles.navTitle}>Manage Group</Text>
-        <TouchableOpacity
-          style={styles.iconNavBtn}
-          onPress={() => setShowMenu(true)}
-        >
-          <Feather name="more-vertical" size={22} color="#0F172A" />
-        </TouchableOpacity>
+      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View style={styles.navBar}>
+          <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
+            <Feather name="chevron-left" size={24} color="#0F172A" />
+          </TouchableOpacity>
+          <Text style={styles.navTitle}>Manage Group</Text>
+          <TouchableOpacity
+            style={styles.iconNavBtn}
+            onPress={() => setShowMenu(true)}
+          >
+            <Feather name="more-vertical" size={22} color="#0F172A" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -1589,7 +1959,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             activeOpacity={0.8}
           >
             <View style={styles.cycleIconBadge}>
-              <Ionicons name="calendar-outline" size={24} color="#2563EB" />
+              <Ionicons name="calendar-outline" size={24} color="#0F172A" />
             </View>
             <Text style={styles.emptyCycleTitle}>No Active Billing Cycle</Text>
             <Text style={styles.emptyCycleSub}>
@@ -1752,11 +2122,68 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         )}
 
+        {/* Water Billing Configuration Card */}
+        {householdId ? (
+          <View style={styles.waterConfigCard}>
+            <View style={styles.waterConfigHeader}>
+              <View style={styles.waterConfigIconWrap}>
+                <Feather name="droplet" size={18} color="#0284C7" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.waterConfigTitle}>
+                  Water Billing Configuration
+                </Text>
+                <Text style={styles.waterConfigSub}>
+                  {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                    ? `Flat Rate · ₱${((waterConfig?.fixedPerPersonAmountCentavos || 0) / 100).toFixed(2)} / resident / mo`
+                    : waterConfig?.pricingModel === "FIXED_MONTHLY"
+                      ? `Fixed Household · ₱${((waterConfig?.fixedMonthlyAmountCentavos || 0) / 100).toFixed(2)} / month`
+                      : `Daily Attendance · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)} / person / day`}
+                </Text>
+              </View>
+              {isHost && (
+                <TouchableOpacity
+                  style={styles.waterConfigEditBtn}
+                  onPress={() => setShowWaterSettingsModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Feather
+                    name="settings"
+                    size={13}
+                    color="#0284C7"
+                    style={{ marginRight: 4 }}
+                  />
+                  <Text style={styles.waterConfigEditBtnText}>Configure</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.waterConfigDetailsRow}>
+              <View style={styles.waterModeTag}>
+                <Text style={styles.waterModeTagText}>
+                  {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                    ? "Flat Fee Mode"
+                    : waterConfig?.pricingModel === "FIXED_MONTHLY"
+                      ? "Household Split Mode"
+                      : "Calendar Active"}
+                </Text>
+              </View>
+              <Text style={styles.waterModeSummary} numberOfLines={2}>
+                {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                  ? "Billed directly as a flat fee to each paying roommate. No calendar logging."
+                  : waterConfig?.pricingModel === "FIXED_MONTHLY"
+                    ? "Split equally across active paying roommates. No calendar logging."
+                    : "Roommates mark daily stay on the Attendance Calendar."}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
         {/* Two Metric Cards - Real Calculated Values (Zero if empty) */}
         <View style={styles.metricCardsRow}>
           <View style={styles.metricCard}>
             <View style={styles.metricIconWrap}>
-              <Ionicons name="wallet-outline" size={20} color="#2563EB" />
+              <Ionicons name="wallet-outline" size={20} color="#0F172A" />
             </View>
             <Text style={styles.metricValue}>
               {formatPesos(totalDuesCents)}
@@ -1766,7 +2193,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
           <View style={styles.metricCard}>
             <View style={styles.metricIconWrap}>
-              <Ionicons name="receipt-outline" size={20} color="#2563EB" />
+              <Ionicons name="receipt-outline" size={20} color="#0F172A" />
             </View>
             <Text style={styles.metricValue}>
               {formatPesos(totalExpenseCents)}
@@ -1816,7 +2243,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 exp.status === "PAID" || exp.isPaid === true;
               const catMeta = getCategoryMeta(exp.category);
               return (
-                <View key={exp.id} style={styles.expenseItemRow}>
+                <TouchableOpacity
+                  key={exp.id}
+                  style={styles.expenseItemRow}
+                  activeOpacity={0.7}
+                  onPress={() => handleExpensePress(exp)}
+                >
                   <View
                     style={[
                       styles.expenseCategoryIconWrap,
@@ -1837,7 +2269,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.expenseItemTitle}>{exp.title}</Text>
+                      <Text style={styles.expenseItemTitle}>
+                        {cleanBillTitle(exp.title, exp.category)}
+                      </Text>
                       <View
                         style={
                           isExpensePaid
@@ -1858,15 +2292,15 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     </View>
                     <Text style={styles.expenseItemSub}>
                       {isExpensePaid
-                        ? `${exp.payerName || "Household"} • Paid`
-                        : `Unpaid Bill • Added by ${exp.payerName || "Host"}`}{" "}
+                        ? `${exp.payerName || "Household"}`
+                        : `Added by ${exp.payerName || "Host"}`}{" "}
                       • {formatShortDate(exp.date)}
                     </Text>
                   </View>
                   <Text style={styles.expenseItemAmount}>
                     {formatPesos(exp.amountCents)}
                   </Text>
-                </View>
+                </TouchableOpacity>
               );
             })
           )}
@@ -2066,6 +2500,34 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                             : "• Shares rent & bills"}
                       </Text>
                     </View>
+                    {p.role !== "NON_PAYOR" &&
+                      p.waterShareCents !== undefined &&
+                      p.waterShareCents > 0 && (
+                        <View style={styles.participantWaterBreakdownWrap}>
+                          <Feather name="droplet" size={11} color="#0284C7" />
+                          <Text style={styles.participantWaterBreakdownText}>
+                            {formatPesos(p.waterShareCents)} (
+                            {p.waterDaysPresent || 0}d own
+                            {p.waterNonPayorCents && p.waterNonPayorCents > 0
+                              ? ` + ${formatPesos(p.waterNonPayorCents)} NP`
+                              : ""}
+                            )
+                          </Text>
+                        </View>
+                      )}
+                    {p.role === "NON_PAYOR" && (
+                      <View style={styles.participantWaterBreakdownWrap}>
+                        <Feather name="droplet" size={11} color="#64748B" />
+                        <Text
+                          style={[
+                            styles.participantWaterBreakdownText,
+                            { color: "#64748B" },
+                          ]}
+                        >
+                          {p.waterDaysPresent || 0}d
+                        </Text>
+                      </View>
+                    )}
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
                     <Text style={styles.participantOwesText}>
@@ -2183,7 +2645,24 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
       {/* MODAL: Host Required Guard Modal */}
       {renderHostRequiredModal()}
-    </SafeAreaView>
+
+      {/* MODAL: Water Billing Settings Modal */}
+      {householdId ? (
+        <WaterSettingsModal
+          visible={showWaterSettingsModal}
+          onClose={() => setShowWaterSettingsModal(false)}
+          householdId={householdId}
+          initialConfig={waterConfig}
+          onSaved={() => {
+            if (activeCycle?.billingCycleId) {
+              mobileDataService
+                .syncCycleWaterBill(householdId, activeCycle.billingCycleId)
+                .catch(() => {});
+            }
+          }}
+        />
+      ) : null}
+    </View>
   );
 
   function renderCreateCycleModal() {
@@ -2839,30 +3318,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F8FAFC",
   },
+  navBarContainer: {
+    backgroundColor: "#F8FAFC",
+    zIndex: 50,
+  },
   navBar: {
     height: 56,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
-    backgroundColor: "#FFFFFF",
+    // borderBottomWidth: 1,
+    // borderBottomColor: "#F1F5F9",
+    // backgroundColor: "#FFFFFF",
   },
   circleBackBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F8FAFC",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
   },
   iconNavBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2950,7 +3432,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 10,
@@ -3013,17 +3495,17 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    // shadowColor: "#000",
+    // shadowOpacity: 0.03,
+    // shadowRadius: 8,
+    // shadowOffset: { width: 0, height: 2 },
+    // elevation: 2,
   },
   metricIconWrap: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    backgroundColor: "#EFF6FF",
+    borderRadius: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 10,
@@ -3088,7 +3570,7 @@ const styles = StyleSheet.create({
   expenseItemRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
@@ -3126,7 +3608,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeTextUnpaid: {
     color: "#B91C1C",
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "800",
     letterSpacing: 0.5,
   },
@@ -3140,7 +3622,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeTextPaid: {
     color: "#047857",
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "800",
     letterSpacing: 0.5,
   },
@@ -3241,6 +3723,24 @@ const styles = StyleSheet.create({
     color: "#64748B",
     marginLeft: 4,
   },
+  participantWaterBreakdownWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0F9FF",
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginTop: 5,
+    alignSelf: "flex-start",
+    gap: 4,
+  },
+  participantWaterBreakdownText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#0369A1",
+  },
   participantOwesText: {
     fontSize: 14,
     fontWeight: "800",
@@ -3313,11 +3813,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#F8FAFC",
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
+    // borderTopWidth: 1,
+    // borderTopColor: "#F1F5F9",
   },
   primaryPillBtn: {
     backgroundColor: "#2563EB",
@@ -3665,5 +4165,84 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "800",
+  },
+  waterConfigCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 16,
+    // shadowColor: "#000",
+    // shadowOffset: { width: 0, height: 1 },
+    // shadowOpacity: 0.04,
+    // shadowRadius: 4,
+    // elevation: 1,
+  },
+  waterConfigHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  waterConfigIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#E0F2FE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waterConfigTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  waterConfigSub: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0284C7",
+    marginTop: 2,
+  },
+  waterConfigEditBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "#F0F9FF",
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+  },
+  waterConfigEditBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#0284C7",
+  },
+  waterConfigDetailsRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  waterModeTag: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  waterModeTagText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#475569",
+  },
+  waterModeSummary: {
+    flex: 1,
+    fontSize: 11,
+    color: "#64748B",
+    lineHeight: 16,
   },
 });

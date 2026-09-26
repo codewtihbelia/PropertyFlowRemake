@@ -9,8 +9,10 @@ import {
   Image,
   ActivityIndicator,
   TextInput,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { UniversalLoader } from "../components/UniversalLoader";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useNavVisibility } from "../context/NavVisibilityContext";
@@ -25,6 +27,7 @@ interface ProfileScreenProps {
   onOpenHostApplication?: () => void;
   onSignOut?: () => void;
   currentUser?: { name: string; role: string; email: string };
+  onLoaded?: () => void;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
@@ -38,6 +41,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     role: "Member",
     email: "",
   },
+  onLoaded,
 }) => {
   const { onScroll } = useNavVisibility();
   const firebaseUser = auth.currentUser;
@@ -48,13 +52,33 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [displayNameInput, setDisplayNameInput] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const updateLoading = (val: boolean) => {
+    setLoading(val);
+    if (!val) {
+      onLoaded?.();
+    }
+  };
+
+  // Fallback safety timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      updateLoading(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    if (!firebaseUser?.uid) return;
+    if (!firebaseUser?.uid) {
+      updateLoading(false);
+      return;
+    }
     mobileDataService.getUserProfile(firebaseUser.uid).then((p) => {
       if (p) {
         setProfile(p);
         setDisplayNameInput(p.displayName || currentUser.name);
+        updateLoading(false);
       }
     });
 
@@ -64,6 +88,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         if (p) {
           setProfile(p);
           setDisplayNameInput(p.displayName || currentUser.name);
+          updateLoading(false);
         }
       },
     );
@@ -176,6 +201,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
+  if (loading && !onLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "transparent" }}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <UniversalLoader
+          text="Loading settings..."
+          subtitle="Preparing profile details..."
+          transparent={true}
+        />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -261,7 +303,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             disabled={uploadingPhoto}
             onPress={handlePickAndUploadPhoto}
           >
-            <Feather name="upload-cloud" size={13} color="#2563EB" />
+            <Feather name="upload-cloud" size={13} color="#0F172A" />
             <Text style={styles.changePhotoPillText}>
               {uploadingPhoto ? "Uploading to Cloudinary..." : "Change Photo"}
             </Text>
@@ -321,7 +363,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               onPress={onOpenHostApplication}
             >
               <View style={styles.menuIconBox}>
-                <Feather name="shield" size={17} color="#2563EB" />
+                <Feather name="shield" size={17} color="#0F172A" />
               </View>
               <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={styles.menuItemText}>Apply for Host Status</Text>
@@ -338,7 +380,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onPress={() => onOpenManageGroup && onOpenManageGroup("join")}
           >
             <View style={styles.menuIconBox}>
-              <Feather name="user-plus" size={17} color="#2563EB" />
+              <Feather name="user-plus" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.menuItemText}>Join Household with Code</Text>
@@ -354,7 +396,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onPress={() => onOpenManageGroup && onOpenManageGroup("details")}
           >
             <View style={styles.menuIconBox}>
-              <Feather name="users" size={17} color="#2563EB" />
+              <Feather name="users" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.menuItemText}>
@@ -369,7 +411,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           <TouchableOpacity style={styles.menuItem} onPress={onOpenReports}>
             <View style={styles.menuIconBox}>
-              <Feather name="bar-chart-2" size={17} color="#2563EB" />
+              <Feather name="bar-chart-2" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.menuItemText}>Monthly Summary & Reports</Text>
@@ -382,7 +424,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           <TouchableOpacity style={styles.menuItem} onPress={onOpenOnboarding}>
             <View style={styles.menuIconBox}>
-              <Feather name="book-open" size={17} color="#2563EB" />
+              <Feather name="book-open" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.menuItemText}>
@@ -407,8 +449,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               )
             }
           >
-            <View style={[styles.menuIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="cloud" size={17} color="#64748B" />
+            <View style={styles.menuIconBox}>
+              <Feather name="cloud" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>Cloudinary Image Storage</Text>
@@ -425,8 +467,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               )
             }
           >
-            <View style={[styles.menuIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="database" size={17} color="#64748B" />
+            <View style={styles.menuIconBox}>
+              <Feather name="database" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>Firestore Sync</Text>
@@ -440,8 +482,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               Alert.alert("App Version", "Splitzy / PropertyFlow Mobile v1.1.0")
             }
           >
-            <View style={[styles.menuIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="info" size={17} color="#64748B" />
+            <View style={styles.menuIconBox}>
+              <Feather name="info" size={17} color="#0F172A" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>App Version</Text>
@@ -666,10 +708,10 @@ const styles = StyleSheet.create({
   },
   menuItemText: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
   menuIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#EFF6FF",
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,

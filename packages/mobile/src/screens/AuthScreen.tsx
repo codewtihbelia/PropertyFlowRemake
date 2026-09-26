@@ -32,6 +32,7 @@ import { Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { ForgotPasswordScreen } from "./ForgotPasswordScreen";
 import { EmailVerificationScreen } from "./EmailVerificationScreen";
 import { OtpVerificationScreen } from "./OtpVerificationScreen";
+import { UniversalLoader, GoogleLogoIcon } from "../components/UniversalLoader";
 
 interface AuthScreenProps {
   onLoginSuccess: (user: {
@@ -352,6 +353,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <View style={styles.rootContainer}>
+      {googleLoading && <UniversalLoader text="Completing Google sign in..." />}
+      {loading && !googleLoading && (
+        <UniversalLoader
+          text="Signing in..."
+          subtitle="Please wait a moment..."
+        />
+      )}
       <StatusBar
         barStyle="dark-content"
         backgroundColor="transparent"
@@ -500,7 +508,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                     onPress={() => setAuthView("forgot_password")}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.forgotPasswordText}>Forgot?</Text>
+                    <Text style={styles.forgotPasswordText}>
+                      Forgot Password?
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -602,11 +612,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 <View style={styles.socialButtonInner}>
                   {/* Google*/}
                   <View style={styles.googleGContainer}>
-                    <Image
-                      source={assets.google}
-                      style={styles.googleLogo}
-                      resizeMode="cover"
-                    />
+                    <GoogleLogoIcon size={20} />
                   </View>
                   <Text style={styles.socialButtonTextDark}>
                     Continue with Google

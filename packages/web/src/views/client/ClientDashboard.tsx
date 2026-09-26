@@ -36,10 +36,6 @@ export const ClientDashboard: React.FC<{
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
-  if (loading && currentUser.householdId) {
-    return <UniversalLoader text="Loading your dashboard..." />;
-  }
-
   const hasHousehold = Boolean(
     household.householdId &&
     household.householdName &&
@@ -123,7 +119,7 @@ export const ClientDashboard: React.FC<{
   const isUnpaid = myBill?.status === "UNPAID";
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="relative space-y-6 max-w-5xl mx-auto">
       {/* Greeting Banner matching proposedUI */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -286,7 +282,7 @@ export const ClientDashboard: React.FC<{
             <span className="text-xs font-semibold text-slate-500">
               My Outstanding Balance
             </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-slate-900/5 text-slate-900 flex items-center justify-center">
               <AlertCircle className="w-4 h-4" />
             </div>
           </div>
@@ -317,7 +313,7 @@ export const ClientDashboard: React.FC<{
             <span className="text-xs font-semibold text-slate-500">
               Original Total Share
             </span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-slate-900/5 text-slate-900 flex items-center justify-center">
               <Receipt className="w-4 h-4" />
             </div>
           </div>
@@ -338,7 +334,7 @@ export const ClientDashboard: React.FC<{
             <span className="text-xs font-semibold text-slate-500">
               Water Attendance
             </span>
-            <div className="w-8 h-8 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-slate-900/5 text-slate-900 flex items-center justify-center">
               <Droplets className="w-4 h-4" />
             </div>
           </div>
@@ -515,7 +511,7 @@ export const ClientDashboard: React.FC<{
                   className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs">
+                    <div className="w-8 h-8 rounded-xl bg-slate-900/5 text-slate-900 flex items-center justify-center font-bold text-xs">
                       ₱
                     </div>
                     <div>

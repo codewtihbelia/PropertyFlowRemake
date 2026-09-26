@@ -6,6 +6,7 @@ export interface BillCategory {
   ionicon: string;
   color: string;
   bgColor: string;
+  accentColor?: string;
   description: string;
 }
 
@@ -16,8 +17,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏠",
     featherIcon: "home",
     ionicon: "home-outline",
-    color: "#2563EB",
-    bgColor: "#EFF6FF",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#2563EB",
     description: "Monthly room or apartment lease",
   },
   {
@@ -26,8 +28,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "⚡",
     featherIcon: "zap",
     ionicon: "flash-outline",
-    color: "#D97706",
-    bgColor: "#FEF3C7",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#D97706",
     description: "Electric power, Meralco & sub-meters",
   },
   {
@@ -36,9 +39,10 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "💧",
     featherIcon: "droplet",
     ionicon: "water-outline",
-    color: "#0284C7",
-    bgColor: "#E0F2FE",
-    description: "Water bills (₱5/day attendance mode)",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#0284C7",
+    description: "Water bills (daily attendance or fixed monthly)",
   },
   {
     id: "Wifi Bills",
@@ -46,8 +50,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "📶",
     featherIcon: "wifi",
     ionicon: "wifi-outline",
-    color: "#7C3AED",
-    bgColor: "#F3E8FF",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#7C3AED",
     description: "Fiber, broadband & internet connection",
   },
   {
@@ -56,8 +61,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🛒",
     featherIcon: "shopping-cart",
     ionicon: "cart-outline",
-    color: "#059669",
-    bgColor: "#D1FAE5",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#059669",
     description: "Shared food, drinking water & kitchen goods",
   },
   {
@@ -66,8 +72,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🧹",
     featherIcon: "trash-2",
     ionicon: "sparkles-outline",
-    color: "#DB2777",
-    bgColor: "#FCE7F3",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#DB2777",
     description: "Housekeeping, trash bags & laundry supplies",
   },
   {
@@ -76,8 +83,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🔧",
     featherIcon: "tool",
     ionicon: "construct-outline",
-    color: "#EA580C",
-    bgColor: "#FFEDD5",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#EA580C",
     description: "Aircon cleaning, plumbing & handyman fixes",
   },
   {
@@ -86,8 +94,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏢",
     featherIcon: "shield",
     ionicon: "business-outline",
-    color: "#4F46E5",
-    bgColor: "#EEF2FF",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#4F46E5",
     description: "HOA fees, condo dues, security & admin dues",
   },
   {
@@ -96,8 +105,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🔥",
     featherIcon: "sun",
     ionicon: "flame-outline",
-    color: "#DC2626",
-    bgColor: "#FEE2E2",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#DC2626",
     description: "Cooking gas cylinder & refill",
   },
   {
@@ -106,8 +116,9 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏷️",
     featherIcon: "tag",
     ionicon: "pricetag-outline",
-    color: "#64748B",
-    bgColor: "#F1F5F9",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#64748B",
     description: "Custom or miscellaneous expense (Specify below)",
   },
 ];
@@ -207,8 +218,12 @@ export function getCategoryMeta(rawCategory?: string): BillCategory {
     emoji: "🏷️",
     featherIcon: "tag",
     ionicon: "pricetag-outline",
-    color: "#64748B",
-    bgColor: "#F1F5F9",
+    color: "#0F172A",
+    bgColor: "rgba(15, 23, 42, 0.05)",
+    accentColor: "#64748B",
     description: displayLabel,
   };
 }
+
+// color: "#0F172A",
+// bgColor: "rgba(15, 23, 42, 0.05)",

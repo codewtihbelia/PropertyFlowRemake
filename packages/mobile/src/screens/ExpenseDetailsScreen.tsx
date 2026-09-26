@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
+import { cleanBillTitle } from "../services/firebaseDataService";
 
 interface ExpenseDetailsScreenProps {
   expense: {
@@ -130,7 +131,9 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
               color={catMeta.color}
             />
           </View>
-          <Text style={styles.heroTitle}>{expense.title}</Text>
+          <Text style={styles.heroTitle}>
+            {cleanBillTitle(expense.title, expense.categoryLabel)}
+          </Text>
           <Text style={styles.heroAmount}>
             {formatPesos(expense.amountCents)}
           </Text>
@@ -317,7 +320,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -340,8 +343,8 @@ const styles = StyleSheet.create({
   heroIconWrap: {
     width: 64,
     height: 64,
-    borderRadius: 32,
-    backgroundColor: "#EFF6FF",
+    borderRadius: 20,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,

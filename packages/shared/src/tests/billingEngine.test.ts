@@ -451,4 +451,136 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     // Total water collected = 225 + 175 = 400 (40,000 centavos)
     assert.equal(summary.waterTotalCentavos, 40000);
   });
+
+  it("calculates Mode 2 (FIXED_MONTHLY): ₱1,200 total water bill split equally across 2 payors (₱600 each), Non-Payors exempt", () => {
+    const members: HouseholdMember[] = [
+      {
+        memberId: "m1",
+        userId: "u_p1",
+        householdId: "h1",
+        role: "PAYOR",
+        displayName: "Payor 1",
+        email: "p1@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+      {
+        memberId: "m2",
+        userId: "u_p2",
+        householdId: "h1",
+        role: "PAYOR",
+        displayName: "Payor 2",
+        email: "p2@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+      {
+        memberId: "m3",
+        userId: "u_np1",
+        householdId: "h1",
+        role: "NON_PAYOR",
+        displayName: "Non-Payor 1",
+        email: "np1@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+    ];
+
+    const billingCycle: BillingCycle = {
+      billingCycleId: "cycle_fixed_monthly",
+      householdId: "h1",
+      name: "Monthly Water Test",
+      startDate: "2026-07-01",
+      endDate: "2026-07-31",
+      status: "ACTIVE",
+      createdDate: "2026-07-01",
+    };
+
+    const summary = calculateHouseholdBilling({
+      billingCycle,
+      members,
+      charges: [],
+      waterConfig: {
+        pricingModel: "FIXED_MONTHLY",
+        rateCentavosPerPersonPerDay: 500,
+        fixedMonthlyAmountCentavos: 120000, // ₱1,200.00
+      },
+      waterAttendance: [],
+    });
+
+    const p1Bill = summary.memberBills.find((b) => b.userId === "u_p1")!;
+    const p2Bill = summary.memberBills.find((b) => b.userId === "u_p2")!;
+    const np1Bill = summary.memberBills.find((b) => b.userId === "u_np1")!;
+
+    assert.equal(p1Bill.waterCentavos, 60000); // ₱600.00
+    assert.equal(p2Bill.waterCentavos, 60000); // ₱600.00
+    assert.equal(np1Bill.waterCentavos, 0); // ₱0.00 (Exempt)
+    assert.equal(summary.waterTotalCentavos, 120000); // ₱1,200.00
+  });
+
+  it("calculates Mode 3 (FIXED_PER_PERSON_MONTH): ₱150 flat fee per paying resident, Non-Payors exempt", () => {
+    const members: HouseholdMember[] = [
+      {
+        memberId: "m1",
+        userId: "u_p1",
+        householdId: "h1",
+        role: "PAYOR",
+        displayName: "Payor 1",
+        email: "p1@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+      {
+        memberId: "m2",
+        userId: "u_p2",
+        householdId: "h1",
+        role: "PAYOR",
+        displayName: "Payor 2",
+        email: "p2@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+      {
+        memberId: "m3",
+        userId: "u_np1",
+        householdId: "h1",
+        role: "NON_PAYOR",
+        displayName: "Non-Payor 1",
+        email: "np1@test.com",
+        status: "ACTIVE",
+        joinedDate: "2026-07-01",
+      },
+    ];
+
+    const billingCycle: BillingCycle = {
+      billingCycleId: "cycle_per_person",
+      householdId: "h1",
+      name: "Flat Per Person Water Test",
+      startDate: "2026-07-01",
+      endDate: "2026-07-31",
+      status: "ACTIVE",
+      createdDate: "2026-07-01",
+    };
+
+    const summary = calculateHouseholdBilling({
+      billingCycle,
+      members,
+      charges: [],
+      waterConfig: {
+        pricingModel: "FIXED_PER_PERSON_MONTH",
+        rateCentavosPerPersonPerDay: 500,
+        fixedPerPersonAmountCentavos: 15000, // ₱150.00
+      },
+      waterAttendance: [],
+    });
+
+    const p1Bill = summary.memberBills.find((b) => b.userId === "u_p1")!;
+    const p2Bill = summary.memberBills.find((b) => b.userId === "u_p2")!;
+    const np1Bill = summary.memberBills.find((b) => b.userId === "u_np1")!;
+
+    assert.equal(p1Bill.waterCentavos, 15000); // ₱150.00
+    assert.equal(p2Bill.waterCentavos, 15000); // ₱150.00
+    assert.equal(np1Bill.waterCentavos, 0); // ₱0.00 (Exempt)
+    assert.equal(summary.waterTotalCentavos, 30000); // ₱300.00
+  });
 });

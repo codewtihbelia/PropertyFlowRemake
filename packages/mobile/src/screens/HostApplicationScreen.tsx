@@ -222,7 +222,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
           onPress={onBack}
           activeOpacity={0.7}
         >
-          <Feather name="chevron-left" size={22} color="#1E293B" />
+          <Feather name="chevron-left" size={22} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Host Application</Text>
         <TouchableOpacity
@@ -230,7 +230,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
           onPress={() => setShowInfoModal(true)}
           activeOpacity={0.7}
         >
-          <Feather name="info" size={18} color="#475569" />
+          <Feather name="info" size={18} color="#0F172A" />
         </TouchableOpacity>
       </View>
 
@@ -977,16 +977,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
   },
   headerTitle: {
     fontSize: 17,

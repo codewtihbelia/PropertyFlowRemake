@@ -6,11 +6,20 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
+  Image,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
-import { mobileDataService } from "../services/firebaseDataService";
+import {
+  mobileDataService,
+  isPayorMember,
+} from "../services/firebaseDataService";
 import { useNavVisibility } from "../context/NavVisibilityContext";
+import { WaterSettingsModal } from "../components/WaterSettingsModal";
+import { UniversalLoader } from "../components/UniversalLoader";
 
 interface CycleDate {
   iso: string;
@@ -18,6 +27,17 @@ interface CycleDate {
   monthShort: string;
   dayOfWeek: string;
   isWeekend: boolean;
+  rawDate: Date;
+}
+
+interface MonthSection {
+  monthKey: string;
+  monthName: string;
+  year: number;
+  dates: CycleDate[];
+  startDayNum: number;
+  endDayNum: number;
+  leadingEmptyDays: number;
 }
 
 const generateCycleDates = (
@@ -59,7 +79,7 @@ const generateCycleDates = (
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   let safety = 0;
-  while (cur <= end && safety < 60) {
+  while (cur <= end && safety < 65) {
     safety++;
     const y = cur.getFullYear();
     const m = String(cur.getMonth() + 1).padStart(2, "0");
@@ -71,24 +91,112 @@ const generateCycleDates = (
       monthShort: monthNames[cur.getMonth()],
       dayOfWeek: dayNames[cur.getDay()],
       isWeekend: cur.getDay() === 0 || cur.getDay() === 6,
+      rawDate: new Date(cur),
     });
     cur.setDate(cur.getDate() + 1);
   }
   return dates;
 };
 
+const groupDatesByMonth = (cycleDates: CycleDate[]): MonthSection[] => {
+  const map = new Map<string, CycleDate[]>();
+  for (const cd of cycleDates) {
+    const key = `${cd.rawDate.getFullYear()}-${cd.rawDate.getMonth()}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(cd);
+  }
+
+  const sections: MonthSection[] = [];
+  const fullMonthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  map.forEach((dates) => {
+    if (dates.length === 0) return;
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    // Monday-first index: Monday = 0, ..., Sunday = 6
+    const leadingEmptyDays = (first.rawDate.getDay() + 6) % 7;
+    sections.push({
+      monthKey: `${first.rawDate.getFullYear()}-${first.rawDate.getMonth()}`,
+      monthName: fullMonthNames[first.rawDate.getMonth()],
+      year: first.rawDate.getFullYear(),
+      dates,
+      startDayNum: first.dayNum,
+      endDayNum: last.dayNum,
+      leadingEmptyDays,
+    });
+  });
+
+  return sections;
+};
+
+const getInitials = (name?: string): string => {
+  if (!name) return "R";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+const AVATAR_COLORS = [
+  "#2563EB",
+  "#F59E0B",
+  "#7C3AED",
+  "#0D9488",
+  "#E11D48",
+  "#4F46E5",
+  "#059669",
+];
+
 export const AttendanceScreen: React.FC<{
   householdId?: string;
   billingCycleId?: string;
   userId?: string;
-}> = ({ householdId, billingCycleId, userId }) => {
+  onBack?: () => void;
+  onLoaded?: () => void;
+}> = ({ householdId, billingCycleId, userId, onBack, onLoaded }) => {
   const [profile, setProfile] = useState<any | null>(null);
   const [cycles, setCycles] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
   const [presentDates, setPresentDates] = useState<string[]>([]);
+  const [allCycleAttendance, setAllCycleAttendance] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<Record<string, any>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const isBatchingRef = useRef<boolean>(false);
   const [isBatching, setIsBatching] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [showWaterSettingsModal, setShowWaterSettingsModal] =
+    useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const updateLoading = (val: boolean) => {
+    setLoading(val);
+    if (!val) {
+      onLoaded?.();
+    }
+  };
+
+  // Fallback safety timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      updateLoading(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
+
   const currentUser = auth.currentUser;
   const activeUserId = userId || currentUser?.uid || "";
   const resolvedHouseholdId = householdId || profile?.householdId || "";
@@ -102,6 +210,7 @@ export const AttendanceScreen: React.FC<{
   );
   const resolvedBillingCycleId =
     billingCycleId || activeCycle?.billingCycleId || "";
+
   const cycleDates = useMemo(
     () =>
       activeCycle
@@ -109,40 +218,101 @@ export const AttendanceScreen: React.FC<{
         : [],
     [activeCycle],
   );
+
+  const monthSections = useMemo(
+    () => groupDatesByMonth(cycleDates),
+    [cycleDates],
+  );
+
+  const pricingModel =
+    waterConfig?.pricingModel ||
+    (waterConfig?.fixedMonthlyAmountCentavos
+      ? "FIXED_MONTHLY"
+      : "PER_PERSON_DAY");
+  const isFixedMode =
+    pricingModel === "FIXED_MONTHLY" ||
+    pricingModel === "FIXED_PER_PERSON_MONTH";
+
   const ratePerDayPesos =
     ((waterConfig?.rateCentavosPerPersonPerDay ?? 500) || 500) / 100;
+  const fixedMonthlyPesos =
+    ((waterConfig?.fixedMonthlyAmountCentavos ?? 0) || 0) / 100;
+  const fixedPerPersonPesos =
+    ((waterConfig?.fixedPerPersonAmountCentavos ?? 0) || 0) / 100;
+
+  const isHost =
+    profile?.role === "HOST" ||
+    profile?.role === "SUPER_ADMIN" ||
+    profile?.hostApplicationStatus === "APPROVED" ||
+    members.some(
+      (m) =>
+        (m.userId === currentUser?.uid || m.memberId === currentUser?.uid) &&
+        m.role === "HOST",
+    );
+
+  const hostMember = members.find((m) => m.role === "HOST");
+  const hostName = hostMember?.displayName || "Property Host";
+
+  const activePayors = useMemo(() => {
+    return members.filter((m) => m.status === "ACTIVE" && isPayorMember(m));
+  }, [members]);
+
+  const payingRoommatesCount = Math.max(1, activePayors.length);
+  const myFixedSharePesos =
+    pricingModel === "FIXED_MONTHLY"
+      ? fixedMonthlyPesos / payingRoommatesCount
+      : fixedPerPersonPesos;
+
+  const mySubmission = submissions[activeUserId];
+  const isMyAttendanceSubmitted = Boolean(mySubmission);
 
   useEffect(() => {
     let mounted = true;
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid) {
+      updateLoading(false);
+      return;
+    }
     mobileDataService.getUserProfile(currentUser.uid).then((nextProfile) => {
-      if (mounted) setProfile(nextProfile);
+      if (mounted) {
+        setProfile(nextProfile);
+        if (!nextProfile?.householdId && !householdId) {
+          updateLoading(false);
+        }
+      }
     });
     return () => {
       mounted = false;
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, householdId]);
 
   useEffect(() => {
     if (!resolvedHouseholdId) return;
     const unsubCycles = mobileDataService.listenToBillingCycles(
       resolvedHouseholdId,
-      setCycles,
+      (cyc) => {
+        setCycles(cyc);
+        updateLoading(false);
+      },
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
       resolvedHouseholdId,
       setWaterConfig,
     );
+    const unsubMembers = mobileDataService.listenToHouseholdMembers(
+      resolvedHouseholdId,
+      setMembers,
+    );
     return () => {
       unsubCycles();
       unsubWater();
+      unsubMembers();
     };
   }, [resolvedHouseholdId]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
-    return mobileDataService.listenToAttendance(
+    const unsubAtt = mobileDataService.listenToAttendance(
       resolvedHouseholdId,
       resolvedBillingCycleId,
       activeUserId,
@@ -153,7 +323,6 @@ export const AttendanceScreen: React.FC<{
           .map(([date]) => date);
 
         setPresentDates((prev) => {
-          // Keep optimistic state for any date currently pending write
           const merged = new Set(serverPresent);
           for (const pendingIso of inFlightRef.current) {
             if (prev.includes(pendingIso)) {
@@ -166,8 +335,27 @@ export const AttendanceScreen: React.FC<{
         });
       },
     );
+
+    const unsubCycleAll = mobileDataService.listenToHouseholdCycleAttendance(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setAllCycleAttendance,
+    );
+
+    const unsubSubs = mobileDataService.listenToAttendanceSubmissions(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setSubmissions,
+    );
+
+    return () => {
+      unsubAtt();
+      unsubCycleAll();
+      unsubSubs();
+    };
   }, [activeUserId, resolvedBillingCycleId, resolvedHouseholdId]);
 
+  // Zero-latency toggle with real-time sync across household and bills
   const toggleDay = async (iso: string) => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
@@ -178,14 +366,14 @@ export const AttendanceScreen: React.FC<{
 
     inFlightRef.current.add(iso);
 
-    // Immediate zero-latency UI update
-    setPresentDates((prev) =>
+    const nextPresent =
       nextStatus === "PRESENT"
-        ? prev.includes(iso)
-          ? prev
-          : [...prev, iso]
-        : prev.filter((date) => date !== iso),
-    );
+        ? presentDates.includes(iso)
+          ? presentDates
+          : [...presentDates, iso]
+        : presentDates.filter((date) => date !== iso);
+
+    setPresentDates(nextPresent);
 
     try {
       await mobileDataService.toggleAttendance(
@@ -195,9 +383,39 @@ export const AttendanceScreen: React.FC<{
         iso,
         nextStatus,
       );
+
+      // If user already submitted before, keep submission record updated in background
+      if (isMyAttendanceSubmitted) {
+        const nextPresentCount = nextPresent.length;
+        const nextAbsentCount = Math.max(
+          0,
+          cycleDates.length - nextPresentCount,
+        );
+        const nextWaterFee = isFixedMode
+          ? myFixedSharePesos
+          : nextPresentCount * ratePerDayPesos;
+        mobileDataService
+          .submitAttendance(
+            resolvedHouseholdId,
+            resolvedBillingCycleId,
+            activeUserId,
+            nextPresentCount,
+            nextAbsentCount,
+            Math.round(nextWaterFee * 100),
+          )
+          .catch(() => {});
+      }
+
+      // Synchronously recalculate and update water bills across screens
+      await mobileDataService.syncCycleWaterBill(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+      );
+      await mobileDataService.recalculateUnpaidExpensesForHousehold(
+        resolvedHouseholdId,
+      );
     } catch (err) {
       console.warn("[AttendanceScreen] toggleDay failed, rolling back:", err);
-      // Safe rollback to prior status on failure
       setPresentDates((prev) =>
         isCurrentlyPresent
           ? prev.includes(iso)
@@ -231,6 +449,29 @@ export const AttendanceScreen: React.FC<{
         activeUserId,
         cycleDates.map((d) => ({ date: d.iso, status: "PRESENT" as const })),
       );
+
+      if (isMyAttendanceSubmitted) {
+        const nextPresentCount = allIsos.length;
+        const nextWaterFee = isFixedMode
+          ? myFixedSharePesos
+          : nextPresentCount * ratePerDayPesos;
+        await mobileDataService.submitAttendance(
+          resolvedHouseholdId,
+          resolvedBillingCycleId,
+          activeUserId,
+          nextPresentCount,
+          0,
+          Math.round(nextWaterFee * 100),
+        );
+      }
+
+      await mobileDataService.syncCycleWaterBill(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+      );
+      await mobileDataService.recalculateUnpaidExpensesForHousehold(
+        resolvedHouseholdId,
+      );
     } catch (err) {
       console.warn("[AttendanceScreen] markAll error:", err);
       setPresentDates(prevDates);
@@ -260,6 +501,26 @@ export const AttendanceScreen: React.FC<{
         activeUserId,
         cycleDates.map((d) => ({ date: d.iso, status: "ABSENT" as const })),
       );
+
+      if (isMyAttendanceSubmitted) {
+        const nextWaterFee = isFixedMode ? myFixedSharePesos : 0;
+        await mobileDataService.submitAttendance(
+          resolvedHouseholdId,
+          resolvedBillingCycleId,
+          activeUserId,
+          0,
+          cycleDates.length,
+          Math.round(nextWaterFee * 100),
+        );
+      }
+
+      await mobileDataService.syncCycleWaterBill(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+      );
+      await mobileDataService.recalculateUnpaidExpensesForHousehold(
+        resolvedHouseholdId,
+      );
     } catch (err) {
       console.warn("[AttendanceScreen] clearAll error:", err);
       setPresentDates(prevDates);
@@ -272,275 +533,1242 @@ export const AttendanceScreen: React.FC<{
   const totalDays = cycleDates.length;
   const presentCount = presentDates.length;
   const absentCount = Math.max(0, totalDays - presentCount);
-  const waterFee = presentCount * ratePerDayPesos;
+  const waterFee = isFixedMode
+    ? myFixedSharePesos
+    : presentCount * ratePerDayPesos;
   const { onScroll } = useNavVisibility();
+
+  // Handle Submit / Update Attendance
+  const handleSubmitAttendance = async () => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId) {
+      Alert.alert(
+        "Notice",
+        "No active billing cycle found to record attendance.",
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const centavos = Math.round(waterFee * 100);
+      await mobileDataService.submitAttendance(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+        activeUserId,
+        presentCount,
+        absentCount,
+        centavos,
+      );
+      // Ensure water bill expense & all memberBills are immediately updated
+      await mobileDataService.syncCycleWaterBill(
+        resolvedHouseholdId,
+        resolvedBillingCycleId,
+      );
+      await mobileDataService.recalculateUnpaidExpensesForHousehold(
+        resolvedHouseholdId,
+      );
+
+      setIsSubmitting(false);
+      Alert.alert(
+        "Attendance Synced",
+        `Your water presence (${presentCount} days present, ₱${waterFee.toFixed(
+          2,
+        )}) has been submitted and updated synchronously across all household bills. You can still edit your dates anytime.`,
+      );
+    } catch (err: any) {
+      setIsSubmitting(false);
+      Alert.alert("Error", err.message || "Failed to submit attendance.");
+    }
+  };
+
+  // Manual Refresh Handler
+  const handleRefresh = async () => {
+    if (!resolvedHouseholdId || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      if (resolvedBillingCycleId) {
+        await mobileDataService.syncCycleWaterBill(
+          resolvedHouseholdId,
+          resolvedBillingCycleId,
+        );
+      }
+      await mobileDataService.recalculateUnpaidExpensesForHousehold(
+        resolvedHouseholdId,
+      );
+    } catch (err) {
+      console.warn("[AttendanceScreen] refresh notice:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Format date range nicely (e.g. "Jul 13, 2026 – Aug 12, 2026")
+  const formatCycleRangeTitle = (
+    startStr?: string,
+    endStr?: string,
+  ): string => {
+    if (!startStr || !endStr) return "Current Billing Cycle";
+    try {
+      const s = new Date(startStr);
+      const e = new Date(endStr);
+      const months = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      return `${months[s.getMonth()]} ${s.getDate()}, ${s.getFullYear()} – ${months[e.getMonth()]} ${e.getDate()}, ${e.getFullYear()}`;
+    } catch {
+      return `${startStr} – ${endStr}`;
+    }
+  };
+
+  if (loading && !onLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "transparent" }}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <UniversalLoader
+          text="Loading attendance..."
+          subtitle="Preparing cycle & dates..."
+          transparent={true}
+        />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Top Bar with circular buttons matching Image 1 */}
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          style={styles.circleIconBtn}
+          onPress={() => (onBack ? onBack() : null)}
+          activeOpacity={0.7}
+        >
+          <Feather name="chevron-left" size={22} color="#0F172A" />
+        </TouchableOpacity>
+
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle}>Attendance</Text>
+          <Text style={styles.topBarSubtitle}>Water Utility Tracking</Text>
+        </View>
+
+        <View style={styles.topBarRight}>
+          <TouchableOpacity
+            style={styles.circleIconBtn}
+            onPress={handleRefresh}
+            disabled={isRefreshing}
+            activeOpacity={0.7}
+          >
+            {isRefreshing ? (
+              <ActivityIndicator size="small" color="#2563EB" />
+            ) : (
+              <Ionicons name="refresh-outline" size={20} color="#0F172A" />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.circleIconBtn}
+            onPress={() => {
+              if (isHost) {
+                setShowWaterSettingsModal(true);
+              } else {
+                Alert.alert(
+                  "Water Mode Info",
+                  pricingModel === "FIXED_MONTHLY"
+                    ? `Fixed monthly water bill is split evenly across ${payingRoommatesCount} roommates.`
+                    : pricingModel === "FIXED_PER_PERSON_MONTH"
+                      ? `Flat water fee of ₱${fixedPerPersonPesos.toFixed(2)} / resident / month.`
+                      : `Daily rate is ₱${ratePerDayPesos.toFixed(2)}/day present. Configured by host.`,
+                );
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="more-vertical" size={20} color="#0F172A" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>Water Attendance</Text>
-          <Text style={styles.subtitle}>
-            {activeCycle
-              ? `${activeCycle.startDate} to ${activeCycle.endDate} · PHP ${ratePerDayPesos.toFixed(2)} / person / day`
-              : "No active Firebase billing cycle found"}
-          </Text>
-        </View>
-
         {!resolvedHouseholdId || !activeCycle ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>
-              No attendance cycle available.
-            </Text>
+            <Ionicons name="calendar-outline" size={40} color="#94A3B8" />
+            <Text style={styles.emptyTitle}>No Active Billing Cycle</Text>
             <Text style={styles.emptySub}>
-              Ask the host to create or finalize a billing cycle in Firebase.
+              Ask your host to create a billing cycle to log and calculate water
+              attendance.
             </Text>
           </View>
         ) : (
           <>
-            <View style={styles.residentPillActive}>
-              <Text style={styles.residentPillTextActive}>
-                {profile?.displayName || currentUser?.displayName || "You"}
-              </Text>
-            </View>
-
-            <View style={styles.statsCard}>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Days Present</Text>
-                <Text style={[styles.statVal, { color: "#059669" }]}>
-                  {presentCount} / {totalDays}
-                </Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Days Absent</Text>
-                <Text style={[styles.statVal, { color: "#DC2626" }]}>
-                  {absentCount} Days
-                </Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Water Share</Text>
-                <Text style={[styles.statVal, { color: "#1E3A8A" }]}>
-                  PHP {waterFee.toFixed(2)}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.batchActions}>
-              <TouchableOpacity
-                style={[styles.batchBtn, isBatching && { opacity: 0.7 }]}
-                onPress={markAll}
-                disabled={isBatching}
-                activeOpacity={0.8}
-              >
-                {isBatching ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.batchBtnText}>Mark All Present</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.batchBtn,
-                  styles.batchBtnSecondary,
-                  isBatching && { opacity: 0.7 },
-                ]}
-                onPress={clearAll}
-                disabled={isBatching}
-                activeOpacity={0.8}
-              >
-                {isBatching ? (
-                  <ActivityIndicator size="small" color="#64748B" />
-                ) : (
-                  <Text
-                    style={[styles.batchBtnText, styles.batchBtnTextSecondary]}
-                  >
-                    Clear All
+            {/* =========================================================================
+                BLUE HERO CARD - Pixel perfect match to Image 1
+                ========================================================================= */}
+            <View style={styles.heroCard}>
+              <View style={styles.heroTopRow}>
+                <View style={styles.activeCyclePill}>
+                  <View style={styles.activeCycleDot} />
+                  <Text style={styles.activeCyclePillText}>
+                    Active Billing Cycle
                   </Text>
+                </View>
+                <Text style={styles.totalDaysText}>{totalDays} Total Days</Text>
+              </View>
+
+              <Text style={styles.heroCycleRange}>
+                {formatCycleRangeTitle(
+                  activeCycle.startDate,
+                  activeCycle.endDate,
                 )}
-              </TouchableOpacity>
+              </Text>
+
+              <Text style={styles.heroWaterRate}>
+                Water Bill:{" "}
+                <Text style={styles.heroWaterRateBold}>
+                  {pricingModel === "FIXED_MONTHLY"
+                    ? `₱${fixedMonthlyPesos.toFixed(2)} / month total`
+                    : pricingModel === "FIXED_PER_PERSON_MONTH"
+                      ? `₱${fixedPerPersonPesos.toFixed(2)} / resident / mo`
+                      : `₱${ratePerDayPesos.toFixed(2)} / day / person`}
+                </Text>
+              </Text>
+
+              {/* 3 Translucent Metric Cards */}
+              <View style={styles.heroMetricsRow}>
+                <View style={styles.heroMetricBox}>
+                  <Text style={styles.heroMetricLabel}>Present Days</Text>
+                  <Text style={styles.heroMetricValue}>{presentCount}</Text>
+                </View>
+
+                <View style={styles.heroMetricBox}>
+                  <Text style={styles.heroMetricLabel}>Absent Days</Text>
+                  <Text style={styles.heroMetricValue}>{absentCount}</Text>
+                </View>
+
+                <View style={styles.heroMetricBox}>
+                  <Text style={styles.heroMetricLabel}>Your Due</Text>
+                  <Text
+                    style={[styles.heroMetricValue, styles.heroMetricValueDue]}
+                  >
+                    ₱{waterFee.toFixed(2)}
+                  </Text>
+                </View>
+              </View>
             </View>
 
-            <Text style={styles.sectionTitle}>Billing Cycle Calendar</Text>
-            <Text style={styles.sectionHint}>
-              Tap any calendar date to toggle Present / Absent status
-            </Text>
+            {/* =========================================================================
+                WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
+                ========================================================================= */}
+            <View style={styles.feeBarCard}>
+              <View style={styles.feeIconCircle}>
+                <Ionicons name="water" size={18} color="#2563EB" />
+              </View>
 
-            <View style={styles.grid}>
-              {cycleDates.map((d) => {
-                const isPresent = presentDates.includes(d.iso);
-                return (
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.feeBarTitle}>Water Utility Fee</Text>
+                <Text style={styles.feeBarSubtitle}>
+                  {pricingModel === "FIXED_MONTHLY"
+                    ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
+                    : pricingModel === "FIXED_PER_PERSON_MONTH"
+                      ? `Fixed ₱${fixedPerPersonPesos.toFixed(2)} flat fee`
+                      : `Fixed ₱${ratePerDayPesos.toFixed(0)} per present day`}
+                </Text>
+              </View>
+
+              {!isFixedMode && (
+                <View style={styles.feeBarActions}>
                   <TouchableOpacity
-                    key={d.iso}
-                    style={[
-                      styles.dayBox,
-                      isPresent ? styles.dayBoxPresent : styles.dayBoxAbsent,
-                      d.isWeekend && styles.dayBoxWeekend,
-                    ]}
-                    onPress={() => toggleDay(d.iso)}
+                    style={styles.markAllBtn}
+                    onPress={markAll}
+                    disabled={isBatching}
+                    activeOpacity={0.7}
                   >
-                    <Text
-                      style={[
-                        styles.dayOfWeek,
-                        isPresent
-                          ? styles.dayTextWhiteSub
-                          : styles.dayTextMuted,
-                      ]}
-                    >
-                      {d.dayOfWeek}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.dayNum,
-                        isPresent ? styles.dayTextWhite : styles.dayTextDark,
-                      ]}
-                    >
-                      {d.dayNum}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.dayMonth,
-                        isPresent
-                          ? styles.dayTextWhiteSub
-                          : styles.dayTextMuted,
-                      ]}
-                    >
-                      {d.monthShort}
-                    </Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        isPresent ? styles.badgePresent : styles.badgeAbsent,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusBadgeText,
-                          isPresent
-                            ? styles.badgePresentText
-                            : styles.badgeAbsentText,
-                        ]}
-                      >
-                        {isPresent ? "P" : "A"}
+                    <Text style={styles.markAllBtnText}>Mark All</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.clearBtn}
+                    onPress={clearAll}
+                    disabled={isBatching}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.clearBtnText}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* =========================================================================
+                CALENDAR SECTION - Grouped by Month with Clean Dates ONLY (No ₱5)
+                ========================================================================= */}
+            {isFixedMode ? (
+              <View style={styles.fixedNoticeCard}>
+                <View style={styles.fixedNoticeIconBox}>
+                  <Ionicons name="checkmark-circle" size={32} color="#059669" />
+                </View>
+                <Text style={styles.fixedNoticeTitle}>
+                  Daily attendance is not required for your apartment.
+                </Text>
+                <Text style={styles.fixedNoticeSub}>
+                  {pricingModel === "FIXED_MONTHLY"
+                    ? `Household water bill (₱${fixedMonthlyPesos.toFixed(
+                        2,
+                      )}) is split evenly across ${payingRoommatesCount} paying roommates.`
+                    : `Water is billed as a flat monthly rate of ₱${fixedPerPersonPesos.toFixed(
+                        2,
+                      )} / resident.`}
+                </Text>
+                <View style={styles.fixedHostTag}>
+                  <Feather name="shield" size={13} color="#0369A1" />
+                  <Text style={styles.fixedHostTagText}>
+                    Set by Property Host ({hostName})
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              monthSections.map((sec) => {
+                const sectionPresentCount = sec.dates.filter((d) =>
+                  presentDates.includes(d.iso),
+                ).length;
+                const totalInSec = sec.dates.length;
+                const rangeLabel = `${sec.dates[0].monthShort} ${sec.startDayNum} – ${
+                  sec.dates[sec.dates.length - 1].monthShort
+                } ${sec.endDayNum} (${totalInSec} days)`;
+
+                // Weekday headers matching Image 1: MON TUE WED THU FRI SAT SUN
+                const weekdayLabels = [
+                  "MON",
+                  "TUE",
+                  "WED",
+                  "THU",
+                  "FRI",
+                  "SAT",
+                  "SUN",
+                ];
+
+                return (
+                  <View key={sec.monthKey} style={styles.calendarCard}>
+                    {/* Month Header */}
+                    <View style={styles.monthHeaderRow}>
+                      <View style={styles.monthTitleLeft}>
+                        <View style={styles.monthDot} />
+                        <Text style={styles.monthTitleText}>
+                          {sec.monthName} {sec.year}
+                        </Text>
+                        <View style={styles.monthRangePill}>
+                          <Text style={styles.monthRangePillText}>
+                            {rangeLabel}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.monthPresentRatio}>
+                        {sectionPresentCount} / {totalInSec} Present
                       </Text>
                     </View>
-                  </TouchableOpacity>
+
+                    {/* Weekday Row */}
+                    <View style={styles.weekdaysRow}>
+                      {weekdayLabels.map((w) => (
+                        <Text key={w} style={styles.weekdayText}>
+                          {w}
+                        </Text>
+                      ))}
+                    </View>
+
+                    {/* Days Grid - Only dates, no ₱5 per user instruction! */}
+                    <View style={styles.daysGrid}>
+                      {/* Leading empty spacers to align day of week */}
+                      {Array.from({ length: sec.leadingEmptyDays }).map(
+                        (_, idx) => (
+                          <View
+                            key={`spacer_${idx}`}
+                            style={styles.dayBoxEmpty}
+                          />
+                        ),
+                      )}
+
+                      {/* Actual Cycle Dates - Clean date numbers only */}
+                      {sec.dates.map((d) => {
+                        const isPresent = presentDates.includes(d.iso);
+                        return (
+                          <TouchableOpacity
+                            key={d.iso}
+                            style={[
+                              styles.dayBox,
+                              isPresent
+                                ? styles.dayBoxPresent
+                                : styles.dayBoxAbsent,
+                            ]}
+                            onPress={() => toggleDay(d.iso)}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.dayNumberText,
+                                isPresent
+                                  ? styles.dayNumberTextPresent
+                                  : styles.dayNumberTextAbsent,
+                              ]}
+                            >
+                              {d.dayNum}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 );
-              })}
+              })
+            )}
+
+            {/* =========================================================================
+                ROOMMATES BREAKDOWN CARD - Pixel perfect match to Image 2
+                ========================================================================= */}
+            <View style={styles.breakdownCard}>
+              <View style={styles.breakdownHeader}>
+                <Text style={styles.breakdownTitle}>Roommates Breakdown</Text>
+                <Text style={styles.breakdownMemberCount}>
+                  {members.length} Member{members.length === 1 ? "" : "s"}
+                </Text>
+              </View>
+
+              <View style={styles.roommatesList}>
+                {members.map((member, index) => {
+                  const mUid = member.userId || member.memberId;
+                  const isMe = mUid === activeUserId;
+                  const isPayor = isPayorMember(member);
+
+                  // Calculate days present for this member from allCycleAttendance or submissions
+                  const attPresentCount = allCycleAttendance.filter(
+                    (a) =>
+                      (a.userId === mUid ||
+                        a.userId === member.userId ||
+                        a.userId === member.memberId ||
+                        a.userId === member.id ||
+                        (member.userId &&
+                          a.userId === member.userId.replace("mem_", "")) ||
+                        (mUid && a.userId === mUid.replace("mem_", ""))) &&
+                      a.status === "PRESENT",
+                  ).length;
+                  const memberSub =
+                    submissions[mUid] ||
+                    (member.userId ? submissions[member.userId] : undefined) ||
+                    (member.memberId
+                      ? submissions[member.memberId]
+                      : undefined) ||
+                    (member.id ? submissions[member.id] : undefined) ||
+                    (mUid ? submissions[mUid.replace("mem_", "")] : undefined);
+                  const subPresentCount = memberSub?.daysPresent || 0;
+                  const memberPresentCount = isMe
+                    ? presentCount
+                    : attPresentCount > 0
+                      ? attPresentCount
+                      : subPresentCount;
+
+                  const memberAbsentCount = Math.max(
+                    0,
+                    totalDays - memberPresentCount,
+                  );
+                  // Effective daily rate (defaults safely to ₱5.00/day)
+                  const effectiveDailyRate =
+                    Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
+                      ? Number(waterConfig.rateCentavosPerPersonPerDay) / 100
+                      : 5.0;
+
+                  // Real amount based on presence: if member has presence days, ALWAYS calculate presence * daily rate
+                  const memberWaterTotal =
+                    memberPresentCount > 0
+                      ? memberPresentCount * effectiveDailyRate
+                      : isFixedMode
+                        ? myFixedSharePesos
+                        : 0;
+
+                  const memberSubmission = submissions[mUid];
+                  const isSubmitted = isMe
+                    ? isMyAttendanceSubmitted
+                    : Boolean(memberSubmission);
+                  const hasMarked = isMe
+                    ? presentCount > 0
+                    : memberPresentCount > 0;
+
+                  const avatarInitials = getInitials(
+                    member.displayName || member.name,
+                  );
+                  const avatarBg = isMe
+                    ? "#2563EB"
+                    : AVATAR_COLORS[index % AVATAR_COLORS.length];
+
+                  return (
+                    <View
+                      key={mUid}
+                      style={[
+                        styles.memberCard,
+                        isMe && styles.memberCardHighlight,
+                      ]}
+                    >
+                      {/* Avatar */}
+                      {member.profilePicture || member.photoURL ? (
+                        <Image
+                          source={{
+                            uri: member.profilePicture || member.photoURL,
+                          }}
+                          style={styles.memberAvatarImg}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.memberAvatar,
+                            { backgroundColor: avatarBg },
+                          ]}
+                        >
+                          <Text style={styles.memberAvatarText}>
+                            {avatarInitials}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Details */}
+                      <View style={styles.memberInfoCol}>
+                        <View style={styles.memberNameRow}>
+                          <Text style={styles.memberName} numberOfLines={1}>
+                            {member.displayName || "Roommate"}
+                            {isMe ? " (You)" : ""}
+                          </Text>
+
+                          {/* Synced Badge */}
+                          {isSubmitted && (
+                            <View style={styles.syncedPill}>
+                              <Text style={styles.syncedPillText}>Synced</Text>
+                            </View>
+                          )}
+
+                          {/* Exempt Pill */}
+                          {!isPayor && (
+                            <View style={styles.exemptPill}>
+                              <Text style={styles.exemptPillText}>Exempt</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        <Text style={styles.memberStaySub}>
+                          {memberPresentCount} days present •{" "}
+                          {memberAbsentCount} off
+                        </Text>
+                      </View>
+
+                      {/* Right Due & Status */}
+                      <View style={styles.memberDueCol}>
+                        <Text style={styles.memberDueAmount}>
+                          ₱{memberWaterTotal.toFixed(2)}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.memberStatusLabel,
+                            hasMarked || isSubmitted
+                              ? styles.memberStatusMarked
+                              : styles.memberStatusPending,
+                          ]}
+                        >
+                          {hasMarked || isSubmitted
+                            ? !isPayor
+                              ? "Marked (Exempt)"
+                              : "Marked"
+                            : !isPayor
+                              ? "Exempt"
+                              : "Pending"}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* =========================================================================
+                SUBMIT / UPDATE BUTTON & BANNER - Pixel perfect match to Image 2
+                Allows editing anytime and synchronizes all bills across app
+                ========================================================================= */}
+            <View style={styles.submissionContainer}>
+              <View
+                style={[
+                  styles.submissionNoticeBox,
+                  isMyAttendanceSubmitted
+                    ? styles.submissionNoticeBoxSubmitted
+                    : styles.submissionNoticeBoxPending,
+                ]}
+              >
+                <Ionicons
+                  name={
+                    isMyAttendanceSubmitted
+                      ? "checkmark-circle"
+                      : "water-outline"
+                  }
+                  size={18}
+                  color={isMyAttendanceSubmitted ? "#059669" : "#2563EB"}
+                />
+                <Text
+                  style={[
+                    styles.submissionNoticeText,
+                    isMyAttendanceSubmitted &&
+                      styles.submissionNoticeTextSubmitted,
+                  ]}
+                >
+                  {isMyAttendanceSubmitted
+                    ? `Presence submitted (${presentCount} days, ₱${waterFee.toFixed(
+                        2,
+                      )}). You can edit dates above anytime — bills will update synchronously.`
+                    : "Submit your water presence for this cycle. You can make adjustments and resubmit anytime."}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.submitButton, isSubmitting && { opacity: 0.75 }]}
+                onPress={handleSubmitAttendance}
+                disabled={isSubmitting}
+                activeOpacity={0.85}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <View style={styles.submitBtnInner}>
+                    <Text style={styles.submitButtonText}>
+                      {isMyAttendanceSubmitted
+                        ? `Update Water Presence (₱${waterFee.toFixed(2)})`
+                        : `Submit Water Presence (₱${waterFee.toFixed(2)})`}
+                    </Text>
+                    <Feather
+                      name={isMyAttendanceSubmitted ? "check" : "arrow-right"}
+                      size={18}
+                      color="#FFFFFF"
+                      style={{ marginLeft: 8 }}
+                    />
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <Text style={styles.submissionFootnote}>
+                {isMyAttendanceSubmitted
+                  ? "✓ Real-time synced · Tap any day to edit and re-sync"
+                  : "Tap above to mark days present, then submit to sync dues"}
+              </Text>
             </View>
           </>
         )}
       </ScrollView>
+
+      {/* Host Water Settings Modal */}
+      {isHost && resolvedHouseholdId && (
+        <WaterSettingsModal
+          visible={showWaterSettingsModal}
+          onClose={() => setShowWaterSettingsModal(false)}
+          householdId={resolvedHouseholdId}
+          initialConfig={waterConfig}
+          onSaved={() => {
+            if (resolvedBillingCycleId) {
+              mobileDataService
+                .syncCycleWaterBill(resolvedHouseholdId, resolvedBillingCycleId)
+                .catch(() => {});
+            }
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
-  scrollContent: { padding: 20, paddingBottom: 85 },
-  header: { marginBottom: 14 },
-  title: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
-  subtitle: { fontSize: 13, color: "#64748B", marginTop: 3 },
-  emptyCard: {
-    backgroundColor: "#F8FAFC",
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
-  },
-  emptyTitle: { fontSize: 13, fontWeight: "700", color: "#334155" },
-  emptySub: { fontSize: 11, color: "#94A3B8", marginTop: 2 },
-  residentPillActive: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: "#2563EB",
-    borderWidth: 1,
-    borderColor: "#2563EB",
-    marginBottom: 14,
-  },
-  residentPillTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 12,
-  },
-  statsCard: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 16,
-    borderRadius: 18,
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
-    marginBottom: 16,
-  },
-  statBox: { flex: 1, alignItems: "center" },
-  statDivider: {
-    width: 1,
-    backgroundColor: "#BFDBFE",
-    height: "80%",
-    alignSelf: "center",
-  },
-  statLabel: { fontSize: 11, color: "#1E40AF", fontWeight: "700" },
-  statVal: { fontSize: 17, fontWeight: "900", marginTop: 4 },
-  batchActions: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  batchBtn: {
+  container: {
     flex: 1,
-    backgroundColor: "#10B981",
-    paddingVertical: 10,
-    borderRadius: 12,
-    alignItems: "center",
+    backgroundColor: "#F8FAFC",
   },
-  batchBtnSecondary: {
-    backgroundColor: "#F1F5F9",
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "#F8FAFC",
+  },
+  topBarCenter: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  topBarTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  topBarSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  topBarRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  circleIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  batchBtnText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
-  batchBtnTextSecondary: { color: "#64748B" },
-  sectionTitle: { fontSize: 15, fontWeight: "800", color: "#0F172A" },
-  sectionHint: {
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 95,
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 32,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+    marginTop: 20,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0F172A",
+    marginTop: 12,
+  },
+  emptySub: {
+    fontSize: 13,
+    color: "#64748B",
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 19,
+  },
+
+  /* Blue Hero Card matching Image 1 */
+  heroCard: {
+    backgroundColor: "#1E60E6",
+    borderRadius: 26,
+    padding: 20,
+    marginBottom: 14,
+    shadowColor: "#1E60E6",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  heroTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  activeCyclePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    gap: 6,
+  },
+  activeCycleDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#10B981",
+  },
+  activeCyclePillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  totalDaysText: {
     fontSize: 12,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.9)",
+  },
+  heroCycleRange: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  heroWaterRate: {
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.85)",
+    marginBottom: 16,
+  },
+  heroWaterRateBold: {
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  heroMetricsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  heroMetricBox: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroMetricLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.85)",
+    marginBottom: 2,
+  },
+  heroMetricValue: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  heroMetricValueDue: {
+    color: "#FACC15",
+  },
+
+  /* Water Utility Fee Bar matching Image 1 */
+  feeBarCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  feeIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  feeBarTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  feeBarSubtitle: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  feeBarActions: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  markAllBtn: {
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  markAllBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  clearBtn: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  clearBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+
+  /* Monthly Calendar Card matching Image 1 */
+  calendarCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  monthHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  monthTitleLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    flex: 1,
+  },
+  monthDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563EB",
+  },
+  monthTitleText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  monthRangePill: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  monthRangePillText: {
+    fontSize: 11,
+    color: "#475569",
+    fontWeight: "600",
+  },
+  monthPresentRatio: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  weekdaysRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  weekdayText: {
+    width: "13.2%",
+    textAlign: "center",
+    fontSize: 10,
+    fontWeight: "700",
     color: "#94A3B8",
-    marginTop: 2,
+  },
+  daysGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    justifyContent: "flex-start",
+  },
+  dayBoxEmpty: {
+    width: "13.2%",
+    aspectRatio: 1,
+  },
+  dayBox: {
+    width: "13.2%",
+    aspectRatio: 1,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+  },
+  dayBoxPresent: {
+    backgroundColor: "#1E60E6",
+    borderColor: "#1E60E6",
+    shadowColor: "#1E60E6",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dayBoxAbsent: {
+    backgroundColor: "#FAFAFA",
+    borderColor: "#E2E8F0",
+    borderStyle: "dashed",
+  },
+  dayNumberText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  dayNumberTextPresent: {
+    color: "#FFFFFF",
+  },
+  dayNumberTextAbsent: {
+    color: "#64748B",
+  },
+
+  /* Fixed notice card */
+  fixedNoticeCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
     marginBottom: 14,
   },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  dayBox: {
-    width: "18.6%",
-    aspectRatio: 0.85,
-    borderRadius: 12,
-    justifyContent: "center",
+  fixedNoticeIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#ECFDF5",
     alignItems: "center",
-    borderWidth: 1.5,
-    paddingVertical: 4,
+    justifyContent: "center",
+    marginBottom: 12,
   },
-  dayBoxPresent: { backgroundColor: "#10B981", borderColor: "#059669" },
-  dayBoxAbsent: { backgroundColor: "#F8FAFC", borderColor: "#E2E8F0" },
-  dayBoxWeekend: { borderStyle: "dashed" },
-  dayOfWeek: { fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
-  dayNum: { fontSize: 15, fontWeight: "900", marginVertical: 1 },
-  dayMonth: { fontSize: 8, fontWeight: "800", textTransform: "uppercase" },
-  dayTextWhite: { color: "#FFFFFF" },
-  dayTextWhiteSub: { color: "#E0F2FE" },
-  dayTextDark: { color: "#0F172A" },
-  dayTextMuted: { color: "#94A3B8" },
-  statusBadge: {
-    marginTop: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 6,
+  fixedNoticeTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0F172A",
+    textAlign: "center",
+    marginBottom: 6,
   },
-  badgePresent: { backgroundColor: "rgba(255,255,255,0.3)" },
-  badgeAbsent: { backgroundColor: "#FEE2E2" },
-  statusBadgeText: { fontSize: 8, fontWeight: "900" },
-  badgePresentText: { color: "#FFFFFF" },
-  badgeAbsentText: { color: "#DC2626" },
+  fixedNoticeSub: {
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  fixedHostTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0F9FF",
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  fixedHostTagText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#0369A1",
+  },
+
+  /* Roommates Breakdown Card matching Image 2 */
+  breakdownCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  breakdownHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  breakdownTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  breakdownMemberCount: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  roommatesList: {
+    gap: 10,
+  },
+  memberCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    borderRadius: 18,
+    padding: 12,
+  },
+  memberCardHighlight: {
+    borderColor: "#BFDBFE",
+    backgroundColor: "#F8FAFF",
+  },
+  memberAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  memberAvatarImg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+  },
+  memberAvatarText: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  memberInfoCol: {
+    flex: 1,
+    marginRight: 8,
+  },
+  memberNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  memberName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  syncedPill: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  syncedPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  exemptPill: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  exemptPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#475569",
+  },
+  memberStaySub: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  memberDueCol: {
+    alignItems: "flex-end",
+  },
+  memberDueAmount: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#0F172A",
+    marginBottom: 2,
+  },
+  memberStatusLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  memberStatusMarked: {
+    color: "#059669",
+  },
+  memberStatusPending: {
+    color: "#94A3B8",
+  },
+
+  /* Submit Water Bill Attendance Button matching Image 2 */
+  submissionContainer: {
+    marginBottom: 24,
+  },
+  submissionNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  submissionNoticeBoxPending: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+  },
+  submissionNoticeBoxSubmitted: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#A7F3D0",
+  },
+  submissionNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#1E40AF",
+    fontWeight: "600",
+  },
+  submissionNoticeTextSubmitted: {
+    color: "#065F46",
+  },
+  submitButton: {
+    backgroundColor: "#2563EB",
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+    marginBottom: 12,
+  },
+  submitBtnInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  submitButtonText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  submissionFootnote: {
+    fontSize: 11,
+    color: "#94A3B8",
+    textAlign: "center",
+    fontWeight: "600",
+  },
 });

@@ -8,12 +8,14 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   mobileDataService,
   MobileExpense,
   isPayorMember,
+  cleanBillTitle,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -22,24 +24,47 @@ import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { UniversalLoader } from "../components/UniversalLoader";
 import { getCategoryMeta } from "../services/categoryService";
+import { getBillDueStatus } from "./HomeScreen";
 
 export const BillsScreen: React.FC<{
   onPayPress?: () => void;
   householdId?: string;
   initialSubView?: "overview" | "pay";
-}> = ({ onPayPress, householdId, initialSubView = "overview" }) => {
+  onLoaded?: () => void;
+}> = ({ onPayPress, householdId, initialSubView = "overview", onLoaded }) => {
   const [subView, setSubView] = useState<"overview" | "pay">(initialSubView);
   const [profile, setProfile] = useState<any | null>(null);
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const currentUser = auth.currentUser;
   const resolvedHouseholdId = householdId || profile?.householdId || "";
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(14)).current;
+
+  const updateLoading = (val: boolean) => {
+    setLoading(val);
+    if (!val) {
+      onLoaded?.();
+    }
+  };
+
+  // Fallback safety timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      updateLoading(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
 
   const activeCycle = useMemo(
     () =>
@@ -52,44 +77,94 @@ export const BillsScreen: React.FC<{
   useEffect(() => {
     let mounted = true;
     if (!currentUser?.uid) {
-      setLoading(false);
+      updateLoading(false);
       return;
     }
     mobileDataService.getUserProfile(currentUser.uid).then((nextProfile) => {
-      if (mounted) setProfile(nextProfile);
+      if (mounted) {
+        setProfile(nextProfile);
+        setProfileLoaded(true);
+        if (!nextProfile?.householdId && !householdId) {
+          updateLoading(false);
+        }
+      }
     });
     return () => {
       mounted = false;
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, householdId]);
 
   useEffect(() => {
-    if (!resolvedHouseholdId) {
-      setLoading(false);
+    if (!profileLoaded && !householdId) {
+      // Still waiting for profile to resolve
       return;
     }
-    setLoading(true);
+    if (!resolvedHouseholdId) {
+      updateLoading(false);
+      return;
+    }
+    updateLoading(true);
+    let expLoaded = false;
+    let cycLoaded = false;
+    const checkDone = () => {
+      if (expLoaded && cycLoaded) {
+        updateLoading(false);
+      }
+    };
+
     const unsubExpenses = mobileDataService.listenToExpenses(
       resolvedHouseholdId,
       (data) => {
         setExpenses(data);
-        setLoading(false);
+        expLoaded = true;
+        checkDone();
       },
     );
     const unsubCycles = mobileDataService.listenToBillingCycles(
       resolvedHouseholdId,
-      setCycles,
+      (data) => {
+        setCycles(data);
+        cycLoaded = true;
+        checkDone();
+      },
     );
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
       setMembers,
     );
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      resolvedHouseholdId,
+      setWaterConfig,
+    );
     return () => {
       unsubExpenses();
       unsubCycles();
       unsubMembers();
+      unsubWater();
     };
   }, [resolvedHouseholdId]);
+
+  useEffect(() => {
+    if (!resolvedHouseholdId || !activeCycle?.billingCycleId) {
+      setCycleAttendance([]);
+      setAttendanceSubmissions({});
+      return;
+    }
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      resolvedHouseholdId,
+      activeCycle.billingCycleId,
+      setCycleAttendance,
+    );
+    const unsubSub = mobileDataService.listenToAttendanceSubmissions(
+      resolvedHouseholdId,
+      activeCycle.billingCycleId,
+      setAttendanceSubmissions,
+    );
+    return () => {
+      unsubAtt();
+      unsubSub();
+    };
+  }, [resolvedHouseholdId, activeCycle?.billingCycleId]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !activeCycle?.billingCycleId) {
@@ -145,14 +220,27 @@ export const BillsScreen: React.FC<{
     const payorCount = Math.max(1, activePayors.length);
     const unpaidExpenses = expenses.filter((e) => e.status !== "PAID");
     return unpaidExpenses.reduce((sum, e) => {
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      const mySplit = e.splitDetails?.find(
+        (s: any) => s.userId === currentUser?.uid,
+      );
+
+      if (isWater && mySplit && typeof mySplit.shareCentavos === "number") {
+        return sum + mySplit.shareCentavos;
+      }
+
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt)
+        : [];
+      const isSplitStale =
+        splitPayors.length > 0 && splitPayors.length !== payorCount;
+
       if (
+        !isSplitStale &&
         e.splitDetails &&
         Array.isArray(e.splitDetails) &&
         e.splitDetails.length > 0
       ) {
-        const mySplit = e.splitDetails.find(
-          (s: any) => s.userId === currentUser?.uid,
-        );
         if (mySplit && typeof mySplit.shareCentavos === "number") {
           return sum + mySplit.shareCentavos;
         }
@@ -165,14 +253,51 @@ export const BillsScreen: React.FC<{
     (acc, cur) => acc + cur.amountCents,
     0,
   );
+  const paidCentavos =
+    myBill && typeof myBill.totalPaidCentavos === "number"
+      ? myBill.totalPaidCentavos
+      : 0;
   const myShareCents = isCurrentUserPayor
-    ? Math.max(
-        myBill && typeof myBill.outstandingCentavos === "number"
-          ? myBill.outstandingCentavos
-          : 0,
-        liveUnpaidShareCents,
-      )
+    ? Math.max(0, liveUnpaidShareCents - paidCentavos)
     : 0;
+
+  // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
+  useEffect(() => {
+    if (
+      !resolvedHouseholdId ||
+      activePayors.length === 0 ||
+      expenses.length === 0
+    )
+      return;
+    const payorCount = Math.max(1, activePayors.length);
+    const hasStaleSplit = expenses.some((e) => {
+      if (e.status === "PAID" || e.isPaid) return false;
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      if (isWater) return false; // Water attendance is managed dynamically
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt)
+        : [];
+      return splitPayors.length > 0 && splitPayors.length !== payorCount;
+    });
+
+    const isMemberBillStale =
+      myBill &&
+      typeof myBill.outstandingCentavos === "number" &&
+      (myBill.totalPaidCentavos || 0) === 0 &&
+      Math.abs(myBill.outstandingCentavos - liveUnpaidShareCents) > 100;
+
+    if (hasStaleSplit || isMemberBillStale) {
+      mobileDataService
+        .recalculateUnpaidExpensesForHousehold(resolvedHouseholdId)
+        .catch(() => {});
+    }
+  }, [
+    resolvedHouseholdId,
+    activePayors.length,
+    expenses,
+    myBill,
+    liveUnpaidShareCents,
+  ]);
   const { onScroll } = useNavVisibility();
 
   if (subView === "pay") {
@@ -185,11 +310,25 @@ export const BillsScreen: React.FC<{
     );
   }
 
+  if (loading && !onLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "transparent" }}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <UniversalLoader
+          text="Loading bills..."
+          subtitle="Calculating fair shares..."
+          transparent={true}
+        />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      {loading && (
-        <UniversalLoader text="Loading bills..." transparent={true} />
-      )}
       <Animated.View
         style={{
           flex: 1,
@@ -270,8 +409,8 @@ export const BillsScreen: React.FC<{
             <Text style={styles.heroAmount}>{formatPesos(myShareCents)}</Text>
             <Text style={styles.heroSub}>
               {isCurrentUserPayor
-                ? `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}${activeNonPayors.length > 0 ? ` (${activeNonPayors.length} non-payors exempt)` : ""}`
-                : `You are exempt from household dues as a non-payor. Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
+                ? `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
+                : `Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
             </Text>
 
             {isCurrentUserPayor && (
@@ -325,15 +464,103 @@ export const BillsScreen: React.FC<{
             expenses.map((e) => {
               const isExpensePaid = e.status === "PAID" || e.isPaid === true;
               const catMeta = getCategoryMeta(e.category);
+              const isWater = (e.category || "")
+                .toLowerCase()
+                .includes("water");
+              const payorCount = Math.max(1, activePayors.length);
+              const isPersonDayMode =
+                waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+                !waterConfig?.pricingModel;
+
+              let waterMyShare = 0;
+              let waterTotalCentavos = e.amountCents;
+              if (isWater) {
+                if (isPersonDayMode) {
+                  const rate = Number(
+                    waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                  );
+                  const myAtt = cycleAttendance.filter(
+                    (a) =>
+                      a.userId === currentUser?.uid && a.status === "PRESENT",
+                  ).length;
+                  const mySub =
+                    attendanceSubmissions[currentUser?.uid || ""]
+                      ?.daysPresent || 0;
+                  const myDays = myAtt > 0 ? myAtt : mySub;
+                  const ownCost = myDays * rate;
+                  const totalNonPayorWater = members
+                    .filter((m) => m.status === "ACTIVE" && !isPayorMember(m))
+                    .reduce((npSum, np) => {
+                      const npUid = np.userId || np.memberId;
+                      const npAtt = cycleAttendance.filter(
+                        (a) => a.userId === npUid && a.status === "PRESENT",
+                      ).length;
+                      const npSub =
+                        attendanceSubmissions[npUid]?.daysPresent || 0;
+                      const npDays = npAtt > 0 ? npAtt : npSub;
+                      return npSum + npDays * rate;
+                    }, 0);
+                  const extraPerPayor =
+                    payorCount > 0
+                      ? Math.round(totalNonPayorWater / payorCount)
+                      : 0;
+                  if (isCurrentUserPayor) {
+                    waterMyShare = ownCost + extraPerPayor;
+                  }
+
+                  const totalAllWater = members
+                    .filter((m) => m.status === "ACTIVE")
+                    .reduce((sum, m) => {
+                      const mUid = m.userId || m.memberId;
+                      const att = cycleAttendance.filter(
+                        (a) => a.userId === mUid && a.status === "PRESENT",
+                      ).length;
+                      const sub = attendanceSubmissions[mUid]?.daysPresent || 0;
+                      const days = att > 0 ? att : sub;
+                      return sum + days * rate;
+                    }, 0);
+                  if (totalAllWater > 0) {
+                    waterTotalCentavos = totalAllWater;
+                  }
+                } else if (
+                  waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                ) {
+                  if (isCurrentUserPayor) {
+                    waterMyShare =
+                      waterConfig.fixedPerPersonAmountCentavos || 0;
+                  }
+                  waterTotalCentavos =
+                    (waterConfig.fixedPerPersonAmountCentavos || 0) *
+                    payorCount;
+                } else {
+                  if (isCurrentUserPayor) {
+                    waterMyShare = Math.round(e.amountCents / payorCount);
+                  }
+                }
+              }
+
+              const splitPayors = e.splitDetails
+                ? e.splitDetails.filter(
+                    (s: any) => !s.isExempt && s.shareCentavos > 0,
+                  )
+                : [];
+              const isSplitStale =
+                !isWater &&
+                splitPayors.length > 0 &&
+                splitPayors.length !== payorCount;
               const mySplit = e.splitDetails?.find(
                 (s: any) => s.userId === currentUser?.uid,
               );
-              const payorCount = Math.max(1, activePayors.length);
               const myShareForExpense = !isCurrentUserPayor
                 ? 0
-                : mySplit
-                  ? mySplit.shareCentavos
-                  : Math.round(e.amountCents / payorCount);
+                : isWater
+                  ? waterMyShare
+                  : !isSplitStale &&
+                      mySplit &&
+                      typeof mySplit.shareCentavos === "number"
+                    ? mySplit.shareCentavos
+                    : Math.round(e.amountCents / payorCount);
+              const dueInfo = getBillDueStatus(e, activeCycle, cycles);
 
               return (
                 <View key={e.id} style={styles.billItem}>
@@ -358,49 +585,47 @@ export const BillsScreen: React.FC<{
                         flexWrap: "wrap",
                       }}
                     >
-                      <Text style={styles.billName}>{e.title}</Text>
-                      <View
-                        style={
-                          isExpensePaid
-                            ? styles.statusBadgePaid
-                            : styles.statusBadgeUnpaid
-                        }
-                      >
-                        <Text
-                          style={
-                            isExpensePaid
-                              ? styles.statusBadgeTextPaid
-                              : styles.statusBadgeTextUnpaid
-                          }
+                      <Text style={styles.billName}>
+                        {cleanBillTitle(e.title, e.category)}
+                      </Text>
+                      {isExpensePaid ? (
+                        <View style={styles.statusBadgePaid}>
+                          <Text style={styles.statusBadgeTextPaid}>PAID</Text>
+                        </View>
+                      ) : (
+                        <View
+                          style={[
+                            styles.dueBadge,
+                            {
+                              backgroundColor: dueInfo.badgeBg,
+                              borderColor: dueInfo.badgeBorder,
+                            },
+                          ]}
                         >
-                          {isExpensePaid ? "PAID" : "UNPAID BILL"}
-                        </Text>
-                      </View>
+                          <Text
+                            style={[
+                              styles.dueBadgeText,
+                              { color: dueInfo.textColor },
+                            ]}
+                          >
+                            {dueInfo.label}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.billPayer}>
                       {isExpensePaid
                         ? `${e.date} · Paid by ${e.payerName}`
-                        : `${e.date} · Unpaid Household Bill · Billed by ${e.payerName || "Host"}`}
+                        : `${e.date} · Added by ${e.payerName || "Host"}`}
                     </Text>
-                    {mySplit?.note && isCurrentUserPayor && (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                          marginTop: 4,
-                        }}
-                      >
-                        <Feather name="info" size={11} color="#0284C7" />
-                        <Text style={{ fontSize: 11, color: "#0284C7" }}>
-                          {mySplit.note}
-                        </Text>
-                      </View>
-                    )}
                   </View>
-                  <View style={{ alignItems: "flex-end" }}>
+                  <View style={{ alignItems: "flex-end", marginTop: 2 }}>
                     <Text style={styles.billValue}>
-                      {formatPesos(e.amountCents)}
+                      {formatPesos(
+                        isWater && waterTotalCentavos > 0
+                          ? waterTotalCentavos
+                          : e.amountCents,
+                      )}
                     </Text>
                     <Text
                       style={{
@@ -412,7 +637,7 @@ export const BillsScreen: React.FC<{
                     >
                       {isCurrentUserPayor
                         ? `Your share: ${formatPesos(myShareForExpense)}`
-                        : "Exempt (Non-payor)"}
+                        : "Exempt"}
                     </Text>
                   </View>
                 </View>
@@ -512,22 +737,42 @@ const styles = StyleSheet.create({
   billItem: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderColor: "#F1F5F9",
   },
   billIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
+    marginTop: 1,
   },
-  billName: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
-  billPayer: { fontSize: 11, color: "#64748B", marginTop: 2 },
+  billName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+    lineHeight: 18,
+  },
+  billPayer: { fontSize: 11, color: "#64748B", marginTop: 3 },
   billValue: { fontSize: 13, fontWeight: "800", color: "#0F172A" },
+  dueBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dueBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
   statusBadgeUnpaid: {
     backgroundColor: "#FEF2F2",
     borderWidth: 1,

@@ -70,15 +70,16 @@ export const HostBilling: React.FC = () => {
       : 16.0,
   );
 
-  // Water rate state (Per person/day OR Fixed monthly)
+  // Water rate state (Per person/day OR Fixed monthly OR Fixed per person/month)
   const waterConfig = state.waterConfigs[household.householdId] || {
     rateCentavosPerPersonPerDay: 500,
     mode: "BILLING_CYCLE",
     pricingModel: "PER_PERSON_DAY",
     fixedMonthlyAmountCentavos: 0,
+    fixedPerPersonAmountCentavos: 0,
   };
   const [waterModel, setWaterModel] = useState<
-    "PER_PERSON_DAY" | "FIXED_MONTHLY"
+    "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH"
   >(
     waterConfig.pricingModel ||
       (waterConfig.fixedMonthlyAmountCentavos
@@ -91,6 +92,10 @@ export const HostBilling: React.FC = () => {
   const [fixedWaterAmount, setFixedWaterAmount] = useState<number>(
     centavosToPesos(waterConfig.fixedMonthlyAmountCentavos || 0),
   );
+  const [fixedPerPersonWaterAmount, setFixedPerPersonWaterAmount] =
+    useState<number>(
+      centavosToPesos(waterConfig.fixedPerPersonAmountCentavos || 0),
+    );
 
   // Custom charge form
   const [showAddCharge, setShowAddCharge] = useState(false);
@@ -155,6 +160,10 @@ export const HostBilling: React.FC = () => {
       pricingModel: waterModel,
       fixedMonthlyAmountCentavos:
         waterModel === "FIXED_MONTHLY" ? pesosToCentavos(fixedWaterAmount) : 0,
+      fixedPerPersonAmountCentavos:
+        waterModel === "FIXED_PER_PERSON_MONTH"
+          ? pesosToCentavos(fixedPerPersonWaterAmount)
+          : 0,
     };
     billingService.saveWaterConfig(household.householdId, config);
     alert("Water pricing model and rates saved successfully.");
@@ -484,40 +493,54 @@ export const HostBilling: React.FC = () => {
                   Water Billing Configuration
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  Choose between Daily Attendance or Fixed Monthly bill
+                  Choose between Daily Attendance, Fixed Monthly Total, or Flat
+                  Per Person
                 </p>
               </div>
             </div>
             <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-              {waterModel === "FIXED_MONTHLY"
-                ? `₱${fixedWaterAmount.toFixed(2)}/month`
-                : `₱${waterDailyRate.toFixed(2)}/person/day`}
+              {waterModel === "FIXED_PER_PERSON_MONTH"
+                ? `₱${fixedPerPersonWaterAmount.toFixed(2)}/resident/month`
+                : waterModel === "FIXED_MONTHLY"
+                  ? `₱${fixedWaterAmount.toFixed(2)}/month`
+                  : `₱${waterDailyRate.toFixed(2)}/person/day`}
             </span>
           </div>
 
-          {/* Pricing Model Selector */}
-          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
+          {/* Pricing Model Selector - 3 Modes */}
+          <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-2xl">
             <button
               type="button"
               onClick={() => setWaterModel("PER_PERSON_DAY")}
-              className={`py-2 text-xs font-bold rounded-xl transition ${
+              className={`py-2 text-[11px] font-bold rounded-xl transition ${
                 waterModel === "PER_PERSON_DAY"
                   ? "bg-white text-blue-600 shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Per Person / Day Attendance
+              ₱/Person/Day
             </button>
             <button
               type="button"
               onClick={() => setWaterModel("FIXED_MONTHLY")}
-              className={`py-2 text-xs font-bold rounded-xl transition ${
+              className={`py-2 text-[11px] font-bold rounded-xl transition ${
                 waterModel === "FIXED_MONTHLY"
                   ? "bg-white text-blue-600 shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Fixed Monthly Amount
+              Fixed Monthly Total
+            </button>
+            <button
+              type="button"
+              onClick={() => setWaterModel("FIXED_PER_PERSON_MONTH")}
+              className={`py-2 text-[11px] font-bold rounded-xl transition ${
+                waterModel === "FIXED_PER_PERSON_MONTH"
+                  ? "bg-white text-blue-600 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Fixed/Person/Mo
             </button>
           </div>
 
@@ -549,7 +572,7 @@ export const HostBilling: React.FC = () => {
                 </p>
               </div>
             </div>
-          ) : (
+          ) : waterModel === "FIXED_MONTHLY" ? (
             <div className="space-y-3">
               <div>
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -574,6 +597,36 @@ export const HostBilling: React.FC = () => {
                   The fixed ₱{fixedWaterAmount.toFixed(2)} water charge is
                   distributed fairly and equally across all Payors. Non-payors
                   are completely exempted.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Flat Fee Per Resident (₱ / resident / month)
+                </label>
+                <input
+                  type="number"
+                  step="5"
+                  value={fixedPerPersonWaterAmount}
+                  onChange={(e) =>
+                    setFixedPerPersonWaterAmount(Number(e.target.value))
+                  }
+                  placeholder="e.g. 150.00"
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-blue-600 font-semibold"
+                />
+              </div>
+
+              <div className="bg-blue-50/70 border border-blue-100 p-3 rounded-2xl text-[11px] text-blue-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-blue-800">
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Flat Direct Fee Rule</span>
+                </div>
+                <p>
+                  Each paying roommate is charged a flat fee of ₱
+                  {fixedPerPersonWaterAmount.toFixed(2)} for water. Attendance
+                  logging is disabled.
                 </p>
               </div>
             </div>

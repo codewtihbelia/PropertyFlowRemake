@@ -41,6 +41,7 @@ import { SuperAdminVersions } from "./views/admin/SuperAdminVersions";
 import { SuperAdminSupport } from "./views/admin/SuperAdminSupport";
 import { ClientHostApplication } from "./views/client/ClientHostApplication";
 import { LandingPage } from "./views/landing/LandingPage";
+import { UniversalLoader } from "./components/common/UniversalLoader";
 
 type WebFlow = "landing" | "onboarding" | "auth" | "app";
 
@@ -58,7 +59,154 @@ const MainLayout: React.FC = () => {
     reloadUser,
   } = useAuth();
   const [currentTab, setCurrentTab] = useState<string>("host_dashboard");
+  const [navTransition, setNavTransition] = useState<{
+    title: string;
+    subtitle: string;
+    isExiting?: boolean;
+  } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const transitionTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const exitTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handleSelectTab = (tab: string) => {
+    if (tab === currentTab) return;
+
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
+
+    const tabLabels: Record<string, { title: string; subtitle: string }> = {
+      host_dashboard: {
+        title: "Loading Host Dashboard...",
+        subtitle: "Preparing property overview...",
+      },
+      host_household: {
+        title: "Loading Household...",
+        subtitle: "Fetching roommates and rooms...",
+      },
+      host_billing: {
+        title: "Loading Billing & Invoices...",
+        subtitle: "Calculating split charges...",
+      },
+      host_attendance: {
+        title: "Loading Attendance...",
+        subtitle: "Syncing monthly calendar...",
+      },
+      host_payments: {
+        title: "Loading Payments...",
+        subtitle: "Fetching transaction history...",
+      },
+      host_redistribution: {
+        title: "Loading Redistribution...",
+        subtitle: "Auditing utility shares...",
+      },
+      host_reports: {
+        title: "Loading Financial Reports...",
+        subtitle: "Compiling balance analytics...",
+      },
+      host_messages: {
+        title: "Loading Messages...",
+        subtitle: "Connecting household channels...",
+      },
+      host_announcements: {
+        title: "Loading Announcements...",
+        subtitle: "Connecting household channels...",
+      },
+      host_logs: {
+        title: "Loading Audit Logs...",
+        subtitle: "Fetching security and activity log...",
+      },
+      host_settings: {
+        title: "Loading Settings...",
+        subtitle: "Retrieving household configuration...",
+      },
+      client_dashboard: {
+        title: "Loading Client Dashboard...",
+        subtitle: "Preparing your expense summary...",
+      },
+      client_bills: {
+        title: "Loading Bills...",
+        subtitle: "Calculating fair shares & utilities...",
+      },
+      client_payments: {
+        title: "Loading Payments...",
+        subtitle: "Fetching receipt history...",
+      },
+      client_attendance: {
+        title: "Loading Attendance...",
+        subtitle: "Syncing your active dates...",
+      },
+      client_profile: {
+        title: "Loading Profile...",
+        subtitle: "Retrieving account details...",
+      },
+      client_messages: {
+        title: "Loading Messages...",
+        subtitle: "Connecting household channels...",
+      },
+      client_announcements: {
+        title: "Loading Announcements...",
+        subtitle: "Connecting household channels...",
+      },
+      client_host_application: {
+        title: "Loading Host Application...",
+        subtitle: "Preparing application form...",
+      },
+      admin_dashboard: {
+        title: "Loading Admin Dashboard...",
+        subtitle: "Preparing system metrics...",
+      },
+      admin_host_applications: {
+        title: "Loading Host Applications...",
+        subtitle: "Reviewing pending hosts...",
+      },
+      admin_households: {
+        title: "Loading Households...",
+        subtitle: "Reviewing all properties...",
+      },
+      admin_users: {
+        title: "Loading Users...",
+        subtitle: "Retrieving member directory...",
+      },
+      admin_versions: {
+        title: "Loading Version History...",
+        subtitle: "Reviewing app releases...",
+      },
+      admin_support: {
+        title: "Loading Support...",
+        subtitle: "Reviewing tickets and help...",
+      },
+      admin_logs: {
+        title: "Loading Audit Logs...",
+        subtitle: "Reviewing system security logs...",
+      },
+    };
+
+    const meta = tabLabels[tab] || {
+      title: "Navigating...",
+      subtitle: "Please wait a moment...",
+    };
+
+    // 1. Immediately display transition loader
+    setNavTransition({ ...meta, isExiting: false });
+
+    // 2. Mount and render destination view underneath
+    setCurrentTab(tab);
+
+    // 3. Keep transition visible for smooth branded feel (280ms) then fade out smoothly
+    transitionTimerRef.current = setTimeout(() => {
+      setNavTransition((prev) => (prev ? { ...prev, isExiting: true } : null));
+
+      exitTimerRef.current = setTimeout(() => {
+        setNavTransition(null);
+      }, 180);
+    }, 280);
+  };
   const [authInitialMode, setAuthInitialMode] = useState<
     "signin" | "register" | "forgot"
   >("signin");
@@ -166,17 +314,11 @@ const MainLayout: React.FC = () => {
 
     if (loading && !hasActiveUser) {
       return (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 font-sans">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-700 to-indigo-600 flex items-center justify-center text-white font-black text-2xl shadow-xl shadow-brand-500/25 animate-pulse mb-4">
-            S
-          </div>
-          <div className="text-base font-bold text-slate-800">
-            Verifying session...
-          </div>
-          <div className="text-xs text-slate-500 mt-1">
-            Authenticating with Firebase Cloud
-          </div>
-        </div>
+        <UniversalLoader
+          text="Verifying session..."
+          subtitle="Authenticating with Firebase Cloud"
+          transparent={false}
+        />
       );
     }
 
@@ -214,7 +356,7 @@ const MainLayout: React.FC = () => {
           return <HostAuditLogs />;
         case "admin_dashboard":
         default:
-          return <SuperAdminDashboard onNavigate={setCurrentTab} />;
+          return <SuperAdminDashboard onNavigate={handleSelectTab} />;
       }
     }
 
@@ -242,7 +384,9 @@ const MainLayout: React.FC = () => {
           return <HostSettings />;
         case "client_bills":
           return (
-            <ClientBills onPayClick={() => setCurrentTab("client_payments")} />
+            <ClientBills
+              onPayClick={() => handleSelectTab("client_payments")}
+            />
           );
         case "client_payments":
           return <ClientPayments />;
@@ -251,20 +395,20 @@ const MainLayout: React.FC = () => {
         case "client_profile":
           return <ClientProfile />;
         case "client_dashboard":
-          return <ClientDashboard onNavigate={setCurrentTab} />;
+          return <ClientDashboard onNavigate={handleSelectTab} />;
         case "host_dashboard":
         default:
-          return <HostDashboard onNavigate={setCurrentTab} />;
+          return <HostDashboard onNavigate={handleSelectTab} />;
       }
     }
 
     // Client Routes (Payor & Non-Payor)
     switch (currentTab) {
       case "client_host_application":
-        return <ClientHostApplication onNavigate={setCurrentTab} />;
+        return <ClientHostApplication onNavigate={handleSelectTab} />;
       case "client_bills":
         return (
-          <ClientBills onPayClick={() => setCurrentTab("client_payments")} />
+          <ClientBills onPayClick={() => handleSelectTab("client_payments")} />
         );
       case "client_payments":
         return <ClientPayments />;
@@ -277,7 +421,7 @@ const MainLayout: React.FC = () => {
         return <ClientProfile />;
       case "client_dashboard":
       default:
-        return <ClientDashboard onNavigate={setCurrentTab} />;
+        return <ClientDashboard onNavigate={handleSelectTab} />;
     }
   };
 
@@ -355,13 +499,21 @@ const MainLayout: React.FC = () => {
       <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
         <Sidebar
           currentTab={currentTab}
-          onSelectTab={setCurrentTab}
+          onSelectTab={handleSelectTab}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
         />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto min-w-0">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto min-w-0 relative">
           {renderContent()}
+          {navTransition && (
+            <UniversalLoader
+              text={navTransition.title}
+              subtitle={navTransition.subtitle}
+              transparent={true}
+              isExiting={navTransition.isExiting}
+            />
+          )}
         </main>
       </div>
     </div>

@@ -111,8 +111,8 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <Feather name="arrow-left" size={20} color="#0F172A" />
-            <Text style={styles.backButtonText}>Back to Sign In</Text>
+            <Feather name="chevron-left" size={20} color="#0F172A" />
+            <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
 
           {/* Logo Badge */}
@@ -135,7 +135,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
               <Text style={styles.mainTitle}>Forgot Password?</Text>
               <Text style={styles.description}>
                 Don't worry! Enter the email associated with your Splitzy
-                roommate account and we'll send you a password recovery link.
+                account and we'll send you a password recovery link.
               </Text>
 
               <View style={styles.formArea}>
@@ -150,7 +150,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                     />
                     <TextInput
                       style={styles.textInput}
-                      placeholder="e.g. alex.rivera@example.com"
+                      placeholder="e.g. rommel.belia@example.com"
                       placeholderTextColor="#94A3B8"
                       value={email}
                       onChangeText={setEmail}
@@ -358,17 +358,14 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoBadge: {
-    width: 44,
-    height: 44,
     borderRadius: 12,
-    backgroundColor: "#2563EB",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   logoImage: {
-    width: 28,
-    height: 28,
+    width: 60,
+    height: 60,
   },
   brandTitleRow: {
     flexDirection: "row",
@@ -431,6 +428,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   primaryActionButton: {
+    width: "100%",
     backgroundColor: "#2563EB",
     borderRadius: 14,
     height: 50,

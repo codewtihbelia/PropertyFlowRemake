@@ -9,8 +9,10 @@ import {
   Image,
   Alert,
   Modal,
+  Platform,
+  StatusBar,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
@@ -58,6 +60,13 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   const [selectedGroupIndex, setSelectedGroupIndex] = useState(0);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("Rent");
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
+  );
   const [otherCategorySpecified, setOtherCategorySpecified] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -72,6 +81,11 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   const [activeCycleId, setActiveCycleId] = useState<string | undefined>(
     undefined,
   );
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
 
   // Custom split percentages state
   const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
@@ -124,6 +138,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               if (active) setActiveCycleId(active.billingCycleId);
             }
           });
+          mobileDataService.listenToWaterConfig(hhId, (cfg) => {
+            if (mounted) setWaterConfig(cfg);
+          });
         }
       }
     });
@@ -132,6 +149,37 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       mounted = false;
     };
   }, [currentUser?.uid]);
+
+  useEffect(() => {
+    const hhId = profile?.householdId || household?.householdId;
+    if (!hhId || !activeCycleId) {
+      setCycleAttendance([]);
+      setAttendanceSubmissions({});
+      return;
+    }
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      hhId,
+      activeCycleId,
+      setCycleAttendance,
+    );
+    const unsubSub = mobileDataService.listenToAttendanceSubmissions(
+      hhId,
+      activeCycleId,
+      setAttendanceSubmissions,
+    );
+    return () => {
+      unsubAtt();
+      unsubSub();
+    };
+  }, [profile?.householdId, household?.householdId, activeCycleId]);
+
+  const getMemberDays = (targetUid: string): number => {
+    const fromAtt = cycleAttendance.filter(
+      (a) => a.userId === targetUid && a.status === "PRESENT",
+    ).length;
+    const fromSub = attendanceSubmissions[targetUid]?.daysPresent || 0;
+    return fromAtt > 0 ? fromAtt : fromSub;
+  };
 
   // Active approved roommates
   const activeMembers = useMemo(() => {
@@ -325,36 +373,59 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     }> = [];
 
     if (splitMethod === "Equal") {
-      if (isWater && nonPayorCount > 0) {
-        // Water mode: non-payors incur water consumption, but are exempted; their water is absorbed and distributed fairly across payors with a proper note
-        const totalPeople = Math.max(1, activeMembers.length);
-        const baseShareCentavos = Math.round(amountCents / totalPeople);
-        const totalNonPayorWaterCentavos = baseShareCentavos * nonPayorCount;
-        const extraPerPayorCentavos = Math.round(
-          totalNonPayorWaterCentavos / payorCount,
-        );
+      if (isWater) {
+        // Water mode: payors pay their own water + water from non-payors
+        const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+        let totalNonPayorWater = 0;
+        const memberDaysMap: Record<string, number> = {};
+
+        activeMembers.forEach((m) => {
+          const uid = m.userId || m.memberId;
+          const days = getMemberDays(uid);
+          memberDaysMap[uid] = days;
+          if (!isPayorMember(m)) {
+            totalNonPayorWater += days * rate;
+          }
+        });
+
+        const extraPerPayor =
+          payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
         const nonPayorNames = activeNonPayors
           .map((np) => np.displayName || "Non-payor")
           .join(", ");
 
         splitDetails = activeMembers.map((m) => {
+          const uid = m.userId || m.memberId;
           const isPayor = isPayorMember(m);
+          const days = memberDaysMap[uid] || 0;
           if (isPayor) {
-            const payorTotal = baseShareCentavos + extraPerPayorCentavos;
+            const ownCost = days * rate;
+            const payorTotal = ownCost + extraPerPayor;
             return {
-              userId: m.userId || m.memberId,
+              userId: uid,
               displayName: m.displayName || "Roommate",
               shareCentavos: payorTotal,
+              ownWaterCentavos: ownCost,
+              nonPayorWaterCentavos: extraPerPayor,
+              daysPresent: days,
+              rateCentavosPerDay: rate,
               isExempt: false,
-              note: `Includes non-payor water reallocation: +₱${(extraPerPayorCentavos / 100).toFixed(2)} from ${nonPayorNames} (5/person/day rule)`,
+              note:
+                extraPerPayor > 0
+                  ? `${days} days @ ₱${rate / 100}/day (₱${(ownCost / 100).toFixed(2)}) + non-payor split (₱${(extraPerPayor / 100).toFixed(2)} from ${nonPayorNames})`
+                  : `${days} days present @ ₱${rate / 100}/day`,
             };
           } else {
             return {
-              userId: m.userId || m.memberId,
+              userId: uid,
               displayName: m.displayName || "Roommate",
               shareCentavos: 0,
+              ownWaterCentavos: 0,
+              nonPayorWaterCentavos: 0,
+              daysPresent: days,
+              rateCentavosPerDay: rate,
               isExempt: true,
-              note: `Exempted (Non-payor) — water cost of ₱${(baseShareCentavos / 100).toFixed(2)} absorbed and split among ${payorCount} payors`,
+              note: `Exempted (Non-payor) — ${days} days water cost absorbed by payors`,
             };
           }
         });
@@ -415,7 +486,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
     const expensePayload: any = {
       householdId,
-      title: `${categoryToSave} - ${selectedGroup.name}`,
+      title: categoryToSave,
       category: categoryToSave,
       amountCents,
       date: new Date().toISOString().slice(0, 10),
@@ -443,7 +514,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     setUploading(false);
 
     onSaveExpense({
-      title: `${categoryToSave} - ${selectedGroup.name}`,
+      title: categoryToSave,
       amount: numericAmount,
       category: categoryToSave,
       splitMethod,
@@ -469,9 +540,14 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     : true;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        translucent={true}
+        backgroundColor="transparent"
+      />
       {/* Header matching screen.png */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: topInset + 6 }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={onBack}
@@ -484,7 +560,10 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(40, insets.bottom + 24) },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {profile && !isHost && (
@@ -762,7 +841,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
           <View style={styles.specifyCategoryCard}>
             <View style={styles.specifyCategoryHeader}>
               <View style={styles.specifyIconWrap}>
-                <Feather name="edit-3" size={15} color="#2563EB" />
+                <Feather name="edit-3" size={15} color="#0F172A" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.specifyCategoryTitle}>
@@ -871,7 +950,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
           ) : (
             <View style={styles.uploadPlaceholder}>
               <View style={styles.uploadIconCircle}>
-                <Feather name="image" size={20} color="#2563EB" />
+                <Feather name="image" size={20} color="#0F172A" />
               </View>
               <Text style={styles.uploadText}>Upload Image or Video</Text>
             </View>
@@ -974,12 +1053,27 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               if (!isPayor) {
                 memberShareCents = 0;
                 note = "Exempted (Non-payor)";
-              } else if (isWater && nonPayorCount > 0) {
-                const totalPeople = Math.max(1, activeMembers.length);
-                const base = Math.round(amountCents / totalPeople);
-                const extra = Math.round((base * nonPayorCount) / payorCount);
-                memberShareCents = base + extra;
-                note = `Includes +₱${(extra / 100).toFixed(2)} non-payor water reallocation (5/day rule)`;
+              } else if (isWater) {
+                const rate = Number(
+                  waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                );
+                const uid = m.userId || m.memberId;
+                const days = getMemberDays(uid);
+                const ownCost = days * rate;
+                let totalNonPayorWater = 0;
+                activeNonPayors.forEach((np) => {
+                  const npUid = np.userId || np.memberId;
+                  totalNonPayorWater += getMemberDays(npUid) * rate;
+                });
+                const extra =
+                  payorCount > 0
+                    ? Math.round(totalNonPayorWater / payorCount)
+                    : 0;
+                memberShareCents = ownCost + extra;
+                note =
+                  extra > 0
+                    ? `${days}d own (₱${(ownCost / 100).toFixed(2)}) + ₱${(extra / 100).toFixed(2)} non-payor split`
+                    : `${days}d own @ ₱${rate / 100}/day`;
               } else {
                 memberShareCents = Math.round(amountCents / payorCount);
                 note = "Equal payor share";
@@ -1124,7 +1218,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
           </Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -1138,11 +1232,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
+    backgroundColor: "#FFFFFF",
   },
   backBtn: {
     width: 36,
     height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1291,7 +1388,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   categoryCountPillText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     color: "#64748B",
   },
@@ -1300,16 +1397,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    // shadowColor: "#0F172A",
+    // shadowOffset: { width: 0, height: 1 },
+    // shadowOpacity: 0.04,
+    // shadowRadius: 3,
+    // elevation: 1,
   },
   dropdownSelectorActive: {
     borderColor: "#2563EB",
@@ -1367,16 +1464,16 @@ const styles = StyleSheet.create({
   // Inline Dropdown List Container
   inlineDropdownList: {
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 16,
     marginTop: 8,
     padding: 6,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
+    // shadowColor: "#0F172A",
+    // shadowOffset: { width: 0, height: 4 },
+    // shadowOpacity: 0.08,
+    // shadowRadius: 10,
+    // elevation: 3,
   },
   inlineDropdownItem: {
     flexDirection: "row",
@@ -1445,7 +1542,7 @@ const styles = StyleSheet.create({
   // Specify Category Card
   specifyCategoryCard: {
     backgroundColor: "#F8FAFC",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#CBD5E1",
     borderRadius: 14,
     padding: 14,
@@ -1461,7 +1558,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 7,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 1,
@@ -1478,7 +1575,7 @@ const styles = StyleSheet.create({
   },
   specifyCategoryInput: {
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#93C5FD",
     borderRadius: 10,
     paddingHorizontal: 12,
@@ -1537,9 +1634,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#BFDBFE",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 8,
@@ -1582,7 +1677,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    borderWidth: 1.5,
+    borderWidth: 1,
   },
   splitOptionActive: {
     backgroundColor: "#FFFFFF",

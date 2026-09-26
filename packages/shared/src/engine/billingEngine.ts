@@ -288,16 +288,39 @@ export function calculateHouseholdBilling(
     }
   }
 
-  // 3. Process Water (Fixed monthly OR Per Person/Day attendance)
-  const isFixedWater =
+  // 3. Process Water (Mode 1: Per Person/Day attendance, Mode 2: Fixed Household Monthly, Mode 3: Fixed Per Person Monthly)
+  const isFixedPerPersonMonth =
+    waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH";
+  const isFixedMonthly =
     waterConfig?.pricingModel === "FIXED_MONTHLY" ||
-    (Boolean(waterConfig?.fixedMonthlyAmountCentavos) &&
+    (!isFixedPerPersonMonth &&
+      Boolean(waterConfig?.fixedMonthlyAmountCentavos) &&
       (waterConfig?.fixedMonthlyAmountCentavos || 0) > 0);
 
   const payorMembers = activeMembers.filter((m) => m.role === "PAYOR");
   const nonPayorMembers = activeMembers.filter((m) => m.role !== "PAYOR");
 
-  if (isFixedWater) {
+  if (isFixedPerPersonMonth) {
+    // Mode 3: Fixed Per Person Monthly (e.g. ₱150.00 / resident / month)
+    const perPersonCentavos = waterConfig?.fixedPerPersonAmountCentavos || 0;
+    if (perPersonCentavos > 0 && payorMembers.length > 0) {
+      for (const m of payorMembers) {
+        memberWater.set(
+          m.userId,
+          (memberWater.get(m.userId) || 0) + perPersonCentavos,
+        );
+        waterTotalCentavos += perPersonCentavos;
+        memberItems.get(m.userId)?.push({
+          chargeId: "water-fixed-per-person-charge",
+          chargeType: "WATER",
+          name: "Water (Fixed / Person)",
+          amountCentavos: perPersonCentavos,
+          details: `Flat fee of ₱${(perPersonCentavos / 100).toFixed(2)}/resident/month`,
+        });
+      }
+    }
+  } else if (isFixedMonthly) {
+    // Mode 2: Fixed Household Monthly (e.g. ₱1,200.00 / month split equally across payors)
     const fixedAmountCentavos = waterConfig?.fixedMonthlyAmountCentavos || 0;
     if (fixedAmountCentavos > 0 && payorMembers.length > 0) {
       waterTotalCentavos += fixedAmountCentavos;
@@ -315,7 +338,7 @@ export function calculateHouseholdBilling(
           chargeType: "WATER",
           name: "Water (Fixed Monthly)",
           amountCentavos: alloc.amountCentavos,
-          details: `Fixed monthly water split (${payorMembers.length} payors)`,
+          details: `Household water bill (₱${(fixedAmountCentavos / 100).toFixed(2)}) split evenly across ${payorMembers.length} paying roommates`,
         });
       }
     }

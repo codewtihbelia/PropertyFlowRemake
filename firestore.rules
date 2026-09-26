@@ -133,12 +133,26 @@ service cloud.firestore {
       // Subcollection: memberBills
       match /memberBills/{billId} {
         allow read: if true;
-        allow create, update: if isHost(householdId) || isSuperAdmin();
+        allow create, update: if isHost(householdId) || isSuperAdmin() || isHouseholdMember(householdId);
         allow delete: if false; // Financial snapshot preservation
       }
 
       // Subcollection: waterAttendance
       match /waterAttendance/{recordId} {
+        allow read: if true;
+        allow create, update: if isAuthenticated() && (
+          isHouseholdMember(householdId) ||
+          isHost(householdId) ||
+          isSuperAdmin() ||
+          request.resource.data.userId == request.auth.uid ||
+          isUser(request.resource.data.userId) ||
+          (resource != null && (resource.data.userId == request.auth.uid || isUser(resource.data.userId)))
+        );
+        allow delete: if isHost(householdId) || isSuperAdmin();
+      }
+
+      // Subcollection: attendanceSubmissions
+      match /attendanceSubmissions/{submissionId} {
         allow read: if true;
         allow create, update: if isAuthenticated() && (
           isHouseholdMember(householdId) ||
