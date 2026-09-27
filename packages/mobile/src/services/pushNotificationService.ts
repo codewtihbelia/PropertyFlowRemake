@@ -49,13 +49,12 @@ export async function registerForPushNotificationsAsync(
     // Dynamically require to prevent Expo Go from executing unsupported listeners on Android
     const Notifications = await import("expo-notifications");
 
-    const permissionStatus = (await Notifications.getPermissionsAsync()) as any;
+    const permissionStatus = await Notifications.getPermissionsAsync() as any;
     const existingStatus = permissionStatus.status;
     let finalStatus = existingStatus;
 
     if (existingStatus !== "granted") {
-      const requestedStatus =
-        (await Notifications.requestPermissionsAsync()) as any;
+      const requestedStatus = await Notifications.requestPermissionsAsync() as any;
       finalStatus = requestedStatus.status;
     }
 

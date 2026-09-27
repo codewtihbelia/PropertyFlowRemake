@@ -1,12 +1,12 @@
 import React from "react";
-import {
-  Building,
-  Receipt,
-  CalendarDays,
-  CheckCircle,
+import { 
+  Building, 
+  Receipt, 
+  CalendarDays, 
+  CheckCircle, 
   ArrowRight,
   ShieldCheck,
-  UserCheck,
+  UserCheck
 } from "lucide-react";
 
 export const HowItWorksSection: React.FC = () => {
@@ -46,11 +46,9 @@ export const HowItWorksSection: React.FC = () => {
   ];
 
   return (
-    <section
-      id="how-it-works"
-      className="py-16 md:py-24 bg-white border-b border-slate-200/80"
-    >
+    <section id="how-it-works" className="py-16 md:py-24 bg-white border-b border-slate-200/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs font-bold uppercase tracking-wider border border-brand-200">
@@ -61,8 +59,7 @@ export const HowItWorksSection: React.FC = () => {
             <span className="text-brand-600">From Move-In to Settlement</span>
           </h2>
           <p className="text-slate-600 text-base sm:text-lg">
-            Designed to integrate seamlessly into busy roommate routines without
-            friction or steep learning curves.
+            Designed to integrate seamlessly into busy roommate routines without friction or steep learning curves.
           </p>
         </div>
 
@@ -103,6 +100,7 @@ export const HowItWorksSection: React.FC = () => {
             );
           })}
         </div>
+
       </div>
     </section>
   );

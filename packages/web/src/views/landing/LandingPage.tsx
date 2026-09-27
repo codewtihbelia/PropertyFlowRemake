@@ -1,6 +1,7 @@
 import React from "react";
 import { LandingNavbar } from "../../components/landing/LandingNavbar";
 import { HeroSection } from "../../components/landing/HeroSection";
+import { ProblemsAndSolutions } from "../../components/landing/ProblemsAndSolutions";
 import { LiveSplitCalculator } from "../../components/landing/LiveSplitCalculator";
 import { MobileAppShowcase } from "../../components/landing/MobileAppShowcase";
 import { FeaturesBentoGrid } from "../../components/landing/FeaturesBentoGrid";
@@ -9,17 +10,13 @@ import { RoleComparisonSection } from "../../components/landing/RoleComparisonSe
 import { FaqSection } from "../../components/landing/FaqSection";
 import { DownloadCtaSection } from "../../components/landing/DownloadCtaSection";
 import { LandingFooter } from "../../components/landing/LandingFooter";
-import { ProblemsAndSolutions } from "../../components/landing/ProblemAndSolutions";
 
 interface LandingPageProps {
   onOpenApp: () => void;
   onOpenAuth?: (mode?: "signin" | "register") => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({
-  onOpenApp,
-  onOpenAuth,
-}) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAuth }) => {
   const handleScrollTo = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) {
@@ -73,7 +70,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </main>
 
       {/* Footer */}
-      <LandingFooter onScrollTo={handleScrollTo} onOpenApp={onOpenApp} />
+      <LandingFooter
+        onScrollTo={handleScrollTo}
+        onOpenApp={onOpenApp}
+      />
     </div>
   );
 };

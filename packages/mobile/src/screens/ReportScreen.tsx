@@ -9,13 +9,37 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
+import { UniversalSkeleton } from "../components/UniversalLoader";
 
 interface ReportScreenProps {
   onBack: () => void;
+  loading?: boolean;
 }
 
-export const ReportScreen: React.FC<ReportScreenProps> = ({ onBack }) => {
+export const ReportScreen: React.FC<ReportScreenProps> = ({
+  onBack,
+  loading = false,
+}) => {
   const [selectedMonth, setSelectedMonth] = useState("Aug 2026");
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={onBack}
+            activeOpacity={0.7}
+          >
+            <Feather name="arrow-left" size={20} color="#0F172A" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Financial Reports</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        <UniversalSkeleton type="reports" />
+      </SafeAreaView>
+    );
+  }
 
   const months = ["Jul 2026", "Aug 2026", "Sep 2026"];
 

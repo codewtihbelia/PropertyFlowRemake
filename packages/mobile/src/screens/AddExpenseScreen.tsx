@@ -1575,7 +1575,7 @@ const styles = StyleSheet.create({
   },
   specifyCategoryInput: {
     backgroundColor: "#FFFFFF",
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: "#93C5FD",
     borderRadius: 10,
     paddingHorizontal: 12,

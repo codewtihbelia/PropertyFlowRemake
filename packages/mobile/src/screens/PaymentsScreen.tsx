@@ -10,9 +10,10 @@ import {
   Image,
   ActivityIndicator,
   StatusBar,
+  Platform,
+  Modal,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { UniversalLoader } from "../components/UniversalLoader";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { formatPesos } from "@propertyflow/shared";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
@@ -23,6 +24,8 @@ import {
 } from "../services/firebaseDataService";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
+import { UniversalSkeleton } from "../components/UniversalLoader";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 
 export interface PaymentsScreenProps {
   householdId?: string;
@@ -35,6 +38,13 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   billingCycleId,
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
+  );
+  const [showMenu, setShowMenu] = useState(false);
   const { onScroll } = useNavVisibility();
   const [method, setMethod] = useState<
     "GCash" | "Maya" | "Cash" | "Bank Transfer"
@@ -45,21 +55,13 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(() => !householdId);
   const [profile, setProfile] = useState<any | null>(null);
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const currentUser = auth.currentUser;
-
-  // Fallback safety timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, []);
 
   const resolvedHouseholdId = householdId || profile?.householdId || "";
   const activeCycle = useMemo(
@@ -119,7 +121,10 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     let mounted = true;
     if (!currentUser?.uid) return;
     mobileDataService.getUserProfile(currentUser.uid).then((nextProfile) => {
-      if (mounted) setProfile(nextProfile);
+      if (mounted) {
+        setProfile(nextProfile);
+        setLoading(false);
+      }
     });
     return () => {
       mounted = false;
@@ -134,10 +139,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     );
     const unsubExp = mobileDataService.listenToExpenses(
       resolvedHouseholdId,
-      (data) => {
-        setExpenses(data);
-        setLoading(false);
-      },
+      setExpenses,
     );
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
@@ -252,7 +254,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     }
   };
 
-  if (loading) {
+  if (loading && !resolvedHouseholdId) {
     return (
       <View style={styles.container}>
         <StatusBar
@@ -260,39 +262,62 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           translucent={true}
           backgroundColor="transparent"
         />
-        <UniversalLoader
-          text="Loading payment details..."
-          subtitle="Calculating outstanding balance..."
-          transparent={false}
-        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={styles.circleBackBtn}
+              onPress={() => (onBack ? onBack() : null)}
+              activeOpacity={0.7}
+            >
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Make Payment</Text>
+            <View style={{ width: 44 }} />
+          </View>
+        </View>
+        <UniversalSkeleton type="bills" />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        translucent={true}
+        backgroundColor="transparent"
+      />
+
+      {/* Top Header */}
+      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View style={styles.navBar}>
+          <TouchableOpacity
+            style={styles.circleBackBtn}
+            onPress={() => (onBack ? onBack() : null)}
+            activeOpacity={0.7}
+          >
+            <Feather name="chevron-left" size={24} color="#0F172A" />
+          </TouchableOpacity>
+          <Text style={styles.navTitle}>Make Payment</Text>
+          <TouchableOpacity
+            style={styles.iconNavBtn}
+            onPress={() => setShowMenu(true)}
+            activeOpacity={0.7}
+          >
+            <Feather name="more-vertical" size={22} color="#0F172A" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
-        {onBack && (
-          <TouchableOpacity
-            style={styles.backRow}
-            onPress={onBack}
-            activeOpacity={0.7}
-          >
-            <View style={styles.backIconCircle}>
-              <Ionicons name="arrow-back" size={18} color="#0F172A" />
-            </View>
-            <Text style={styles.backText}>Back to Bills Overview</Text>
-          </TouchableOpacity>
-        )}
-
-        <Text style={styles.title}>Make Payment</Text>
+        <Text style={styles.title}>Settle Dues</Text>
         <Text style={styles.subtitle}>
-          Settle your roommate share with Firebase proof
+          Settle your roommate share with payment proof
         </Text>
 
         <View style={styles.dueCard}>
@@ -410,12 +435,195 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           )}
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+
+      {/* Menu Modal matching elevated bottom sheet design */}
+      <SmoothBottomSheetModal
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Payment Options"
+        subtitle="Quick actions for your payment submission"
+        icon={<Feather name="credit-card" size={18} color="#2563EB" />}
+      >
+        <View style={{ paddingTop: 6, paddingBottom: 10 }}>
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              setAmount(
+                liveOutstandingCentavos > 0
+                  ? (liveOutstandingCentavos / 100).toFixed(2)
+                  : "0.00",
+              );
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="dollar-sign" size={18} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>
+                Autofill Outstanding Balance
+              </Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Insert {formatPesos(liveOutstandingCentavos)} into amount field
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              setAmount("");
+              setRefNum("");
+              setNotes("");
+              setImageUri(null);
+              setSubmitted(false);
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#FFF1F2",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="trash-2" size={18} color="#E11D48" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Clear Form</Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Reset receipt photo, reference, and amount
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              Alert.alert(
+                "Billing Information",
+                activeCycle
+                  ? `Current Cycle: ${activeCycle.name || "Active Cycle"}\nDates: ${activeCycle.startDate} to ${activeCycle.endDate}`
+                  : "No active cycle is currently selected.",
+              );
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#F8FAFC",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="info" size={18} color="#0F172A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Billing Cycle Details</Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                View active cycle dates and period status
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
+  navBarContainer: {
+    backgroundColor: "#F8FAFC",
+    zIndex: 50,
+  },
+  navBar: {
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+  },
+  circleBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconNavBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  menuCard: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+  },
+  menuHeader: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#64748B",
+    marginBottom: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    gap: 12,
+  },
+  menuItemText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
   scrollContent: { padding: 20, paddingBottom: 85 },
   backRow: {
     flexDirection: "row",

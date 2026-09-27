@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -19,7 +18,10 @@ import {
 } from "../services/firebaseDataService";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { WaterSettingsModal } from "../components/WaterSettingsModal";
-import { UniversalLoader } from "../components/UniversalLoader";
+import {
+  UniversalLoader,
+  UniversalSkeleton,
+} from "../components/UniversalLoader";
 
 interface CycleDate {
   iso: string;
@@ -164,9 +166,15 @@ export const AttendanceScreen: React.FC<{
   billingCycleId?: string;
   userId?: string;
   onBack?: () => void;
-  onLoaded?: () => void;
-}> = ({ householdId, billingCycleId, userId, onBack, onLoaded }) => {
-  const [profile, setProfile] = useState<any | null>(null);
+}> = ({ householdId, billingCycleId, userId, onBack }) => {
+  const currentUser = auth.currentUser;
+  const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
+  const [profile, setProfile] = useState<any | null>(() => cachedProfile);
+  const resolvedHouseholdId =
+    householdId || profile?.householdId || cachedProfile?.householdId || "";
+  const [isProfileLoaded, setIsProfileLoaded] = useState<boolean>(() =>
+    Boolean(cachedProfile || householdId),
+  );
   const [cycles, setCycles] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
@@ -182,24 +190,7 @@ export const AttendanceScreen: React.FC<{
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const updateLoading = (val: boolean) => {
-    setLoading(val);
-    if (!val) {
-      onLoaded?.();
-    }
-  };
-
-  // Fallback safety timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      updateLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const currentUser = auth.currentUser;
   const activeUserId = userId || currentUser?.uid || "";
-  const resolvedHouseholdId = householdId || profile?.householdId || "";
 
   const activeCycle = useMemo(
     () =>
@@ -269,29 +260,55 @@ export const AttendanceScreen: React.FC<{
   useEffect(() => {
     let mounted = true;
     if (!currentUser?.uid) {
-      updateLoading(false);
+      setIsProfileLoaded(true);
+      setLoading(false);
       return;
     }
-    mobileDataService.getUserProfile(currentUser.uid).then((nextProfile) => {
-      if (mounted) {
-        setProfile(nextProfile);
-        if (!nextProfile?.householdId && !householdId) {
-          updateLoading(false);
+    mobileDataService
+      .getUserProfile(currentUser.uid)
+      .then((nextProfile) => {
+        if (mounted) {
+          setProfile(nextProfile);
+          setIsProfileLoaded(true);
         }
-      }
-    });
+      })
+      .catch(() => {
+        if (mounted) setIsProfileLoaded(true);
+      });
     return () => {
       mounted = false;
     };
-  }, [currentUser?.uid, householdId]);
+  }, [currentUser?.uid]);
 
   useEffect(() => {
-    if (!resolvedHouseholdId) return;
+    // Wait for profile resolution before deciding if user is in a household
+    if (!isProfileLoaded) {
+      return;
+    }
+
+    if (!resolvedHouseholdId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+
+    const attReady = { cycles: false, members: false };
+    const checkReady = () => {
+      if (attReady.cycles && attReady.members) {
+        setLoading(false);
+      }
+    };
+
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
     const unsubCycles = mobileDataService.listenToBillingCycles(
       resolvedHouseholdId,
-      (cyc) => {
-        setCycles(cyc);
-        updateLoading(false);
+      (data) => {
+        setCycles(data);
+        attReady.cycles = true;
+        checkReady();
       },
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
@@ -300,14 +317,19 @@ export const AttendanceScreen: React.FC<{
     );
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
-      setMembers,
+      (data) => {
+        setMembers(data);
+        attReady.members = true;
+        checkReady();
+      },
     );
     return () => {
+      clearTimeout(safetyTimer);
       unsubCycles();
       unsubWater();
       unsubMembers();
     };
-  }, [resolvedHouseholdId]);
+  }, [resolvedHouseholdId, isProfileLoaded]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
@@ -631,23 +653,6 @@ export const AttendanceScreen: React.FC<{
     }
   };
 
-  if (loading && !onLoaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: "transparent" }}>
-        <StatusBar
-          barStyle="dark-content"
-          translucent={true}
-          backgroundColor="transparent"
-        />
-        <UniversalLoader
-          text="Loading attendance..."
-          subtitle="Preparing cycle & dates..."
-          transparent={true}
-        />
-      </View>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Top Bar with circular buttons matching Image 1 */}
@@ -702,478 +707,493 @@ export const AttendanceScreen: React.FC<{
         </View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-      >
-        {!resolvedHouseholdId || !activeCycle ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="calendar-outline" size={40} color="#94A3B8" />
-            <Text style={styles.emptyTitle}>No Active Billing Cycle</Text>
-            <Text style={styles.emptySub}>
-              Ask your host to create a billing cycle to log and calculate water
-              attendance.
-            </Text>
-          </View>
-        ) : (
-          <>
-            {/* =========================================================================
+      {loading ? (
+        <UniversalSkeleton type="attendance" />
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
+          {!resolvedHouseholdId || !activeCycle ? (
+            <View style={styles.emptyCard}>
+              <Ionicons name="calendar-outline" size={40} color="#94A3B8" />
+              <Text style={styles.emptyTitle}>No Active Billing Cycle</Text>
+              <Text style={styles.emptySub}>
+                Ask your host to create a billing cycle to log and calculate
+                water attendance.
+              </Text>
+            </View>
+          ) : (
+            <>
+              {/* =========================================================================
                 BLUE HERO CARD - Pixel perfect match to Image 1
                 ========================================================================= */}
-            <View style={styles.heroCard}>
-              <View style={styles.heroTopRow}>
-                <View style={styles.activeCyclePill}>
-                  <View style={styles.activeCycleDot} />
-                  <Text style={styles.activeCyclePillText}>
-                    Active Billing Cycle
-                  </Text>
-                </View>
-                <Text style={styles.totalDaysText}>{totalDays} Total Days</Text>
-              </View>
-
-              <Text style={styles.heroCycleRange}>
-                {formatCycleRangeTitle(
-                  activeCycle.startDate,
-                  activeCycle.endDate,
-                )}
-              </Text>
-
-              <Text style={styles.heroWaterRate}>
-                Water Bill:{" "}
-                <Text style={styles.heroWaterRateBold}>
-                  {pricingModel === "FIXED_MONTHLY"
-                    ? `₱${fixedMonthlyPesos.toFixed(2)} / month total`
-                    : pricingModel === "FIXED_PER_PERSON_MONTH"
-                      ? `₱${fixedPerPersonPesos.toFixed(2)} / resident / mo`
-                      : `₱${ratePerDayPesos.toFixed(2)} / day / person`}
-                </Text>
-              </Text>
-
-              {/* 3 Translucent Metric Cards */}
-              <View style={styles.heroMetricsRow}>
-                <View style={styles.heroMetricBox}>
-                  <Text style={styles.heroMetricLabel}>Present Days</Text>
-                  <Text style={styles.heroMetricValue}>{presentCount}</Text>
-                </View>
-
-                <View style={styles.heroMetricBox}>
-                  <Text style={styles.heroMetricLabel}>Absent Days</Text>
-                  <Text style={styles.heroMetricValue}>{absentCount}</Text>
-                </View>
-
-                <View style={styles.heroMetricBox}>
-                  <Text style={styles.heroMetricLabel}>Your Due</Text>
-                  <Text
-                    style={[styles.heroMetricValue, styles.heroMetricValueDue]}
-                  >
-                    ₱{waterFee.toFixed(2)}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* =========================================================================
-                WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
-                ========================================================================= */}
-            <View style={styles.feeBarCard}>
-              <View style={styles.feeIconCircle}>
-                <Ionicons name="water" size={18} color="#2563EB" />
-              </View>
-
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.feeBarTitle}>Water Utility Fee</Text>
-                <Text style={styles.feeBarSubtitle}>
-                  {pricingModel === "FIXED_MONTHLY"
-                    ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
-                    : pricingModel === "FIXED_PER_PERSON_MONTH"
-                      ? `Fixed ₱${fixedPerPersonPesos.toFixed(2)} flat fee`
-                      : `Fixed ₱${ratePerDayPesos.toFixed(0)} per present day`}
-                </Text>
-              </View>
-
-              {!isFixedMode && (
-                <View style={styles.feeBarActions}>
-                  <TouchableOpacity
-                    style={styles.markAllBtn}
-                    onPress={markAll}
-                    disabled={isBatching}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.markAllBtnText}>Mark All</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.clearBtn}
-                    onPress={clearAll}
-                    disabled={isBatching}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.clearBtnText}>Clear</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            {/* =========================================================================
-                CALENDAR SECTION - Grouped by Month with Clean Dates ONLY (No ₱5)
-                ========================================================================= */}
-            {isFixedMode ? (
-              <View style={styles.fixedNoticeCard}>
-                <View style={styles.fixedNoticeIconBox}>
-                  <Ionicons name="checkmark-circle" size={32} color="#059669" />
-                </View>
-                <Text style={styles.fixedNoticeTitle}>
-                  Daily attendance is not required for your apartment.
-                </Text>
-                <Text style={styles.fixedNoticeSub}>
-                  {pricingModel === "FIXED_MONTHLY"
-                    ? `Household water bill (₱${fixedMonthlyPesos.toFixed(
-                        2,
-                      )}) is split evenly across ${payingRoommatesCount} paying roommates.`
-                    : `Water is billed as a flat monthly rate of ₱${fixedPerPersonPesos.toFixed(
-                        2,
-                      )} / resident.`}
-                </Text>
-                <View style={styles.fixedHostTag}>
-                  <Feather name="shield" size={13} color="#0369A1" />
-                  <Text style={styles.fixedHostTagText}>
-                    Set by Property Host ({hostName})
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              monthSections.map((sec) => {
-                const sectionPresentCount = sec.dates.filter((d) =>
-                  presentDates.includes(d.iso),
-                ).length;
-                const totalInSec = sec.dates.length;
-                const rangeLabel = `${sec.dates[0].monthShort} ${sec.startDayNum} – ${
-                  sec.dates[sec.dates.length - 1].monthShort
-                } ${sec.endDayNum} (${totalInSec} days)`;
-
-                // Weekday headers matching Image 1: MON TUE WED THU FRI SAT SUN
-                const weekdayLabels = [
-                  "MON",
-                  "TUE",
-                  "WED",
-                  "THU",
-                  "FRI",
-                  "SAT",
-                  "SUN",
-                ];
-
-                return (
-                  <View key={sec.monthKey} style={styles.calendarCard}>
-                    {/* Month Header */}
-                    <View style={styles.monthHeaderRow}>
-                      <View style={styles.monthTitleLeft}>
-                        <View style={styles.monthDot} />
-                        <Text style={styles.monthTitleText}>
-                          {sec.monthName} {sec.year}
-                        </Text>
-                        <View style={styles.monthRangePill}>
-                          <Text style={styles.monthRangePillText}>
-                            {rangeLabel}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <Text style={styles.monthPresentRatio}>
-                        {sectionPresentCount} / {totalInSec} Present
-                      </Text>
-                    </View>
-
-                    {/* Weekday Row */}
-                    <View style={styles.weekdaysRow}>
-                      {weekdayLabels.map((w) => (
-                        <Text key={w} style={styles.weekdayText}>
-                          {w}
-                        </Text>
-                      ))}
-                    </View>
-
-                    {/* Days Grid - Only dates, no ₱5 per user instruction! */}
-                    <View style={styles.daysGrid}>
-                      {/* Leading empty spacers to align day of week */}
-                      {Array.from({ length: sec.leadingEmptyDays }).map(
-                        (_, idx) => (
-                          <View
-                            key={`spacer_${idx}`}
-                            style={styles.dayBoxEmpty}
-                          />
-                        ),
-                      )}
-
-                      {/* Actual Cycle Dates - Clean date numbers only */}
-                      {sec.dates.map((d) => {
-                        const isPresent = presentDates.includes(d.iso);
-                        return (
-                          <TouchableOpacity
-                            key={d.iso}
-                            style={[
-                              styles.dayBox,
-                              isPresent
-                                ? styles.dayBoxPresent
-                                : styles.dayBoxAbsent,
-                            ]}
-                            onPress={() => toggleDay(d.iso)}
-                            activeOpacity={0.7}
-                          >
-                            <Text
-                              style={[
-                                styles.dayNumberText,
-                                isPresent
-                                  ? styles.dayNumberTextPresent
-                                  : styles.dayNumberTextAbsent,
-                              ]}
-                            >
-                              {d.dayNum}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+              <View style={styles.heroCard}>
+                <View style={styles.heroTopRow}>
+                  <View style={styles.activeCyclePill}>
+                    <View style={styles.activeCycleDot} />
+                    <Text style={styles.activeCyclePillText}>
+                      Active Billing Cycle
+                    </Text>
                   </View>
-                );
-              })
-            )}
+                  <Text style={styles.totalDaysText}>
+                    {totalDays} Total Days
+                  </Text>
+                </View>
 
-            {/* =========================================================================
-                ROOMMATES BREAKDOWN CARD - Pixel perfect match to Image 2
-                ========================================================================= */}
-            <View style={styles.breakdownCard}>
-              <View style={styles.breakdownHeader}>
-                <Text style={styles.breakdownTitle}>Roommates Breakdown</Text>
-                <Text style={styles.breakdownMemberCount}>
-                  {members.length} Member{members.length === 1 ? "" : "s"}
+                <Text style={styles.heroCycleRange}>
+                  {formatCycleRangeTitle(
+                    activeCycle.startDate,
+                    activeCycle.endDate,
+                  )}
                 </Text>
-              </View>
 
-              <View style={styles.roommatesList}>
-                {members.map((member, index) => {
-                  const mUid = member.userId || member.memberId;
-                  const isMe = mUid === activeUserId;
-                  const isPayor = isPayorMember(member);
+                <Text style={styles.heroWaterRate}>
+                  Water Bill:{" "}
+                  <Text style={styles.heroWaterRateBold}>
+                    {pricingModel === "FIXED_MONTHLY"
+                      ? `₱${fixedMonthlyPesos.toFixed(2)} / month total`
+                      : pricingModel === "FIXED_PER_PERSON_MONTH"
+                        ? `₱${fixedPerPersonPesos.toFixed(2)} / resident / mo`
+                        : `₱${ratePerDayPesos.toFixed(2)} / day / person`}
+                  </Text>
+                </Text>
 
-                  // Calculate days present for this member from allCycleAttendance or submissions
-                  const attPresentCount = allCycleAttendance.filter(
-                    (a) =>
-                      (a.userId === mUid ||
-                        a.userId === member.userId ||
-                        a.userId === member.memberId ||
-                        a.userId === member.id ||
-                        (member.userId &&
-                          a.userId === member.userId.replace("mem_", "")) ||
-                        (mUid && a.userId === mUid.replace("mem_", ""))) &&
-                      a.status === "PRESENT",
-                  ).length;
-                  const memberSub =
-                    submissions[mUid] ||
-                    (member.userId ? submissions[member.userId] : undefined) ||
-                    (member.memberId
-                      ? submissions[member.memberId]
-                      : undefined) ||
-                    (member.id ? submissions[member.id] : undefined) ||
-                    (mUid ? submissions[mUid.replace("mem_", "")] : undefined);
-                  const subPresentCount = memberSub?.daysPresent || 0;
-                  const memberPresentCount = isMe
-                    ? presentCount
-                    : attPresentCount > 0
-                      ? attPresentCount
-                      : subPresentCount;
+                {/* 3 Translucent Metric Cards */}
+                <View style={styles.heroMetricsRow}>
+                  <View style={styles.heroMetricBox}>
+                    <Text style={styles.heroMetricLabel}>Present Days</Text>
+                    <Text style={styles.heroMetricValue}>{presentCount}</Text>
+                  </View>
 
-                  const memberAbsentCount = Math.max(
-                    0,
-                    totalDays - memberPresentCount,
-                  );
-                  // Effective daily rate (defaults safely to ₱5.00/day)
-                  const effectiveDailyRate =
-                    Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
-                      ? Number(waterConfig.rateCentavosPerPersonPerDay) / 100
-                      : 5.0;
+                  <View style={styles.heroMetricBox}>
+                    <Text style={styles.heroMetricLabel}>Absent Days</Text>
+                    <Text style={styles.heroMetricValue}>{absentCount}</Text>
+                  </View>
 
-                  // Real amount based on presence: if member has presence days, ALWAYS calculate presence * daily rate
-                  const memberWaterTotal =
-                    memberPresentCount > 0
-                      ? memberPresentCount * effectiveDailyRate
-                      : isFixedMode
-                        ? myFixedSharePesos
-                        : 0;
-
-                  const memberSubmission = submissions[mUid];
-                  const isSubmitted = isMe
-                    ? isMyAttendanceSubmitted
-                    : Boolean(memberSubmission);
-                  const hasMarked = isMe
-                    ? presentCount > 0
-                    : memberPresentCount > 0;
-
-                  const avatarInitials = getInitials(
-                    member.displayName || member.name,
-                  );
-                  const avatarBg = isMe
-                    ? "#2563EB"
-                    : AVATAR_COLORS[index % AVATAR_COLORS.length];
-
-                  return (
-                    <View
-                      key={mUid}
+                  <View style={styles.heroMetricBox}>
+                    <Text style={styles.heroMetricLabel}>Your Due</Text>
+                    <Text
                       style={[
-                        styles.memberCard,
-                        isMe && styles.memberCardHighlight,
+                        styles.heroMetricValue,
+                        styles.heroMetricValueDue,
                       ]}
                     >
-                      {/* Avatar */}
-                      {member.profilePicture || member.photoURL ? (
-                        <Image
-                          source={{
-                            uri: member.profilePicture || member.photoURL,
-                          }}
-                          style={styles.memberAvatarImg}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.memberAvatar,
-                            { backgroundColor: avatarBg },
-                          ]}
-                        >
-                          <Text style={styles.memberAvatarText}>
-                            {avatarInitials}
+                      ₱{waterFee.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* =========================================================================
+                WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
+                ========================================================================= */}
+              <View style={styles.feeBarCard}>
+                <View style={styles.feeIconCircle}>
+                  <Ionicons name="water" size={18} color="#2563EB" />
+                </View>
+
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={styles.feeBarTitle}>Water Utility Fee</Text>
+                  <Text style={styles.feeBarSubtitle}>
+                    {pricingModel === "FIXED_MONTHLY"
+                      ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
+                      : pricingModel === "FIXED_PER_PERSON_MONTH"
+                        ? `Fixed ₱${fixedPerPersonPesos.toFixed(2)} flat fee`
+                        : `Fixed ₱${ratePerDayPesos.toFixed(0)} per present day`}
+                  </Text>
+                </View>
+
+                {!isFixedMode && (
+                  <View style={styles.feeBarActions}>
+                    <TouchableOpacity
+                      style={styles.markAllBtn}
+                      onPress={markAll}
+                      disabled={isBatching}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.markAllBtnText}>Mark All</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.clearBtn}
+                      onPress={clearAll}
+                      disabled={isBatching}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.clearBtnText}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* =========================================================================
+                CALENDAR SECTION - Grouped by Month with Clean Dates ONLY (No ₱5)
+                ========================================================================= */}
+              {isFixedMode ? (
+                <View style={styles.fixedNoticeCard}>
+                  <View style={styles.fixedNoticeIconBox}>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={32}
+                      color="#059669"
+                    />
+                  </View>
+                  <Text style={styles.fixedNoticeTitle}>
+                    Daily attendance is not required for your apartment.
+                  </Text>
+                  <Text style={styles.fixedNoticeSub}>
+                    {pricingModel === "FIXED_MONTHLY"
+                      ? `Household water bill (₱${fixedMonthlyPesos.toFixed(
+                          2,
+                        )}) is split evenly across ${payingRoommatesCount} paying roommates.`
+                      : `Water is billed as a flat monthly rate of ₱${fixedPerPersonPesos.toFixed(
+                          2,
+                        )} / resident.`}
+                  </Text>
+                  <View style={styles.fixedHostTag}>
+                    <Feather name="shield" size={13} color="#0369A1" />
+                    <Text style={styles.fixedHostTagText}>
+                      Set by Property Host ({hostName})
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                monthSections.map((sec) => {
+                  const sectionPresentCount = sec.dates.filter((d) =>
+                    presentDates.includes(d.iso),
+                  ).length;
+                  const totalInSec = sec.dates.length;
+                  const rangeLabel = `${sec.dates[0].monthShort} ${sec.startDayNum} – ${
+                    sec.dates[sec.dates.length - 1].monthShort
+                  } ${sec.endDayNum} (${totalInSec} days)`;
+
+                  // Weekday headers matching Image 1: MON TUE WED THU FRI SAT SUN
+                  const weekdayLabels = [
+                    "MON",
+                    "TUE",
+                    "WED",
+                    "THU",
+                    "FRI",
+                    "SAT",
+                    "SUN",
+                  ];
+
+                  return (
+                    <View key={sec.monthKey} style={styles.calendarCard}>
+                      {/* Month Header */}
+                      <View style={styles.monthHeaderRow}>
+                        <View style={styles.monthTitleLeft}>
+                          <View style={styles.monthDot} />
+                          <Text style={styles.monthTitleText}>
+                            {sec.monthName} {sec.year}
                           </Text>
-                        </View>
-                      )}
-
-                      {/* Details */}
-                      <View style={styles.memberInfoCol}>
-                        <View style={styles.memberNameRow}>
-                          <Text style={styles.memberName} numberOfLines={1}>
-                            {member.displayName || "Roommate"}
-                            {isMe ? " (You)" : ""}
-                          </Text>
-
-                          {/* Synced Badge */}
-                          {isSubmitted && (
-                            <View style={styles.syncedPill}>
-                              <Text style={styles.syncedPillText}>Synced</Text>
-                            </View>
-                          )}
-
-                          {/* Exempt Pill */}
-                          {!isPayor && (
-                            <View style={styles.exemptPill}>
-                              <Text style={styles.exemptPillText}>Exempt</Text>
-                            </View>
-                          )}
+                          <View style={styles.monthRangePill}>
+                            <Text style={styles.monthRangePillText}>
+                              {rangeLabel}
+                            </Text>
+                          </View>
                         </View>
 
-                        <Text style={styles.memberStaySub}>
-                          {memberPresentCount} days present •{" "}
-                          {memberAbsentCount} off
+                        <Text style={styles.monthPresentRatio}>
+                          {sectionPresentCount} / {totalInSec} Present
                         </Text>
                       </View>
 
-                      {/* Right Due & Status */}
-                      <View style={styles.memberDueCol}>
-                        <Text style={styles.memberDueAmount}>
-                          ₱{memberWaterTotal.toFixed(2)}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.memberStatusLabel,
-                            hasMarked || isSubmitted
-                              ? styles.memberStatusMarked
-                              : styles.memberStatusPending,
-                          ]}
-                        >
-                          {hasMarked || isSubmitted
-                            ? !isPayor
-                              ? "Marked (Exempt)"
-                              : "Marked"
-                            : !isPayor
-                              ? "Exempt"
-                              : "Pending"}
-                        </Text>
+                      {/* Weekday Row */}
+                      <View style={styles.weekdaysRow}>
+                        {weekdayLabels.map((w) => (
+                          <Text key={w} style={styles.weekdayText}>
+                            {w}
+                          </Text>
+                        ))}
+                      </View>
+
+                      {/* Days Grid - Only dates, no ₱5 per user instruction! */}
+                      <View style={styles.daysGrid}>
+                        {/* Leading empty spacers to align day of week */}
+                        {Array.from({ length: sec.leadingEmptyDays }).map(
+                          (_, idx) => (
+                            <View
+                              key={`spacer_${idx}`}
+                              style={styles.dayBoxEmpty}
+                            />
+                          ),
+                        )}
+
+                        {/* Actual Cycle Dates - Clean date numbers only */}
+                        {sec.dates.map((d) => {
+                          const isPresent = presentDates.includes(d.iso);
+                          return (
+                            <TouchableOpacity
+                              key={d.iso}
+                              style={[
+                                styles.dayBox,
+                                isPresent
+                                  ? styles.dayBoxPresent
+                                  : styles.dayBoxAbsent,
+                              ]}
+                              onPress={() => toggleDay(d.iso)}
+                              activeOpacity={0.7}
+                            >
+                              <Text
+                                style={[
+                                  styles.dayNumberText,
+                                  isPresent
+                                    ? styles.dayNumberTextPresent
+                                    : styles.dayNumberTextAbsent,
+                                ]}
+                              >
+                                {d.dayNum}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </View>
                     </View>
                   );
-                })}
-              </View>
-            </View>
+                })
+              )}
 
-            {/* =========================================================================
+              {/* =========================================================================
+                ROOMMATES BREAKDOWN CARD - Pixel perfect match to Image 2
+                ========================================================================= */}
+              <View style={styles.breakdownCard}>
+                <View style={styles.breakdownHeader}>
+                  <Text style={styles.breakdownTitle}>Roommates Breakdown</Text>
+                  <Text style={styles.breakdownMemberCount}>
+                    {members.length} Member{members.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
+
+                <View style={styles.roommatesList}>
+                  {members.map((member, index) => {
+                    const mUid = member.userId || member.memberId;
+                    const isMe = mUid === activeUserId;
+                    const isPayor = isPayorMember(member);
+
+                    // Calculate days present for this member from allCycleAttendance or submissions
+                    const attPresentCount = allCycleAttendance.filter(
+                      (a) =>
+                        (a.userId === mUid ||
+                          a.userId === member.userId ||
+                          a.userId === member.memberId ||
+                          a.userId === member.id ||
+                          (member.userId &&
+                            a.userId === member.userId.replace("mem_", "")) ||
+                          (mUid && a.userId === mUid.replace("mem_", ""))) &&
+                        a.status === "PRESENT",
+                    ).length;
+                    const memberSub =
+                      submissions[mUid] ||
+                      (member.userId
+                        ? submissions[member.userId]
+                        : undefined) ||
+                      (member.memberId
+                        ? submissions[member.memberId]
+                        : undefined) ||
+                      (member.id ? submissions[member.id] : undefined) ||
+                      (mUid
+                        ? submissions[mUid.replace("mem_", "")]
+                        : undefined);
+                    const subPresentCount = memberSub?.daysPresent || 0;
+                    const memberPresentCount = isMe
+                      ? presentCount
+                      : attPresentCount > 0
+                        ? attPresentCount
+                        : subPresentCount;
+
+                    const memberAbsentCount = Math.max(
+                      0,
+                      totalDays - memberPresentCount,
+                    );
+                    // Effective daily rate (defaults safely to ₱5.00/day)
+                    const effectiveDailyRate =
+                      Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
+                        ? Number(waterConfig.rateCentavosPerPersonPerDay) / 100
+                        : 5.0;
+
+                    // Real amount based on presence: if member has presence days, ALWAYS calculate presence * daily rate
+                    const memberWaterTotal =
+                      memberPresentCount > 0
+                        ? memberPresentCount * effectiveDailyRate
+                        : isFixedMode
+                          ? myFixedSharePesos
+                          : 0;
+
+                    const memberSubmission = submissions[mUid];
+                    const isSubmitted = isMe
+                      ? isMyAttendanceSubmitted
+                      : Boolean(memberSubmission);
+                    const hasMarked = isMe
+                      ? presentCount > 0
+                      : memberPresentCount > 0;
+
+                    const avatarInitials = getInitials(
+                      member.displayName || member.name,
+                    );
+                    const avatarBg = isMe
+                      ? "#2563EB"
+                      : AVATAR_COLORS[index % AVATAR_COLORS.length];
+
+                    return (
+                      <View
+                        key={mUid}
+                        style={[
+                          styles.memberCard,
+                          isMe && styles.memberCardHighlight,
+                        ]}
+                      >
+                        {/* Avatar */}
+                        {member.profilePicture || member.photoURL ? (
+                          <Image
+                            source={{
+                              uri: member.profilePicture || member.photoURL,
+                            }}
+                            style={styles.memberAvatarImg}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.memberAvatar,
+                              { backgroundColor: avatarBg },
+                            ]}
+                          >
+                            <Text style={styles.memberAvatarText}>
+                              {avatarInitials}
+                            </Text>
+                          </View>
+                        )}
+
+                        {/* Details */}
+                        <View style={styles.memberInfoCol}>
+                          <View style={styles.memberNameRow}>
+                            <Text style={styles.memberName} numberOfLines={1}>
+                              {member.displayName || "Roommate"}
+                              {isMe ? " (You)" : ""}
+                            </Text>
+
+                            {/* Synced Badge */}
+                            {isSubmitted && (
+                              <View style={styles.syncedPill}>
+                                <Text style={styles.syncedPillText}>
+                                  Synced
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+
+                          <Text style={styles.memberStaySub}>
+                            {memberPresentCount} days present •{" "}
+                            {memberAbsentCount} off
+                          </Text>
+                        </View>
+
+                        {/* Right Due & Status */}
+                        <View style={styles.memberDueCol}>
+                          <Text style={styles.memberDueAmount}>
+                            ₱{memberWaterTotal.toFixed(2)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.memberStatusLabel,
+                              hasMarked || isSubmitted
+                                ? styles.memberStatusMarked
+                                : styles.memberStatusPending,
+                            ]}
+                          >
+                            {hasMarked || isSubmitted
+                              ? !isPayor
+                                ? "Marked (Exempt)"
+                                : "Marked"
+                              : !isPayor
+                                ? "Exempt"
+                                : "Pending"}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* =========================================================================
                 SUBMIT / UPDATE BUTTON & BANNER - Pixel perfect match to Image 2
                 Allows editing anytime and synchronizes all bills across app
                 ========================================================================= */}
-            <View style={styles.submissionContainer}>
-              <View
-                style={[
-                  styles.submissionNoticeBox,
-                  isMyAttendanceSubmitted
-                    ? styles.submissionNoticeBoxSubmitted
-                    : styles.submissionNoticeBoxPending,
-                ]}
-              >
-                <Ionicons
-                  name={
-                    isMyAttendanceSubmitted
-                      ? "checkmark-circle"
-                      : "water-outline"
-                  }
-                  size={18}
-                  color={isMyAttendanceSubmitted ? "#059669" : "#2563EB"}
-                />
-                <Text
+              <View style={styles.submissionContainer}>
+                <View
                   style={[
-                    styles.submissionNoticeText,
-                    isMyAttendanceSubmitted &&
-                      styles.submissionNoticeTextSubmitted,
+                    styles.submissionNoticeBox,
+                    isMyAttendanceSubmitted
+                      ? styles.submissionNoticeBoxSubmitted
+                      : styles.submissionNoticeBoxPending,
                   ]}
                 >
+                  <Ionicons
+                    name={
+                      isMyAttendanceSubmitted
+                        ? "checkmark-circle"
+                        : "water-outline"
+                    }
+                    size={18}
+                    color={isMyAttendanceSubmitted ? "#059669" : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.submissionNoticeText,
+                      isMyAttendanceSubmitted &&
+                        styles.submissionNoticeTextSubmitted,
+                    ]}
+                  >
+                    {isMyAttendanceSubmitted
+                      ? `Presence submitted (${presentCount} days, ₱${waterFee.toFixed(
+                          2,
+                        )}). You can edit dates above anytime — bills will update synchronously.`
+                      : "Submit your water presence for this cycle. You can make adjustments and resubmit anytime."}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.submitButton,
+                    isSubmitting && { opacity: 0.75 },
+                  ]}
+                  onPress={handleSubmitAttendance}
+                  disabled={isSubmitting}
+                  activeOpacity={0.85}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <View style={styles.submitBtnInner}>
+                      <Text style={styles.submitButtonText}>
+                        {isMyAttendanceSubmitted
+                          ? `Update Water Presence (₱${waterFee.toFixed(2)})`
+                          : `Submit Water Presence (₱${waterFee.toFixed(2)})`}
+                      </Text>
+                      <Feather
+                        name={isMyAttendanceSubmitted ? "check" : "arrow-right"}
+                        size={18}
+                        color="#FFFFFF"
+                        style={{ marginLeft: 8 }}
+                      />
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                <Text style={styles.submissionFootnote}>
                   {isMyAttendanceSubmitted
-                    ? `Presence submitted (${presentCount} days, ₱${waterFee.toFixed(
-                        2,
-                      )}). You can edit dates above anytime — bills will update synchronously.`
-                    : "Submit your water presence for this cycle. You can make adjustments and resubmit anytime."}
+                    ? "✓ Real-time synced · Tap any day to edit and re-sync"
+                    : "Tap above to mark days present, then submit to sync dues"}
                 </Text>
               </View>
-
-              <TouchableOpacity
-                style={[styles.submitButton, isSubmitting && { opacity: 0.75 }]}
-                onPress={handleSubmitAttendance}
-                disabled={isSubmitting}
-                activeOpacity={0.85}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <View style={styles.submitBtnInner}>
-                    <Text style={styles.submitButtonText}>
-                      {isMyAttendanceSubmitted
-                        ? `Update Water Presence (₱${waterFee.toFixed(2)})`
-                        : `Submit Water Presence (₱${waterFee.toFixed(2)})`}
-                    </Text>
-                    <Feather
-                      name={isMyAttendanceSubmitted ? "check" : "arrow-right"}
-                      size={18}
-                      color="#FFFFFF"
-                      style={{ marginLeft: 8 }}
-                    />
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              <Text style={styles.submissionFootnote}>
-                {isMyAttendanceSubmitted
-                  ? "✓ Real-time synced · Tap any day to edit and re-sync"
-                  : "Tap above to mark days present, then submit to sync dues"}
-              </Text>
-            </View>
-          </>
-        )}
-      </ScrollView>
+            </>
+          )}
+        </ScrollView>
+      )}
 
       {/* Host Water Settings Modal */}
       {isHost && resolvedHouseholdId && (
@@ -1228,19 +1248,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   circleIconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -1369,11 +1382,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
   },
   feeIconCircle: {
     width: 36,
@@ -1429,11 +1437,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
   },
   monthHeaderRow: {
     flexDirection: "row",
@@ -1589,11 +1592,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
   },
   breakdownHeader: {
     flexDirection: "row",

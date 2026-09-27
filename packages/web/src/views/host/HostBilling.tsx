@@ -30,11 +30,13 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 import { doc, setDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
 
 export const HostBilling: React.FC = () => {
-  const { household, members, billingCycles, activeCycle } = useHousehold();
+  const { household, members, billingCycles, activeCycle, loading } =
+    useHousehold();
   const state = getAppState();
 
   // Re-render immediately when store updates (e.g. mobile adds an expense or charges change)
@@ -46,6 +48,21 @@ export const HostBilling: React.FC = () => {
   const [selectedCycleId, setSelectedCycleId] = useState<string>(
     activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId || "",
   );
+
+  useEffect(() => {
+    if (
+      !selectedCycleId &&
+      (activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId)
+    ) {
+      setSelectedCycleId(
+        activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId || "",
+      );
+    }
+  }, [activeCycle?.billingCycleId, billingCycles, selectedCycleId]);
+
+  if (loading && household.householdId) {
+    return <UniversalLoader variant="skeleton" type="bills" />;
+  }
 
   const currentCycle =
     billingCycles.find((c) => c.billingCycleId === selectedCycleId) ||

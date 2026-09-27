@@ -1,8 +1,8 @@
-import React, { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { useHousehold } from "../../contexts/HouseholdContext";
-import { JoinHouseholdModal } from "./JoinHouseholdModal";
-import { CreateRoomModal } from "../CreateRoomModal";
+import React, { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useHousehold } from '../../contexts/HouseholdContext';
+import { JoinHouseholdModal } from './JoinHouseholdModal';
+import { CreateRoomModal } from '../CreateRoomModal';
 import {
   LayoutDashboard,
   Users,
@@ -24,7 +24,7 @@ import {
   Building2,
   Plus,
   KeyRound,
-} from "lucide-react";
+} from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
@@ -33,14 +33,8 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  currentTab,
-  onSelectTab,
-  isOpen,
-  onClose,
-}) => {
-  const { isHost, isSuperAdmin, isPayor, isNonPayor, role, currentUser } =
-    useAuth();
+export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, isOpen, onClose }) => {
+  const { isHost, isSuperAdmin, isPayor, isNonPayor, role, currentUser } = useAuth();
   const { household, members } = useHousehold();
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -48,106 +42,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const hasGroup = Boolean(
     household.householdId &&
     household.householdName &&
-    household.householdName !== "No household connected",
+    household.householdName !== 'No household connected'
   );
 
   const isUserHost = Boolean(
     isHost ||
-    currentUser.role === "HOST" ||
-    currentUser.hostApplicationStatus === "APPROVED" ||
+    currentUser.role === 'HOST' ||
+    currentUser.hostApplicationStatus === 'APPROVED' ||
     (household.hostId && household.hostId === currentUser.uid) ||
     members.some(
       (m) =>
-        (m.userId === currentUser.uid ||
-          m.memberId === currentUser.uid ||
-          m.memberId === `mem_${currentUser.uid}`) &&
-        m.role === "HOST",
-    ),
+        (m.userId === currentUser.uid || m.memberId === currentUser.uid || m.memberId === `mem_${currentUser.uid}`) &&
+        m.role === 'HOST'
+    )
   );
 
   const getNavItems = () => {
     if (isSuperAdmin) {
       return [
-        {
-          id: "admin_dashboard",
-          label: "Platform Dashboard",
-          icon: LayoutDashboard,
-        },
-        {
-          id: "admin_host_applications",
-          label: "Host Applications",
-          icon: ShieldCheck,
-        },
-        { id: "admin_households", label: "Households", icon: Layers },
-        { id: "admin_users", label: "User Directory", icon: Users },
-        {
-          id: "admin_versions",
-          label: "App Version Control",
-          icon: Smartphone,
-        },
-        { id: "admin_support", label: "Support Tickets", icon: HelpCircle },
-        { id: "admin_logs", label: "Audit Logs", icon: History },
+        { id: 'admin_dashboard', label: 'Platform Dashboard', icon: LayoutDashboard },
+        { id: 'admin_host_applications', label: 'Host Applications', icon: ShieldCheck },
+        { id: 'admin_households', label: 'Households', icon: Layers },
+        { id: 'admin_users', label: 'User Directory', icon: Users },
+        { id: 'admin_versions', label: 'App Version Control', icon: Smartphone },
+        { id: 'admin_support', label: 'Support Tickets', icon: HelpCircle },
+        { id: 'admin_logs', label: 'Audit Logs', icon: History },
       ];
     }
 
     if (isUserHost) {
       return [
-        { id: "host_dashboard", label: "Dashboard", icon: LayoutDashboard },
-        {
-          id: "host_household",
-          label: hasGroup ? "Manage Group" : "Create Group",
-          icon: hasGroup ? Users : Plus,
-        },
-        { id: "host_billing", label: "Billing Cycles & Rates", icon: Receipt },
-        { id: "host_attendance", label: "Water Attendance", icon: Droplets },
-        {
-          id: "host_payments",
-          label: "Payment Verifications",
-          icon: CreditCard,
-        },
-        {
-          id: "host_redistribution",
-          label: "Balance Redistribution",
-          icon: ArrowLeftRight,
-        },
-        { id: "host_messages", label: "Messages & Chat", icon: MessageSquare },
-        { id: "host_announcements", label: "Announcements", icon: Megaphone },
-        { id: "host_reports", label: "Financial Reports", icon: BarChart3 },
-        { id: "host_logs", label: "Activity Logs", icon: History },
-        { id: "host_settings", label: "Household Settings", icon: Settings },
+        { id: 'host_dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'host_household', label: hasGroup ? 'Manage Group' : 'Create Group', icon: hasGroup ? Users : Plus },
+        { id: 'host_billing', label: 'Billing Cycles & Rates', icon: Receipt },
+        { id: 'host_attendance', label: 'Water Attendance', icon: Droplets },
+        { id: 'host_payments', label: 'Payment Verifications', icon: CreditCard },
+        { id: 'host_redistribution', label: 'Balance Redistribution', icon: ArrowLeftRight },
+        { id: 'host_messages', label: 'Messages & Chat', icon: MessageSquare },
+        { id: 'host_announcements', label: 'Announcements', icon: Megaphone },
+        { id: 'host_reports', label: 'Financial Reports', icon: BarChart3 },
+        { id: 'host_logs', label: 'Activity Logs', icon: History },
+        { id: 'host_settings', label: 'Household Settings', icon: Settings },
       ];
     }
 
     // Client (Payor or Non-Payor resident)
     const clientItems = [
-      {
-        id: "client_dashboard",
-        label: "Home Dashboard",
-        icon: LayoutDashboard,
-      },
-      { id: "client_bills", label: "My Bills & Breakdown", icon: Receipt },
-      {
-        id: "client_payments",
-        label: "Submit & View Payments",
-        icon: CreditCard,
-      },
-      { id: "client_attendance", label: "Water Attendance", icon: Droplets },
-      {
-        id: "client_messages",
-        label: "Roommate Messages",
-        icon: MessageSquare,
-      },
-      { id: "client_announcements", label: "Announcements", icon: Megaphone },
-      { id: "client_profile", label: "My Profile & Support", icon: Settings },
+      { id: 'client_dashboard', label: 'Home Dashboard', icon: LayoutDashboard },
+      { id: 'client_bills', label: 'My Bills & Breakdown', icon: Receipt },
+      { id: 'client_payments', label: 'Submit & View Payments', icon: CreditCard },
+      { id: 'client_attendance', label: 'Water Attendance', icon: Droplets },
+      { id: 'client_messages', label: 'Roommate Messages', icon: MessageSquare },
+      { id: 'client_announcements', label: 'Announcements', icon: Megaphone },
+      { id: 'client_profile', label: 'My Profile & Support', icon: Settings },
     ];
 
     // Only non-hosts can apply for host status
     if (!isUserHost) {
-      clientItems.splice(1, 0, {
-        id: "client_host_application",
-        label: "Apply for Host Status",
-        icon: Building2,
-      });
+      clientItems.splice(1, 0, { id: 'client_host_application', label: 'Apply for Host Status', icon: Building2 });
     }
 
     return clientItems;
@@ -167,14 +119,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         className={`fixed lg:static top-0 left-0 bottom-0 w-64 bg-white border-r border-slate-200 z-50 flex flex-col justify-between transition-transform duration-200 ease-in-out ${
-          isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div className="p-4 overflow-y-auto">
           <div className="px-3 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            {isUserHost
-              ? "HOST / PAYOR MENU"
-              : `${role.replace("_", " ")} MENU`}
+            {isUserHost ? 'HOST / PAYOR MENU' : `${role.replace('_', ' ')} MENU`}
           </div>
 
           <nav className="space-y-1 mt-2">
@@ -190,13 +140,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }}
                   className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition ${
                     isActive
-                      ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <Icon
-                    className={`w-4 h-4 ${isActive ? "text-white" : "text-slate-500"}`}
-                  />
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
                   <span>{item.label}</span>
                 </button>
               );
@@ -240,3 +188,4 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
+

@@ -1,17 +1,17 @@
 import React, { useState } from "react";
-import {
-  CheckCircle2,
-  ArrowRight,
-  Calculator,
-  Smartphone,
-  ShieldCheck,
-  TrendingUp,
+import { 
+  CheckCircle2, 
+  ArrowRight, 
+  Calculator, 
+  Smartphone, 
+  ShieldCheck, 
+  TrendingUp, 
   Sparkles,
   Users,
   Receipt,
   Droplets,
   Zap,
-  Eye,
+  Eye
 } from "lucide-react";
 
 interface HeroSectionProps {
@@ -52,25 +52,22 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   ];
 
   return (
-    <section
-      id="hero"
-      className="relative pt-8 pb-20 md:pt-14 md:pb-28 overflow-hidden bg-gradient-to-b from-slate-50 via-white to-slate-50"
-    >
+    <section id="hero" className="relative pt-8 pb-20 md:pt-14 md:pb-28 overflow-hidden bg-gradient-to-b from-slate-50 via-white to-slate-50">
       {/* Background Subtle Grid Pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f015_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f015_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
+          
           {/* Left Column: Value Proposition & Copy */}
           <div className="lg:col-span-7 text-left space-y-6">
+            
             {/* Top Badge */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 border border-brand-200 text-brand-700 text-xs sm:text-sm font-bold shadow-xs">
               <Sparkles className="w-4 h-4 text-brand-600" />
               <span>Tailored for Co-living, Condos & Dormitories</span>
               <span className="hidden sm:inline-block w-1.5 h-1.5 rounded-full bg-brand-500" />
-              <span className="hidden sm:inline-block text-slate-500 font-normal">
-                iOS • Android • Web
-              </span>
+              <span className="hidden sm:inline-block text-slate-500 font-normal">iOS • Android • Web</span>
             </div>
 
             {/* Main Headline */}
@@ -83,10 +80,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
             {/* Sub-headline */}
             <p className="text-lg sm:text-xl text-slate-600 font-normal leading-relaxed max-w-2xl">
-              Eliminate awkward group chats and messy spreadsheets. Track rent,
-              electricity, water attendance, and household essentials in
-              real-time with automatic absence redistribution and instant
-              payment reconciliation.
+              Eliminate awkward group chats and messy spreadsheets. Track rent, electricity, water attendance, and household essentials in real-time with automatic absence redistribution and instant payment reconciliation.
             </p>
 
             {/* Key Value Bullets */}
@@ -152,36 +146,30 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             <div className="pt-6 border-t border-slate-200/80 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-4 sm:gap-8">
               <div>
                 <p className="text-2xl font-black text-slate-900">₱0.00</p>
-                <p className="text-xs text-slate-500 font-medium">
-                  Rounding Drift
-                </p>
+                <p className="text-xs text-slate-500 font-medium">Rounding Drift</p>
               </div>
               <div className="hidden sm:block h-8 w-px bg-slate-200" />
               <div>
                 <p className="text-2xl font-black text-slate-900">100%</p>
-                <p className="text-xs text-slate-500 font-medium">
-                  Attendance Precision
-                </p>
+                <p className="text-xs text-slate-500 font-medium">Attendance Precision</p>
               </div>
               <div className="hidden sm:block h-8 w-px bg-slate-200" />
               <div>
                 <p className="text-2xl font-black text-slate-900">1-Tap</p>
-                <p className="text-xs text-slate-500 font-medium">
-                  Payment Verification
-                </p>
+                <p className="text-xs text-slate-500 font-medium">Payment Verification</p>
               </div>
               <div className="hidden sm:block h-8 w-px bg-slate-200" />
               <div>
                 <p className="text-2xl font-black text-slate-900">Cloud</p>
-                <p className="text-xs text-slate-500 font-medium">
-                  Multi-Device Sync
-                </p>
+                <p className="text-xs text-slate-500 font-medium">Multi-Device Sync</p>
               </div>
             </div>
+
           </div>
 
           {/* Right Column: Interactive Proposed Mobile UI Showcase */}
           <div className="lg:col-span-5 relative flex flex-col items-center">
+            
             {/* Screen Selector Tabs */}
             <div className="w-full max-w-sm mb-4 bg-slate-200/80 p-1 rounded-xl flex items-center gap-1 shadow-inner">
               {screens.map((scr, idx) => (
@@ -201,6 +189,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
             {/* Smartphone Container Mockup */}
             <div className="relative w-full max-w-[320px] sm:max-w-[340px] bg-slate-900 rounded-[44px] p-3.5 shadow-2xl border-4 border-slate-800 ring-1 ring-white/20">
+              
               {/* Phone Speaker & Dynamic Island Notch */}
               <div className="absolute top-5 left-1/2 -translate-x-1/2 w-24 h-4 bg-slate-950 rounded-full z-30 flex items-center justify-center">
                 <div className="w-3 h-3 rounded-full bg-slate-900 mr-2" />
@@ -209,6 +198,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
               {/* Phone Screen Glass */}
               <div className="relative overflow-hidden rounded-[36px] bg-slate-100 aspect-[9/18.5] shadow-inner flex flex-col">
+                
                 {/* Proposed UI Image render */}
                 <div className="relative w-full h-full bg-slate-50 flex items-center justify-center overflow-hidden">
                   <img
@@ -216,7 +206,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                     alt={screens[activeScreenIndex].title}
                     className="w-full h-full object-cover object-top transition-all duration-300 hover:scale-105"
                   />
-
+                  
                   {/* Subtle Gradient Overlay at bottom for caption */}
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/80 via-slate-950/40 to-transparent p-4 text-white">
                     <div className="flex items-center justify-between mb-1">
@@ -235,6 +225,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                     </p>
                   </div>
                 </div>
+
               </div>
 
               {/* Floating Highlight Card 1: Attendance Saver */}
@@ -244,12 +235,8 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                     <Droplets className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase">
-                      Absence Engine
-                    </p>
-                    <p className="text-xs font-bold text-emerald-600">
-                      -₱480.00 Credit
-                    </p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase">Absence Engine</p>
+                    <p className="text-xs font-bold text-emerald-600">-₱480.00 Credit</p>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-600 leading-snug">
@@ -264,30 +251,27 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                     <CheckCircle2 className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase">
-                      Payment
-                    </p>
-                    <p className="text-xs font-bold text-slate-900">
-                      ₱4,250.00 Verified
-                    </p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase">Payment</p>
+                    <p className="text-xs font-bold text-slate-900">₱4,250.00 Verified</p>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-600 leading-snug">
                   GCash receipt auto-matched and receipt archived.
                 </p>
               </div>
+
             </div>
 
             {/* Quick Caption under phone */}
             <div className="mt-4 text-center">
               <p className="text-xs text-slate-500 flex items-center justify-center gap-1.5">
                 <Smartphone className="w-3.5 h-3.5 text-brand-600" />
-                <span>
-                  Native React Native & Expo mobile client ready for deployment
-                </span>
+                <span>Native React Native & Expo mobile client ready for deployment</span>
               </p>
             </div>
+
           </div>
+
         </div>
       </div>
     </section>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { firebaseDataService } from "../../services/firebaseDataService";
 import { HostApplication } from "@splitzy/shared";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 import {
   Building2,
   ShieldCheck,
@@ -233,9 +234,7 @@ export const SuperAdminHostApplications: React.FC = () => {
 
       {/* Applications List */}
       {loading ? (
-        <div className="p-12 text-center text-slate-400 text-xs">
-          Loading applications...
-        </div>
+        <UniversalLoader variant="skeleton" type="cards" count={3} />
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-xs space-y-2">
           <Building2 className="w-10 h-10 text-slate-300 mx-auto" />

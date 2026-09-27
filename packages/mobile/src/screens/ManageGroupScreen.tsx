@@ -25,11 +25,14 @@ import {
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
 import { WaterSettingsModal } from "../components/WaterSettingsModal";
-import { UniversalLoader } from "../components/UniversalLoader";
+import { UniversalSkeleton } from "../components/UniversalLoader";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { ViewGroupScreen } from "./ViewGroupScreen";
 
 export interface ManageGroupScreenProps {
   onBack: () => void;
   onOpenAddExpense?: () => void;
+  onOpenSettleDues?: () => void;
   onOpenHostApplication?: () => void;
   currentUser?: {
     name: string;
@@ -39,7 +42,6 @@ export interface ManageGroupScreenProps {
     email?: string;
   };
   initialView?: "details" | "edit" | "create" | "join";
-  onLoaded?: () => void;
 }
 
 interface Participant {
@@ -63,10 +65,10 @@ interface Participant {
 export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   onBack,
   onOpenAddExpense,
+  onOpenSettleDues,
   onOpenHostApplication,
   currentUser = { name: "Resident", avatar: "R" },
   initialView = "details",
-  onLoaded,
 }) => {
   const [viewMode, setViewMode] = useState<
     "details" | "edit" | "create" | "success" | "join"
@@ -97,41 +99,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     {},
   );
   const [loading, setLoading] = useState(false);
-  const [dataLoaded, setDataLoaded] = useState(false);
-  const dataLoadedRef = useRef({
-    profile: false,
-    expenses: false,
-    cycles: false,
-    members: false,
-  });
-
-  const checkGroupDataLoaded = (targetHhId?: string) => {
-    const hh = targetHhId ?? (profile?.householdId || household?.householdId);
-    if (!hh) {
-      if (dataLoadedRef.current.profile) {
-        setDataLoaded(true);
-        onLoaded?.();
-      }
-      return;
-    }
-    if (
-      dataLoadedRef.current.profile &&
-      dataLoadedRef.current.expenses &&
-      dataLoadedRef.current.cycles &&
-      dataLoadedRef.current.members
-    ) {
-      setDataLoaded(true);
-      onLoaded?.();
-    }
-  };
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDataLoaded(true);
-      onLoaded?.();
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
+  const [isInitialLoading, setIsInitialLoading] = useState(
+    () => !cachedHousehold,
+  );
 
   // Modals
   const [showCreateCycleModal, setShowCreateCycleModal] = useState(false);
@@ -199,10 +169,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
   const firebaseUser = auth.currentUser;
   const householdId = profile?.householdId || household?.householdId || "";
-  const isHost =
+  const isHost = Boolean(
     profile?.role === "HOST" ||
     profile?.role === "SUPER_ADMIN" ||
-    profile?.hostApplicationStatus === "APPROVED";
+    profile?.hostApplicationStatus === "APPROVED" ||
+    (household?.hostId &&
+      firebaseUser?.uid &&
+      household.hostId === firebaseUser.uid),
+  );
 
   const handleApproveRequest = async (memberId: string) => {
     if (!householdId) return;
@@ -258,27 +232,29 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     let mounted = true;
     if (!firebaseUser?.uid) return;
     mobileDataService.getUserProfile(firebaseUser.uid).then((p) => {
-      if (mounted && p) {
-        setProfile(p);
-        dataLoadedRef.current.profile = true;
-        const defaultApt = p.householdName || p.apartmentName || "";
-        if (defaultApt) {
-          setGroupNameInput((prev: string) => prev || defaultApt);
-          setEditGroupName((prev: string) => prev || defaultApt);
+      if (mounted) {
+        if (p) {
+          setProfile(p);
+          const defaultApt = p.householdName || p.apartmentName || "";
+          if (defaultApt) {
+            setGroupNameInput((prev: string) => prev || defaultApt);
+            setEditGroupName((prev: string) => prev || defaultApt);
+          }
         }
-        checkGroupDataLoaded(p.householdId);
+        setIsInitialLoading(false);
       }
     });
     const unsubProfile = mobileDataService.listenToUserProfile(
       firebaseUser.uid,
       (p) => {
-        if (mounted && p) {
-          setProfile(p);
-          dataLoadedRef.current.profile = true;
-          if (!p.householdId) {
-            setHousehold(null);
+        if (mounted) {
+          if (p) {
+            setProfile(p);
+            if (!p.householdId) {
+              setHousehold(null);
+            }
           }
-          checkGroupDataLoaded(p.householdId);
+          setIsInitialLoading(false);
         }
       },
     );
@@ -288,23 +264,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     };
   }, [firebaseUser?.uid]);
 
+  const prevInitialViewRef = useRef(initialView);
+  const hasInitializedRef = useRef(false);
+
   // Set initial view mode on mount or when initialView prop changes
   useEffect(() => {
-    if (initialView === "create") {
-      if (profile && !isHost) {
+    // CRITICAL: Never overwrite if user is on the success screen
+    if (viewMode === "success") {
+      return;
+    }
+
+    const propChanged = prevInitialViewRef.current !== initialView;
+    if (propChanged) {
+      prevInitialViewRef.current = initialView;
+      if (initialView === "create") {
+        if (profile && !isHost) {
+          setViewMode(householdId ? "details" : "join");
+          setShowHostRequiredModal(true);
+        } else {
+          setViewMode("create");
+        }
+      } else if (initialView === "join") {
+        setViewMode("join");
+      } else if (initialView === "edit") {
+        setViewMode("edit");
+      } else if (initialView === "details") {
+        setViewMode(householdId ? "details" : isHost ? "create" : "join");
+      }
+      return;
+    }
+
+    // Initial mount check when profile loads
+    if (!hasInitializedRef.current && profile) {
+      hasInitializedRef.current = true;
+      if (initialView === "create" && !isHost) {
         setViewMode(householdId ? "details" : "join");
         setShowHostRequiredModal(true);
-      } else {
-        setViewMode("create");
       }
-    } else if (initialView === "join") {
-      setViewMode("join");
-    } else if (initialView === "edit") {
-      setViewMode("edit");
-    } else if (initialView === "details") {
-      setViewMode(householdId ? "details" : isHost ? "create" : "join");
     }
-  }, [initialView, householdId, isHost, profile]);
+  }, [initialView, householdId, isHost, profile, viewMode]);
 
   // Listen to Household and sub-collections
   useEffect(() => {
@@ -320,32 +318,22 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     });
     const unsubExp = mobileDataService.listenToExpenses(
       householdId,
-      (expData) => {
-        setExpenses(expData);
-        dataLoadedRef.current.expenses = true;
-        checkGroupDataLoaded(householdId);
-      },
+      setExpenses,
     );
     const unsubCyc = mobileDataService.listenToBillingCycles(
       householdId,
       (loadedCycles) => {
         setCycles(loadedCycles);
-        dataLoadedRef.current.cycles = true;
         if (loadedCycles.length > 0 && !selectedCycleId) {
           const active =
             loadedCycles.find((c) => c.status === "ACTIVE") || loadedCycles[0];
           setSelectedCycleId(active.billingCycleId);
         }
-        checkGroupDataLoaded(householdId);
       },
     );
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
-      (memData) => {
-        setCloudMembers(memData);
-        dataLoadedRef.current.members = true;
-        checkGroupDataLoaded(householdId);
-      },
+      setCloudMembers,
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
       householdId,
@@ -1039,6 +1027,8 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         })),
       });
       setCreatedGroupName(finalGroupName);
+      setGroupNameInput("");
+      setAddedMembers([]);
       setLoading(false);
       setViewMode("success");
     } catch (err: any) {
@@ -1102,23 +1092,15 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     setShowMenu(false);
   };
 
-  // --------------------------------------------------------------------------
-  // LOADING STATE: Ensure 100% data loaded before displaying screen content
-  // --------------------------------------------------------------------------
-  if (!dataLoaded && !onLoaded) {
+  // Non-host safety guard: non-host users in a group always see the read-only informational ViewGroupScreen
+  if (!isInitialLoading && profile && !isHost && viewMode !== "join") {
     return (
-      <View style={{ flex: 1, backgroundColor: "transparent" }}>
-        <StatusBar
-          barStyle="dark-content"
-          translucent={true}
-          backgroundColor="transparent"
-        />
-        <UniversalLoader
-          text="Loading group details..."
-          subtitle="Preparing household & bills..."
-          transparent={true}
-        />
-      </View>
+      <ViewGroupScreen
+        onBack={onBack}
+        onOpenSettleDues={onOpenSettleDues}
+        onOpenHostApplication={onOpenHostApplication}
+        currentUser={currentUser}
+      />
     );
   }
 
@@ -1196,15 +1178,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <View style={{ width: "100%", gap: 12, marginBottom: 16 }}>
             <TouchableOpacity
               style={[styles.primaryPillBtn, { width: "100%" }]}
-              onPress={() => {
-                if (onOpenAddExpense) {
-                  onOpenAddExpense();
-                } else {
-                  onBack();
-                }
-              }}
+              onPress={() => setViewMode("details")}
             >
-              <Text style={styles.primaryPillBtnText}>+ Add Expense</Text>
+              <Text style={styles.primaryPillBtnText}>View Group Details</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1217,9 +1193,31 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   borderColor: "#BFDBFE",
                 },
               ]}
-              onPress={onBack}
+              onPress={() => {
+                if (onOpenAddExpense) {
+                  onOpenAddExpense();
+                } else {
+                  onBack();
+                }
+              }}
             >
               <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+                + Add Expense
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                width: "100%",
+                paddingVertical: 12,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onPress={onBack}
+            >
+              <Text
+                style={{ fontSize: 15, fontWeight: "600", color: "#64748B" }}
+              >
                 Back to Home
               </Text>
             </TouchableOpacity>
@@ -1762,6 +1760,29 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         {renderMenuModal()}
         {renderInviteModal()}
         {renderHostRequiredModal()}
+      </View>
+    );
+  }
+
+  // If initial profile & household are loading, show UniversalSkeleton groups
+  if (isInitialLoading && !householdId && viewMode === "details") {
+    return (
+      <View style={styles.container}>
+        <StatusBar
+          barStyle="dark-content"
+          translucent={true}
+          backgroundColor="transparent"
+        />
+        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View style={styles.navBar}>
+            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
+              <Feather name="chevron-left" size={24} color="#0F172A" />
+            </TouchableOpacity>
+            <Text style={styles.navTitle}>Manage Group</Text>
+            <View style={{ width: 42 }} />
+          </View>
+        </View>
+        <UniversalSkeleton type="groups" />
       </View>
     );
   }
@@ -2667,303 +2688,342 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
   function renderCreateCycleModal() {
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={showCreateCycleModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowCreateCycleModal(false)}
+        onClose={() => setShowCreateCycleModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Create Billing Cycle"
+        subtitle="Set up a billing cycle (e.g. monthly) to track rent, electricity, and water dues"
+        icon={<Feather name="calendar" size={18} color="#2563EB" />}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Create Billing Cycle</Text>
-              <TouchableOpacity onPress={() => setShowCreateCycleModal(false)}>
-                <Feather name="x" size={22} color="#64748B" />
-              </TouchableOpacity>
-            </View>
+        <View style={{ paddingTop: 4 }}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Cycle Name</Text>
+            <TextInput
+              style={styles.textInput}
+              value={cycleNameInput}
+              onChangeText={setCycleNameInput}
+              placeholder="e.g. October 2026 Cycle"
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
 
-            <Text style={styles.sheetSub}>
-              Set up a billing cycle (e.g. monthly) to track rent, electricity,
-              and water dues for your apartment.
-            </Text>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Cycle Name</Text>
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
               <TextInput
                 style={styles.textInput}
-                value={cycleNameInput}
-                onChangeText={setCycleNameInput}
-                placeholder="e.g. October 2026 Cycle"
+                value={cycleStartInput}
+                onChangeText={setCycleStartInput}
+                placeholder="2026-10-01"
                 placeholderTextColor="#94A3B8"
               />
             </View>
 
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={cycleStartInput}
-                  onChangeText={setCycleStartInput}
-                  placeholder="2026-10-01"
-                  placeholderTextColor="#94A3B8"
-                />
-              </View>
-
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={cycleEndInput}
-                  onChangeText={setCycleEndInput}
-                  placeholder="2026-10-31"
-                  placeholderTextColor="#94A3B8"
-                />
-              </View>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={cycleEndInput}
+                onChangeText={setCycleEndInput}
+                placeholder="2026-10-31"
+                placeholderTextColor="#94A3B8"
+              />
             </View>
-
-            <TouchableOpacity
-              style={[styles.primaryPillBtn, { marginTop: 24 }]}
-              onPress={handleCreateBillingCycle}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryPillBtnText}>Create Cycle</Text>
-              )}
-            </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            onPress={handleCreateBillingCycle}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryPillBtnText}>Create Cycle</Text>
+            )}
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
     );
   }
 
   function renderEditCycleModal() {
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={showEditCycleModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowEditCycleModal(false)}
+        onClose={() => setShowEditCycleModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Edit Billing Cycle"
+        subtitle="Update cycle name, duration dates, or billing status"
+        icon={<Feather name="edit-3" size={18} color="#2563EB" />}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Edit Billing Cycle</Text>
-              <TouchableOpacity onPress={() => setShowEditCycleModal(false)}>
-                <Feather name="x" size={22} color="#64748B" />
-              </TouchableOpacity>
-            </View>
+        <View style={{ paddingTop: 4 }}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Cycle Name</Text>
+            <TextInput
+              style={styles.textInput}
+              value={editCycleName}
+              onChangeText={setEditCycleName}
+              placeholder="e.g. October 2026 Cycle"
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
 
-            <Text style={styles.sheetSub}>
-              Update the name, duration dates, or billing status of this cycle.
-            </Text>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Cycle Name</Text>
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
               <TextInput
                 style={styles.textInput}
-                value={editCycleName}
-                onChangeText={setEditCycleName}
-                placeholder="e.g. October 2026 Cycle"
+                value={editCycleStart}
+                onChangeText={setEditCycleStart}
+                placeholder="2026-10-01"
                 placeholderTextColor="#94A3B8"
               />
             </View>
 
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={editCycleStart}
-                  onChangeText={setEditCycleStart}
-                  placeholder="2026-10-01"
-                  placeholderTextColor="#94A3B8"
-                />
-              </View>
-
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={editCycleEnd}
-                  onChangeText={setEditCycleEnd}
-                  placeholder="2026-10-31"
-                  placeholderTextColor="#94A3B8"
-                />
-              </View>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={editCycleEnd}
+                onChangeText={setEditCycleEnd}
+                placeholder="2026-10-31"
+                placeholderTextColor="#94A3B8"
+              />
             </View>
-
-            <View style={[styles.inputGroup, { marginTop: 14 }]}>
-              <Text style={styles.inputLabel}>Status</Text>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-                {["ACTIVE", "FINALIZED", "ARCHIVED"].map((status) => (
-                  <TouchableOpacity
-                    key={status}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 9,
-                      borderRadius: 12,
-                      alignItems: "center",
-                      backgroundColor:
-                        editCycleStatus === status ? "#EFF6FF" : "#F8FAFC",
-                      borderWidth: 1,
-                      borderColor:
-                        editCycleStatus === status ? "#2563EB" : "#E2E8F0",
-                    }}
-                    onPress={() => setEditCycleStatus(status)}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "700",
-                        color:
-                          editCycleStatus === status ? "#2563EB" : "#64748B",
-                      }}
-                    >
-                      {status}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.primaryPillBtn, { marginTop: 24 }]}
-              onPress={handleUpdateBillingCycle}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryPillBtnText}>Save Changes</Text>
-              )}
-            </TouchableOpacity>
           </View>
+
+          <View style={[styles.inputGroup, { marginTop: 14 }]}>
+            <Text style={styles.inputLabel}>Status</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              {["ACTIVE", "FINALIZED", "ARCHIVED"].map((status) => (
+                <TouchableOpacity
+                  key={status}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 9,
+                    borderRadius: 12,
+                    alignItems: "center",
+                    backgroundColor:
+                      editCycleStatus === status ? "#EFF6FF" : "#F8FAFC",
+                    borderWidth: 1,
+                    borderColor:
+                      editCycleStatus === status ? "#2563EB" : "#E2E8F0",
+                  }}
+                  onPress={() => setEditCycleStatus(status)}
+                >
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "700",
+                      color: editCycleStatus === status ? "#2563EB" : "#64748B",
+                    }}
+                  >
+                    {status}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            onPress={handleUpdateBillingCycle}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryPillBtnText}>Save Changes</Text>
+            )}
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
     );
   }
 
   function renderInviteModal() {
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={showInviteModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowInviteModal(false)}
+        onClose={() => setShowInviteModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Invite Roommate"
+        subtitle="Add a new resident to your household room"
+        icon={<Feather name="user-plus" size={18} color="#2563EB" />}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Invite Roommate</Text>
-              <TouchableOpacity onPress={() => setShowInviteModal(false)}>
-                <Feather name="x" size={22} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Roommate Name</Text>
-              <TextInput
-                style={styles.textInput}
-                value={inviteName}
-                onChangeText={setInviteName}
-                placeholder="e.g. John Doe"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
-
-            <View style={[styles.inputGroup, { marginTop: 14 }]}>
-              <Text style={styles.inputLabel}>Email or Phone (Optional)</Text>
-              <TextInput
-                style={styles.textInput}
-                value={inviteContact}
-                onChangeText={setInviteContact}
-                placeholder="e.g. roommate@email.com or +63 912..."
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[styles.primaryPillBtn, { marginTop: 24 }]}
-              onPress={handleInviteRoommate}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryPillBtnText}>Send Invitation</Text>
-              )}
-            </TouchableOpacity>
+        <View style={{ paddingTop: 4 }}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Roommate Name</Text>
+            <TextInput
+              style={styles.textInput}
+              value={inviteName}
+              onChangeText={setInviteName}
+              placeholder="e.g. John Doe"
+              placeholderTextColor="#94A3B8"
+            />
           </View>
+
+          <View style={[styles.inputGroup, { marginTop: 14 }]}>
+            <Text style={styles.inputLabel}>Email or Phone (Optional)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={inviteContact}
+              onChangeText={setInviteContact}
+              placeholder="e.g. roommate@email.com or +63 912..."
+              placeholderTextColor="#94A3B8"
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            onPress={handleInviteRoommate}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryPillBtnText}>Send Invitation</Text>
+            )}
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
     );
   }
 
   function renderMenuModal() {
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={showMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMenu(false)}
+        onClose={() => setShowMenu(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Group Options"
+        subtitle="Manage apartment details & memberships"
+        icon={<Feather name="more-horizontal" size={18} color="#2563EB" />}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowMenu(false)}
-        >
-          <View style={styles.menuCard}>
-            <Text style={styles.menuHeader}>Group Options</Text>
-
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setShowMenu(false);
-                setViewMode("edit");
+        <View style={{ paddingTop: 6, paddingBottom: 10 }}>
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              setViewMode("edit");
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
               }}
             >
-              <Feather name="edit-3" size={18} color="#0F172A" />
+              <Feather name="edit-3" size={18} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>Edit Apartment & Members</Text>
-            </TouchableOpacity>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Update name, rent cost, and member list
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setShowMenu(false);
-                setShowCreateCycleModal(true);
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              setShowCreateCycleModal(true);
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#F0FDF4",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
               }}
             >
-              <Feather name="calendar" size={18} color="#0F172A" />
+              <Feather name="calendar" size={18} color="#059669" />
+            </View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>Create New Billing Cycle</Text>
-            </TouchableOpacity>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Start a new month or tracking period
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
 
-            {isHost ? (
-              <TouchableOpacity
-                style={styles.menuItem}
-                onPress={() => {
-                  setShowMenu(false);
-                  setViewMode("create");
+          {isHost ? (
+            <TouchableOpacity
+              style={styles.menuItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                setShowMenu(false);
+                setViewMode("create");
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: "#FAF5FF",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 12,
                 }}
               >
-                <Feather name="plus-circle" size={18} color="#0F172A" />
+                <Feather name="plus-circle" size={18} color="#7C3AED" />
+              </View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.menuItemText}>Create Another Group</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.menuItem}
-                onPress={() => {
-                  setShowMenu(false);
-                  if (onOpenHostApplication) {
-                    onOpenHostApplication();
-                  } else {
-                    setShowHostRequiredModal(true);
-                  }
+                <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                  Add another unit or roommate property
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.menuItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                setShowMenu(false);
+                if (onOpenHostApplication) {
+                  onOpenHostApplication();
+                } else {
+                  setShowHostRequiredModal(true);
+                }
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: "#EFF6FF",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 12,
                 }}
               >
                 <Feather name="shield" size={18} color="#2563EB" />
+              </View>
+              <View style={{ flex: 1 }}>
                 <Text
                   style={[
                     styles.menuItemText,
@@ -2972,25 +3032,63 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 >
                   Apply to Become a Host
                 </Text>
-              </TouchableOpacity>
-            )}
+                <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                  Unlock host privileges to create groups
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setShowMenu(false);
-                setViewMode("join");
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              setViewMode("join");
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#F1F5F9",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
               }}
             >
               <Feather name="link" size={18} color="#0F172A" />
+            </View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.menuItemText}>Join with Code or Link</Text>
-            </TouchableOpacity>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Enter a code to join another apartment
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={handleCopyInviteCode}
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+            activeOpacity={0.7}
+            onPress={handleCopyInviteCode}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
             >
               <Feather name="copy" size={18} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
               <Text
                 style={[
                   styles.menuItemText,
@@ -2999,10 +3097,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               >
                 Copy Household Code
               </Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Share code with roommates
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
     );
   }
 
@@ -3013,302 +3115,270 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     const isProcessing = Boolean(processingRequestId);
 
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={Boolean(rejectingMember)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setRejectingMember(null)}
+        onClose={() => setRejectingMember(null)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Decline Join Request"
+        subtitle={`Please provide a reason for declining ${reqName}`}
+        icon={<Feather name="alert-triangle" size={18} color="#BE123C" />}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHeader}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <Feather name="alert-triangle" size={20} color="#BE123C" />
-                <Text style={styles.sheetTitle}>Decline Join Request</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setRejectingMember(null)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                disabled={isProcessing}
-              >
-                <Feather name="x" size={20} color="#64748B" />
-              </TouchableOpacity>
-            </View>
+        <View style={{ paddingTop: 4 }}>
+          <Text style={styles.sheetSub}>
+            The applicant will see this reason in their app so they understand
+            why they were not approved.
+          </Text>
 
-            <Text style={styles.sheetSub}>
-              Please provide a reason for declining {reqName}. The applicant
-              will see this reason in their app so they understand why they were
-              not approved.
-            </Text>
+          <TextInput
+            style={[
+              styles.textInput,
+              { height: 90, textAlignVertical: "top", paddingTop: 10 },
+            ]}
+            placeholder="e.g. Unit is already at maximum capacity / Room code not intended for this tenant."
+            placeholderTextColor="#94A3B8"
+            multiline
+            numberOfLines={3}
+            value={rejectReason}
+            onChangeText={setRejectReason}
+            autoFocus
+          />
 
-            <TextInput
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+            <TouchableOpacity
+              style={[styles.secondaryPillBtn, { flex: 1 }]}
+              onPress={() => setRejectingMember(null)}
+              disabled={isProcessing}
+            >
+              <Text style={styles.secondaryPillBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[
-                styles.textInput,
-                { height: 90, textAlignVertical: "top", paddingTop: 10 },
+                styles.dangerPillBtn,
+                { flex: 1 },
+                (!rejectReason.trim() || isProcessing) && { opacity: 0.6 },
               ]}
-              placeholder="e.g. Unit is already at maximum capacity / Room code not intended for this tenant."
-              placeholderTextColor="#94A3B8"
-              multiline
-              numberOfLines={3}
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              autoFocus
-            />
-
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
-              <TouchableOpacity
-                style={[styles.secondaryPillBtn, { flex: 1 }]}
-                onPress={() => setRejectingMember(null)}
-                disabled={isProcessing}
-              >
-                <Text style={styles.secondaryPillBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.dangerPillBtn,
-                  { flex: 1 },
-                  (!rejectReason.trim() || isProcessing) && { opacity: 0.6 },
-                ]}
-                onPress={handleRejectRequest}
-                disabled={!rejectReason.trim() || isProcessing}
-              >
-                {isProcessing ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.dangerPillBtnText}>
-                    Confirm Rejection
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
+              onPress={handleRejectRequest}
+              disabled={!rejectReason.trim() || isProcessing}
+            >
+              {isProcessing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.dangerPillBtnText}>Confirm Rejection</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
     );
   }
 
   function renderHostRequiredModal() {
     return (
-      <Modal
+      <SmoothBottomSheetModal
         visible={showHostRequiredModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowHostRequiredModal(false)}
+        onClose={() => setShowHostRequiredModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        showCloseBtn={true}
+        maxHeight="90%"
       >
-        <View style={styles.modalOverlay}>
+        <View style={{ alignItems: "center", paddingTop: 4 }}>
           <View
-            style={[
-              styles.sheetCard,
-              {
-                maxWidth: 360,
-                alignSelf: "center",
-                borderRadius: 24,
-                padding: 22,
-              },
-            ]}
+            style={{
+              width: 58,
+              height: 58,
+              borderRadius: 29,
+              backgroundColor: "#EFF6FF",
+              borderWidth: 2,
+              borderColor: "#BFDBFE",
+              justifyContent: "center",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
           >
-            <View style={{ alignItems: "center" }}>
-              <View
-                style={{
-                  width: 58,
-                  height: 58,
-                  borderRadius: 29,
-                  backgroundColor: "#EFF6FF",
-                  borderWidth: 2,
-                  borderColor: "#BFDBFE",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  marginBottom: 14,
-                }}
-              >
-                <Feather name="shield" size={28} color="#2563EB" />
-              </View>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "800",
-                  color: "#0F172A",
-                  textAlign: "center",
-                  marginBottom: 6,
-                }}
-              >
-                Host Privileges Required
-              </Text>
-              <Text
-                style={{
-                  fontSize: 13,
-                  color: "#64748B",
-                  textAlign: "center",
-                  lineHeight: 19,
-                  marginBottom: 18,
-                }}
-              >
-                Creating and managing household groups is restricted to verified
-                Property Hosts. Non-hosts can join an existing room with an
-                invite code.
-              </Text>
+            <Feather name="shield" size={28} color="#2563EB" />
+          </View>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "800",
+              color: "#0F172A",
+              textAlign: "center",
+              marginBottom: 6,
+            }}
+          >
+            Host Privileges Required
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: "#64748B",
+              textAlign: "center",
+              lineHeight: 19,
+              marginBottom: 16,
+            }}
+          >
+            Creating and managing household groups is restricted to verified
+            Property Hosts. Non-hosts can join an existing room with an invite
+            code.
+          </Text>
 
-              {/* Informational Guidance Box */}
-              <View
-                style={{
-                  backgroundColor: "#F8FAFC",
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: "#E2E8F0",
-                  padding: 12,
-                  width: "100%",
-                  marginBottom: 18,
-                  gap: 10,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    gap: 10,
-                  }}
-                >
-                  <Feather
-                    name="home"
-                    size={16}
-                    color="#2563EB"
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: "#1E293B",
-                      }}
-                    >
-                      Property Hosts
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: "#64748B",
-                        marginTop: 1,
-                        lineHeight: 15,
-                      }}
-                    >
-                      Apply to get verified. Approved hosts can create household
-                      groups, set rules, and split utilities.
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
-
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    gap: 10,
-                  }}
-                >
-                  <Feather
-                    name="users"
-                    size={16}
-                    color="#059669"
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: "#1E293B",
-                      }}
-                    >
-                      Roommates / Residents
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: "#64748B",
-                        marginTop: 1,
-                        lineHeight: 15,
-                      }}
-                    >
-                      Ask your property host for your room’s invite code (e.g.
-                      PF-402) to join immediately.
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryPillBtn,
-                  { width: "100%", marginBottom: 10 },
-                ]}
-                onPress={() => {
-                  setShowHostRequiredModal(false);
-                  if (onOpenHostApplication) {
-                    onOpenHostApplication();
-                  } else {
-                    Alert.alert(
-                      "Host Application",
-                      "Navigate to Settings / Profile to submit a Host application.",
-                    );
-                  }
-                }}
-              >
-                <Feather
-                  name="shield"
-                  size={16}
-                  color="#FFFFFF"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.primaryPillBtnText}>
-                  Apply to Become a Host
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryPillBtn,
-                  {
-                    width: "100%",
-                    backgroundColor: "#EFF6FF",
-                    borderWidth: 1,
-                    borderColor: "#BFDBFE",
-                    marginBottom: 8,
-                  },
-                ]}
-                onPress={() => {
-                  setShowHostRequiredModal(false);
-                  setViewMode("join");
-                }}
-              >
-                <Feather
-                  name="hash"
-                  size={16}
-                  color="#2563EB"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
-                  Join with Invite Code
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{ paddingVertical: 8 }}
-                onPress={() => setShowHostRequiredModal(false)}
-              >
+          {/* Informational Guidance Box */}
+          <View
+            style={{
+              backgroundColor: "#F8FAFC",
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: "#E2E8F0",
+              padding: 12,
+              width: "100%",
+              marginBottom: 18,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <Feather
+                name="home"
+                size={16}
+                color="#2563EB"
+                style={{ marginTop: 2 }}
+              />
+              <View style={{ flex: 1 }}>
                 <Text
-                  style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color: "#1E293B",
+                  }}
                 >
-                  Dismiss
+                  Property Hosts
                 </Text>
-              </TouchableOpacity>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: "#64748B",
+                    marginTop: 1,
+                    lineHeight: 15,
+                  }}
+                >
+                  Apply to get verified. Approved hosts can create household
+                  groups, set rules, and split utilities.
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <Feather
+                name="users"
+                size={16}
+                color="#059669"
+                style={{ marginTop: 2 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color: "#1E293B",
+                  }}
+                >
+                  Roommates / Residents
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: "#64748B",
+                    marginTop: 1,
+                    lineHeight: 15,
+                  }}
+                >
+                  Ask your property host for your room’s invite code (e.g.
+                  PF-402) to join immediately.
+                </Text>
+              </View>
             </View>
           </View>
+
+          <TouchableOpacity
+            style={{
+              width: "100%",
+              backgroundColor: "#2563EB",
+              paddingVertical: 13,
+              borderRadius: 14,
+              alignItems: "center",
+              marginBottom: 10,
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+            }}
+            onPress={() => {
+              setShowHostRequiredModal(false);
+              if (onOpenHostApplication) {
+                onOpenHostApplication();
+              } else {
+                Alert.alert(
+                  "Host Application",
+                  "Navigate to Settings / Profile to submit a Host application.",
+                );
+              }
+            }}
+          >
+            <Feather name="shield" size={16} color="#FFFFFF" />
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Apply to Become a Host
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              width: "100%",
+              backgroundColor: "#EFF6FF",
+              borderWidth: 1,
+              borderColor: "#BFDBFE",
+              paddingVertical: 13,
+              borderRadius: 14,
+              alignItems: "center",
+              marginBottom: 8,
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+            }}
+            onPress={() => {
+              setShowHostRequiredModal(false);
+              setViewMode("join");
+            }}
+          >
+            <Feather name="hash" size={15} color="#2563EB" />
+            <Text style={{ color: "#2563EB", fontWeight: "700", fontSize: 14 }}>
+              Join with Invite Code
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ paddingVertical: 8 }}
+            onPress={() => setShowHostRequiredModal(false)}
+          >
+            <Text style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}>
+              Dismiss
+            </Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
     );
   }
 };

@@ -1,18 +1,18 @@
 import React, { useState } from "react";
-import {
-  Smartphone,
-  Sparkles,
-  CheckCircle2,
-  ZoomIn,
-  ShieldCheck,
-  ArrowRight,
-  Layers,
-  Bell,
-  DollarSign,
+import { 
+  Smartphone, 
+  Sparkles, 
+  CheckCircle2, 
+  ZoomIn, 
+  ShieldCheck, 
+  ArrowRight, 
+  Layers, 
+  Bell, 
+  DollarSign, 
   Calendar,
   Receipt,
   Users,
-  Code,
+  Code
 } from "lucide-react";
 import { CodedOnboarding1Phone } from "./CodedOnboarding1Phone";
 import { CodedAuthScreenPhone } from "./CodedAuthScreenPhone";
@@ -24,8 +24,7 @@ export const MobileAppShowcase: React.FC = () => {
   const showcaseItems = [
     {
       title: "Mobile Auth Screen",
-      subtitle:
-        "Two-tone card with Splitzy branding, segmented Sign In/Up, and Google + Apple OAuth",
+      subtitle: "Two-tone card with Splitzy branding, segmented Sign In/Up, and Google + Apple OAuth",
       image: "/auth-screen.png",
       badge: "Coded Auth UI",
       features: [
@@ -37,8 +36,7 @@ export const MobileAppShowcase: React.FC = () => {
     },
     {
       title: "Onboarding Screens (1, 2, 3)",
-      subtitle:
-        "Smart expense sharing, roommate transparency, and stress-free settlement flow",
+      subtitle: "Smart expense sharing, roommate transparency, and stress-free settlement flow",
       image: "/onboarding-flow.png",
       badge: "Onboarding UI",
       features: [
@@ -50,8 +48,7 @@ export const MobileAppShowcase: React.FC = () => {
     },
     {
       title: "All-Screen Mobile Flow",
-      subtitle:
-        "Complete mobile architecture across authentication, active cycle, and settlements",
+      subtitle: "Complete mobile architecture across authentication, active cycle, and settlements",
       image: "/proposed-all-screens.webp",
       badge: "Full Experience",
       features: [
@@ -63,8 +60,7 @@ export const MobileAppShowcase: React.FC = () => {
     },
     {
       title: "Home Dashboard & Quick Bar",
-      subtitle:
-        "Effortlessly add expenses, initiate dues settlement, and review active cycle total",
+      subtitle: "Effortlessly add expenses, initiate dues settlement, and review active cycle total",
       image: "/mobile-screen-1.webp",
       badge: "Daily Hub",
       features: [
@@ -76,8 +72,7 @@ export const MobileAppShowcase: React.FC = () => {
     },
     {
       title: "Transparent Member Breakdown",
-      subtitle:
-        "Clean itemized shares showing exact centavos, attendance, and proof verification",
+      subtitle: "Clean itemized shares showing exact centavos, attendance, and proof verification",
       image: "/mobile-screen-2.webp",
       badge: "Zero Ambiguity",
       features: [
@@ -90,11 +85,9 @@ export const MobileAppShowcase: React.FC = () => {
   ];
 
   return (
-    <section
-      id="mobile-app"
-      className="py-16 md:py-24 bg-white border-b border-slate-200/80"
-    >
+    <section id="mobile-app" className="py-16 md:py-24 bg-white border-b border-slate-200/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs font-bold uppercase tracking-wider border border-brand-200">
@@ -106,9 +99,7 @@ export const MobileAppShowcase: React.FC = () => {
             <span className="text-brand-600">On iOS & Android</span>
           </h2>
           <p className="text-slate-600 text-base sm:text-lg">
-            Inspect the proposed mobile application screens designed for quick
-            utility logging, daily attendance check-ins, and frictionless
-            roommate settlements.
+            Inspect the proposed mobile application screens designed for quick utility logging, daily attendance check-ins, and frictionless roommate settlements.
           </p>
         </div>
 
@@ -125,13 +116,9 @@ export const MobileAppShowcase: React.FC = () => {
               }`}
             >
               <span>{item.title}</span>
-              <span
-                className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  activeTab === index
-                    ? "bg-brand-500 text-white"
-                    : "bg-white text-slate-600"
-                }`}
-              >
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                activeTab === index ? "bg-brand-500 text-white" : "bg-white text-slate-600"
+              }`}>
                 {item.badge}
               </span>
             </button>
@@ -141,6 +128,7 @@ export const MobileAppShowcase: React.FC = () => {
         {/* Showcase Display Area */}
         <div className="bg-slate-50 rounded-3xl p-6 sm:p-10 border border-slate-200 shadow-sm">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            
             {/* Left: Key Screen Features */}
             <div className="lg:col-span-5 space-y-6">
               <div className="space-y-2">
@@ -162,9 +150,7 @@ export const MobileAppShowcase: React.FC = () => {
                     <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-sm font-medium text-slate-700">
-                      {feat}
-                    </span>
+                    <span className="text-sm font-medium text-slate-700">{feat}</span>
                   </div>
                 ))}
               </div>
@@ -172,9 +158,7 @@ export const MobileAppShowcase: React.FC = () => {
               {/* Action */}
               <div className="pt-4">
                 <button
-                  onClick={() =>
-                    setSelectedImage(showcaseItems[activeTab].image)
-                  }
+                  onClick={() => setSelectedImage(showcaseItems[activeTab].image)}
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl shadow-xs transition-all"
                 >
                   <ZoomIn className="w-4 h-4 text-brand-600" />
@@ -202,10 +186,8 @@ export const MobileAppShowcase: React.FC = () => {
                   <CodedOnboarding1Phone />
                 </div>
               ) : (
-                <div
-                  onClick={() =>
-                    setSelectedImage(showcaseItems[activeTab].image)
-                  }
+                <div 
+                  onClick={() => setSelectedImage(showcaseItems[activeTab].image)}
                   className="group relative cursor-pointer overflow-hidden rounded-2xl border-4 border-white shadow-2xl bg-slate-900 max-h-[540px] w-full flex items-center justify-center transition-transform hover:scale-[1.01]"
                 >
                   <img
@@ -224,16 +206,17 @@ export const MobileAppShowcase: React.FC = () => {
                 </div>
               )}
             </div>
+
           </div>
         </div>
 
         {/* Modal Lightbox */}
         {selectedImage && (
-          <div
+          <div 
             onClick={() => setSelectedImage(null)}
             className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 animate-fadeIn"
           >
-            <div
+            <div 
               onClick={(e) => e.stopPropagation()}
               className="relative max-w-5xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 shadow-2xl border border-slate-700"
             >
@@ -251,6 +234,7 @@ export const MobileAppShowcase: React.FC = () => {
             </div>
           </div>
         )}
+
       </div>
     </section>
   );

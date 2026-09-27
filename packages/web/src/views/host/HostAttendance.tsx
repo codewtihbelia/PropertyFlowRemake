@@ -16,9 +16,10 @@ import {
   Unlock,
   Calendar,
 } from "lucide-react";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 
 export const HostAttendance: React.FC = () => {
-  const { household, members, activeCycle } = useHousehold();
+  const { household, members, activeCycle, loading } = useHousehold();
   const state = getAppState();
 
   const currentCycle =
@@ -29,6 +30,10 @@ export const HostAttendance: React.FC = () => {
   };
 
   const [filterRole, setFilterRole] = useState<"ALL" | "PAYORS">("ALL");
+
+  if (loading && household.householdId) {
+    return <UniversalLoader variant="skeleton" type="attendance" />;
+  }
 
   if (!currentCycle) {
     return (

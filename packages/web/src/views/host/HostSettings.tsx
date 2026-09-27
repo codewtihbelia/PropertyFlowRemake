@@ -12,11 +12,23 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 
 export const HostSettings: React.FC = () => {
-  const { household, updateHousehold } = useHousehold();
-  const { currentUser, updateProfile } = useAuth();
+  const {
+    household,
+    updateHousehold,
+    loading: householdLoading,
+  } = useHousehold();
+  const { currentUser, updateProfile, loading: authLoading } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (
+    (householdLoading && !household.householdId) ||
+    (authLoading && !currentUser.uid)
+  ) {
+    return <UniversalLoader variant="skeleton" type="settings" />;
+  }
 
   const [name, setName] = useState(household.householdName);
   const [apt, setApt] = useState(household.apartmentName);

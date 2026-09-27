@@ -9,8 +9,11 @@ import {
   Animated,
   Easing,
   StatusBar,
+  Modal,
+  Platform,
+  Alert,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   mobileDataService,
   MobileExpense,
@@ -22,18 +25,34 @@ import { formatPesos } from "@propertyflow/shared";
 import { PaymentsScreen } from "./PaymentsScreen";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
-import { UniversalLoader } from "../components/UniversalLoader";
+import { UniversalSkeleton } from "../components/UniversalLoader";
 import { getCategoryMeta } from "../services/categoryService";
 import { getBillDueStatus } from "./HomeScreen";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 
-export const BillsScreen: React.FC<{
+export interface BillsScreenProps {
+  onBack?: () => void;
   onPayPress?: () => void;
   householdId?: string;
   initialSubView?: "overview" | "pay";
-  onLoaded?: () => void;
-}> = ({ onPayPress, householdId, initialSubView = "overview", onLoaded }) => {
+}
+
+export const BillsScreen: React.FC<BillsScreenProps> = ({
+  onBack,
+  onPayPress,
+  householdId,
+  initialSubView = "overview",
+}) => {
   const [subView, setSubView] = useState<"overview" | "pay">(initialSubView);
-  const [profile, setProfile] = useState<any | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const currentUser = auth.currentUser;
+  const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
+  const [profile, setProfile] = useState<any | null>(() => cachedProfile);
+  const resolvedHouseholdId =
+    householdId || profile?.householdId || cachedProfile?.householdId || "";
+  const [isProfileLoaded, setIsProfileLoaded] = useState<boolean>(() =>
+    Boolean(cachedProfile || householdId),
+  );
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
@@ -43,28 +62,17 @@ export const BillsScreen: React.FC<{
   const [attendanceSubmissions, setAttendanceSubmissions] = useState<
     Record<string, any>
   >({});
-  const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
-  const currentUser = auth.currentUser;
-  const resolvedHouseholdId = householdId || profile?.householdId || "";
+
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
+  );
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(14)).current;
-
-  const updateLoading = (val: boolean) => {
-    setLoading(val);
-    if (!val) {
-      onLoaded?.();
-    }
-  };
-
-  // Fallback safety timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      updateLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
 
   const activeCycle = useMemo(
     () =>
@@ -77,72 +85,90 @@ export const BillsScreen: React.FC<{
   useEffect(() => {
     let mounted = true;
     if (!currentUser?.uid) {
-      updateLoading(false);
+      setIsProfileLoaded(true);
+      setLoading(false);
       return;
     }
-    mobileDataService.getUserProfile(currentUser.uid).then((nextProfile) => {
-      if (mounted) {
-        setProfile(nextProfile);
-        setProfileLoaded(true);
-        if (!nextProfile?.householdId && !householdId) {
-          updateLoading(false);
+    mobileDataService
+      .getUserProfile(currentUser.uid)
+      .then((nextProfile) => {
+        if (mounted) {
+          setProfile(nextProfile);
+          setIsProfileLoaded(true);
         }
-      }
-    });
+      })
+      .catch(() => {
+        if (mounted) setIsProfileLoaded(true);
+      });
     return () => {
       mounted = false;
     };
-  }, [currentUser?.uid, householdId]);
+  }, [currentUser?.uid]);
 
   useEffect(() => {
-    if (!profileLoaded && !householdId) {
-      // Still waiting for profile to resolve
+    // If profile is still resolving, keep skeleton loader active without flashing empty state
+    if (!isProfileLoaded) {
       return;
     }
+
     if (!resolvedHouseholdId) {
-      updateLoading(false);
+      setLoading(false);
       return;
     }
-    updateLoading(true);
-    let expLoaded = false;
-    let cycLoaded = false;
-    const checkDone = () => {
-      if (expLoaded && cycLoaded) {
-        updateLoading(false);
+    setLoading(true);
+
+    const billsReady = {
+      expenses: false,
+      cycles: false,
+      members: false,
+    };
+
+    const checkReady = () => {
+      if (billsReady.expenses && billsReady.cycles && billsReady.members) {
+        setLoading(false);
       }
     };
+
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
 
     const unsubExpenses = mobileDataService.listenToExpenses(
       resolvedHouseholdId,
       (data) => {
         setExpenses(data);
-        expLoaded = true;
-        checkDone();
+        billsReady.expenses = true;
+        checkReady();
       },
     );
     const unsubCycles = mobileDataService.listenToBillingCycles(
       resolvedHouseholdId,
       (data) => {
         setCycles(data);
-        cycLoaded = true;
-        checkDone();
+        billsReady.cycles = true;
+        checkReady();
       },
     );
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
-      setMembers,
+      (data) => {
+        setMembers(data);
+        billsReady.members = true;
+        checkReady();
+      },
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
       resolvedHouseholdId,
       setWaterConfig,
     );
     return () => {
+      clearTimeout(safetyTimer);
       unsubExpenses();
       unsubCycles();
       unsubMembers();
       unsubWater();
     };
-  }, [resolvedHouseholdId]);
+  }, [resolvedHouseholdId, isProfileLoaded]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !activeCycle?.billingCycleId) {
@@ -310,348 +336,517 @@ export const BillsScreen: React.FC<{
     );
   }
 
-  if (loading && !onLoaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: "transparent" }}>
-        <StatusBar
-          barStyle="dark-content"
-          translucent={true}
-          backgroundColor="transparent"
-        />
-        <UniversalLoader
-          text="Loading bills..."
-          subtitle="Calculating fair shares..."
-          transparent={true}
-        />
-      </View>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.container}>
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        translucent={true}
+        backgroundColor="transparent"
+      />
+
+      {/* Top Header */}
+      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View style={styles.navBar}>
+          <TouchableOpacity
+            style={styles.circleBackBtn}
+            onPress={() => (onBack ? onBack() : null)}
+            activeOpacity={0.7}
+          >
+            <Feather name="chevron-left" size={24} color="#0F172A" />
+          </TouchableOpacity>
+          <Text style={styles.navTitle}>Bills & Dues</Text>
+          <TouchableOpacity
+            style={styles.iconNavBtn}
+            onPress={() => setShowMenu(true)}
+            activeOpacity={0.7}
+          >
+            <Feather name="more-vertical" size={22} color="#0F172A" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {loading ? (
+        <UniversalSkeleton type="bills" />
+      ) : (
+        <Animated.View
+          style={{
+            flex: 1,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
         >
-          {/* Top Sub-screen Segment Control */}
-          <View style={styles.segmentContainer}>
-            <TouchableOpacity
-              style={[styles.segmentBtn, styles.segmentBtnActive]}
-              onPress={() => setSubView("overview")}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="receipt-outline" size={15} color="#2563EB" />
-              <Text style={[styles.segmentText, styles.segmentTextActive]}>
-                Bills & Dues
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.segmentBtn}
-              onPress={() => {
-                if (onPayPress) onPayPress();
-                setSubView("pay");
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="card-outline" size={15} color="#64748B" />
-              <Text style={styles.segmentText}>Pay / Settle</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.title}>My Current Bill</Text>
-          <Text style={styles.subtitle}>
-            {activeCycle
-              ? `${activeCycle.name || "Billing cycle"} · Firestore synced`
-              : "Firestore synced"}
-          </Text>
-
-          <View style={styles.heroCard}>
-            {!isCurrentUserPayor && (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  marginBottom: 6,
-                }}
-              >
-                <View
-                  style={{
-                    backgroundColor: "#E2E8F0",
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 6,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "800",
-                      color: "#475569",
-                    }}
-                  >
-                    EXEMPT (NON-PAYOR)
-                  </Text>
-                </View>
-              </View>
-            )}
-            <Text style={styles.heroLabel}>Total Remaining Due</Text>
-            <Text style={styles.heroAmount}>{formatPesos(myShareCents)}</Text>
-            <Text style={styles.heroSub}>
-              {isCurrentUserPayor
-                ? `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
-                : `Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+          >
+            <Text style={styles.title}>My Current Bill</Text>
+            <Text style={styles.subtitle}>
+              {activeCycle
+                ? `${activeCycle.name || "Billing cycle"} · Cloud synced`
+                : "Cloud synced"}
             </Text>
 
-            {isCurrentUserPayor && (
-              <TouchableOpacity
-                style={styles.payNowBtn}
-                onPress={() => {
-                  if (onPayPress) onPayPress();
-                  setSubView("pay");
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.payNowText}>Pay with GCash / Bank →</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <Text style={styles.sectionTitle}>
-            Itemized Charges (
-            {expenses.length > 0
-              ? `${expenses.length} recorded`
-              : "No bills yet"}
-            )
-          </Text>
-
-          {loading ? (
-            <View style={{ padding: 30, alignItems: "center" }}>
-              <ActivityIndicator color="#2563EB" size="small" />
-              <Text style={{ marginTop: 8, color: "#64748B", fontSize: 12 }}>
-                Syncing from Firebase...
-              </Text>
-            </View>
-          ) : !resolvedHouseholdId ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No household connected.</Text>
-              <Text style={styles.emptySub}>
-                Ask a host or Super Admin to connect your account to a
-                household.
-              </Text>
-            </View>
-          ) : expenses.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>
-                No household bills logged yet.
-              </Text>
-              <Text style={styles.emptySub}>
-                Bills will appear here after a host records charges or finalizes
-                a cycle.
-              </Text>
-            </View>
-          ) : (
-            expenses.map((e) => {
-              const isExpensePaid = e.status === "PAID" || e.isPaid === true;
-              const catMeta = getCategoryMeta(e.category);
-              const isWater = (e.category || "")
-                .toLowerCase()
-                .includes("water");
-              const payorCount = Math.max(1, activePayors.length);
-              const isPersonDayMode =
-                waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-                !waterConfig?.pricingModel;
-
-              let waterMyShare = 0;
-              let waterTotalCentavos = e.amountCents;
-              if (isWater) {
-                if (isPersonDayMode) {
-                  const rate = Number(
-                    waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-                  );
-                  const myAtt = cycleAttendance.filter(
-                    (a) =>
-                      a.userId === currentUser?.uid && a.status === "PRESENT",
-                  ).length;
-                  const mySub =
-                    attendanceSubmissions[currentUser?.uid || ""]
-                      ?.daysPresent || 0;
-                  const myDays = myAtt > 0 ? myAtt : mySub;
-                  const ownCost = myDays * rate;
-                  const totalNonPayorWater = members
-                    .filter((m) => m.status === "ACTIVE" && !isPayorMember(m))
-                    .reduce((npSum, np) => {
-                      const npUid = np.userId || np.memberId;
-                      const npAtt = cycleAttendance.filter(
-                        (a) => a.userId === npUid && a.status === "PRESENT",
-                      ).length;
-                      const npSub =
-                        attendanceSubmissions[npUid]?.daysPresent || 0;
-                      const npDays = npAtt > 0 ? npAtt : npSub;
-                      return npSum + npDays * rate;
-                    }, 0);
-                  const extraPerPayor =
-                    payorCount > 0
-                      ? Math.round(totalNonPayorWater / payorCount)
-                      : 0;
-                  if (isCurrentUserPayor) {
-                    waterMyShare = ownCost + extraPerPayor;
-                  }
-
-                  const totalAllWater = members
-                    .filter((m) => m.status === "ACTIVE")
-                    .reduce((sum, m) => {
-                      const mUid = m.userId || m.memberId;
-                      const att = cycleAttendance.filter(
-                        (a) => a.userId === mUid && a.status === "PRESENT",
-                      ).length;
-                      const sub = attendanceSubmissions[mUid]?.daysPresent || 0;
-                      const days = att > 0 ? att : sub;
-                      return sum + days * rate;
-                    }, 0);
-                  if (totalAllWater > 0) {
-                    waterTotalCentavos = totalAllWater;
-                  }
-                } else if (
-                  waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
-                ) {
-                  if (isCurrentUserPayor) {
-                    waterMyShare =
-                      waterConfig.fixedPerPersonAmountCentavos || 0;
-                  }
-                  waterTotalCentavos =
-                    (waterConfig.fixedPerPersonAmountCentavos || 0) *
-                    payorCount;
-                } else {
-                  if (isCurrentUserPayor) {
-                    waterMyShare = Math.round(e.amountCents / payorCount);
-                  }
-                }
-              }
-
-              const splitPayors = e.splitDetails
-                ? e.splitDetails.filter(
-                    (s: any) => !s.isExempt && s.shareCentavos > 0,
-                  )
-                : [];
-              const isSplitStale =
-                !isWater &&
-                splitPayors.length > 0 &&
-                splitPayors.length !== payorCount;
-              const mySplit = e.splitDetails?.find(
-                (s: any) => s.userId === currentUser?.uid,
-              );
-              const myShareForExpense = !isCurrentUserPayor
-                ? 0
-                : isWater
-                  ? waterMyShare
-                  : !isSplitStale &&
-                      mySplit &&
-                      typeof mySplit.shareCentavos === "number"
-                    ? mySplit.shareCentavos
-                    : Math.round(e.amountCents / payorCount);
-              const dueInfo = getBillDueStatus(e, activeCycle, cycles);
-
-              return (
-                <View key={e.id} style={styles.billItem}>
+            <View style={styles.heroCard}>
+              {!isCurrentUserPayor && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 6,
+                  }}
+                >
                   <View
-                    style={[
-                      styles.billIconWrap,
-                      { backgroundColor: catMeta.bgColor },
-                    ]}
+                    style={{
+                      backgroundColor: "#E2E8F0",
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 6,
+                    }}
                   >
-                    <Feather
-                      name={catMeta.featherIcon as any}
-                      size={18}
-                      color={catMeta.color}
-                    />
-                  </View>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <Text style={styles.billName}>
-                        {cleanBillTitle(e.title, e.category)}
-                      </Text>
-                      {isExpensePaid ? (
-                        <View style={styles.statusBadgePaid}>
-                          <Text style={styles.statusBadgeTextPaid}>PAID</Text>
-                        </View>
-                      ) : (
-                        <View
-                          style={[
-                            styles.dueBadge,
-                            {
-                              backgroundColor: dueInfo.badgeBg,
-                              borderColor: dueInfo.badgeBorder,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.dueBadgeText,
-                              { color: dueInfo.textColor },
-                            ]}
-                          >
-                            {dueInfo.label}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.billPayer}>
-                      {isExpensePaid
-                        ? `${e.date} · Paid by ${e.payerName}`
-                        : `${e.date} · Added by ${e.payerName || "Host"}`}
-                    </Text>
-                  </View>
-                  <View style={{ alignItems: "flex-end", marginTop: 2 }}>
-                    <Text style={styles.billValue}>
-                      {formatPesos(
-                        isWater && waterTotalCentavos > 0
-                          ? waterTotalCentavos
-                          : e.amountCents,
-                      )}
-                    </Text>
                     <Text
                       style={{
                         fontSize: 11,
-                        color: isCurrentUserPayor ? "#2563EB" : "#94A3B8",
-                        fontWeight: "700",
-                        marginTop: 2,
+                        fontWeight: "800",
+                        color: "#475569",
                       }}
                     >
-                      {isCurrentUserPayor
-                        ? `Your share: ${formatPesos(myShareForExpense)}`
-                        : "Exempt"}
+                      EXEMPT (NON-PAYOR)
                     </Text>
                   </View>
                 </View>
+              )}
+              <Text style={styles.heroLabel}>Total Remaining Due</Text>
+              <Text style={styles.heroAmount}>{formatPesos(myShareCents)}</Text>
+              <Text style={styles.heroSub}>
+                {isCurrentUserPayor
+                  ? `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
+                  : `Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
+              </Text>
+
+              {isCurrentUserPayor && (
+                <TouchableOpacity
+                  style={styles.payNowBtn}
+                  onPress={() => {
+                    if (onPayPress) onPayPress();
+                    setSubView("pay");
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.payNowText}>Pay with GCash / Bank →</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <Text style={styles.sectionTitle}>
+              Itemized Charges (
+              {expenses.length > 0
+                ? `${expenses.length} recorded`
+                : "No bills yet"}
+              )
+            </Text>
+
+            {loading ? (
+              <View style={{ padding: 30, alignItems: "center" }}>
+                <ActivityIndicator color="#2563EB" size="small" />
+                <Text style={{ marginTop: 8, color: "#64748B", fontSize: 12 }}>
+                  Syncing from Firebase...
+                </Text>
+              </View>
+            ) : !resolvedHouseholdId ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No household connected.</Text>
+                <Text style={styles.emptySub}>
+                  Ask a host or Super Admin to connect your account to a
+                  household.
+                </Text>
+              </View>
+            ) : expenses.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>
+                  No household bills logged yet.
+                </Text>
+                <Text style={styles.emptySub}>
+                  Bills will appear here after a host records charges or
+                  finalizes a cycle.
+                </Text>
+              </View>
+            ) : (
+              expenses.map((e) => {
+                const isExpensePaid = e.status === "PAID" || e.isPaid === true;
+                const catMeta = getCategoryMeta(e.category);
+                const isWater = (e.category || "")
+                  .toLowerCase()
+                  .includes("water");
+                const payorCount = Math.max(1, activePayors.length);
+                const isPersonDayMode =
+                  waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+                  !waterConfig?.pricingModel;
+
+                let waterMyShare = 0;
+                let waterTotalCentavos = e.amountCents;
+                if (isWater) {
+                  if (isPersonDayMode) {
+                    const rate = Number(
+                      waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                    );
+                    const myAtt = cycleAttendance.filter(
+                      (a) =>
+                        a.userId === currentUser?.uid && a.status === "PRESENT",
+                    ).length;
+                    const mySub =
+                      attendanceSubmissions[currentUser?.uid || ""]
+                        ?.daysPresent || 0;
+                    const myDays = myAtt > 0 ? myAtt : mySub;
+                    const ownCost = myDays * rate;
+                    const totalNonPayorWater = members
+                      .filter((m) => m.status === "ACTIVE" && !isPayorMember(m))
+                      .reduce((npSum, np) => {
+                        const npUid = np.userId || np.memberId;
+                        const npAtt = cycleAttendance.filter(
+                          (a) => a.userId === npUid && a.status === "PRESENT",
+                        ).length;
+                        const npSub =
+                          attendanceSubmissions[npUid]?.daysPresent || 0;
+                        const npDays = npAtt > 0 ? npAtt : npSub;
+                        return npSum + npDays * rate;
+                      }, 0);
+                    const extraPerPayor =
+                      payorCount > 0
+                        ? Math.round(totalNonPayorWater / payorCount)
+                        : 0;
+                    if (isCurrentUserPayor) {
+                      waterMyShare = ownCost + extraPerPayor;
+                    }
+
+                    const totalAllWater = members
+                      .filter((m) => m.status === "ACTIVE")
+                      .reduce((sum, m) => {
+                        const mUid = m.userId || m.memberId;
+                        const att = cycleAttendance.filter(
+                          (a) => a.userId === mUid && a.status === "PRESENT",
+                        ).length;
+                        const sub =
+                          attendanceSubmissions[mUid]?.daysPresent || 0;
+                        const days = att > 0 ? att : sub;
+                        return sum + days * rate;
+                      }, 0);
+                    if (totalAllWater > 0) {
+                      waterTotalCentavos = totalAllWater;
+                    }
+                  } else if (
+                    waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                  ) {
+                    if (isCurrentUserPayor) {
+                      waterMyShare =
+                        waterConfig.fixedPerPersonAmountCentavos || 0;
+                    }
+                    waterTotalCentavos =
+                      (waterConfig.fixedPerPersonAmountCentavos || 0) *
+                      payorCount;
+                  } else {
+                    if (isCurrentUserPayor) {
+                      waterMyShare = Math.round(e.amountCents / payorCount);
+                    }
+                  }
+                }
+
+                const splitPayors = e.splitDetails
+                  ? e.splitDetails.filter(
+                      (s: any) => !s.isExempt && s.shareCentavos > 0,
+                    )
+                  : [];
+                const isSplitStale =
+                  !isWater &&
+                  splitPayors.length > 0 &&
+                  splitPayors.length !== payorCount;
+                const mySplit = e.splitDetails?.find(
+                  (s: any) => s.userId === currentUser?.uid,
+                );
+                const myShareForExpense = !isCurrentUserPayor
+                  ? 0
+                  : isWater
+                    ? waterMyShare
+                    : !isSplitStale &&
+                        mySplit &&
+                        typeof mySplit.shareCentavos === "number"
+                      ? mySplit.shareCentavos
+                      : Math.round(e.amountCents / payorCount);
+                const dueInfo = getBillDueStatus(e, activeCycle, cycles);
+
+                return (
+                  <View key={e.id} style={styles.billItem}>
+                    <View
+                      style={[
+                        styles.billIconWrap,
+                        { backgroundColor: catMeta.bgColor },
+                      ]}
+                    >
+                      <Feather
+                        name={catMeta.featherIcon as any}
+                        size={18}
+                        color={catMeta.color}
+                      />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Text style={styles.billName}>
+                          {cleanBillTitle(e.title, e.category)}
+                        </Text>
+                        {isExpensePaid ? (
+                          <View style={styles.statusBadgePaid}>
+                            <Text style={styles.statusBadgeTextPaid}>PAID</Text>
+                          </View>
+                        ) : (
+                          <View
+                            style={[
+                              styles.dueBadge,
+                              {
+                                backgroundColor: dueInfo.badgeBg,
+                                borderColor: dueInfo.badgeBorder,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.dueBadgeText,
+                                { color: dueInfo.textColor },
+                              ]}
+                            >
+                              {dueInfo.label}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.billPayer}>
+                        {isExpensePaid
+                          ? `${e.date} · Paid by ${e.payerName}`
+                          : `${e.date} · Added by ${e.payerName || "Host"}`}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end", marginTop: 2 }}>
+                      <Text style={styles.billValue}>
+                        {formatPesos(
+                          isWater && waterTotalCentavos > 0
+                            ? waterTotalCentavos
+                            : e.amountCents,
+                        )}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: isCurrentUserPayor ? "#2563EB" : "#94A3B8",
+                          fontWeight: "700",
+                          marginTop: 2,
+                        }}
+                      >
+                        {isCurrentUserPayor
+                          ? `Your share: ${formatPesos(myShareForExpense)}`
+                          : "Exempt"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </Animated.View>
+      )}
+
+      {/* Menu Modal matching elevated bottom sheet design */}
+      <SmoothBottomSheetModal
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Bill Options"
+        subtitle="Manage billing cycle & payment actions"
+        icon={<Feather name="layers" size={18} color="#2563EB" />}
+      >
+        <View style={{ paddingTop: 6, paddingBottom: 10 }}>
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              if (onPayPress) onPayPress();
+              setSubView("pay");
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="credit-card" size={18} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Pay / Settle Dues</Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Submit payment receipt or pay outstanding balance
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              if (resolvedHouseholdId) {
+                setLoading(true);
+                mobileDataService
+                  .recalculateUnpaidExpensesForHousehold(resolvedHouseholdId)
+                  .then(() => setLoading(false))
+                  .catch(() => setLoading(false));
+              }
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#F0FDF4",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="refresh-cw" size={18} color="#059669" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Recalculate & Sync Splits</Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                Recompute centavos distribution for all roommates
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMenu(false);
+              Alert.alert(
+                "Billing Information",
+                activeCycle
+                  ? `Current Cycle: ${activeCycle.name || "Active Cycle"}\nDates: ${activeCycle.startDate} to ${activeCycle.endDate}`
+                  : "No active cycle is currently selected.",
               );
-            })
-          )}
-        </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+            }}
+          >
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: "#F8FAFC",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12,
+              }}
+            >
+              <Feather name="info" size={18} color="#0F172A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Billing Cycle Details</Text>
+              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                View active cycle dates and period status
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
+  navBarContainer: {
+    backgroundColor: "#F8FAFC",
+    zIndex: 50,
+  },
+  navBar: {
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+  },
+  circleBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconNavBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  menuCard: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+  },
+  menuHeader: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#64748B",
+    marginBottom: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    gap: 12,
+  },
+  menuItemText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
   scrollContent: { padding: 20, paddingBottom: 85 },
   segmentContainer: {
     flexDirection: "row",

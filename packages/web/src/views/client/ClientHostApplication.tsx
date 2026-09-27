@@ -8,6 +8,7 @@ import {
   Household,
   HOST_MANAGEMENT_TYPES,
 } from "@propertyflow/shared";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 import {
   Building2,
   ShieldCheck,
@@ -223,12 +224,7 @@ export const ClientHostApplication: React.FC<{
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center p-12 text-slate-400 text-xs">
-        <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mr-2" />
-        Loading application status...
-      </div>
-    );
+    return <UniversalLoader variant="skeleton" type="form" />;
   }
 
   const isAlreadyHost =
@@ -478,7 +474,7 @@ export const ClientHostApplication: React.FC<{
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* 1. Full Name */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-slate-400" />
                   <span>Full Name *</span>
                 </label>
@@ -494,7 +490,7 @@ export const ClientHostApplication: React.FC<{
 
               {/* 2. Contact Number */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-slate-400" />
                   <span>Contact Number *</span>
                 </label>
@@ -511,7 +507,7 @@ export const ClientHostApplication: React.FC<{
 
             {/* 3. Property Address */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+              <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Home className="w-3.5 h-3.5 text-slate-400" />
                 <span>Property Address *</span>
               </label>
@@ -528,7 +524,7 @@ export const ClientHostApplication: React.FC<{
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* 4. Host Management Type with dropdowns */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <Briefcase className="w-3.5 h-3.5 text-slate-400" />
                   <span>Host Management Type *</span>
                 </label>
@@ -552,7 +548,7 @@ export const ClientHostApplication: React.FC<{
               {/* 5. Select Roommate Group (Optional) */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-slate-400" />
                     <span>Select Roommate Group</span>
                   </label>
@@ -629,7 +625,7 @@ export const ClientHostApplication: React.FC<{
 
               {/* 7. Est. Monthly Bills */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-slate-400" />
                   <span>Est. Monthly Bills</span>
                 </label>

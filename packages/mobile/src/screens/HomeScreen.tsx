@@ -25,15 +25,21 @@ import {
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
 import { useNavVisibility } from "../context/NavVisibilityContext";
-import { UniversalLoader } from "../components/UniversalLoader";
+import {
+  UniversalLoader,
+  UniversalSkeleton,
+} from "../components/UniversalLoader";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { getCategoryMeta } from "../services/categoryService";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 
 interface HomeScreenProps {
   onNavigate: (tab: string) => void;
+  householdId?: string;
   onOpenAddExpense?: () => void;
   onOpenSettleDues?: () => void;
   onOpenExpenseHistory?: () => void;
+  onOpenViewGroup?: () => void;
   onOpenManageGroup?: (mode?: "details" | "create" | "join") => void;
   onOpenReports?: () => void;
   onOpenHostApplication?: () => void;
@@ -187,9 +193,11 @@ export function getBillDueStatus(
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigate,
+  householdId: propHouseholdId,
   onOpenAddExpense,
   onOpenSettleDues,
   onOpenExpenseHistory,
+  onOpenViewGroup,
   onOpenManageGroup,
   onOpenReports,
   onOpenHostApplication,
@@ -208,32 +216,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [household, setHousehold] = useState<any | null>(
     () => cachedInitialHousehold,
   );
+  const householdId =
+    propHouseholdId ||
+    profile?.householdId ||
+    household?.householdId ||
+    cachedInitialProfile?.householdId ||
+    "";
+  const [isProfileLoaded, setIsProfileLoaded] = useState<boolean>(() =>
+    Boolean(cachedInitialProfile || propHouseholdId),
+  );
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
-  const dataLoadedRef = useRef({
-    profile: false,
-    expenses: false,
-    cycles: false,
-    members: false,
-  });
-
-  const checkAllLoaded = (hhId?: string) => {
-    const targetHh = hhId ?? (profile?.householdId || household?.householdId);
-    if (!targetHh) {
-      if (dataLoadedRef.current.profile) {
-        setInitialLoading(false);
-      }
-      return;
-    }
-    if (
-      dataLoadedRef.current.profile &&
-      dataLoadedRef.current.expenses &&
-      dataLoadedRef.current.cycles &&
-      dataLoadedRef.current.members
-    ) {
-      setInitialLoading(false);
-    }
-  };
-
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
@@ -256,7 +248,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [joinCodeInput, setJoinCodeInput] = useState<string>("");
   const [joinLoading, setJoinLoading] = useState<boolean>(false);
 
-  const householdId = profile?.householdId || household?.householdId || "";
   const activeCycle =
     cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
     cycles[0];
@@ -267,11 +258,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
   const { onScroll } = useNavVisibility();
   const insets = useSafeAreaInsets();
-  const isHost =
+  const isHost = Boolean(
     profile?.role === "HOST" ||
     profile?.role === "SUPER_ADMIN" ||
-    profile?.hostApplicationStatus === "APPROVED";
+    profile?.hostApplicationStatus === "APPROVED" ||
+    (household?.hostId &&
+      firebaseUser?.uid &&
+      household.hostId === firebaseUser.uid),
+  );
   const hasGroup = Boolean(household?.householdId || profile?.householdId);
+
+  const handleOpenGroupView = () => {
+    if (isHost) {
+      if (onOpenManageGroup) {
+        onOpenManageGroup("details");
+      } else {
+        onNavigate("groups");
+      }
+    } else {
+      if (onOpenViewGroup) {
+        onOpenViewGroup();
+      } else {
+        onNavigate("groups");
+      }
+    }
+  };
 
   const handleCreateGroupPress = () => {
     if (!isHost) {
@@ -285,14 +296,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   };
 
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(14)).current;
+  const fadeAnim = useRef(
+    new Animated.Value(cachedInitialProfile ? 1 : 0),
+  ).current;
+  const slideAnim = useRef(
+    new Animated.Value(cachedInitialProfile ? 0 : 14),
+  ).current;
 
-  // Fallback timer for loading screen
+  // Fallback timer for loading screen so UI never hangs indefinitely
   useEffect(() => {
     const timer = setTimeout(() => {
       setInitialLoading(false);
-    }, 2500);
+    }, 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -317,24 +332,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    if (!firebaseUser?.uid) return;
-    mobileDataService.getUserProfile(firebaseUser.uid).then((nextProfile) => {
-      if (mounted) {
-        setProfile(nextProfile);
-        dataLoadedRef.current.profile = true;
-        checkAllLoaded(nextProfile?.householdId);
-      }
-    });
+    if (!firebaseUser?.uid) {
+      setIsProfileLoaded(true);
+      setInitialLoading(false);
+      return;
+    }
+    mobileDataService
+      .getUserProfile(firebaseUser.uid)
+      .then((nextProfile) => {
+        if (mounted) {
+          setProfile(nextProfile);
+          setIsProfileLoaded(true);
+          if (!nextProfile?.householdId) {
+            setInitialLoading(false);
+          }
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setIsProfileLoaded(true);
+          setInitialLoading(false);
+        }
+      });
     const unsubProfile = mobileDataService.listenToUserProfile(
       firebaseUser.uid,
       (nextProfile) => {
         if (mounted) {
           setProfile(nextProfile);
-          dataLoadedRef.current.profile = true;
+          setIsProfileLoaded(true);
           if (!nextProfile?.householdId) {
             setHousehold(null);
+            setInitialLoading(false);
           }
-          checkAllLoaded(nextProfile?.householdId);
         }
       },
     );
@@ -345,41 +374,75 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [firebaseUser?.uid]);
 
   useEffect(() => {
+    // Wait for profile resolution before deciding if user is in a household
+    if (!isProfileLoaded) {
+      return;
+    }
+
     if (!householdId) {
       setHousehold(null);
       setExpenses([]);
       setCycles([]);
       setMembers([]);
       setPayments([]);
-      checkAllLoaded("");
+      setInitialLoading(false);
       return;
     }
+
+    setInitialLoading(true);
+
+    const readyTracker = {
+      household: false,
+      expenses: false,
+      cycles: false,
+      members: false,
+    };
+
+    const checkAllReady = () => {
+      if (
+        readyTracker.household &&
+        readyTracker.expenses &&
+        readyTracker.cycles &&
+        readyTracker.members
+      ) {
+        setInitialLoading(false);
+      }
+    };
+
+    const safetyTimer = setTimeout(() => {
+      setInitialLoading(false);
+    }, 2500);
+
     const unsubHousehold = mobileDataService.listenToHousehold(
       householdId,
-      setHousehold,
+      (data) => {
+        setHousehold(data);
+        readyTracker.household = true;
+        checkAllReady();
+      },
     );
     const unsubExpenses = mobileDataService.listenToExpenses(
       householdId,
       (data) => {
         setExpenses(data);
-        dataLoadedRef.current.expenses = true;
-        checkAllLoaded(householdId);
+        readyTracker.expenses = true;
+        checkAllReady();
       },
     );
     const unsubCycles = mobileDataService.listenToBillingCycles(
       householdId,
       (data) => {
         setCycles(data);
-        dataLoadedRef.current.cycles = true;
-        checkAllLoaded(householdId);
+        readyTracker.cycles = true;
+        checkAllReady();
       },
     );
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       householdId,
       (data) => {
         setMembers(data);
-        dataLoadedRef.current.members = true;
-        checkAllLoaded(householdId);
+        readyTracker.members = true;
+        checkAllReady();
       },
     );
     const unsubPayments = mobileDataService.listenToPayments(
@@ -391,6 +454,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setWaterConfig,
     );
     return () => {
+      clearTimeout(safetyTimer);
       unsubHousehold();
       unsubExpenses();
       unsubCycles();
@@ -398,7 +462,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       unsubPayments();
       unsubWater();
     };
-  }, [householdId]);
+  }, [householdId, isProfileLoaded]);
 
   useEffect(() => {
     if (!householdId || !activeCycle?.billingCycleId) {
@@ -950,20 +1014,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         ? "Start a Household Group"
         : "Household Group",
     desc: hasGroup
-      ? "Add a household bill to start tracking room expenses."
+      ? isHost
+        ? "Add a household bill to start tracking room expenses."
+        : "View your household group overview, billing cycle, and roommates."
       : isHost
         ? "Create your shared apartment group or enter an invite code."
         : "Join your household with an invite code, or apply to be a Host.",
     actionText: hasGroup
-      ? "Add Bills"
+      ? isHost
+        ? "Add Bills"
+        : "View Group"
       : isHost
         ? "Create Group"
         : "Join / Host",
     onAction: () =>
       hasGroup
-        ? onOpenAddExpense
-          ? onOpenAddExpense()
-          : onNavigate("bills")
+        ? isHost
+          ? onOpenAddExpense
+            ? onOpenAddExpense()
+            : onNavigate("bills")
+          : handleOpenGroupView()
         : handleCreateGroupPress(),
     icon: hasGroup ? "file-text" : isHost ? "users" : "shield",
     color: "#2563EB",
@@ -982,15 +1052,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         translucent
         backgroundColor="transparent"
       />
-
-      {/* Solid loading Splitzy screen to prevent empty state flash */}
-      {initialLoading && (
-        <UniversalLoader
-          text="Loading Splitzy..."
-          subtitle="Preparing household & bills..."
-          transparent={true}
-        />
-      )}
 
       <Animated.View
         style={{
@@ -1046,1241 +1107,1208 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            {
-              paddingTop: 10,
-              paddingBottom: Math.max(insets.bottom, 14) + 72,
-            },
-          ]}
-          showsVerticalScrollIndicator={false}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-        >
-          {/* Greeting Section */}
-          <View style={styles.greetingSection}>
-            <Text style={styles.greetingTitle}>Hi {greetingName}!</Text>
-            <Text style={styles.greetingSubtitle}>
-              Control your expenses here.
-            </Text>
+        {initialLoading ? (
+          <View style={{ flex: 1, paddingTop: topInset + 54 }}>
+            <UniversalSkeleton type="home" />
           </View>
-
-          {/* Pending Request Status Notice */}
-          {profile?.joinRequestStatus === "PENDING" && (
-            <View style={styles.noticeBannerPending}>
-              <Feather name="clock" size={20} color="#D97706" />
-              <View style={styles.noticeBannerTextWrap}>
-                <Text style={styles.noticeBannerTitle}>
-                  Join Request Pending Approval
-                </Text>
-                <Text style={styles.noticeBannerSubtitle}>
-                  Waiting for the host of{" "}
-                  {profile.pendingHouseholdName || "the household"} to approve
-                  your request.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {profile?.joinRequestStatus === "REJECTED" && (
-            <View style={styles.noticeBannerRejected}>
-              <Feather name="alert-circle" size={20} color="#E11D48" />
-              <View style={styles.noticeBannerTextWrap}>
-                <Text style={styles.noticeBannerRejectedTitle}>
-                  Join Request Declined
-                </Text>
-                <Text style={styles.noticeBannerRejectedSubtitle}>
-                  Reason: {profile.joinRejectionReason || "Declined by host"}.
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() =>
-                  mobileDataService.saveUserProfile({
-                    uid: firebaseUser!.uid,
-                    joinRequestStatus: undefined,
-                    joinRejectionReason: undefined,
-                  })
-                }
-              >
-                <Feather name="x" size={16} color="#E11D48" />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Search Bar Capsule */}
-          <View style={styles.searchBarContainer}>
-            <Feather
-              name="search"
-              size={19}
-              color="#64748B"
-              style={styles.searchIcon}
-            />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search group or expenses"
-              placeholderTextColor="#94A3B8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              returnKeyType="search"
-              autoCapitalize="none"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => setSearchQuery("")}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Feather name="x" size={16} color="#94A3B8" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Recent Updates Section */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Updates</Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (recentActivities.length > 0) {
-                  setShowActivitiesModal(true);
-                } else if (onOpenExpenseHistory) {
-                  onOpenExpenseHistory();
-                } else {
-                  onNavigate("bills");
-                }
-              }}
-            >
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Recent Updates Banner Card */}
-          <View style={styles.recentUpdateCard}>
-            <View style={styles.recentUpdateTextWrap}>
-              <Text style={styles.recentUpdateTitle} numberOfLines={1}>
-                {bannerActivity.title}
-              </Text>
-              <Text style={styles.recentUpdateDesc} numberOfLines={2}>
-                {bannerActivity.desc}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.settleNowButton}
-              activeOpacity={0.85}
-              onPress={bannerActivity.onAction}
-            >
-              <Text style={styles.settleNowButtonText}>
-                {bannerActivity.actionText}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* My Groups Section */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>My Groups</Text>
-            <TouchableOpacity
-              onPress={() =>
-                onOpenManageGroup
-                  ? onOpenManageGroup("details")
-                  : onNavigate("manage_group")
-              }
-            >
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Groups Horizontal Carousel */}
+        ) : (
           <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.groupsScrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              {
+                paddingTop: 10,
+                paddingBottom: Math.max(insets.bottom, 14) + 72,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
           >
-            {/* Card 1: Vibrant Blue Card (Active Household) */}
-            <TouchableOpacity
-              style={styles.groupCardBlue}
-              activeOpacity={0.92}
-              onPress={() => {
-                if (hasGroup) {
-                  onOpenManageGroup
-                    ? onOpenManageGroup("details")
-                    : onNavigate("manage_group");
-                } else {
-                  handleCreateGroupPress();
-                }
-              }}
-            >
-              <Text style={styles.groupCardBlueTitle} numberOfLines={1}>
-                {group1Title}
+            {/* Greeting Section */}
+            <View style={styles.greetingSection}>
+              <Text style={styles.greetingTitle}>Hi {greetingName}!</Text>
+              <Text style={styles.greetingSubtitle}>
+                Control your expenses here.
               </Text>
-              <Text style={styles.groupCardBlueSubtitle}>{group1Subtitle}</Text>
+            </View>
 
-              {/* Roommate Avatars: if no members yet, only room host is shown */}
-              <View style={styles.avatarStackRow}>
-                {(() => {
-                  if (!hasGroup) {
-                    return (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
+            {/* Pending Request Status Notice */}
+            {profile?.joinRequestStatus === "PENDING" && (
+              <View style={styles.noticeBannerPending}>
+                <Feather name="clock" size={20} color="#D97706" />
+                <View style={styles.noticeBannerTextWrap}>
+                  <Text style={styles.noticeBannerTitle}>
+                    Join Request Pending Approval
+                  </Text>
+                  <Text style={styles.noticeBannerSubtitle}>
+                    Waiting for the host of{" "}
+                    {profile.pendingHouseholdName || "the household"} to approve
+                    your request.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {profile?.joinRequestStatus === "REJECTED" && (
+              <View style={styles.noticeBannerRejected}>
+                <Feather name="alert-circle" size={20} color="#E11D48" />
+                <View style={styles.noticeBannerTextWrap}>
+                  <Text style={styles.noticeBannerRejectedTitle}>
+                    Join Request Declined
+                  </Text>
+                  <Text style={styles.noticeBannerRejectedSubtitle}>
+                    Reason: {profile.joinRejectionReason || "Declined by host"}.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() =>
+                    mobileDataService.saveUserProfile({
+                      uid: firebaseUser!.uid,
+                      joinRequestStatus: undefined,
+                      joinRejectionReason: undefined,
+                    })
+                  }
+                >
+                  <Feather name="x" size={16} color="#E11D48" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Search Bar Capsule */}
+            <View style={styles.searchBarContainer}>
+              <Feather
+                name="search"
+                size={19}
+                color="#64748B"
+                style={styles.searchIcon}
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search group or expenses"
+                placeholderTextColor="#94A3B8"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                returnKeyType="search"
+                autoCapitalize="none"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setSearchQuery("")}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Feather name="x" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Recent Updates Section */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Updates</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (recentActivities.length > 0) {
+                    setShowActivitiesModal(true);
+                  } else if (onOpenExpenseHistory) {
+                    onOpenExpenseHistory();
+                  } else {
+                    onNavigate("bills");
+                  }
+                }}
+              >
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Recent Updates Banner Card */}
+            <View style={styles.recentUpdateCard}>
+              <View style={styles.recentUpdateTextWrap}>
+                <Text style={styles.recentUpdateTitle} numberOfLines={1}>
+                  {bannerActivity.title}
+                </Text>
+                <Text style={styles.recentUpdateDesc} numberOfLines={2}>
+                  {bannerActivity.desc}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.settleNowButton}
+                activeOpacity={0.85}
+                onPress={bannerActivity.onAction}
+              >
+                <Text style={styles.settleNowButtonText}>
+                  {bannerActivity.actionText}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* My Groups Section */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Groups</Text>
+              <TouchableOpacity onPress={handleOpenGroupView}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Groups Horizontal Carousel */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.groupsScrollContent}
+            >
+              {/* Card 1: Vibrant Blue Card (Active Household) */}
+              <TouchableOpacity
+                style={styles.groupCardBlue}
+                activeOpacity={0.92}
+                onPress={() => {
+                  if (hasGroup) {
+                    handleOpenGroupView();
+                  } else if (isHost) {
+                    handleCreateGroupPress();
+                  } else {
+                    setShowJoinModal(true);
+                  }
+                }}
+              >
+                <Text style={styles.groupCardBlueTitle} numberOfLines={1}>
+                  {group1Title}
+                </Text>
+                <Text style={styles.groupCardBlueSubtitle}>
+                  {group1Subtitle}
+                </Text>
+
+                {/* Roommate Avatars: if no members yet, only room host is shown */}
+                <View style={styles.avatarStackRow}>
+                  {(() => {
+                    if (!hasGroup) {
+                      return (
                         <View
-                          style={[
-                            styles.stackAvatarFallback,
-                            {
-                              backgroundColor: "rgba(255,255,255,0.2)",
-                              borderColor: "rgba(255,255,255,0.4)",
-                            },
-                          ]}
-                        >
-                          <Feather
-                            name={isHost ? "plus" : "shield"}
-                            size={14}
-                            color="#FFFFFF"
-                          />
-                        </View>
-                        <Text
                           style={{
-                            fontSize: 11,
-                            color: "rgba(255, 255, 255, 0.9)",
-                            fontWeight: "600",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
                           }}
                         >
-                          {isHost
-                            ? "Tap to create a household"
-                            : "Host status required to create"}
-                        </Text>
-                      </View>
-                    );
-                  }
-
-                  const hostId =
-                    household?.hostId || (isHost ? firebaseUser?.uid : "");
-                  const hostDisplayName =
-                    household?.hostName ||
-                    (isHost
-                      ? profile?.displayName || currentUser.name
-                      : "Room Host");
-                  const hostPhoto = isHost
-                    ? profile?.profilePicture || firebaseUser?.photoURL
-                    : household?.hostPhoto ||
-                      members.find((m) => m.role === "HOST")?.profilePicture;
-
-                  const hostObj = {
-                    memberId: hostId || "host",
-                    displayName: hostDisplayName,
-                    profilePicture: hostPhoto,
-                    role: "HOST",
-                  };
-
-                  // Strictly approved, active members that are NOT the host
-                  const otherActiveMembers = members.filter(
-                    (m) =>
-                      m.status === "ACTIVE" &&
-                      m.role !== "HOST" &&
-                      m.userId !== hostId &&
-                      m.memberId !== hostId,
-                  );
-
-                  // If no members yet, only show room host profile!
-                  if (otherActiveMembers.length === 0) {
-                    return (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        {hostObj.profilePicture ? (
-                          <Image
-                            source={{ uri: hostObj.profilePicture }}
-                            style={[
-                              styles.stackAvatarImage,
-                              { borderColor: "#2563EB" },
-                            ]}
-                          />
-                        ) : (
                           <View
                             style={[
                               styles.stackAvatarFallback,
-                              { borderColor: "#2563EB" },
+                              {
+                                backgroundColor: "rgba(255,255,255,0.2)",
+                                borderColor: "rgba(255,255,255,0.4)",
+                              },
                             ]}
                           >
-                            <Text style={styles.stackAvatarFallbackText}>
-                              {hostObj.displayName.charAt(0).toUpperCase() ||
-                                "H"}
-                            </Text>
+                            <Feather
+                              name={isHost ? "plus" : "shield"}
+                              size={14}
+                              color="#FFFFFF"
+                            />
                           </View>
-                        )}
-                        <Text
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: "rgba(255, 255, 255, 0.9)",
+                              fontWeight: "600",
+                            }}
+                          >
+                            {isHost
+                              ? "Tap to create a household"
+                              : "Host status required to create"}
+                          </Text>
+                        </View>
+                      );
+                    }
+
+                    const hostId =
+                      household?.hostId || (isHost ? firebaseUser?.uid : "");
+                    const hostDisplayName =
+                      household?.hostName ||
+                      (isHost
+                        ? profile?.displayName || currentUser.name
+                        : "Room Host");
+                    const hostPhoto = isHost
+                      ? profile?.profilePicture || firebaseUser?.photoURL
+                      : household?.hostPhoto ||
+                        members.find((m) => m.role === "HOST")?.profilePicture;
+
+                    const hostObj = {
+                      memberId: hostId || "host",
+                      displayName: hostDisplayName,
+                      profilePicture: hostPhoto,
+                      role: "HOST",
+                    };
+
+                    // Strictly approved, active members that are NOT the host
+                    const otherActiveMembers = members.filter(
+                      (m) =>
+                        m.status === "ACTIVE" &&
+                        m.role !== "HOST" &&
+                        m.userId !== hostId &&
+                        m.memberId !== hostId,
+                    );
+
+                    // If no members yet, only show room host profile!
+                    if (otherActiveMembers.length === 0) {
+                      return (
+                        <View
                           style={{
-                            fontSize: 11,
-                            color: "rgba(255, 255, 255, 0.9)",
-                            fontWeight: "700",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
                           }}
                         >
-                          Host: {hostObj.displayName}
-                        </Text>
-                      </View>
-                    );
-                  }
-
-                  // If there are approved members, show host + up to 3 members
-                  const displayedList = [
-                    hostObj,
-                    ...otherActiveMembers.slice(0, 3),
-                  ];
-                  const extraRoommatesCount = Math.max(
-                    0,
-                    otherActiveMembers.length - 3,
-                  );
-
-                  return (
-                    <>
-                      {displayedList.map((m: any, idx: number) => {
-                        if (m.profilePicture) {
-                          return (
+                          {hostObj.profilePicture ? (
                             <Image
-                              key={`g1-avatar-${m.memberId || m.userId || idx}`}
-                              source={{ uri: m.profilePicture }}
+                              source={{ uri: hostObj.profilePicture }}
                               style={[
                                 styles.stackAvatarImage,
-                                idx > 0 && styles.stackAvatarOverlap,
                                 { borderColor: "#2563EB" },
                               ]}
                             />
-                          );
-                        }
-                        const initial = (
-                          m.displayName ||
-                          m.name ||
-                          (m.role === "HOST" ? "H" : "M")
-                        )
-                          .charAt(0)
-                          .toUpperCase();
-                        return (
-                          <View
-                            key={`g1-avatar-${m.memberId || m.userId || idx}`}
-                            style={[
-                              styles.stackAvatarFallback,
-                              idx > 0 && styles.stackAvatarOverlap,
-                              { borderColor: "#2563EB" },
-                            ]}
-                          >
-                            <Text style={styles.stackAvatarFallbackText}>
-                              {initial}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                      {extraRoommatesCount > 0 && (
-                        <View
-                          style={[
-                            styles.stackCounterBadge,
-                            styles.stackAvatarOverlap,
-                          ]}
-                        >
-                          <Text style={styles.stackCounterText}>
-                            +{extraRoommatesCount}
-                          </Text>
-                        </View>
-                      )}
-                    </>
-                  );
-                })()}
-              </View>
-
-              {/* Add Bills or Create Group Button */}
-              <TouchableOpacity
-                style={styles.groupCardBlueButton}
-                activeOpacity={0.85}
-                onPress={() => {
-                  if (hasGroup) {
-                    if (onOpenAddExpense) onOpenAddExpense();
-                    else onNavigate("bills");
-                  } else {
-                    handleCreateGroupPress();
-                  }
-                }}
-              >
-                <Text style={styles.groupCardBlueButtonText}>
-                  {hasGroup
-                    ? "Add Bills"
-                    : isHost
-                      ? "Create Group"
-                      : "Join Household"}
-                </Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            {/* Card 2: Clean Join Card */}
-            <TouchableOpacity
-              style={styles.groupCardLight}
-              activeOpacity={0.92}
-              onPress={() => setShowJoinModal(true)}
-            >
-              <View style={styles.groupCardLightHeader}>
-                <Text style={styles.groupCardLightTitle} numberOfLines={1}>
-                  Join a Room
-                </Text>
-                <View style={styles.groupCardLightIconWrap}>
-                  <Feather name="user-plus" size={16} color="#0F172A" />
-                </View>
-              </View>
-              <Text style={styles.groupCardLightSubtitle}>
-                Have an invite code from your host?
-              </Text>
-
-              <View style={styles.joinCodePillPreview}>
-                <Feather name="hash" size={13} color="#0F172A" />
-                <Text style={styles.joinCodePillText}>Invite Code</Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.groupCardLightButton}
-                activeOpacity={0.85}
-                onPress={() => setShowJoinModal(true)}
-              >
-                <Text style={styles.groupCardLightButtonText}>Enter Code</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            {/* Card 3: Create Household Button Card */}
-            <TouchableOpacity
-              style={[
-                styles.groupCardAdd,
-                !isHost && {
-                  borderColor: "#E2E8F0",
-                  backgroundColor: "#F8FAFC",
-                },
-              ]}
-              activeOpacity={0.85}
-              onPress={handleCreateGroupPress}
-            >
-              <View style={styles.groupCardAddIconWrap}>
-                <Feather
-                  name={isHost ? "plus" : "shield"}
-                  size={22}
-                  color="#0F172A"
-                />
-              </View>
-              <Text style={styles.groupCardAddTitle}>Create Group</Text>
-              <Text style={styles.groupCardAddSubtitle}>
-                {isHost ? "Start New Household" : "Host Access Only"}
-              </Text>
-              {!isHost && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 4,
-                    backgroundColor: "#EFF6FF",
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 12,
-                    marginTop: 6,
-                    borderWidth: 1,
-                    borderColor: "#BFDBFE",
-                  }}
-                >
-                  <Feather name="lock" size={10} color="#2563EB" />
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "700",
-                      color: "#2563EB",
-                    }}
-                  >
-                    Host Guard
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </ScrollView>
-
-          {/* Upcoming Bills Section */}
-          <View style={[styles.sectionHeader, { marginTop: 24 }]}>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-            >
-              <Text style={styles.sectionTitle}>Upcoming Bills</Text>
-              {upcomingBills.length > 0 && (
-                <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>
-                    {upcomingBills.length}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <TouchableOpacity onPress={() => onNavigate("bills")}>
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Upcoming Bills List */}
-          <View style={styles.expenseList}>
-            {upcomingBills.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <View style={styles.emptyIconWrap}>
-                  <Ionicons
-                    name="checkmark-done-circle-outline"
-                    size={24}
-                    color="#10B981"
-                  />
-                </View>
-                <Text style={styles.emptyTitle}>
-                  {searchQuery.trim()
-                    ? "No matching upcoming bills"
-                    : "No upcoming bills right now"}
-                </Text>
-                <Text style={styles.emptySub}>
-                  {searchQuery.trim()
-                    ? "Try searching another keyword or clear your query."
-                    : hasGroup
-                      ? "All household bills have been settled or none are currently pending."
-                      : "Join a household above to view upcoming shared bills."}
-                </Text>
-              </View>
-            ) : (
-              upcomingBills.map((bill) => {
-                const dueInfo = getBillDueStatus(bill, activeCycle, cycles);
-                const isWaterBill = (bill.category || "")
-                  .toLowerCase()
-                  .includes("water");
-                const isExpanded = Boolean(expandedWaterBills[bill.id]);
-                const waterBreakdownItems = isWaterBill
-                  ? getWaterBreakdownForBill(bill)
-                  : [];
-                const waterHouseholdTotal = isWaterBill
-                  ? waterBreakdownItems.reduce(
-                      (acc: number, it: any) =>
-                        acc + (it.totalShareCentavos || 0),
-                      0,
-                    )
-                  : bill.amountCents;
-                const effectiveHouseholdTotal =
-                  waterHouseholdTotal > 0
-                    ? waterHouseholdTotal
-                    : bill.amountCents;
-
-                return (
-                  <View
-                    key={`bill_${bill.id}`}
-                    style={
-                      isWaterBill ? styles.waterUpcomingCardWrapper : undefined
-                    }
-                  >
-                    <TouchableOpacity
-                      style={[
-                        styles.upcomingBillCard,
-                        isWaterBill && {
-                          borderWidth: 0,
-                          borderRadius: 0,
-                          backgroundColor: "#FFFFFF",
-                        },
-                      ]}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        if (dueInfo.status === "pay_now" && onOpenSettleDues) {
-                          onOpenSettleDues();
-                        } else {
-                          onNavigate("bills");
-                        }
-                      }}
-                    >
-                      {/* Left Icon Container - aligned flex-start with title */}
-                      <View
-                        style={[
-                          styles.upcomingBillIconContainer,
-                          { backgroundColor: bill.categoryMeta.bgColor },
-                        ]}
-                      >
-                        <Feather
-                          name={bill.categoryMeta.featherIcon as any}
-                          size={20}
-                          color={bill.categoryMeta.color}
-                        />
-                      </View>
-
-                      {/* Middle Title & Details - aligned flex-start */}
-                      <View style={styles.upcomingBillDetailsWrap}>
-                        <Text
-                          style={styles.upcomingBillTitle}
-                          numberOfLines={2}
-                        >
-                          {cleanBillTitle(
-                            bill.title,
-                            bill.category,
-                            group1Title,
+                          ) : (
+                            <View
+                              style={[
+                                styles.stackAvatarFallback,
+                                { borderColor: "#2563EB" },
+                              ]}
+                            >
+                              <Text style={styles.stackAvatarFallbackText}>
+                                {hostObj.displayName.charAt(0).toUpperCase() ||
+                                  "H"}
+                              </Text>
+                            </View>
                           )}
-                        </Text>
-                        <Text
-                          style={styles.upcomingBillSubtitle}
-                          numberOfLines={1}
-                        >
-                          {isWaterBill
-                            ? `${bill.date} · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)}/day attendance`
-                            : `${bill.date} · Added by ${bill.payerName}`}
-                        </Text>
-                        {isCurrentUserPayor && bill.myShareCents > 0 ? (
-                          <Text style={styles.upcomingBillShareText}>
-                            Your share: {bill.myShareFormatted}
-                          </Text>
-                        ) : !isCurrentUserPayor ? (
                           <Text
-                            style={[
-                              styles.upcomingBillShareText,
-                              { color: "#64748B" },
-                            ]}
-                          >
-                            Exempt (Non-payor)
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      {/* Right Column - Dynamic Due status badge at upper-right, Amount at bottom-right */}
-                      <View style={styles.upcomingBillRightCol}>
-                        <TouchableOpacity
-                          style={[
-                            styles.dueBadge,
-                            {
-                              backgroundColor: dueInfo.badgeBg,
-                              borderColor: dueInfo.badgeBorder,
-                            },
-                          ]}
-                          activeOpacity={0.8}
-                          onPress={() => {
-                            if (
-                              dueInfo.status === "pay_now" &&
-                              onOpenSettleDues
-                            ) {
-                              onOpenSettleDues();
-                            } else {
-                              onNavigate("bills");
-                            }
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.dueBadgeText,
-                              { color: dueInfo.textColor },
-                            ]}
-                          >
-                            {dueInfo.label}
-                          </Text>
-                        </TouchableOpacity>
-                        <View style={styles.upcomingBillAmountWrap}>
-                          <Text style={styles.billTotalAmountText}>
-                            {isWaterBill
-                              ? formatPesos(effectiveHouseholdTotal)
-                              : formatPesos(bill.amountCents)}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    {/* Water Bill Dropdown Button & Detailed Breakdown */}
-                    {isWaterBill && (
-                      <>
-                        <TouchableOpacity
-                          style={styles.waterDropdownButton}
-                          activeOpacity={0.7}
-                          onPress={() => toggleWaterBillDropdown(bill.id)}
-                        >
-                          <View
                             style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 5,
+                              fontSize: 11,
+                              color: "rgba(255, 255, 255, 0.9)",
+                              fontWeight: "700",
                             }}
                           >
-                            <Feather name="droplet" size={13} color="#0284C7" />
-                            <Text style={styles.waterDropdownButtonText}>
-                              {isExpanded
-                                ? "Hide Water Breakdown"
-                                : "View Water Breakdown"}
-                            </Text>
-                          </View>
-                          <Feather
-                            name={isExpanded ? "chevron-up" : "chevron-down"}
-                            size={16}
-                            color="#0284C7"
-                          />
-                        </TouchableOpacity>
+                            Host: {hostObj.displayName}
+                          </Text>
+                        </View>
+                      );
+                    }
 
-                        {isExpanded && (
-                          <View style={styles.waterBreakdownCard}>
-                            <View style={styles.waterBreakdownTopRow}>
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  gap: 6,
-                                }}
-                              >
-                                <Feather
-                                  name="users"
-                                  size={14}
-                                  color="#0369A1"
-                                />
-                                <Text style={styles.waterBreakdownTitle}>
-                                  Water Split Breakdown
-                                </Text>
-                              </View>
-                              <View style={styles.waterRateTag}>
-                                <Text style={styles.waterRateTagText}>
-                                  ₱
-                                  {(
-                                    (waterConfig?.rateCentavosPerPersonPerDay ??
-                                      500) / 100
-                                  ).toFixed(2)}
-                                  /day
-                                </Text>
-                              </View>
-                            </View>
-                            <Text style={styles.waterBreakdownNote}>
-                              Payors pay their own water + water from
-                              non-payors. Non-payors are exempt.
-                            </Text>
+                    // If there are approved members, show host + up to 3 members
+                    const displayedList = [
+                      hostObj,
+                      ...otherActiveMembers.slice(0, 3),
+                    ];
+                    const extraRoommatesCount = Math.max(
+                      0,
+                      otherActiveMembers.length - 3,
+                    );
 
-                            <View style={styles.waterBreakdownList}>
-                              {waterBreakdownItems.map((item: any) => (
-                                <View
-                                  key={item.userId}
-                                  style={[
-                                    styles.waterBreakdownRow,
-                                    item.isCurrentUser &&
-                                      styles.waterBreakdownRowCurrent,
-                                  ]}
-                                >
-                                  <View style={{ flex: 1, marginRight: 8 }}>
-                                    <View
-                                      style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
-                                        gap: 6,
-                                      }}
-                                    >
-                                      <Text
-                                        style={[
-                                          styles.waterMemberName,
-                                          item.isCurrentUser &&
-                                            styles.waterMemberNameCurrent,
-                                        ]}
-                                      >
-                                        {item.displayName}
-                                      </Text>
-                                      {item.isCurrentUser && (
-                                        <View style={styles.waterYouBadge}>
-                                          <Text
-                                            style={styles.waterYouBadgeText}
-                                          >
-                                            YOU
-                                          </Text>
-                                        </View>
-                                      )}
-                                      <View
-                                        style={
-                                          item.role === "NON_PAYOR"
-                                            ? styles.waterNonPayorPill
-                                            : item.role === "HOST"
-                                              ? styles.waterHostPill
-                                              : styles.waterPayorPill
-                                        }
-                                      >
-                                        <Text
-                                          style={
-                                            item.role === "NON_PAYOR"
-                                              ? styles.waterNonPayorPillText
-                                              : item.role === "HOST"
-                                                ? styles.waterHostPillText
-                                                : styles.waterPayorPillText
-                                          }
-                                        >
-                                          {item.role === "NON_PAYOR"
-                                            ? "NON-PAYOR"
-                                            : item.role === "HOST"
-                                              ? "HOST"
-                                              : "PAYOR"}
-                                        </Text>
-                                      </View>
-                                    </View>
-                                    <Text style={styles.waterMemberMeta}>
-                                      {item.daysPresent} days present ·{" "}
-                                      {item.role === "NON_PAYOR"
-                                        ? "Exempted"
-                                        : `Own: ₱${(item.ownWaterCentavos / 100).toFixed(2)}`}
-                                      {item.nonPayorAbsorptionCentavos > 0 &&
-                                        ` + ₱${(item.nonPayorAbsorptionCentavos / 100).toFixed(2)} non-payor split`}
-                                    </Text>
-                                  </View>
-                                  <View style={{ alignItems: "flex-end" }}>
-                                    <Text
-                                      style={[
-                                        styles.waterMemberAmount,
-                                        item.isCurrentUser &&
-                                          styles.waterMemberAmountCurrent,
-                                      ]}
-                                    >
-                                      {item.role === "NON_PAYOR"
-                                        ? "₱0.00"
-                                        : formatPesos(item.totalShareCentavos)}
-                                    </Text>
-                                    <Text style={styles.waterMemberSub}>
-                                      {item.role === "NON_PAYOR"
-                                        ? "Exempt"
-                                        : "Water Share"}
-                                    </Text>
-                                  </View>
-                                </View>
-                              ))}
-                            </View>
-
-                            <View style={styles.waterBreakdownFooter}>
-                              <Text style={styles.waterBreakdownFooterText}>
-                                Water Total:
-                              </Text>
-                              <Text style={styles.waterBreakdownFooterAmount}>
-                                {formatPesos(effectiveHouseholdTotal)}
+                    return (
+                      <>
+                        {displayedList.map((m: any, idx: number) => {
+                          if (m.profilePicture) {
+                            return (
+                              <Image
+                                key={`g1-avatar-${m.memberId || m.userId || idx}`}
+                                source={{ uri: m.profilePicture }}
+                                style={[
+                                  styles.stackAvatarImage,
+                                  idx > 0 && styles.stackAvatarOverlap,
+                                  { borderColor: "#2563EB" },
+                                ]}
+                              />
+                            );
+                          }
+                          const initial = (
+                            m.displayName ||
+                            m.name ||
+                            (m.role === "HOST" ? "H" : "M")
+                          )
+                            .charAt(0)
+                            .toUpperCase();
+                          return (
+                            <View
+                              key={`g1-avatar-${m.memberId || m.userId || idx}`}
+                              style={[
+                                styles.stackAvatarFallback,
+                                idx > 0 && styles.stackAvatarOverlap,
+                                { borderColor: "#2563EB" },
+                              ]}
+                            >
+                              <Text style={styles.stackAvatarFallbackText}>
+                                {initial}
                               </Text>
                             </View>
+                          );
+                        })}
+                        {extraRoommatesCount > 0 && (
+                          <View
+                            style={[
+                              styles.stackCounterBadge,
+                              styles.stackAvatarOverlap,
+                            ]}
+                          >
+                            <Text style={styles.stackCounterText}>
+                              +{extraRoommatesCount}
+                            </Text>
                           </View>
                         )}
                       </>
-                    )}
-                  </View>
-                );
-              })
-            )}
-          </View>
-
-          {/* Recent Expenses Section (Settled & Paid items) */}
-          <View style={[styles.sectionHeader, { marginTop: 24 }]}>
-            <Text style={styles.sectionTitle}>Recent Expenses</Text>
-            <TouchableOpacity onPress={onOpenExpenseHistory}>
-              <Text style={styles.viewAllText}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Settled Expense Items List */}
-          <View style={styles.expenseList}>
-            {settledExpenses.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <View style={styles.emptyIconWrap}>
-                  <Ionicons name="receipt-outline" size={24} color="#94A3B8" />
+                    );
+                  })()}
                 </View>
-                <Text style={styles.emptyTitle}>
-                  {searchQuery.trim()
-                    ? "No matching paid expenses"
-                    : "No paid expenses recorded yet"}
+
+                {/* Add Bills (Host) or View Group (Member) or Create/Join Button */}
+                <TouchableOpacity
+                  style={styles.groupCardBlueButton}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    if (hasGroup) {
+                      if (isHost) {
+                        if (onOpenAddExpense) onOpenAddExpense();
+                        else onNavigate("bills");
+                      } else {
+                        handleOpenGroupView();
+                      }
+                    } else if (isHost) {
+                      handleCreateGroupPress();
+                    } else {
+                      setShowJoinModal(true);
+                    }
+                  }}
+                >
+                  <Text style={styles.groupCardBlueButtonText}>
+                    {hasGroup
+                      ? isHost
+                        ? "Add Bills"
+                        : "View Group"
+                      : isHost
+                        ? "Create Group"
+                        : "Join Household"}
+                  </Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+
+              {/* Card 2: Clean Join Card */}
+              <TouchableOpacity
+                style={styles.groupCardLight}
+                activeOpacity={0.92}
+                onPress={() => setShowJoinModal(true)}
+              >
+                <View style={styles.groupCardLightHeader}>
+                  <Text style={styles.groupCardLightTitle} numberOfLines={1}>
+                    Join a Room
+                  </Text>
+                  <View style={styles.groupCardLightIconWrap}>
+                    <Feather name="user-plus" size={16} color="#0F172A" />
+                  </View>
+                </View>
+                <Text style={styles.groupCardLightSubtitle}>
+                  Have an invite code from your host?
                 </Text>
-                <Text style={styles.emptySub}>
-                  {searchQuery.trim()
-                    ? "Try searching another keyword or clear your search."
-                    : "Once upcoming bills are settled, they will appear here as completed expenses."}
+
+                <View style={styles.joinCodePillPreview}>
+                  <Feather name="hash" size={13} color="#0F172A" />
+                  <Text style={styles.joinCodePillText}>Invite Code</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.groupCardLightButton}
+                  activeOpacity={0.85}
+                  onPress={() => setShowJoinModal(true)}
+                >
+                  <Text style={styles.groupCardLightButtonText}>
+                    Enter Code
+                  </Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+
+              {/* Card 3: Create Household Button Card */}
+              <TouchableOpacity
+                style={[
+                  styles.groupCardAdd,
+                  !isHost && {
+                    borderColor: "#E2E8F0",
+                    backgroundColor: "#F8FAFC",
+                  },
+                ]}
+                activeOpacity={0.85}
+                onPress={handleCreateGroupPress}
+              >
+                <View style={styles.groupCardAddIconWrap}>
+                  <Feather
+                    name={isHost ? "plus" : "shield"}
+                    size={22}
+                    color="#0F172A"
+                  />
+                </View>
+                <Text style={styles.groupCardAddTitle}>Create Group</Text>
+                <Text style={styles.groupCardAddSubtitle}>
+                  {isHost ? "Start New Household" : "Host Access Only"}
                 </Text>
-              </View>
-            ) : (
-              settledExpenses.map((expense) => {
-                return (
-                  <TouchableOpacity
-                    key={`exp_${expense.id}`}
-                    style={styles.expenseItemCard}
-                    activeOpacity={0.85}
-                    onPress={onOpenExpenseHistory}
+                {!isHost && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      backgroundColor: "#EFF6FF",
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 12,
+                      marginTop: 6,
+                      borderWidth: 1,
+                      borderColor: "#BFDBFE",
+                    }}
                   >
-                    {/* Left Icon Container */}
-                    <View
-                      style={[
-                        styles.expenseIconContainer,
-                        { backgroundColor: expense.categoryMeta.bgColor },
-                      ]}
+                    <Feather name="lock" size={10} color="#2563EB" />
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        fontWeight: "700",
+                        color: "#2563EB",
+                      }}
                     >
-                      <Feather
-                        name={expense.categoryMeta.featherIcon as any}
-                        size={20}
-                        color={expense.categoryMeta.color}
-                      />
-                    </View>
-
-                    {/* Middle Title & Details */}
-                    <View style={styles.expenseDetailsWrap}>
-                      <Text style={styles.expenseTitle}>{expense.title}</Text>
-                      <Text style={styles.expenseSubtitle}>
-                        {expense.date} · Paid by {expense.payerName}
-                      </Text>
-                    </View>
-
-                    {/* Right Negative Amount in Pesos */}
-                    <Text style={styles.expenseAmountText}>
-                      {expense.amountFormatted}
+                      Host Guard
                     </Text>
-                  </TouchableOpacity>
-                );
-              })
-            )}
-          </View>
-        </ScrollView>
-      </Animated.View>
-
-      {/* Join Household with Code Modal */}
-      <Modal
-        visible={showJoinModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowJoinModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalIconWrap}>
-                <Ionicons name="key" size={20} color="#0F172A" />
-              </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.modalTitle}>Join Household Group</Text>
-                <Text style={styles.modalSubtitle}>
-                  Enter invite code or group ID
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowJoinModal(false)}
-                style={styles.modalCloseBtn}
-              >
-                <Ionicons name="close" size={20} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.inputLabel}>Household Code (e.g. PF-402)</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="e.g. PF-402"
-              placeholderTextColor="#94A3B8"
-              value={joinCodeInput}
-              onChangeText={setJoinCodeInput}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-            <Text style={styles.inputHint}>
-              Ask your host or roommate to check their Household settings or
-              invite code.
-            </Text>
-
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setShowJoinModal(false)}
-                disabled={joinLoading}
-              >
-                <Text style={styles.modalCancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalSubmitBtn, joinLoading && { opacity: 0.7 }]}
-                onPress={handleJoinByCode}
-                disabled={joinLoading}
-              >
-                {joinLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalSubmitBtnText}>Join Group</Text>
+                  </View>
                 )}
               </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+            </ScrollView>
 
-      {/* Recent Updates Activity Feed Modal */}
-      <Modal
-        visible={showActivitiesModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowActivitiesModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { maxHeight: "80%" }]}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalIconWrap}>
-                <Feather name="activity" size={20} color="#0F172A" />
-              </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.modalTitle}>Recent Updates</Text>
-                <Text style={styles.modalSubtitle}>
-                  Real-time activity feed for your room
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowActivitiesModal(false)}
-                style={styles.modalCloseBtn}
+            {/* Upcoming Bills Section */}
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
               >
-                <Ionicons name="close" size={20} color="#64748B" />
+                <Text style={styles.sectionTitle}>Upcoming Bills</Text>
+                {upcomingBills.length > 0 && (
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>
+                      {upcomingBills.length}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => onNavigate("bills")}>
+                <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              style={{ marginTop: 8 }}
-            >
-              {recentActivities.length === 0 ? (
-                <View style={{ paddingVertical: 24, alignItems: "center" }}>
-                  <Text style={{ fontSize: 13, color: "#94A3B8" }}>
-                    No recent activities yet.
+            {/* Upcoming Bills List */}
+            <View style={styles.expenseList}>
+              {upcomingBills.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons
+                      name="checkmark-done-circle-outline"
+                      size={24}
+                      color="#10B981"
+                    />
+                  </View>
+                  <Text style={styles.emptyTitle}>
+                    {searchQuery.trim()
+                      ? "No matching upcoming bills"
+                      : "No upcoming bills right now"}
+                  </Text>
+                  <Text style={styles.emptySub}>
+                    {searchQuery.trim()
+                      ? "Try searching another keyword or clear your query."
+                      : hasGroup
+                        ? "All household bills have been settled or none are currently pending."
+                        : "Join a household above to view upcoming shared bills."}
                   </Text>
                 </View>
               ) : (
-                recentActivities.map((act) => (
-                  <TouchableOpacity
-                    key={act.id}
-                    style={styles.activityRow}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setShowActivitiesModal(false);
-                      act.onAction();
-                    }}
-                  >
+                upcomingBills.map((bill) => {
+                  const dueInfo = getBillDueStatus(bill, activeCycle, cycles);
+                  const isWaterBill = (bill.category || "")
+                    .toLowerCase()
+                    .includes("water");
+                  const isExpanded = Boolean(expandedWaterBills[bill.id]);
+                  const waterBreakdownItems = isWaterBill
+                    ? getWaterBreakdownForBill(bill)
+                    : [];
+                  const waterHouseholdTotal = isWaterBill
+                    ? waterBreakdownItems.reduce(
+                        (acc: number, it: any) =>
+                          acc + (it.totalShareCentavos || 0),
+                        0,
+                      )
+                    : bill.amountCents;
+                  const effectiveHouseholdTotal =
+                    waterHouseholdTotal > 0
+                      ? waterHouseholdTotal
+                      : bill.amountCents;
+
+                  return (
                     <View
-                      style={[
-                        styles.activityIconCircle,
-                        { backgroundColor: "rgba(15, 23, 42, 0.05)" },
-                      ]}
+                      key={`bill_${bill.id}`}
+                      style={
+                        isWaterBill
+                          ? styles.waterUpcomingCardWrapper
+                          : undefined
+                      }
                     >
-                      <Feather name={act.icon} size={16} color="#0F172A" />
+                      <TouchableOpacity
+                        style={[
+                          styles.upcomingBillCard,
+                          isWaterBill && {
+                            borderWidth: 0,
+                            borderRadius: 0,
+                            backgroundColor: "#FFFFFF",
+                          },
+                        ]}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          if (
+                            dueInfo.status === "pay_now" &&
+                            onOpenSettleDues
+                          ) {
+                            onOpenSettleDues();
+                          } else {
+                            onNavigate("bills");
+                          }
+                        }}
+                      >
+                        {/* Left Icon Container - aligned flex-start with title */}
+                        <View
+                          style={[
+                            styles.upcomingBillIconContainer,
+                            { backgroundColor: bill.categoryMeta.bgColor },
+                          ]}
+                        >
+                          <Feather
+                            name={bill.categoryMeta.featherIcon as any}
+                            size={20}
+                            color={bill.categoryMeta.color}
+                          />
+                        </View>
+
+                        {/* Middle Title & Details - aligned flex-start */}
+                        <View style={styles.upcomingBillDetailsWrap}>
+                          <Text
+                            style={styles.upcomingBillTitle}
+                            numberOfLines={2}
+                          >
+                            {cleanBillTitle(
+                              bill.title,
+                              bill.category,
+                              group1Title,
+                            )}
+                          </Text>
+                          <Text
+                            style={styles.upcomingBillSubtitle}
+                            numberOfLines={1}
+                          >
+                            {isWaterBill
+                              ? `${bill.date} · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)}/day attendance`
+                              : `${bill.date} · Added by ${bill.payerName}`}
+                          </Text>
+                          {isCurrentUserPayor && bill.myShareCents > 0 ? (
+                            <Text style={styles.upcomingBillShareText}>
+                              Your share: {bill.myShareFormatted}
+                            </Text>
+                          ) : !isCurrentUserPayor ? (
+                            <Text
+                              style={[
+                                styles.upcomingBillShareText,
+                                { color: "#64748B" },
+                              ]}
+                            >
+                              Exempt (Non-payor)
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        {/* Right Column - Dynamic Due status badge at upper-right, Amount at bottom-right */}
+                        <View style={styles.upcomingBillRightCol}>
+                          <TouchableOpacity
+                            style={[
+                              styles.dueBadge,
+                              {
+                                backgroundColor: dueInfo.badgeBg,
+                                borderColor: dueInfo.badgeBorder,
+                              },
+                            ]}
+                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (
+                                dueInfo.status === "pay_now" &&
+                                onOpenSettleDues
+                              ) {
+                                onOpenSettleDues();
+                              } else {
+                                onNavigate("bills");
+                              }
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.dueBadgeText,
+                                { color: dueInfo.textColor },
+                              ]}
+                            >
+                              {dueInfo.label}
+                            </Text>
+                          </TouchableOpacity>
+                          <View style={styles.upcomingBillAmountWrap}>
+                            <Text style={styles.billTotalAmountText}>
+                              {isWaterBill
+                                ? formatPesos(effectiveHouseholdTotal)
+                                : formatPesos(bill.amountCents)}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Water Bill Dropdown Button & Detailed Breakdown */}
+                      {isWaterBill && (
+                        <>
+                          <TouchableOpacity
+                            style={styles.waterDropdownButton}
+                            activeOpacity={0.7}
+                            onPress={() => toggleWaterBillDropdown(bill.id)}
+                          >
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 5,
+                              }}
+                            >
+                              <Feather
+                                name="droplet"
+                                size={13}
+                                color="#0284C7"
+                              />
+                              <Text style={styles.waterDropdownButtonText}>
+                                {isExpanded
+                                  ? "Hide Water Breakdown"
+                                  : "View Water Breakdown"}
+                              </Text>
+                            </View>
+                            <Feather
+                              name={isExpanded ? "chevron-up" : "chevron-down"}
+                              size={16}
+                              color="#0284C7"
+                            />
+                          </TouchableOpacity>
+
+                          {isExpanded && (
+                            <View style={styles.waterBreakdownCard}>
+                              <View style={styles.waterBreakdownTopRow}>
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 6,
+                                  }}
+                                >
+                                  <Feather
+                                    name="users"
+                                    size={14}
+                                    color="#0369A1"
+                                  />
+                                  <Text style={styles.waterBreakdownTitle}>
+                                    Water Split Breakdown
+                                  </Text>
+                                </View>
+                                <View style={styles.waterRateTag}>
+                                  <Text style={styles.waterRateTagText}>
+                                    ₱
+                                    {(
+                                      (waterConfig?.rateCentavosPerPersonPerDay ??
+                                        500) / 100
+                                    ).toFixed(2)}
+                                    /day
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={styles.waterBreakdownNote}>
+                                Payors pay their own water + water from
+                                non-payors. Non-payors are exempt.
+                              </Text>
+
+                              <View style={styles.waterBreakdownList}>
+                                {waterBreakdownItems.map((item: any) => (
+                                  <View
+                                    key={item.userId}
+                                    style={[
+                                      styles.waterBreakdownRow,
+                                      item.isCurrentUser &&
+                                        styles.waterBreakdownRowCurrent,
+                                    ]}
+                                  >
+                                    <View style={{ flex: 1, marginRight: 8 }}>
+                                      <View
+                                        style={{
+                                          flexDirection: "row",
+                                          alignItems: "center",
+                                          gap: 6,
+                                        }}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.waterMemberName,
+                                            item.isCurrentUser &&
+                                              styles.waterMemberNameCurrent,
+                                          ]}
+                                        >
+                                          {item.displayName}
+                                        </Text>
+                                        {item.isCurrentUser && (
+                                          <View style={styles.waterYouBadge}>
+                                            <Text
+                                              style={styles.waterYouBadgeText}
+                                            >
+                                              YOU
+                                            </Text>
+                                          </View>
+                                        )}
+                                        <View
+                                          style={
+                                            item.role === "NON_PAYOR"
+                                              ? styles.waterNonPayorPill
+                                              : item.role === "HOST"
+                                                ? styles.waterHostPill
+                                                : styles.waterPayorPill
+                                          }
+                                        >
+                                          <Text
+                                            style={
+                                              item.role === "NON_PAYOR"
+                                                ? styles.waterNonPayorPillText
+                                                : item.role === "HOST"
+                                                  ? styles.waterHostPillText
+                                                  : styles.waterPayorPillText
+                                            }
+                                          >
+                                            {item.role === "NON_PAYOR"
+                                              ? "NON-PAYOR"
+                                              : item.role === "HOST"
+                                                ? "HOST"
+                                                : "PAYOR"}
+                                          </Text>
+                                        </View>
+                                      </View>
+                                      <Text style={styles.waterMemberMeta}>
+                                        {item.daysPresent} days present ·{" "}
+                                        {item.role === "NON_PAYOR"
+                                          ? "Exempted"
+                                          : `Own: ₱${(item.ownWaterCentavos / 100).toFixed(2)}`}
+                                        {item.nonPayorAbsorptionCentavos > 0 &&
+                                          ` + ₱${(item.nonPayorAbsorptionCentavos / 100).toFixed(2)} non-payor split`}
+                                      </Text>
+                                    </View>
+                                    <View style={{ alignItems: "flex-end" }}>
+                                      <Text
+                                        style={[
+                                          styles.waterMemberAmount,
+                                          item.isCurrentUser &&
+                                            styles.waterMemberAmountCurrent,
+                                        ]}
+                                      >
+                                        {item.role === "NON_PAYOR"
+                                          ? "₱0.00"
+                                          : formatPesos(
+                                              item.totalShareCentavos,
+                                            )}
+                                      </Text>
+                                      <Text style={styles.waterMemberSub}>
+                                        {item.role === "NON_PAYOR"
+                                          ? "Exempt"
+                                          : "Water Share"}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ))}
+                              </View>
+
+                              <View style={styles.waterBreakdownFooter}>
+                                <Text style={styles.waterBreakdownFooterText}>
+                                  Water Total:
+                                </Text>
+                                <Text style={styles.waterBreakdownFooterAmount}>
+                                  {formatPesos(effectiveHouseholdTotal)}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                        </>
+                      )}
                     </View>
-                    <View style={{ flex: 1, marginLeft: 10, marginRight: 8 }}>
-                      <Text style={styles.activityTitle}>{act.title}</Text>
-                      <Text style={styles.activityDesc} numberOfLines={2}>
-                        {act.desc}
-                      </Text>
-                      <Text style={styles.activityTime}>
-                        {act.dateFormatted}
-                      </Text>
-                    </View>
-                    <View style={styles.activityActionBtn}>
-                      <Text style={styles.activityActionText}>
-                        {act.actionText}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
+                  );
+                })
               )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+            </View>
 
-      {/* Host Privileges Guard Modal */}
-      <Modal
-        visible={showHostRequiredModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowHostRequiredModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { maxWidth: 360 }]}>
-            <View style={{ alignItems: "center", paddingVertical: 10 }}>
-              <View
-                style={{
-                  width: 58,
-                  height: 58,
-                  borderRadius: 29,
-                  backgroundColor: "#EFF6FF",
-                  borderWidth: 2,
-                  borderColor: "#BFDBFE",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  marginBottom: 14,
-                }}
-              >
-                <Feather name="shield" size={28} color="#2563EB" />
-              </View>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "800",
-                  color: "#0F172A",
-                  textAlign: "center",
-                  marginBottom: 6,
-                }}
-              >
-                Host Privileges Required
-              </Text>
-              <Text
-                style={{
-                  fontSize: 13,
-                  color: "#64748B",
-                  textAlign: "center",
-                  lineHeight: 19,
-                  paddingHorizontal: 8,
-                  marginBottom: 18,
-                }}
-              >
-                Only verified Property Hosts can create and manage new household
-                groups. Non-hosts can join an existing room with an invite code.
-              </Text>
-
-              {/* Informational Guidance Box */}
-              <View
-                style={{
-                  backgroundColor: "#F8FAFC",
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: "#E2E8F0",
-                  padding: 12,
-                  width: "100%",
-                  marginBottom: 18,
-                  gap: 10,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    gap: 10,
-                  }}
-                >
-                  <Feather
-                    name="home"
-                    size={16}
-                    color="#2563EB"
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: "#1E293B",
-                      }}
-                    >
-                      Are you the Property Host?
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: "#64748B",
-                        marginTop: 1,
-                        lineHeight: 15,
-                      }}
-                    >
-                      Apply to get verified. Approved hosts can create household
-                      groups, set rules, and split utilities.
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
-
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    gap: 10,
-                  }}
-                >
-                  <Feather
-                    name="users"
-                    size={16}
-                    color="#059669"
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: "#1E293B",
-                      }}
-                    >
-                      Are you a Roommate or Tenant?
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: "#64748B",
-                        marginTop: 1,
-                        lineHeight: 15,
-                      }}
-                    >
-                      Ask your property host for your household’s invite code
-                      (e.g. PF-402) to join immediately.
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Action Buttons */}
-              <TouchableOpacity
-                style={{
-                  width: "100%",
-                  backgroundColor: "#2563EB",
-                  paddingVertical: 13,
-                  borderRadius: 12,
-                  alignItems: "center",
-                  marginBottom: 10,
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  gap: 8,
-                }}
-                onPress={() => {
-                  setShowHostRequiredModal(false);
-                  if (onOpenHostApplication) {
-                    onOpenHostApplication();
-                  } else {
-                    onNavigate("profile");
-                  }
-                }}
-              >
-                <Feather name="shield" size={16} color="#FFFFFF" />
-                <Text
-                  style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}
-                >
-                  Apply to Become a Host
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{
-                  width: "100%",
-                  backgroundColor: "#EFF6FF",
-                  borderWidth: 1,
-                  borderColor: "#BFDBFE",
-                  paddingVertical: 13,
-                  borderRadius: 12,
-                  alignItems: "center",
-                  marginBottom: 8,
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  gap: 8,
-                }}
-                onPress={() => {
-                  setShowHostRequiredModal(false);
-                  setShowJoinModal(true);
-                }}
-              >
-                <Feather name="hash" size={15} color="#2563EB" />
-                <Text
-                  style={{ color: "#2563EB", fontWeight: "700", fontSize: 14 }}
-                >
-                  Join with Invite Code
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{ paddingVertical: 8 }}
-                onPress={() => setShowHostRequiredModal(false)}
-              >
-                <Text
-                  style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}
-                >
-                  Dismiss
-                </Text>
+            {/* Recent Expenses Section (Settled & Paid items) */}
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+              <Text style={styles.sectionTitle}>Recent Expenses</Text>
+              <TouchableOpacity onPress={onOpenExpenseHistory}>
+                <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Settled Expense Items List */}
+            <View style={styles.expenseList}>
+              {settledExpenses.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons
+                      name="receipt-outline"
+                      size={24}
+                      color="#94A3B8"
+                    />
+                  </View>
+                  <Text style={styles.emptyTitle}>
+                    {searchQuery.trim()
+                      ? "No matching paid expenses"
+                      : "No paid expenses recorded yet"}
+                  </Text>
+                  <Text style={styles.emptySub}>
+                    {searchQuery.trim()
+                      ? "Try searching another keyword or clear your search."
+                      : "Once upcoming bills are settled, they will appear here as completed expenses."}
+                  </Text>
+                </View>
+              ) : (
+                settledExpenses.map((expense) => {
+                  return (
+                    <TouchableOpacity
+                      key={`exp_${expense.id}`}
+                      style={styles.expenseItemCard}
+                      activeOpacity={0.85}
+                      onPress={onOpenExpenseHistory}
+                    >
+                      {/* Left Icon Container */}
+                      <View
+                        style={[
+                          styles.expenseIconContainer,
+                          { backgroundColor: expense.categoryMeta.bgColor },
+                        ]}
+                      >
+                        <Feather
+                          name={expense.categoryMeta.featherIcon as any}
+                          size={20}
+                          color={expense.categoryMeta.color}
+                        />
+                      </View>
+
+                      {/* Middle Title & Details */}
+                      <View style={styles.expenseDetailsWrap}>
+                        <Text style={styles.expenseTitle}>{expense.title}</Text>
+                        <Text style={styles.expenseSubtitle}>
+                          {expense.date} · Paid by {expense.payerName}
+                        </Text>
+                      </View>
+
+                      {/* Right Negative Amount in Pesos */}
+                      <Text style={styles.expenseAmountText}>
+                        {expense.amountFormatted}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          </ScrollView>
+        )}
+      </Animated.View>
+
+      {/* Join Household with Code Modal */}
+      <SmoothBottomSheetModal
+        visible={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Join Household Group"
+        subtitle="Enter invite code or group ID"
+        icon={<Ionicons name="key" size={18} color="#0F172A" />}
+      >
+        <View style={{ paddingTop: 4 }}>
+          <Text style={styles.inputLabel}>Household Code (e.g. PF-402)</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g. PF-402"
+            placeholderTextColor="#94A3B8"
+            value={joinCodeInput}
+            onChangeText={setJoinCodeInput}
+            autoCapitalize="characters"
+            autoCorrect={false}
+          />
+          <Text style={styles.inputHint}>
+            Ask your host or roommate to check their Household settings or
+            invite code.
+          </Text>
+
+          <View style={styles.modalBtnRow}>
+            <TouchableOpacity
+              style={styles.modalCancelBtn}
+              onPress={() => setShowJoinModal(false)}
+              disabled={joinLoading}
+            >
+              <Text style={styles.modalCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalSubmitBtn, joinLoading && { opacity: 0.7 }]}
+              onPress={handleJoinByCode}
+              disabled={joinLoading}
+            >
+              {joinLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalSubmitBtnText}>Join Group</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </SmoothBottomSheetModal>
+
+      {/* Recent Updates Activity Feed Modal */}
+      <SmoothBottomSheetModal
+        visible={showActivitiesModal}
+        onClose={() => setShowActivitiesModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Recent Updates"
+        subtitle="Real-time activity feed for your room"
+        icon={<Feather name="activity" size={18} color="#0F172A" />}
+        maxHeight="86%"
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={{ marginTop: 6, maxHeight: 440 }}
+        >
+          {recentActivities.length === 0 ? (
+            <View style={{ paddingVertical: 28, alignItems: "center" }}>
+              <Text style={{ fontSize: 13, color: "#94A3B8" }}>
+                No recent activities yet.
+              </Text>
+            </View>
+          ) : (
+            recentActivities.map((act) => (
+              <TouchableOpacity
+                key={act.id}
+                style={styles.activityRow}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowActivitiesModal(false);
+                  act.onAction();
+                }}
+              >
+                <View
+                  style={[
+                    styles.activityIconCircle,
+                    { backgroundColor: "rgba(15, 23, 42, 0.05)" },
+                  ]}
+                >
+                  <Feather name={act.icon} size={16} color="#0F172A" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10, marginRight: 8 }}>
+                  <Text style={styles.activityTitle}>{act.title}</Text>
+                  <Text style={styles.activityDesc} numberOfLines={2}>
+                    {act.desc}
+                  </Text>
+                  <Text style={styles.activityTime}>{act.dateFormatted}</Text>
+                </View>
+                <View style={styles.activityActionBtn}>
+                  <Text style={styles.activityActionText}>
+                    {act.actionText}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </SmoothBottomSheetModal>
+
+      {/* Host Privileges Guard Modal */}
+      <SmoothBottomSheetModal
+        visible={showHostRequiredModal}
+        onClose={() => setShowHostRequiredModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        showCloseBtn={true}
+        maxHeight="90%"
+      >
+        <View style={{ alignItems: "center", paddingTop: 4 }}>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "800",
+              color: "#0F172A",
+              textAlign: "center",
+              marginBottom: 6,
+            }}
+          >
+            Host Privileges Required
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: "#64748B",
+              textAlign: "center",
+              lineHeight: 19,
+              paddingHorizontal: 8,
+              marginBottom: 16,
+            }}
+          >
+            Only verified Property Hosts can create and manage new household
+            groups. Non-hosts can join an existing room with an invite code.
+          </Text>
+
+          {/* Informational Guidance Box */}
+          <View
+            style={{
+              backgroundColor: "#F8FAFC",
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: "#E2E8F0",
+              padding: 12,
+              width: "100%",
+              marginBottom: 18,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <Feather
+                name="home"
+                size={16}
+                color="#2563EB"
+                style={{ marginTop: 2 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color: "#1E293B",
+                  }}
+                >
+                  Are you the Property Host?
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: "#64748B",
+                    marginTop: 1,
+                    lineHeight: 15,
+                  }}
+                >
+                  Apply to get verified. Approved hosts can create household
+                  groups, set rules, and split utilities.
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <Feather
+                name="users"
+                size={16}
+                color="#059669"
+                style={{ marginTop: 2 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color: "#1E293B",
+                  }}
+                >
+                  Are you a Roommate or Tenant?
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: "#64748B",
+                    marginTop: 1,
+                    lineHeight: 15,
+                  }}
+                >
+                  Ask your property host for your household’s invite code (e.g.
+                  PF-402) to join immediately.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <TouchableOpacity
+            style={{
+              width: "100%",
+              backgroundColor: "#2563EB",
+              paddingVertical: 13,
+              borderRadius: 14,
+              alignItems: "center",
+              marginBottom: 10,
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+            }}
+            onPress={() => {
+              setShowHostRequiredModal(false);
+              if (onOpenHostApplication) {
+                onOpenHostApplication();
+              } else {
+                onNavigate("profile");
+              }
+            }}
+          >
+            <Feather name="shield" size={16} color="#FFFFFF" />
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Apply to Become a Host
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              width: "100%",
+              backgroundColor: "#EFF6FF",
+              borderWidth: 1,
+              borderColor: "#BFDBFE",
+              paddingVertical: 13,
+              borderRadius: 14,
+              alignItems: "center",
+              marginBottom: 8,
+              flexDirection: "row",
+              justifyContent: "center",
+              gap: 8,
+            }}
+            onPress={() => {
+              setShowHostRequiredModal(false);
+              setShowJoinModal(true);
+            }}
+          >
+            <Feather name="hash" size={15} color="#2563EB" />
+            <Text style={{ color: "#2563EB", fontWeight: "700", fontSize: 14 }}>
+              Join with Invite Code
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ paddingVertical: 8 }}
+            onPress={() => setShowHostRequiredModal(false)}
+          >
+            <Text style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}>
+              Dismiss
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
     </View>
   );
 };
@@ -2818,11 +2846,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#BAE6FD",
     overflow: "hidden",
-    shadowColor: "#0284C7",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
   waterDropdownButton: {
     flexDirection: "row",

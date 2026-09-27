@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useHousehold } from "../../contexts/HouseholdContext";
 import { billingService } from "../../services/billingService";
 import { formatPesos } from "@propertyflow/shared";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 import {
   Receipt,
   Home,
@@ -21,7 +22,8 @@ export const ClientBills: React.FC<{ onPayClick: () => void }> = ({
   onPayClick,
 }) => {
   const { currentUser } = useAuth();
-  const { household, billingCycles, activeCycle, members } = useHousehold();
+  const { household, billingCycles, activeCycle, members, loading } =
+    useHousehold();
 
   const [selectedCycleId, setSelectedCycleId] = useState<string>(
     activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId || "",
@@ -29,6 +31,21 @@ export const ClientBills: React.FC<{ onPayClick: () => void }> = ({
   const [selectedMemberId, setSelectedMemberId] = useState<string>(
     currentUser.uid,
   );
+
+  useEffect(() => {
+    if (
+      !selectedCycleId &&
+      (activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId)
+    ) {
+      setSelectedCycleId(
+        activeCycle?.billingCycleId || billingCycles[0]?.billingCycleId || "",
+      );
+    }
+  }, [activeCycle?.billingCycleId, billingCycles, selectedCycleId]);
+
+  if (loading && currentUser.householdId) {
+    return <UniversalLoader variant="skeleton" type="bills" />;
+  }
 
   const currentCycle =
     billingCycles.find((c) => c.billingCycleId === selectedCycleId) ||

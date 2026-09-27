@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { useHousehold } from '../../contexts/HouseholdContext';
-import { billingService } from '../../services/billingService';
-import { calculateRedistributionPlan, formatPesos } from '@propertyflow/shared';
+import React, { useState } from "react";
+import { useHousehold } from "../../contexts/HouseholdContext";
+import { billingService } from "../../services/billingService";
+import { calculateRedistributionPlan, formatPesos } from "@propertyflow/shared";
 import {
   ArrowLeftRight,
   AlertTriangle,
@@ -9,55 +9,75 @@ import {
   Users,
   Receipt,
   Sparkles,
-} from 'lucide-react';
+} from "lucide-react";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 
 export const HostRedistribution: React.FC = () => {
-  const { household, activeCycle, members } = useHousehold();
-  const bills = activeCycle ? billingService.getMemberBills(household.householdId, activeCycle.billingCycleId) : [];
+  const { household, activeCycle, members, loading } = useHousehold();
+
+  if (loading && household.householdId) {
+    return <UniversalLoader variant="skeleton" type="bills" />;
+  }
+
+  const bills = activeCycle
+    ? billingService.getMemberBills(
+        household.householdId,
+        activeCycle.billingCycleId,
+      )
+    : [];
 
   // Payors with outstanding unpaid balances
-  const unpaidBills = bills.filter((b) => b.outstandingCentavos > 0 && b.userRole === 'PAYOR');
-
-  const [selectedSourceUserId, setSelectedSourceUserId] = useState<string>(
-    unpaidBills[0]?.userId || 'u_p1'
+  const unpaidBills = bills.filter(
+    (b) => b.outstandingCentavos > 0 && b.userRole === "PAYOR",
   );
 
-  const selectedBill = bills.find((b) => b.userId === selectedSourceUserId) || unpaidBills[0];
+  const [selectedSourceUserId, setSelectedSourceUserId] = useState<string>(
+    unpaidBills[0]?.userId || "u_p1",
+  );
+
+  const selectedBill =
+    bills.find((b) => b.userId === selectedSourceUserId) || unpaidBills[0];
 
   // Recipient payors (excluding the source member)
   const candidateRecipients = members.filter(
-    (m) => m.role === 'PAYOR' && m.userId !== selectedSourceUserId && m.status === 'ACTIVE'
+    (m) =>
+      m.role === "PAYOR" &&
+      m.userId !== selectedSourceUserId &&
+      m.status === "ACTIVE",
   );
 
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>(
-    candidateRecipients.map((r) => r.userId)
+    candidateRecipients.map((r) => r.userId),
   );
 
   const [reason, setReason] = useState(
-    'Roommate short payment re-allocation for billing cycle settlement.'
+    "Roommate short payment re-allocation for billing cycle settlement.",
   );
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Calculate live preview plan
-  const previewPlan = selectedBill && selectedRecipientIds.length > 0
-    ? calculateRedistributionPlan(
-        selectedBill,
-        candidateRecipients
-          .filter((c) => selectedRecipientIds.includes(c.userId))
-          .map((c) => ({ userId: c.userId, userName: c.displayName })),
-        reason
-      )
-    : null;
+  const previewPlan =
+    selectedBill && selectedRecipientIds.length > 0
+      ? calculateRedistributionPlan(
+          selectedBill,
+          candidateRecipients
+            .filter((c) => selectedRecipientIds.includes(c.userId))
+            .map((c) => ({ userId: c.userId, userName: c.displayName })),
+          reason,
+        )
+      : null;
 
   const toggleRecipient = (userId: string) => {
     if (selectedRecipientIds.includes(userId)) {
       if (selectedRecipientIds.length === 1) {
-        alert('At least one recipient must be selected.');
+        alert("At least one recipient must be selected.");
         return;
       }
-      setSelectedRecipientIds(selectedRecipientIds.filter((id) => id !== userId));
+      setSelectedRecipientIds(
+        selectedRecipientIds.filter((id) => id !== userId),
+      );
     } else {
       setSelectedRecipientIds([...selectedRecipientIds, userId]);
     }
@@ -73,10 +93,12 @@ export const HostRedistribution: React.FC = () => {
         activeCycle.billingCycleId,
         selectedBill.userId,
         selectedRecipientIds,
-        reason
+        reason,
       );
       setShowConfirmModal(false);
-      alert('Balance redistribution successfully executed! All balances, adjustments, audit logs, and notifications have been recorded.');
+      alert(
+        "Balance redistribution successfully executed! All balances, adjustments, audit logs, and notifications have been recorded.",
+      );
     } catch (e: any) {
       alert(`Redistribution failed: ${e.message}`);
     } finally {
@@ -96,13 +118,14 @@ export const HostRedistribution: React.FC = () => {
             Centavo-Safe Balance Redistribution
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Evenly split unpaid remaining roommate balances among other active payors down to the centavo
+            Evenly split unpaid remaining roommate balances among other active
+            payors down to the centavo
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="px-3 py-1.5 bg-blue-50 text-blue-700 font-bold text-xs rounded-xl border border-blue-200">
-            Active Cycle: {activeCycle?.name || 'Current'}
+            Active Cycle: {activeCycle?.name || "Current"}
           </span>
         </div>
       </div>
@@ -112,9 +135,12 @@ export const HostRedistribution: React.FC = () => {
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center">
             <CheckCircle2 className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-slate-900">All Payors Settled</h3>
+          <h3 className="text-base font-bold text-slate-900">
+            All Payors Settled
+          </h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto">
-            There are currently no outstanding unpaid balances in this billing cycle to redistribute.
+            There are currently no outstanding unpaid balances in this billing
+            cycle to redistribute.
           </p>
         </div>
       ) : (
@@ -135,25 +161,32 @@ export const HostRedistribution: React.FC = () => {
                       setSelectedSourceUserId(b.userId);
                       // refresh candidate recipients
                       const recs = members.filter(
-                        (m) => m.role === 'PAYOR' && m.userId !== b.userId && m.status === 'ACTIVE'
+                        (m) =>
+                          m.role === "PAYOR" &&
+                          m.userId !== b.userId &&
+                          m.status === "ACTIVE",
                       );
                       setSelectedRecipientIds(recs.map((r) => r.userId));
                     }}
                     className={`p-4 rounded-2xl border text-left transition ${
                       selectedSourceUserId === b.userId
-                        ? 'border-blue-600 bg-blue-50/50 shadow-xs ring-1 ring-blue-500'
-                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                        ? "border-blue-600 bg-blue-50/50 shadow-xs ring-1 ring-blue-500"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-900">{b.userName}</span>
+                      <span className="font-bold text-xs text-slate-900">
+                        {b.userName}
+                      </span>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
                         {b.status}
                       </span>
                     </div>
 
                     <div className="mt-3 flex items-baseline justify-between">
-                      <span className="text-xs text-slate-500">Unpaid Balance:</span>
+                      <span className="text-xs text-slate-500">
+                        Unpaid Balance:
+                      </span>
                       <span className="text-base font-black text-rose-600">
                         {formatPesos(b.outstandingCentavos)}
                       </span>
@@ -190,8 +223,8 @@ export const HostRedistribution: React.FC = () => {
                       onClick={() => toggleRecipient(cand.userId)}
                       className={`p-3.5 rounded-2xl border flex items-center justify-between cursor-pointer transition ${
                         isChecked
-                          ? 'border-blue-500 bg-blue-50/40'
-                          : 'border-slate-200 hover:bg-slate-50'
+                          ? "border-blue-500 bg-blue-50/40"
+                          : "border-slate-200 hover:bg-slate-50"
                       }`}
                     >
                       <div className="flex items-center gap-3">
@@ -202,8 +235,12 @@ export const HostRedistribution: React.FC = () => {
                           className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 pointer-events-none"
                         />
                         <div>
-                          <div className="text-xs font-bold text-slate-900">{cand.displayName}</div>
-                          <div className="text-[11px] text-slate-500">{cand.email}</div>
+                          <div className="text-xs font-bold text-slate-900">
+                            {cand.displayName}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {cand.email}
+                          </div>
                         </div>
                       </div>
 
@@ -237,14 +274,18 @@ export const HostRedistribution: React.FC = () => {
                 <span>Deterministic Centavo Split</span>
               </div>
 
-              <h4 className="text-base font-extrabold text-slate-900">Allocation Breakdown</h4>
+              <h4 className="text-base font-extrabold text-slate-900">
+                Allocation Breakdown
+              </h4>
 
               {selectedBill && previewPlan ? (
                 <div className="space-y-4">
                   <div className="bg-slate-50 rounded-2xl p-4 space-y-2 text-xs">
                     <div className="flex justify-between text-slate-600">
                       <span>Source Payor:</span>
-                      <strong className="text-slate-900">{selectedBill.userName}</strong>
+                      <strong className="text-slate-900">
+                        {selectedBill.userName}
+                      </strong>
                     </div>
                     <div className="flex justify-between text-slate-600">
                       <span>Original Bill:</span>
@@ -258,7 +299,9 @@ export const HostRedistribution: React.FC = () => {
                     </div>
                     <div className="flex justify-between font-bold text-rose-600 pt-1 border-t border-slate-200">
                       <span>Unpaid Balance:</span>
-                      <span>{formatPesos(selectedBill.outstandingCentavos)}</span>
+                      <span>
+                        {formatPesos(selectedBill.outstandingCentavos)}
+                      </span>
                     </div>
                   </div>
 
@@ -271,7 +314,9 @@ export const HostRedistribution: React.FC = () => {
                         key={alloc.userId}
                         className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50/50 border border-blue-100 text-xs"
                       >
-                        <span className="font-semibold text-slate-800">{alloc.userName}</span>
+                        <span className="font-semibold text-slate-800">
+                          {alloc.userName}
+                        </span>
                         <span className="font-black text-blue-700">
                           +{formatPesos(alloc.amountCentavos)}
                         </span>
@@ -281,7 +326,9 @@ export const HostRedistribution: React.FC = () => {
 
                   <div className="p-3 bg-emerald-50 rounded-xl text-xs text-emerald-800 font-semibold flex items-center justify-between">
                     <span>Sum of Allocations:</span>
-                    <span>{formatPesos(previewPlan.totalRedistributedCentavos)}</span>
+                    <span>
+                      {formatPesos(previewPlan.totalRedistributedCentavos)}
+                    </span>
                   </div>
 
                   <button
@@ -292,7 +339,9 @@ export const HostRedistribution: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <p className="text-xs text-slate-400">Select payors to calculate plan.</p>
+                <p className="text-xs text-slate-400">
+                  Select payors to calculate plan.
+                </p>
               )}
             </div>
           </div>
@@ -309,27 +358,39 @@ export const HostRedistribution: React.FC = () => {
             </div>
 
             <h3 className="text-lg font-black text-slate-900 mt-1">
-              Apply {formatPesos(previewPlan.totalRedistributedCentavos)} Redistribution?
+              Apply {formatPesos(previewPlan.totalRedistributedCentavos)}{" "}
+              Redistribution?
             </h3>
 
             <p className="text-xs text-slate-600 mt-1">
-              This action atomically writes an immutable Adjustment record, increments the recipient roommate bills by the exact centavo amounts, updates {selectedBill.userName}'s balance, and notifies all affected roommates.
+              This action atomically writes an immutable Adjustment record,
+              increments the recipient roommate bills by the exact centavo
+              amounts, updates {selectedBill.userName}'s balance, and notifies
+              all affected roommates.
             </p>
 
             <div className="mt-4 bg-slate-50 rounded-2xl p-4 space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">From:</span>
-                <span className="font-bold text-slate-900">{selectedBill.userName}</span>
+                <span className="font-bold text-slate-900">
+                  {selectedBill.userName}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Recipients:</span>
                 <span className="font-semibold text-slate-800">
-                  {previewPlan.allocations.map((a) => `${a.userName} (${formatPesos(a.amountCentavos)})`).join(', ')}
+                  {previewPlan.allocations
+                    .map(
+                      (a) => `${a.userName} (${formatPesos(a.amountCentavos)})`,
+                    )
+                    .join(", ")}
                 </span>
               </div>
               <div className="flex justify-between font-bold pt-1 border-t border-slate-200">
                 <span>Total Absorbed:</span>
-                <span className="text-blue-600">{formatPesos(previewPlan.totalRedistributedCentavos)}</span>
+                <span className="text-blue-600">
+                  {formatPesos(previewPlan.totalRedistributedCentavos)}
+                </span>
               </div>
             </div>
 
@@ -347,7 +408,7 @@ export const HostRedistribution: React.FC = () => {
                 disabled={isProcessing}
                 className="px-5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs"
               >
-                {isProcessing ? 'Processing...' : 'Confirm & Apply'}
+                {isProcessing ? "Processing..." : "Confirm & Apply"}
               </button>
             </div>
           </div>

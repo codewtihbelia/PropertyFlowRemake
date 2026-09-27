@@ -1,12 +1,12 @@
 import React from "react";
-import {
-  ArrowRight,
-  Smartphone,
-  LayoutDashboard,
-  CheckCircle2,
-  ShieldCheck,
+import { 
+  ArrowRight, 
+  Smartphone, 
+  LayoutDashboard, 
+  CheckCircle2, 
+  ShieldCheck, 
   Sparkles,
-  QrCode,
+  QrCode
 } from "lucide-react";
 
 interface DownloadCtaSectionProps {
@@ -19,14 +19,12 @@ export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
   onOpenCalculator,
 }) => {
   return (
-    <section
-      id="cta"
-      className="py-16 md:py-24 bg-gradient-to-tr from-slate-900 via-brand-950 to-slate-900 text-white relative overflow-hidden"
-    >
+    <section id="cta" className="py-16 md:py-24 bg-gradient-to-tr from-slate-900 via-brand-950 to-slate-900 text-white relative overflow-hidden">
       {/* Subtle Glow Circle */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand-500/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center space-y-8">
+        
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/20 border border-brand-500/30 text-brand-300 text-xs font-bold uppercase tracking-wider">
           <Sparkles className="w-3.5 h-3.5 text-brand-400" />
           <span>Start Your Harmonious Living Experience</span>
@@ -40,9 +38,7 @@ export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
         </h2>
 
         <p className="text-slate-300 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-          Join thousands of shared apartments, condos, and student dormitories
-          who trust PropertyFlow to handle their household finances down to the
-          exact centavo.
+          Join thousands of shared apartments, condos, and student dormitories who trust PropertyFlow to handle their household finances down to the exact centavo.
         </p>
 
         {/* Action Buttons */}
@@ -83,6 +79,7 @@ export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
             <span>Native iOS & Android Mobile Suite</span>
           </div>
         </div>
+
       </div>
     </section>
   );

@@ -1,8 +1,8 @@
-export type UserRole = "SUPER_ADMIN" | "HOST" | "PAYOR" | "NON_PAYOR";
+export type UserRole = 'SUPER_ADMIN' | 'HOST' | 'PAYOR' | 'NON_PAYOR';
 
-export type AccountStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
+export type AccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
-export type HostApplicationStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type HostApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface HostApplication {
   id?: string;
@@ -52,7 +52,7 @@ export interface UserProfile {
   apartmentName?: string;
   pendingHouseholdId?: string;
   pendingHouseholdName?: string;
-  joinRequestStatus?: "PENDING" | "APPROVED" | "REJECTED";
+  joinRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
   joinRejectionReason?: string;
   hostApplicationStatus?: HostApplicationStatus;
   hostApplicationId?: string;
@@ -74,7 +74,7 @@ export interface Household {
   description?: string;
   hostId: string;
   inviteCode?: string;
-  status: "ACTIVE" | "ARCHIVED";
+  status: 'ACTIVE' | 'ARCHIVED';
   createdDate: string;
   updatedDate: string;
 }
@@ -87,7 +87,7 @@ export interface HouseholdMember {
   displayName: string;
   email: string;
   profilePicture?: string;
-  status: "ACTIVE" | "INACTIVE" | "REMOVED" | "PENDING" | "REJECTED";
+  status: 'ACTIVE' | 'INACTIVE' | 'REMOVED' | 'PENDING' | 'REJECTED';
   joinedDate: string;
   requestedDate?: string;
   rejectionReason?: string;
@@ -95,7 +95,7 @@ export interface HouseholdMember {
   notes?: string;
 }
 
-export type InvitationStatus = "PENDING" | "ACCEPTED" | "EXPIRED" | "REVOKED";
+export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
 
 export interface Invitation {
   invitationId: string;
@@ -110,19 +110,19 @@ export interface Invitation {
 }
 
 export type BillingCycleStatus =
-  | "DRAFT"
-  | "ACTIVE"
-  | "CALCULATION"
-  | "FINALIZED"
-  | "PAYMENT_COLLECTION"
-  | "CLOSED";
+  | 'DRAFT'
+  | 'ACTIVE'
+  | 'CALCULATION'
+  | 'FINALIZED'
+  | 'PAYMENT_COLLECTION'
+  | 'CLOSED';
 
 export interface BillingCycle {
   billingCycleId: string;
   householdId: string;
   name: string;
   startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
   status: BillingCycleStatus;
   notes?: string;
   createdBy?: string;
@@ -135,20 +135,15 @@ export interface BillingCycle {
   totalCollectedCentavos?: number;
 }
 
-export type ChargeType =
-  | "RENT"
-  | "INTERNET"
-  | "ELECTRICITY"
-  | "WATER"
-  | "CUSTOM";
+export type ChargeType = 'RENT' | 'INTERNET' | 'ELECTRICITY' | 'WATER' | 'CUSTOM';
 
 export type DistributionMethod =
-  | "EQUAL_SPLIT"
-  | "PAYORS_ONLY"
-  | "ALL_MEMBERS"
-  | "SELECTED_MEMBERS"
-  | "FIXED_AMOUNTS"
-  | "PERCENTAGE_ALLOCATION";
+  | 'EQUAL_SPLIT'
+  | 'PAYORS_ONLY'
+  | 'ALL_MEMBERS'
+  | 'SELECTED_MEMBERS'
+  | 'FIXED_AMOUNTS'
+  | 'PERCENTAGE_ALLOCATION';
 
 export interface Charge {
   chargeId: string;
@@ -161,7 +156,7 @@ export interface Charge {
   distributionMethod: DistributionMethod;
   participantUserIds: string[];
   fixedAmounts?: Record<string, number>; // userId -> centavos
-  percentages?: Record<string, number>; // userId -> percentage e.g. 25.0
+  percentages?: Record<string, number>;  // userId -> percentage e.g. 25.0
   createdDate: string;
   createdBy: string;
 }
@@ -176,7 +171,7 @@ export interface ElectricityConfig {
   manualAdjustmentReason?: string;
 }
 
-export type WaterAttendanceStatus = "PRESENT" | "ABSENT" | "UNMARKED";
+export type WaterAttendanceStatus = 'PRESENT' | 'ABSENT' | 'UNMARKED';
 
 export interface WaterAttendanceRecord {
   recordId: string;
@@ -191,11 +186,11 @@ export interface WaterAttendanceRecord {
 }
 
 export interface WaterConfig {
-  pricingModel?: "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH";
+  pricingModel?: 'PER_PERSON_DAY' | 'FIXED_MONTHLY' | 'FIXED_PER_PERSON_MONTH';
   rateCentavosPerPersonPerDay: number; // default 500 (₱5.00)
   fixedMonthlyAmountCentavos?: number;
   fixedPerPersonAmountCentavos?: number;
-  mode?: "BILLING_CYCLE" | "MONTHLY_CUSTOM";
+  mode?: 'BILLING_CYCLE' | 'MONTHLY_CUSTOM';
   customStartDate?: string;
   customEndDate?: string;
 }
@@ -208,7 +203,7 @@ export interface MemberBillItem {
   details?: string;
 }
 
-export type MemberBillStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID";
+export type MemberBillStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 
 export interface MemberBill {
   billId: string;
@@ -232,14 +227,9 @@ export interface MemberBill {
   finalizedAt: string;
 }
 
-export type PaymentStatus = "PENDING" | "VERIFIED" | "REJECTED" | "CANCELLED";
+export type PaymentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED' | 'CANCELLED';
 
-export type PaymentMethod =
-  | "CASH"
-  | "BANK_TRANSFER"
-  | "GCASH"
-  | "MAYA"
-  | "OTHER";
+export type PaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'GCASH' | 'MAYA' | 'OTHER';
 
 export interface Payment {
   paymentId: string;
@@ -260,10 +250,7 @@ export interface Payment {
   verifiedBy?: string;
 }
 
-export type AdjustmentType =
-  | "BALANCE_REDISTRIBUTION"
-  | "MANUAL_CORRECTION"
-  | "CREDIT";
+export type AdjustmentType = 'BALANCE_REDISTRIBUTION' | 'MANUAL_CORRECTION' | 'CREDIT';
 
 export interface AdjustmentAllocation {
   userId: string;
@@ -290,18 +277,18 @@ export interface NotificationItem {
   recipientId: string; // userId or 'ALL'
   householdId?: string;
   type:
-    | "PAYMENT_SUBMITTED"
-    | "PAYMENT_VERIFIED"
-    | "PAYMENT_REJECTED"
-    | "BILL_FINALIZED"
-    | "BILL_UPDATED"
-    | "ADJUSTMENT_CREATED"
-    | "BALANCE_REDISTRIBUTED"
-    | "ATTENDANCE_UPDATED"
-    | "ANNOUNCEMENT"
-    | "NEW_MESSAGE"
-    | "INVITATION_RECEIVED"
-    | "SUPPORT_UPDATE";
+    | 'PAYMENT_SUBMITTED'
+    | 'PAYMENT_VERIFIED'
+    | 'PAYMENT_REJECTED'
+    | 'BILL_FINALIZED'
+    | 'BILL_UPDATED'
+    | 'ADJUSTMENT_CREATED'
+    | 'BALANCE_REDISTRIBUTED'
+    | 'ATTENDANCE_UPDATED'
+    | 'ANNOUNCEMENT'
+    | 'NEW_MESSAGE'
+    | 'INVITATION_RECEIVED'
+    | 'SUPPORT_UPDATE';
   title: string;
   message: string;
   relatedEntityId?: string;
@@ -313,7 +300,7 @@ export interface NotificationItem {
 export interface Conversation {
   conversationId: string;
   householdId: string;
-  type: "DIRECT" | "HOUSEHOLD_GROUP";
+  type: 'DIRECT' | 'HOUSEHOLD_GROUP';
   participantIds: string[];
   participantNames?: Record<string, string>;
   lastMessage?: string;
@@ -338,22 +325,17 @@ export interface Announcement {
   householdId: string;
   title: string;
   message: string;
-  audience: "EVERYONE" | "PAYORS" | "NON_PAYORS" | "SELECTED_MEMBERS";
+  audience: 'EVERYONE' | 'PAYORS' | 'NON_PAYORS' | 'SELECTED_MEMBERS';
   selectedMemberIds?: string[];
   createdBy: string;
   creatorName: string;
   createdDate: string;
   expirationDate?: string;
-  status: "ACTIVE" | "ARCHIVED";
+  status: 'ACTIVE' | 'ARCHIVED';
 }
 
-export type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-export type TicketStatus =
-  | "OPEN"
-  | "IN_PROGRESS"
-  | "WAITING_FOR_USER"
-  | "RESOLVED"
-  | "CLOSED";
+export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'WAITING_FOR_USER' | 'RESOLVED' | 'CLOSED';
 
 export interface SupportTicket {
   ticketId: string;
@@ -361,13 +343,7 @@ export interface SupportTicket {
   userName: string;
   householdId?: string;
   householdName?: string;
-  category:
-    | "BILLING"
-    | "ACCOUNT"
-    | "PAYMENT"
-    | "BUG"
-    | "FEATURE_REQUEST"
-    | "OTHER";
+  category: 'BILLING' | 'ACCOUNT' | 'PAYMENT' | 'BUG' | 'FEATURE_REQUEST' | 'OTHER';
   subject: string;
   description: string;
   attachments?: string[];
@@ -379,13 +355,13 @@ export interface SupportTicket {
 
 export interface AppVersion {
   versionId: string;
-  platform: "ANDROID" | "IOS" | "WEB";
+  platform: 'ANDROID' | 'IOS' | 'WEB';
   versionNumber: string;
   minimumSupportedVersion: string;
   latestVersion: string;
   releaseNotes: string;
   mandatoryUpdate: boolean;
-  releaseStatus: "ACTIVE" | "BETA" | "DEPRECATED";
+  releaseStatus: 'ACTIVE' | 'BETA' | 'DEPRECATED';
   releaseDate: string;
 }
 
@@ -403,3 +379,4 @@ export interface AuditLog {
   newValue?: any;
   reason?: string;
 }
+

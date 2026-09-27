@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import {
   splitCentavosEvenly,
   formatPesos,
@@ -10,12 +10,12 @@ import {
   BillingCycle,
   Charge,
   WaterAttendanceRecord,
-} from "../index";
+} from '../index';
 
-describe("PropertyFlow Centavo Math & Billing Engine", () => {
-  it("splits ₱219.50 (21950 centavos) across 3 recipients deterministically without losing centavos", () => {
+describe('PropertyFlow Centavo Math & Billing Engine', () => {
+  it('splits ₱219.50 (21950 centavos) across 3 recipients deterministically without losing centavos', () => {
     const totalCentavos = 21950; // ₱219.50
-    const recipients = ["payor_b", "payor_c", "payor_d"];
+    const recipients = ['payor_b', 'payor_c', 'payor_d'];
     const result = splitCentavosEvenly(totalCentavos, recipients);
 
     assert.equal(result.length, 3);
@@ -26,16 +26,16 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     const sum = result.reduce((acc, curr) => acc + curr.amountCentavos, 0);
     assert.equal(sum, totalCentavos);
 
-    assert.equal(formatPesos(result[0].amountCentavos), "₱73.17");
-    assert.equal(formatPesos(result[1].amountCentavos), "₱73.17");
-    assert.equal(formatPesos(result[2].amountCentavos), "₱73.16");
-    assert.equal(formatPesos(sum), "₱219.50");
+    assert.equal(formatPesos(result[0].amountCentavos), '₱73.17');
+    assert.equal(formatPesos(result[1].amountCentavos), '₱73.17');
+    assert.equal(formatPesos(result[2].amountCentavos), '₱73.16');
+    assert.equal(formatPesos(sum), '₱219.50');
   });
 
-  it("calculates exact rent and internet splits for 4 payors", () => {
+  it('calculates exact rent and internet splits for 4 payors', () => {
     const rentCentavos = pesosToCentavos(14000); // ₱14,000
     const internetCentavos = pesosToCentavos(1500); // ₱1,500
-    const payors = ["p1", "p2", "p3", "p4"];
+    const payors = ['p1', 'p2', 'p3', 'p4'];
 
     const rentAlloc = splitCentavosEvenly(rentCentavos, payors);
     assert.equal(rentAlloc[0].amountCentavos, 350000); // ₱3,500.00
@@ -46,137 +46,65 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(netAlloc[3].amountCentavos, 37500);
   });
 
-  it("calculates full household billing with 7 residents (1 Host, 4 Payors, 3 Non-Payors)", () => {
+  it('calculates full household billing with 7 residents (1 Host, 4 Payors, 3 Non-Payors)', () => {
     const members: HouseholdMember[] = [
-      {
-        memberId: "m0",
-        userId: "u_host",
-        householdId: "h1",
-        role: "HOST",
-        displayName: "Host Alex",
-        email: "alex@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m1",
-        userId: "u_p1",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor Bea",
-        email: "bea@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m2",
-        userId: "u_p2",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor Carlos",
-        email: "carlos@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m3",
-        userId: "u_p3",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor Diana",
-        email: "diana@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m4",
-        userId: "u_p4",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor Ethan",
-        email: "ethan@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m5",
-        userId: "u_np1",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor Fiona",
-        email: "fiona@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m6",
-        userId: "u_np2",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor George",
-        email: "george@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
-      {
-        memberId: "m7",
-        userId: "u_np3",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor Hannah",
-        email: "hannah@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-08-01",
-      },
+      { memberId: 'm0', userId: 'u_host', householdId: 'h1', role: 'HOST', displayName: 'Host Alex', email: 'alex@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm1', userId: 'u_p1', householdId: 'h1', role: 'PAYOR', displayName: 'Payor Bea', email: 'bea@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm2', userId: 'u_p2', householdId: 'h1', role: 'PAYOR', displayName: 'Payor Carlos', email: 'carlos@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm3', userId: 'u_p3', householdId: 'h1', role: 'PAYOR', displayName: 'Payor Diana', email: 'diana@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm4', userId: 'u_p4', householdId: 'h1', role: 'PAYOR', displayName: 'Payor Ethan', email: 'ethan@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm5', userId: 'u_np1', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor Fiona', email: 'fiona@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm6', userId: 'u_np2', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor George', email: 'george@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
+      { memberId: 'm7', userId: 'u_np3', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor Hannah', email: 'hannah@flow.test', status: 'ACTIVE', joinedDate: '2026-08-01' },
     ];
 
     const billingCycle: BillingCycle = {
-      billingCycleId: "cycle_aug_sep_2026",
-      householdId: "h1",
-      name: "August 13 – September 12, 2026",
-      startDate: "2026-08-13",
-      endDate: "2026-09-12",
-      status: "ACTIVE",
-      createdBy: "u_host",
-      createdDate: "2026-08-13",
+      billingCycleId: 'cycle_aug_sep_2026',
+      householdId: 'h1',
+      name: 'August 13 – September 12, 2026',
+      startDate: '2026-08-13',
+      endDate: '2026-09-12',
+      status: 'ACTIVE',
+      createdBy: 'u_host',
+      createdDate: '2026-08-13',
     };
 
     const charges: Charge[] = [
       {
-        chargeId: "c_rent",
-        householdId: "h1",
-        billingCycleId: "cycle_aug_sep_2026",
-        chargeType: "RENT",
-        name: "Apartment Rent",
+        chargeId: 'c_rent',
+        householdId: 'h1',
+        billingCycleId: 'cycle_aug_sep_2026',
+        chargeType: 'RENT',
+        name: 'Apartment Rent',
         amountCentavos: pesosToCentavos(14000), // ₱14,000
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-08-13",
-        createdBy: "u_host",
+        createdDate: '2026-08-13',
+        createdBy: 'u_host',
       },
       {
-        chargeId: "c_net",
-        householdId: "h1",
-        billingCycleId: "cycle_aug_sep_2026",
-        chargeType: "INTERNET",
-        name: "Fiber Internet 300Mbps",
+        chargeId: 'c_net',
+        householdId: 'h1',
+        billingCycleId: 'cycle_aug_sep_2026',
+        chargeType: 'INTERNET',
+        name: 'Fiber Internet 300Mbps',
         amountCentavos: pesosToCentavos(1500), // ₱1,500
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-08-13",
-        createdBy: "u_host",
+        createdDate: '2026-08-13',
+        createdBy: 'u_host',
       },
       {
-        chargeId: "c_cleaning",
-        householdId: "h1",
-        billingCycleId: "cycle_aug_sep_2026",
-        chargeType: "CUSTOM",
-        name: "Bi-weekly Common Area Cleaning",
+        chargeId: 'c_cleaning',
+        householdId: 'h1',
+        billingCycleId: 'cycle_aug_sep_2026',
+        chargeType: 'CUSTOM',
+        name: 'Bi-weekly Common Area Cleaning',
         amountCentavos: pesosToCentavos(200), // ₱200
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-08-13",
-        createdBy: "u_host",
+        createdDate: '2026-08-13',
+        createdBy: 'u_host',
       },
     ];
 
@@ -194,11 +122,11 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     for (let day = 1; day <= 25; day++) {
       waterAttendance.push({
         recordId: `w_bea_${day}`,
-        householdId: "h1",
-        billingCycleId: "cycle_aug_sep_2026",
-        userId: "u_p1",
-        date: `2026-08-${day.toString().padStart(2, "0")}`,
-        status: "PRESENT",
+        householdId: 'h1',
+        billingCycleId: 'cycle_aug_sep_2026',
+        userId: 'u_p1',
+        date: `2026-08-${day.toString().padStart(2, '0')}`,
+        status: 'PRESENT',
         locked: false,
       });
     }
@@ -208,7 +136,7 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
       members,
       charges,
       electricityConfig,
-      waterConfig: { rateCentavosPerPersonPerDay: 500, mode: "BILLING_CYCLE" },
+      waterConfig: { rateCentavosPerPersonPerDay: 500, mode: 'BILLING_CYCLE' },
       waterAttendance,
     });
 
@@ -225,7 +153,7 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     // Cleaning: ₱50 (200 / 4)
     // Water: ₱125 (25 days * ₱5)
     // Total: 3500 + 375 + 560 + 50 + 125 = ₱4,610.00 (461,000 centavos)
-    const beaBill = summary.memberBills.find((b) => b.userId === "u_p1");
+    const beaBill = summary.memberBills.find((b) => b.userId === 'u_p1');
     assert(beaBill);
     assert.equal(beaBill.rentCentavos, 350000);
     assert.equal(beaBill.internetCentavos, 37500);
@@ -233,27 +161,27 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(beaBill.customChargesCentavos, 5000);
     assert.equal(beaBill.waterCentavos, 12500);
     assert.equal(beaBill.totalDueCentavos, 461000);
-    assert.equal(formatPesos(beaBill.totalDueCentavos), "₱4,610.00");
+    assert.equal(formatPesos(beaBill.totalDueCentavos), '₱4,610.00');
 
     // Non-payors should owe ₱0
-    const fionaBill = summary.memberBills.find((b) => b.userId === "u_np1");
+    const fionaBill = summary.memberBills.find((b) => b.userId === 'u_np1');
     assert(fionaBill);
     assert.equal(fionaBill.totalDueCentavos, 0);
   });
 
-  it("performs partial payment and balance redistribution as specified in the prompt", () => {
+  it('performs partial payment and balance redistribution as specified in the prompt', () => {
     // Prompt scenario:
     // Original bill: ₱2,219.50
     // Payor pays: ₱2,000
     // Outstanding: ₱219.50
     // Redistribute across 3 Payors: ₱73.17, ₱73.17, ₱73.16
     const sampleBill = {
-      billId: "b_1",
-      householdId: "h1",
-      billingCycleId: "c1",
-      userId: "u_p1",
-      userName: "Payor Bea",
-      userRole: "PAYOR" as const,
+      billId: 'b_1',
+      householdId: 'h1',
+      billingCycleId: 'c1',
+      userId: 'u_p1',
+      userName: 'Payor Bea',
+      userRole: 'PAYOR' as const,
       rentCentavos: 0,
       internetCentavos: 0,
       electricityCentavos: 0,
@@ -261,18 +189,18 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
       customChargesCentavos: 0,
       adjustmentsCentavos: 0,
       totalDueCentavos: 221950, // ₱2,219.50
-      paidCentavos: 200000, // ₱2,000.00
+      paidCentavos: 200000,     // ₱2,000.00
       outstandingCentavos: 21950, // ₱219.50
-      status: "PARTIALLY_PAID" as const,
+      status: 'PARTIALLY_PAID' as const,
       items: [],
       waterDaysPresent: 0,
-      finalizedAt: "2026-08-13",
+      finalizedAt: '2026-08-13',
     };
 
     const recipientPayors = [
-      { userId: "u_p2", userName: "Payor Carlos" },
-      { userId: "u_p3", userName: "Payor Diana" },
-      { userId: "u_p4", userName: "Payor Ethan" },
+      { userId: 'u_p2', userName: 'Payor Carlos' },
+      { userId: 'u_p3', userName: 'Payor Diana' },
+      { userId: 'u_p4', userName: 'Payor Ethan' },
     ];
 
     const plan = calculateRedistributionPlan(sampleBill, recipientPayors);
@@ -286,90 +214,63 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(plan.allocations[2].amountCentavos, 7316); // ₱73.16
 
     assert.equal(plan.totalRedistributedCentavos, 21950);
-    assert.equal(formatPesos(plan.totalRedistributedCentavos), "₱219.50");
+    assert.equal(formatPesos(plan.totalRedistributedCentavos), '₱219.50');
   });
 
-  it("distributes Rent, Electricity, Internet to payors only, and redistributes non-payors water to payors", () => {
+  it('distributes Rent, Electricity, Internet to payors only, and redistributes non-payors water to payors', () => {
     const members: HouseholdMember[] = [
-      {
-        memberId: "m1",
-        userId: "u_p1",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 1",
-        email: "p1@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-07-13",
-      },
-      {
-        memberId: "m2",
-        userId: "u_p2",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 2",
-        email: "p2@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-07-13",
-      },
-      {
-        memberId: "m3",
-        userId: "u_np1",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor 1",
-        email: "np1@flow.test",
-        status: "ACTIVE",
-        joinedDate: "2026-07-13",
-      },
+      { memberId: 'm1', userId: 'u_p1', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 1', email: 'p1@flow.test', status: 'ACTIVE', joinedDate: '2026-07-13' },
+      { memberId: 'm2', userId: 'u_p2', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 2', email: 'p2@flow.test', status: 'ACTIVE', joinedDate: '2026-07-13' },
+      { memberId: 'm3', userId: 'u_np1', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor 1', email: 'np1@flow.test', status: 'ACTIVE', joinedDate: '2026-07-13' },
     ];
 
     const billingCycle: BillingCycle = {
-      billingCycleId: "cycle_jul_aug_2026",
-      householdId: "h1",
-      name: "July 13, 2026 – August 12, 2026",
-      startDate: "2026-07-13",
-      endDate: "2026-08-12",
-      status: "ACTIVE",
-      createdBy: "u_host",
-      createdDate: "2026-07-13",
+      billingCycleId: 'cycle_jul_aug_2026',
+      householdId: 'h1',
+      name: 'July 13, 2026 – August 12, 2026',
+      startDate: '2026-07-13',
+      endDate: '2026-08-12',
+      status: 'ACTIVE',
+      createdBy: 'u_host',
+      createdDate: '2026-07-13',
     };
 
     const charges: Charge[] = [
       {
-        chargeId: "c_rent",
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        chargeType: "RENT",
-        name: "Rent",
+        chargeId: 'c_rent',
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        chargeType: 'RENT',
+        name: 'Rent',
         amountCentavos: 1000000, // ₱10,000
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-07-13",
-        createdBy: "u_host",
+        createdDate: '2026-07-13',
+        createdBy: 'u_host',
       },
       {
-        chargeId: "c_elec",
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        chargeType: "ELECTRICITY",
-        name: "Electricity",
+        chargeId: 'c_elec',
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        chargeType: 'ELECTRICITY',
+        name: 'Electricity',
         amountCentavos: 200000, // ₱2,000
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-07-13",
-        createdBy: "u_host",
+        createdDate: '2026-07-13',
+        createdBy: 'u_host',
       },
       {
-        chargeId: "c_net",
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        chargeType: "INTERNET",
-        name: "Internet",
+        chargeId: 'c_net',
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        chargeType: 'INTERNET',
+        name: 'Internet',
         amountCentavos: 100000, // ₱1,000
-        distributionMethod: "PAYORS_ONLY",
+        distributionMethod: 'PAYORS_ONLY',
         participantUserIds: [],
-        createdDate: "2026-07-13",
-        createdBy: "u_host",
+        createdDate: '2026-07-13',
+        createdBy: 'u_host',
       },
     ];
 
@@ -381,33 +282,33 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     for (let day = 1; day <= 30; day++) {
       waterAttendance.push({
         recordId: `w_p1_${day}`,
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        userId: "u_p1",
-        date: `2026-07-${day.toString().padStart(2, "0")}`,
-        status: "PRESENT",
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        userId: 'u_p1',
+        date: `2026-07-${day.toString().padStart(2, '0')}`,
+        status: 'PRESENT',
         locked: false,
       });
     }
     for (let day = 1; day <= 20; day++) {
       waterAttendance.push({
         recordId: `w_p2_${day}`,
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        userId: "u_p2",
-        date: `2026-07-${day.toString().padStart(2, "0")}`,
-        status: "PRESENT",
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        userId: 'u_p2',
+        date: `2026-07-${day.toString().padStart(2, '0')}`,
+        status: 'PRESENT',
         locked: false,
       });
     }
     for (let day = 1; day <= 30; day++) {
       waterAttendance.push({
         recordId: `w_np1_${day}`,
-        householdId: "h1",
-        billingCycleId: "cycle_jul_aug_2026",
-        userId: "u_np1",
-        date: `2026-07-${day.toString().padStart(2, "0")}`,
-        status: "PRESENT",
+        householdId: 'h1',
+        billingCycleId: 'cycle_jul_aug_2026',
+        userId: 'u_np1',
+        date: `2026-07-${day.toString().padStart(2, '0')}`,
+        status: 'PRESENT',
         locked: false,
       });
     }
@@ -416,11 +317,7 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
       billingCycle,
       members,
       charges,
-      waterConfig: {
-        rateCentavosPerPersonPerDay: 500,
-        mode: "BILLING_CYCLE",
-        pricingModel: "PER_PERSON_DAY",
-      },
+      waterConfig: { rateCentavosPerPersonPerDay: 500, mode: 'BILLING_CYCLE', pricingModel: 'PER_PERSON_DAY' },
       waterAttendance,
     });
 
@@ -429,9 +326,9 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     // Payor 1 water = 30 * ₱5 (₱150) + ₱75 = ₱225 (22,500 centavos)
     // Payor 2 water = 20 * ₱5 (₱100) + ₱75 = ₱175 (17,500 centavos)
     // Non-Payor water = ₱0 (exempted)
-    const p1Bill = summary.memberBills.find((b) => b.userId === "u_p1")!;
-    const p2Bill = summary.memberBills.find((b) => b.userId === "u_p2")!;
-    const np1Bill = summary.memberBills.find((b) => b.userId === "u_np1")!;
+    const p1Bill = summary.memberBills.find((b) => b.userId === 'u_p1')!;
+    const p2Bill = summary.memberBills.find((b) => b.userId === 'u_p2')!;
+    const np1Bill = summary.memberBills.find((b) => b.userId === 'u_np1')!;
 
     assert.equal(p1Bill.rentCentavos, 500000);
     assert.equal(p1Bill.electricityCentavos, 100000);
@@ -452,48 +349,21 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(summary.waterTotalCentavos, 40000);
   });
 
-  it("calculates Mode 2 (FIXED_MONTHLY): ₱1,200 total water bill split equally across 2 payors (₱600 each), Non-Payors exempt", () => {
+  it('calculates Mode 2 (FIXED_MONTHLY): ₱1,200 total water bill split equally across 2 payors (₱600 each), Non-Payors exempt', () => {
     const members: HouseholdMember[] = [
-      {
-        memberId: "m1",
-        userId: "u_p1",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 1",
-        email: "p1@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
-      {
-        memberId: "m2",
-        userId: "u_p2",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 2",
-        email: "p2@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
-      {
-        memberId: "m3",
-        userId: "u_np1",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor 1",
-        email: "np1@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
+      { memberId: 'm1', userId: 'u_p1', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 1', email: 'p1@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
+      { memberId: 'm2', userId: 'u_p2', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 2', email: 'p2@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
+      { memberId: 'm3', userId: 'u_np1', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor 1', email: 'np1@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
     ];
 
     const billingCycle: BillingCycle = {
-      billingCycleId: "cycle_fixed_monthly",
-      householdId: "h1",
-      name: "Monthly Water Test",
-      startDate: "2026-07-01",
-      endDate: "2026-07-31",
-      status: "ACTIVE",
-      createdDate: "2026-07-01",
+      billingCycleId: 'cycle_fixed_monthly',
+      householdId: 'h1',
+      name: 'Monthly Water Test',
+      startDate: '2026-07-01',
+      endDate: '2026-07-31',
+      status: 'ACTIVE',
+      createdDate: '2026-07-01',
     };
 
     const summary = calculateHouseholdBilling({
@@ -501,16 +371,16 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
       members,
       charges: [],
       waterConfig: {
-        pricingModel: "FIXED_MONTHLY",
+        pricingModel: 'FIXED_MONTHLY',
         rateCentavosPerPersonPerDay: 500,
         fixedMonthlyAmountCentavos: 120000, // ₱1,200.00
       },
       waterAttendance: [],
     });
 
-    const p1Bill = summary.memberBills.find((b) => b.userId === "u_p1")!;
-    const p2Bill = summary.memberBills.find((b) => b.userId === "u_p2")!;
-    const np1Bill = summary.memberBills.find((b) => b.userId === "u_np1")!;
+    const p1Bill = summary.memberBills.find((b) => b.userId === 'u_p1')!;
+    const p2Bill = summary.memberBills.find((b) => b.userId === 'u_p2')!;
+    const np1Bill = summary.memberBills.find((b) => b.userId === 'u_np1')!;
 
     assert.equal(p1Bill.waterCentavos, 60000); // ₱600.00
     assert.equal(p2Bill.waterCentavos, 60000); // ₱600.00
@@ -518,48 +388,21 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(summary.waterTotalCentavos, 120000); // ₱1,200.00
   });
 
-  it("calculates Mode 3 (FIXED_PER_PERSON_MONTH): ₱150 flat fee per paying resident, Non-Payors exempt", () => {
+  it('calculates Mode 3 (FIXED_PER_PERSON_MONTH): ₱150 flat fee per paying resident, Non-Payors exempt', () => {
     const members: HouseholdMember[] = [
-      {
-        memberId: "m1",
-        userId: "u_p1",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 1",
-        email: "p1@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
-      {
-        memberId: "m2",
-        userId: "u_p2",
-        householdId: "h1",
-        role: "PAYOR",
-        displayName: "Payor 2",
-        email: "p2@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
-      {
-        memberId: "m3",
-        userId: "u_np1",
-        householdId: "h1",
-        role: "NON_PAYOR",
-        displayName: "Non-Payor 1",
-        email: "np1@test.com",
-        status: "ACTIVE",
-        joinedDate: "2026-07-01",
-      },
+      { memberId: 'm1', userId: 'u_p1', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 1', email: 'p1@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
+      { memberId: 'm2', userId: 'u_p2', householdId: 'h1', role: 'PAYOR', displayName: 'Payor 2', email: 'p2@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
+      { memberId: 'm3', userId: 'u_np1', householdId: 'h1', role: 'NON_PAYOR', displayName: 'Non-Payor 1', email: 'np1@test.com', status: 'ACTIVE', joinedDate: '2026-07-01' },
     ];
 
     const billingCycle: BillingCycle = {
-      billingCycleId: "cycle_per_person",
-      householdId: "h1",
-      name: "Flat Per Person Water Test",
-      startDate: "2026-07-01",
-      endDate: "2026-07-31",
-      status: "ACTIVE",
-      createdDate: "2026-07-01",
+      billingCycleId: 'cycle_per_person',
+      householdId: 'h1',
+      name: 'Flat Per Person Water Test',
+      startDate: '2026-07-01',
+      endDate: '2026-07-31',
+      status: 'ACTIVE',
+      createdDate: '2026-07-01',
     };
 
     const summary = calculateHouseholdBilling({
@@ -567,16 +410,16 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
       members,
       charges: [],
       waterConfig: {
-        pricingModel: "FIXED_PER_PERSON_MONTH",
+        pricingModel: 'FIXED_PER_PERSON_MONTH',
         rateCentavosPerPersonPerDay: 500,
         fixedPerPersonAmountCentavos: 15000, // ₱150.00
       },
       waterAttendance: [],
     });
 
-    const p1Bill = summary.memberBills.find((b) => b.userId === "u_p1")!;
-    const p2Bill = summary.memberBills.find((b) => b.userId === "u_p2")!;
-    const np1Bill = summary.memberBills.find((b) => b.userId === "u_np1")!;
+    const p1Bill = summary.memberBills.find((b) => b.userId === 'u_p1')!;
+    const p2Bill = summary.memberBills.find((b) => b.userId === 'u_p2')!;
+    const np1Bill = summary.memberBills.find((b) => b.userId === 'u_np1')!;
 
     assert.equal(p1Bill.waterCentavos, 15000); // ₱150.00
     assert.equal(p2Bill.waterCentavos, 15000); // ₱150.00
@@ -584,3 +427,4 @@ describe("PropertyFlow Centavo Math & Billing Engine", () => {
     assert.equal(summary.waterTotalCentavos, 30000); // ₱300.00
   });
 });
+

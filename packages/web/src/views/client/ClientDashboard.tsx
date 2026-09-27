@@ -36,6 +36,10 @@ export const ClientDashboard: React.FC<{
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
+  if (loading && currentUser.householdId) {
+    return <UniversalLoader variant="skeleton" type="dashboard" />;
+  }
+
   const hasHousehold = Boolean(
     household.householdId &&
     household.householdName &&
@@ -119,7 +123,7 @@ export const ClientDashboard: React.FC<{
   const isUnpaid = myBill?.status === "UNPAID";
 
   return (
-    <div className="relative space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Greeting Banner matching proposedUI */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -398,7 +402,7 @@ export const ClientDashboard: React.FC<{
                     />
                   ) : (
                     <div
-                      className="inline-block h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
+                      className="h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
                       title={`${hostDisplayName} (Host)`}
                     >
                       {hostDisplayName?.charAt(0) || "H"}
@@ -420,7 +424,7 @@ export const ClientDashboard: React.FC<{
                     />
                   ) : (
                     <div
-                      className="inline-block h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
+                      className="h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
                       title={`${hostDisplayName} (Host)`}
                     >
                       {hostDisplayName?.charAt(0) || "H"}
@@ -440,7 +444,7 @@ export const ClientDashboard: React.FC<{
                     ) : (
                       <div
                         key={m.memberId || m.userId}
-                        className="inline-block h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
+                        className="h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-100 text-blue-900 text-[10px] font-black flex items-center justify-center"
                         title={m.displayName}
                       >
                         {m.displayName?.charAt(0) || "R"}
@@ -448,7 +452,7 @@ export const ClientDashboard: React.FC<{
                     );
                   })}
                   {otherActiveMembers.length > 3 && (
-                    <div className="inline-block h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-950 text-white text-[10px] font-bold flex items-center justify-center">
+                    <div className="h-7 w-7 rounded-full ring-2 ring-blue-700 bg-blue-950 text-white text-[10px] font-bold flex items-center justify-center">
                       +{otherActiveMembers.length - 3}
                     </div>
                   )}

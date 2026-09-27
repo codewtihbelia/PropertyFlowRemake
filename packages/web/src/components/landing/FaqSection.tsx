@@ -36,11 +36,9 @@ export const FaqSection: React.FC = () => {
   };
 
   return (
-    <section
-      id="faq"
-      className="py-16 md:py-24 bg-white border-b border-slate-200/80"
-    >
+    <section id="faq" className="py-16 md:py-24 bg-white border-b border-slate-200/80">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        
         {/* Header */}
         <div className="text-center space-y-3 mb-14">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider">
@@ -51,8 +49,7 @@ export const FaqSection: React.FC = () => {
             Frequently Asked Questions
           </h2>
           <p className="text-slate-600 text-base sm:text-lg">
-            Everything you need to know about setting up your household,
-            splitting bills, and managing roommate dues.
+            Everything you need to know about setting up your household, splitting bills, and managing roommate dues.
           </p>
         </div>
 
@@ -72,13 +69,9 @@ export const FaqSection: React.FC = () => {
                   <span className="font-bold text-slate-900 text-base sm:text-lg">
                     {faq.q}
                   </span>
-                  <div
-                    className={`w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0 transition-transform duration-200 ${
-                      isOpen
-                        ? "rotate-180 text-brand-600 border-brand-200"
-                        : "text-slate-400"
-                    }`}
-                  >
+                  <div className={`w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0 transition-transform duration-200 ${
+                    isOpen ? "rotate-180 text-brand-600 border-brand-200" : "text-slate-400"
+                  }`}>
                     <ChevronDown className="w-4 h-4" />
                   </div>
                 </button>
@@ -92,6 +85,7 @@ export const FaqSection: React.FC = () => {
             );
           })}
         </div>
+
       </div>
     </section>
   );

@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
 const { width } = Dimensions.get("window");
+const SPLASH_CHIME_ASSET = require("../../assets/splash-chime.wav");
 
 export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
   onFinish,
@@ -19,8 +20,49 @@ export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.92)).current;
   const textFadeAnim = useRef(new Animated.Value(0)).current;
+  const cleanupAudioRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const playSplashSound = async () => {
+      try {
+        // Lazy-require expo-audio inside try/catch so top-level bundle evaluation never fails
+        // and any missing native module error on older dev clients is safely caught.
+        const ExpoAudio = require("expo-audio") as typeof import("expo-audio");
+
+        if (typeof ExpoAudio.setAudioModeAsync === "function") {
+          await ExpoAudio.setAudioModeAsync({
+            playsInSilentMode: true,
+            shouldPlayInBackground: false,
+            interruptionMode: "mixWithOthers",
+            interruptionModeAndroid: "duckOthers",
+          }).catch(() => {});
+        }
+
+        if (!isMounted) return;
+
+        if (typeof ExpoAudio.createAudioPlayer === "function") {
+          const player = ExpoAudio.createAudioPlayer(SPLASH_CHIME_ASSET);
+          player.volume = 0.75;
+          player.play();
+
+          cleanupAudioRef.current = () => {
+            try {
+              player.pause();
+              player.remove();
+            } catch {
+              // Ignore cleanup errors
+            }
+          };
+        }
+      } catch {
+        // Silently ignore audio errors if the native module is unavailable in the current client
+      }
+    };
+
+    playSplashSound();
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -45,7 +87,14 @@ export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
       onFinish();
     }, 2200);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+      if (cleanupAudioRef.current) {
+        cleanupAudioRef.current();
+        cleanupAudioRef.current = null;
+      }
+    };
   }, [fadeAnim, scaleAnim, textFadeAnim, onFinish]);
 
   return (

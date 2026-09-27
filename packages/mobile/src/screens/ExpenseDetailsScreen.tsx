@@ -94,8 +94,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           {
             name: "Dennis Tan",
             role: "Payor",
-            shareCents:
-              expense.amountCents - Math.round(expense.amountCents / 4) * 3,
+            shareCents: expense.amountCents - Math.round(expense.amountCents / 4) * 3,
             status: isExpensePaid ? "Paid" : "Pending",
             isExempt: false,
             note: undefined,
@@ -105,11 +104,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={onBack}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
           <Feather name="arrow-left" size={20} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Bill Details</Text>
@@ -122,34 +117,16 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
       >
         {/* Main Expense Hero Card */}
         <View style={styles.heroCard}>
-          <View
-            style={[styles.heroIconWrap, { backgroundColor: catMeta.bgColor }]}
-          >
-            <Ionicons
-              name={catMeta.ionicon as any}
-              size={32}
-              color={catMeta.color}
-            />
+          <View style={[styles.heroIconWrap, { backgroundColor: catMeta.bgColor }]}>
+            <Ionicons name={catMeta.ionicon as any} size={32} color={catMeta.color} />
           </View>
-          <Text style={styles.heroTitle}>
-            {cleanBillTitle(expense.title, expense.categoryLabel)}
-          </Text>
+          <Text style={styles.heroTitle}>{cleanBillTitle(expense.title, expense.categoryLabel)}</Text>
           <Text style={styles.heroAmount}>
             {formatPesos(expense.amountCents)}
           </Text>
           <View style={styles.tagWrap}>
-            <View
-              style={[
-                styles.categoryTagWrap,
-                {
-                  backgroundColor: catMeta.bgColor,
-                  borderColor: catMeta.color,
-                },
-              ]}
-            >
-              <Text style={[styles.categoryTag, { color: catMeta.color }]}>
-                {expense.categoryLabel}
-              </Text>
+            <View style={[styles.categoryTagWrap, { backgroundColor: catMeta.bgColor, borderColor: catMeta.color }]}>
+              <Text style={[styles.categoryTag, { color: catMeta.color }]}>{expense.categoryLabel}</Text>
             </View>
             <Text style={styles.cycleTag}>{expense.cycle}</Text>
             <Text
@@ -157,11 +134,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                 styles.statusBadge,
                 isExpensePaid
                   ? styles.statusPaid
-                  : {
-                      backgroundColor: "#FEF2F2",
-                      borderColor: "#FECACA",
-                      color: "#B91C1C",
-                    },
+                  : { backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#B91C1C" },
               ]}
             >
               {isExpensePaid ? "PAID" : "UNPAID BILL"}
@@ -191,10 +164,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             <View
               style={[
                 styles.paidMethodBadge,
-                !isExpensePaid && {
-                  backgroundColor: "#FEF2F2",
-                  borderColor: "#FECACA",
-                },
+                !isExpensePaid && { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
               ]}
             >
               <Text
@@ -225,14 +195,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                 <Text style={styles.splitUserName}>{p.name}</Text>
                 <Text style={styles.splitUserRole}>{p.role}</Text>
                 {p.note && (
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                      marginTop: 2,
-                    }}
-                  >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
                     <Feather name="info" size={11} color="#0284C7" />
                     <Text style={{ fontSize: 11, color: "#0284C7" }}>
                       {p.note}
@@ -250,12 +213,8 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                     p.status === "Paid"
                       ? styles.statusPaid
                       : p.status === "Exempt"
-                        ? {
-                            backgroundColor: "#F1F5F9",
-                            borderColor: "#E2E8F0",
-                            color: "#64748B",
-                          }
-                        : styles.statusPending,
+                      ? { backgroundColor: "#F1F5F9", borderColor: "#E2E8F0", color: "#64748B" }
+                      : styles.statusPending,
                   ]}
                 >
                   {p.status}
@@ -276,12 +235,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             />
           ) : (
             <View style={styles.receiptPlaceholder}>
-              <Feather
-                name="file-text"
-                size={26}
-                color="#94A3B8"
-                style={{ marginBottom: 6 }}
-              />
+              <Feather name="file-text" size={26} color="#94A3B8" style={{ marginBottom: 6 }} />
               <Text style={styles.placeholderText}>
                 Official Document Uploaded
               </Text>
@@ -362,13 +316,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 12,
   },
-  tagWrap: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    flexWrap: "wrap",
-    justifyContent: "center",
-  },
+  tagWrap: { flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center" },
   categoryTagWrap: {
     paddingHorizontal: 12,
     paddingVertical: 4,

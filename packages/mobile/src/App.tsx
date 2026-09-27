@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -6,7 +6,6 @@ import {
   StatusBar,
   Animated,
   Platform,
-  Easing,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -25,6 +24,7 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { BillsScreen } from "./screens/BillsScreen";
 import { AttendanceScreen } from "./screens/AttendanceScreen";
+import { MessagesScreen } from "./screens/MessagesScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { AddExpenseScreen } from "./screens/AddExpenseScreen";
 import { SettleDuesScreen } from "./screens/SettleDuesScreen";
@@ -32,11 +32,16 @@ import { ExpenseHistoryScreen } from "./screens/ExpenseHistoryScreen";
 import { ExpenseDetailsScreen } from "./screens/ExpenseDetailsScreen";
 import { ReportScreen } from "./screens/ReportScreen";
 import { ManageGroupScreen } from "./screens/ManageGroupScreen";
+import { ViewGroupScreen } from "./screens/ViewGroupScreen";
 import { HostApplicationScreen } from "./screens/HostApplicationScreen";
 import { registerForPushNotificationsAsync } from "./services/pushNotificationService";
 import { mobileDataService } from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
-import { UniversalLoader } from "./components/UniversalLoader";
+import { alertService } from "./services/alertService";
+import { CustomAlertModal } from "./components/CustomAlertModal";
+
+// Initialize global alert interceptor to upgrade all Alert.alert dialogs to app-matching UI
+alertService.initAlertPatch();
 
 type RootFlow = "splash" | "onboarding" | "auth" | "main";
 type MainTab =
@@ -54,6 +59,7 @@ type OverlayScreen =
   | "expense_details"
   | "reports"
   | "manage_group"
+  | "view_group"
   | "host_application";
 
 interface NavItemConfig {
@@ -171,36 +177,6 @@ function FloatingNavBar({
   );
 }
 
-const TAB_TRANSITION_META: Record<
-  MainTab,
-  { title: string; subtitle: string }
-> = {
-  home: {
-    title: "Loading Home...",
-    subtitle: "Preparing your balance & bills...",
-  },
-  groups: {
-    title: "Loading Groups...",
-    subtitle: "Connecting household members...",
-  },
-  bills: {
-    title: "Loading Bills...",
-    subtitle: "Calculating fair shares & utilities...",
-  },
-  attendance: {
-    title: "Loading Attendance...",
-    subtitle: "Syncing monthly calendar...",
-  },
-  messages: {
-    title: "Loading Messages...",
-    subtitle: "Connecting household chat...",
-  },
-  profile: {
-    title: "Loading Settings...",
-    subtitle: "Retrieving account configuration...",
-  },
-};
-
 interface MainAppContentProps {
   rootFlow: RootFlow;
   setRootFlow: React.Dispatch<React.SetStateAction<RootFlow>>;
@@ -209,18 +185,6 @@ interface MainAppContentProps {
 function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const { showNav } = useNavVisibility();
   const [currentTab, setCurrentTab] = useState<MainTab>("home");
-  const [visitedTabs, setVisitedTabs] = useState<Set<MainTab>>(
-    () => new Set(["home"]),
-  );
-  const [navTransition, setNavTransition] = useState<{
-    tab: MainTab;
-    title: string;
-    subtitle: string;
-  } | null>(null);
-
-  const transitionFadeAnim = useRef(new Animated.Value(0)).current;
-  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [billsInitialSubView, setBillsInitialSubView] = useState<
     "overview" | "pay"
   >("overview");
@@ -235,76 +199,38 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     email: "",
     avatar: "R",
   });
+  const [userProfile, setUserProfile] = useState<any>(() =>
+    mobileDataService.getCachedProfile(auth.currentUser?.uid),
+  );
+  const [householdId, setHouseholdId] = useState<string>(() => {
+    const cached = mobileDataService.getCachedProfile(auth.currentUser?.uid);
+    return cached?.householdId || "";
+  });
 
-  const [isTransitionExiting, setIsTransitionExiting] = useState(false);
+  useEffect(() => {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser?.uid) return;
+    const unsub = mobileDataService.listenToUserProfile(
+      firebaseUser.uid,
+      (p) => {
+        if (p) {
+          setUserProfile(p);
+          if (p.householdId) {
+            setHouseholdId(p.householdId);
+          }
+        }
+      },
+    );
+    return () => unsub();
+  }, [rootFlow]);
 
-  const dismissTransition = () => {
-    if (transitionTimerRef.current) {
-      clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = null;
-    }
-    setIsTransitionExiting(true);
-    Animated.timing(transitionFadeAnim, {
-      toValue: 0,
-      duration: 220,
-      easing: Easing.in(Easing.quad),
-      useNativeDriver: true,
-    }).start(() => {
-      setNavTransition(null);
-      setIsTransitionExiting(false);
-    });
-  };
-
-  const navigateToTab = (tab: MainTab, billsSubView?: "overview" | "pay") => {
-    showNav();
-    if (billsSubView) {
-      setBillsInitialSubView(billsSubView);
-    } else if (tab === "bills") {
-      setBillsInitialSubView("overview");
-    }
-    setOverlayScreen("none");
-    if (tab === currentTab) return;
-
-    if (transitionTimerRef.current) {
-      clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = null;
-    }
-
-    const meta = TAB_TRANSITION_META[tab] || {
-      title: "Loading...",
-      subtitle: "Please wait a moment...",
-    };
-
-    setVisitedTabs((prev) => {
-      if (prev.has(tab)) return prev;
-      const next = new Set(prev);
-      next.add(tab);
-      return next;
-    });
-
-    setIsTransitionExiting(false);
-    transitionFadeAnim.setValue(0);
-    setNavTransition({ tab, ...meta });
-    setCurrentTab(tab);
-
-    // Smooth fade-in
-    Animated.timing(transitionFadeAnim, {
-      toValue: 1,
-      duration: 180,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-
-    // Give a clear, satisfying 600ms presence so the user comfortably sees the loader card, then smoothly exit
-    transitionTimerRef.current = setTimeout(() => {
-      dismissTransition();
-    }, 600);
-  };
-
-  const navigateToOverlay = (screen: OverlayScreen, setup?: () => void) => {
-    if (setup) setup();
-    setOverlayScreen(screen);
-  };
+  const isHostUser = Boolean(
+    userProfile?.role === "HOST" ||
+    userProfile?.role === "SUPER_ADMIN" ||
+    userProfile?.hostApplicationStatus === "APPROVED" ||
+    currentUser.role === "HOST" ||
+    currentUser.role === "SUPER ADMIN",
+  );
 
   useEffect(() => {
     if (Platform.OS === "android") {
@@ -355,8 +281,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               email: user.email,
               avatar: displayName.charAt(0).toUpperCase(),
             });
+            if ((user as any).householdId) {
+              setHouseholdId((user as any).householdId);
+            }
             setCurrentTab("home");
-            setVisitedTabs(new Set(["home"]));
             setOverlayScreen("none");
             setBillsInitialSubView("overview");
             setRootFlow("main");
@@ -366,110 +294,177 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     );
   }
 
-  const renderOverlayScreen = () => {
-    switch (overlayScreen) {
-      case "add_expense":
-        return (
-          <AddExpenseScreen
-            onBack={() => setOverlayScreen("none")}
-            onSaveExpense={() => {
-              setOverlayScreen("none");
-              setBillsInitialSubView("overview");
-              setCurrentTab("bills");
-            }}
-          />
-        );
-      case "settle_dues":
-        return (
-          <SettleDuesScreen
-            onBack={() => setOverlayScreen("none")}
-            onPayPress={() => {
-              setOverlayScreen("none");
-              setBillsInitialSubView("pay");
-              setCurrentTab("bills");
-            }}
-          />
-        );
-      case "expense_history":
-        return (
-          <ExpenseHistoryScreen
-            onBack={() => setOverlayScreen("none")}
-            onAddExpensePress={() => navigateToOverlay("add_expense")}
-            onSelectExpense={(expense) => {
-              setSelectedExpense(expense);
-              navigateToOverlay("expense_details");
-            }}
-          />
-        );
-      case "expense_details":
-        return (
-          <ExpenseDetailsScreen
-            expense={selectedExpense}
-            onBack={() => setOverlayScreen("expense_history")}
-          />
-        );
-      case "reports":
-        return <ReportScreen onBack={() => setOverlayScreen("none")} />;
-      case "manage_group":
-        return (
-          <ManageGroupScreen
-            onBack={() => setOverlayScreen("none")}
-            onOpenAddExpense={() => navigateToOverlay("add_expense")}
-            onOpenHostApplication={() => navigateToOverlay("host_application")}
-            currentUser={currentUser}
-            initialView={manageGroupInitialView}
-          />
-        );
-      case "host_application":
-        return (
-          <HostApplicationScreen onBack={() => setOverlayScreen("none")} />
-        );
-      default:
-        return null;
-    }
-  };
+  if (overlayScreen === "add_expense") {
+    return (
+      <AddExpenseScreen
+        onBack={() => setOverlayScreen("none")}
+        onSaveExpense={() => {
+          setOverlayScreen("none");
+          setBillsInitialSubView("overview");
+          setCurrentTab("bills");
+        }}
+      />
+    );
+  }
 
-  const renderTabContent = (tab: MainTab, onLoaded?: () => void) => {
-    switch (tab) {
+  if (overlayScreen === "settle_dues") {
+    return (
+      <SettleDuesScreen
+        onBack={() => setOverlayScreen("none")}
+        onPayPress={() => {
+          setOverlayScreen("none");
+          setBillsInitialSubView("pay");
+          setCurrentTab("bills");
+        }}
+      />
+    );
+  }
+
+  if (overlayScreen === "expense_history") {
+    return (
+      <ExpenseHistoryScreen
+        onBack={() => setOverlayScreen("none")}
+        onAddExpensePress={
+          isHostUser ? () => setOverlayScreen("add_expense") : undefined
+        }
+        onSelectExpense={(expense) => {
+          setSelectedExpense(expense);
+          setOverlayScreen("expense_details");
+        }}
+      />
+    );
+  }
+
+  if (overlayScreen === "expense_details") {
+    return (
+      <ExpenseDetailsScreen
+        expense={selectedExpense}
+        onBack={() => setOverlayScreen("expense_history")}
+      />
+    );
+  }
+
+  if (overlayScreen === "reports") {
+    return <ReportScreen onBack={() => setOverlayScreen("none")} />;
+  }
+
+  if (overlayScreen === "view_group") {
+    return (
+      <ViewGroupScreen
+        onBack={() => setOverlayScreen("none")}
+        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenHostApplication={() => setOverlayScreen("host_application")}
+        currentUser={currentUser}
+      />
+    );
+  }
+
+  if (overlayScreen === "manage_group") {
+    if (!isHostUser && manageGroupInitialView === "details") {
+      return (
+        <ViewGroupScreen
+          onBack={() => {
+            setOverlayScreen("none");
+            setManageGroupInitialView("details");
+          }}
+          onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+          onOpenHostApplication={() => {
+            setOverlayScreen("host_application");
+            setManageGroupInitialView("details");
+          }}
+          currentUser={currentUser}
+        />
+      );
+    }
+    return (
+      <ManageGroupScreen
+        onBack={() => {
+          setOverlayScreen("none");
+          setManageGroupInitialView("details");
+        }}
+        onOpenAddExpense={() => {
+          setOverlayScreen("add_expense");
+          setManageGroupInitialView("details");
+        }}
+        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenHostApplication={() => {
+          setOverlayScreen("host_application");
+          setManageGroupInitialView("details");
+        }}
+        currentUser={currentUser}
+        initialView={manageGroupInitialView}
+      />
+    );
+  }
+
+  if (overlayScreen === "host_application") {
+    return <HostApplicationScreen onBack={() => setOverlayScreen("none")} />;
+  }
+
+  const renderTabContent = () => {
+    switch (currentTab) {
       case "groups":
+        if (!isHostUser && manageGroupInitialView === "details") {
+          return (
+            <ViewGroupScreen
+              onBack={() => {
+                setCurrentTab("home");
+                setManageGroupInitialView("details");
+              }}
+              onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+              onOpenHostApplication={() => setOverlayScreen("host_application")}
+              currentUser={currentUser}
+            />
+          );
+        }
         return (
           <ManageGroupScreen
-            onBack={() => navigateToTab("home")}
-            onOpenAddExpense={() => navigateToOverlay("add_expense")}
-            onOpenHostApplication={() => navigateToOverlay("host_application")}
+            onBack={() => {
+              setCurrentTab("home");
+              setManageGroupInitialView("details");
+            }}
+            onOpenAddExpense={() => setOverlayScreen("add_expense")}
+            onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+            onOpenHostApplication={() => setOverlayScreen("host_application")}
             currentUser={currentUser}
             initialView={manageGroupInitialView}
-            onLoaded={onLoaded}
           />
         );
       case "bills":
         return (
           <BillsScreen
+            onBack={() => setCurrentTab("home")}
+            householdId={householdId}
             initialSubView={billsInitialSubView}
-            onPayPress={() => {
-              setBillsInitialSubView("pay");
-            }}
-            onLoaded={onLoaded}
+            onPayPress={() => setBillsInitialSubView("pay")}
           />
         );
       case "attendance":
-        return <AttendanceScreen onLoaded={onLoaded} />;
+        return <AttendanceScreen householdId={householdId} />;
       case "messages":
         return <MessagesScreen />;
       case "profile":
         return (
           <ProfileScreen
+            onBack={() => setCurrentTab("home")}
             currentUser={currentUser}
-            onOpenHostApplication={() => navigateToOverlay("host_application")}
+            onOpenHostApplication={() => setOverlayScreen("host_application")}
+            onOpenViewGroup={() => setOverlayScreen("view_group")}
             onOpenManageGroup={(mode) => {
+              if (!isHostUser && (!mode || mode === "details")) {
+                setOverlayScreen("view_group");
+                return;
+              }
               setManageGroupInitialView(mode || "details");
-              navigateToOverlay("manage_group");
+              setOverlayScreen("manage_group");
             }}
-            onOpenReports={() => navigateToOverlay("reports")}
+            onOpenReports={() => setOverlayScreen("reports")}
             onOpenOnboarding={() => setRootFlow("onboarding")}
             onSignOut={async () => {
               await auth.signOut();
               mobileDataService.clearCache();
+              setHouseholdId("");
+              setUserProfile(null);
               setCurrentUser({
                 name: "Resident",
                 role: "Member",
@@ -477,49 +472,46 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
                 avatar: "R",
               });
               setCurrentTab("home");
-              setVisitedTabs(new Set(["home"]));
               setOverlayScreen("none");
               setBillsInitialSubView("overview");
               setRootFlow("auth");
             }}
-            onLoaded={onLoaded}
           />
         );
       case "home":
       default:
         return (
           <HomeScreen
+            householdId={householdId}
             currentUser={{
               name: currentUser.name.split(" ")[0],
               avatar: currentUser.avatar,
             }}
-            onNavigate={(navTarget: any) => {
-              if (navTarget === "payments") {
-                navigateToTab("bills", "pay");
-              } else if (navTarget === "bills") {
-                navigateToTab("bills", "overview");
-              } else if (
-                navTarget === "manage_group" ||
-                navTarget === "add_expense" ||
-                navTarget === "settle_dues" ||
-                navTarget === "expense_history" ||
-                navTarget === "reports" ||
-                navTarget === "host_application"
-              ) {
-                navigateToOverlay(navTarget);
+            onNavigate={(tab: any) => {
+              if (tab === "payments") {
+                setBillsInitialSubView("pay");
+                setCurrentTab("bills");
+              } else if (tab === "bills") {
+                setBillsInitialSubView("overview");
+                setCurrentTab("bills");
               } else {
-                navigateToTab(navTarget);
+                setCurrentTab(tab);
               }
             }}
-            onOpenAddExpense={() => navigateToOverlay("add_expense")}
-            onOpenSettleDues={() => navigateToOverlay("settle_dues")}
-            onOpenExpenseHistory={() => navigateToOverlay("expense_history")}
+            onOpenAddExpense={() => setOverlayScreen("add_expense")}
+            onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+            onOpenExpenseHistory={() => setOverlayScreen("expense_history")}
+            onOpenViewGroup={() => setOverlayScreen("view_group")}
             onOpenManageGroup={(mode) => {
+              if (!isHostUser && (!mode || mode === "details")) {
+                setOverlayScreen("view_group");
+                return;
+              }
               setManageGroupInitialView(mode || "details");
-              navigateToOverlay("manage_group");
+              setOverlayScreen("manage_group");
             }}
-            onOpenReports={() => navigateToOverlay("reports")}
-            onOpenHostApplication={() => navigateToOverlay("host_application")}
+            onOpenReports={() => setOverlayScreen("reports")}
+            onOpenHostApplication={() => setOverlayScreen("host_application")}
           />
         );
     }
@@ -532,57 +524,21 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         translucent
         backgroundColor="transparent"
       />
+      <View style={styles.mainContent}>{renderTabContent()}</View>
 
-      {/* Visited Tab Screens (kept mounted in memory, zero remount lag, no duplicate loaders) */}
-      {Array.from(visitedTabs).map((tab) => (
-        <View
-          key={tab}
-          style={[
-            StyleSheet.absoluteFill,
-            { display: currentTab === tab ? "flex" : "none" },
-          ]}
-        >
-          {renderTabContent(tab, () => {
-            // Screen is fully ready
-          })}
-        </View>
-      ))}
-
-      {/* Floating Bottom Navigation Bar (only visible when no overlay screen is open) */}
-      {overlayScreen === "none" && (
-        <FloatingNavBar
-          currentTab={currentTab}
-          onSelectTab={(tab) => {
-            navigateToTab(tab);
-          }}
-        />
-      )}
-
-      {/* Unique Transition Overlay using UniversalLoader */}
-      {navTransition && (
-        <Animated.View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              zIndex: 9999,
-              opacity: transitionFadeAnim,
-            },
-          ]}
-          pointerEvents="auto"
-        >
-          <UniversalLoader
-            text={navTransition.title}
-            subtitle={navTransition.subtitle}
-            transparent={true}
-            isExiting={isTransitionExiting}
-          />
-        </Animated.View>
-      )}
-
-      {/* Overlay Screens (stacked on top of the base screen) */}
-      {overlayScreen !== "none" && (
-        <View style={StyleSheet.absoluteFill}>{renderOverlayScreen()}</View>
-      )}
+      <FloatingNavBar
+        currentTab={currentTab}
+        onSelectTab={(tab) => {
+          showNav();
+          if (tab === "bills") {
+            setBillsInitialSubView("overview");
+          }
+          if (tab === "groups") {
+            setManageGroupInitialView("details");
+          }
+          setCurrentTab(tab);
+        }}
+      />
     </View>
   );
 }
@@ -594,6 +550,7 @@ export default function App() {
     <SafeAreaProvider style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
       <NavVisibilityProvider>
         <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
+        <CustomAlertModal />
       </NavVisibilityProvider>
     </SafeAreaProvider>
   );

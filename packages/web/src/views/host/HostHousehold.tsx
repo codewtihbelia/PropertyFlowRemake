@@ -78,6 +78,10 @@ export const HostHousehold: React.FC = () => {
     );
   };
 
+  if (loading && household.householdId) {
+    return <UniversalLoader variant="skeleton" type="cards" />;
+  }
+
   const hasGroup = Boolean(
     household.householdId &&
     household.householdName &&
@@ -153,7 +157,7 @@ export const HostHousehold: React.FC = () => {
   }
 
   return (
-    <div className="relative space-y-6">
+    <div className="space-y-6">
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider">

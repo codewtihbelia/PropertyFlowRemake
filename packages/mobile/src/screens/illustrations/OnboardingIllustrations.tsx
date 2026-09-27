@@ -1,6 +1,6 @@
-import React from "react";
-import { StyleSheet, View, Text } from "react-native";
-import { Ionicons, Feather } from "@expo/vector-icons";
+import React from 'react';
+import { StyleSheet, View, Text } from 'react-native';
+import { Ionicons, Feather } from '@expo/vector-icons';
 
 /**
  * OnboardingIllustration1
@@ -114,13 +114,13 @@ export const OnboardingIllustration2: React.FC = () => {
 
         {/* Roommate avatar badge pill */}
         <View style={styles.membersPill}>
-          <View style={[styles.miniMemberDot, { backgroundColor: "#38BDF8" }]}>
+          <View style={[styles.miniMemberDot, { backgroundColor: '#38BDF8' }]}>
             <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
-          <View style={[styles.miniMemberDot, { backgroundColor: "#818CF8" }]}>
+          <View style={[styles.miniMemberDot, { backgroundColor: '#818CF8' }]}>
             <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
-          <View style={[styles.miniMemberDot, { backgroundColor: "#FB923C" }]}>
+          <View style={[styles.miniMemberDot, { backgroundColor: '#FB923C' }]}>
             <Ionicons name="person" size={8} color="#FFFFFF" />
           </View>
         </View>
@@ -139,56 +139,23 @@ export const OnboardingIllustration2: React.FC = () => {
       {/* Satellite Floating Badge: Analytics Bar Chart (Right) */}
       <View style={[styles.satelliteCard, styles.satChart]}>
         <View style={styles.chartBars}>
-          <View
-            style={[styles.chartBar, { height: 7, backgroundColor: "#93C5FD" }]}
-          />
-          <View
-            style={[
-              styles.chartBar,
-              { height: 14, backgroundColor: "#2563EB" },
-            ]}
-          />
-          <View
-            style={[
-              styles.chartBar,
-              { height: 10, backgroundColor: "#60A5FA" },
-            ]}
-          />
+          <View style={[styles.chartBar, { height: 7, backgroundColor: '#93C5FD' }]} />
+          <View style={[styles.chartBar, { height: 14, backgroundColor: '#2563EB' }]} />
+          <View style={[styles.chartBar, { height: 10, backgroundColor: '#60A5FA' }]} />
         </View>
       </View>
 
       {/* Satellite Floating Badge: Wallet (Bottom-Right) */}
-      <View
-        style={[
-          styles.satelliteCard,
-          styles.satWallet,
-          { backgroundColor: "#2563EB" },
-        ]}
-      >
+      <View style={[styles.satelliteCard, styles.satWallet, { backgroundColor: '#2563EB' }]}>
         <Ionicons name="card-outline" size={14} color="#FFFFFF" />
       </View>
 
       {/* Satellite Floating Badge: Receipt List (Bottom-Left) */}
       <View style={[styles.satelliteCard, styles.satReceipt]}>
         <View style={styles.receiptLines}>
-          <View
-            style={[
-              styles.receiptLine,
-              { width: 14, backgroundColor: "#2563EB" },
-            ]}
-          />
-          <View
-            style={[
-              styles.receiptLine,
-              { width: 10, backgroundColor: "#94A3B8" },
-            ]}
-          />
-          <View
-            style={[
-              styles.receiptLine,
-              { width: 12, backgroundColor: "#CBD5E1" },
-            ]}
-          />
+          <View style={[styles.receiptLine, { width: 14, backgroundColor: '#2563EB' }]} />
+          <View style={[styles.receiptLine, { width: 10, backgroundColor: '#94A3B8' }]} />
+          <View style={[styles.receiptLine, { width: 12, backgroundColor: '#CBD5E1' }]} />
         </View>
       </View>
 
@@ -223,50 +190,26 @@ export const OnboardingIllustration3: React.FC = () => {
 
       {/* Left Avatar (Sky Blue) */}
       <View style={[styles.avatarCircleRing, { left: 18, top: 70 }]}>
-        <View
-          style={[
-            styles.avatarCircleInner,
-            { backgroundColor: "#EFF6FF", borderColor: "#38BDF8" },
-          ]}
-        >
+        <View style={[styles.avatarCircleInner, { backgroundColor: '#EFF6FF', borderColor: '#38BDF8' }]}>
           <Ionicons name="person" size={18} color="#0284C7" />
         </View>
-        <View
-          style={[styles.avatarSmallAnchor, { backgroundColor: "#38BDF8" }]}
-        />
+        <View style={[styles.avatarSmallAnchor, { backgroundColor: '#38BDF8' }]} />
       </View>
 
       {/* Right Avatar (Coral / Pink) */}
       <View style={[styles.avatarCircleRing, { right: 18, top: 70 }]}>
-        <View
-          style={[
-            styles.avatarCircleInner,
-            { backgroundColor: "#FFF1F2", borderColor: "#FB7185" },
-          ]}
-        >
+        <View style={[styles.avatarCircleInner, { backgroundColor: '#FFF1F2', borderColor: '#FB7185' }]}>
           <Ionicons name="person" size={18} color="#E11D48" />
         </View>
-        <View
-          style={[styles.avatarSmallAnchor, { backgroundColor: "#FB7185" }]}
-        />
+        <View style={[styles.avatarSmallAnchor, { backgroundColor: '#FB7185' }]} />
       </View>
 
       {/* Bottom Gold Coins */}
-      <View
-        style={[
-          styles.goldCoin,
-          { position: "absolute", bottom: 34, left: 62 },
-        ]}
-      >
+      <View style={[styles.goldCoin, { position: 'absolute', bottom: 34, left: 62 }]}>
         <Text style={styles.goldCoinText}>$</Text>
       </View>
 
-      <View
-        style={[
-          styles.goldCoin,
-          { position: "absolute", bottom: 34, right: 62 },
-        ]}
-      >
+      <View style={[styles.goldCoin, { position: 'absolute', bottom: 34, right: 62 }]}>
         <Text style={styles.goldCoinText}>$</Text>
       </View>
     </View>
@@ -277,9 +220,9 @@ const styles = StyleSheet.create({
   container: {
     width: 290,
     height: 195,
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
   },
 
   /* ------------------- Onboarding 1 Vector Styles ------------------- */
@@ -287,10 +230,10 @@ const styles = StyleSheet.create({
     width: 98,
     height: 98,
     borderRadius: 49,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#2563EB",
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.36,
     shadowRadius: 18,
@@ -301,43 +244,43 @@ const styles = StyleSheet.create({
     width: 90,
     height: 90,
     borderRadius: 45,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   centerBlueCircle: {
     width: 82,
     height: 82,
     borderRadius: 41,
-    backgroundColor: "#2563EB",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   dollarSign: {
     fontSize: 42,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    fontWeight: '800',
+    color: '#FFFFFF',
     includeFontPadding: false,
     lineHeight: 46,
   },
 
   /* Arcs */
   leftArcWrapper: {
-    position: "absolute",
+    position: 'absolute',
     left: 45,
     top: 50,
     width: 95,
     height: 50,
-    overflow: "hidden",
+    overflow: 'hidden',
     zIndex: 2,
   },
   rightArcWrapper: {
-    position: "absolute",
+    position: 'absolute',
     right: 45,
     top: 50,
     width: 95,
     height: 50,
-    overflow: "hidden",
+    overflow: 'hidden',
     zIndex: 2,
   },
   arcDashedBorder: {
@@ -345,86 +288,86 @@ const styles = StyleSheet.create({
     height: 90,
     borderRadius: 70,
     borderWidth: 2,
-    borderColor: "#38BDF8",
-    borderStyle: "dashed",
-    position: "absolute",
+    borderColor: '#38BDF8',
+    borderStyle: 'dashed',
+    position: 'absolute',
     top: 0,
     left: -20,
   },
   leftArcNode: {
-    position: "absolute",
+    position: 'absolute',
     top: 14,
     left: 28,
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#0284C7",
+    backgroundColor: '#0284C7',
   },
   rightArcNode: {
-    position: "absolute",
+    position: 'absolute',
     top: 14,
     right: 28,
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#0284C7",
+    backgroundColor: '#0284C7',
   },
 
   /* Avatars */
   leftAvatarCard: {
-    position: "absolute",
+    position: 'absolute',
     left: 14,
     top: 50,
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: '#EFF6FF',
     borderWidth: 1.5,
-    borderColor: "#BFDBFE",
-    justifyContent: "flex-end",
-    alignItems: "center",
+    borderColor: '#BFDBFE',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
     zIndex: 5,
-    overflow: "hidden",
-    shadowColor: "#2563EB",
+    overflow: 'hidden',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 3,
   },
   rightAvatarCard: {
-    position: "absolute",
+    position: 'absolute',
     right: 14,
     top: 50,
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: "#EFF6FF",
+    backgroundColor: '#EFF6FF',
     borderWidth: 1.5,
-    borderColor: "#BFDBFE",
-    justifyContent: "flex-end",
-    alignItems: "center",
+    borderColor: '#BFDBFE',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
     zIndex: 5,
-    overflow: "hidden",
-    shadowColor: "#2563EB",
+    overflow: 'hidden',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 3,
   },
   avatarCharacter: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-    width: "100%",
-    height: "100%",
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+    height: '100%',
     paddingBottom: 2,
   },
   avatarHeadYellow: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#FACC15",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#FACC15',
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 2,
     marginBottom: -2,
   },
@@ -432,9 +375,9 @@ const styles = StyleSheet.create({
     width: 23,
     height: 23,
     borderRadius: 11.5,
-    backgroundColor: "#60A5FA",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#60A5FA',
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 2,
     marginBottom: -2,
   },
@@ -442,12 +385,12 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: "#FACC15",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#FACC15',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   eyesRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 4,
     marginTop: 2,
   },
@@ -455,13 +398,13 @@ const styles = StyleSheet.create({
     width: 2.2,
     height: 2.2,
     borderRadius: 1.1,
-    backgroundColor: "#1E293B",
+    backgroundColor: '#1E293B',
   },
   neutralMouth: {
     width: 3.5,
     height: 1.2,
     borderRadius: 0.6,
-    backgroundColor: "#1E293B",
+    backgroundColor: '#1E293B',
     marginTop: 2.5,
   },
   avatarShouldersBlue: {
@@ -469,40 +412,40 @@ const styles = StyleSheet.create({
     height: 13,
     borderTopLeftRadius: 10,
     borderTopRightRadius: 10,
-    backgroundColor: "#60A5FA",
+    backgroundColor: '#60A5FA',
   },
 
   /* Gold Indicator Groups */
   leftCoinGroup: {
-    position: "absolute",
+    position: 'absolute',
     left: 22,
     bottom: 24,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
   },
   rightCoinGroup: {
-    position: "absolute",
+    position: 'absolute',
     right: 22,
     bottom: 24,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
   },
   goldDash: {
     width: 9,
     height: 2,
     borderRadius: 1,
-    backgroundColor: "#EAB308",
+    backgroundColor: '#EAB308',
   },
   goldCoin: {
     width: 19,
     height: 19,
     borderRadius: 9.5,
-    backgroundColor: "#FACC15",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#EAB308",
+    backgroundColor: '#FACC15',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#EAB308',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3,
@@ -510,33 +453,33 @@ const styles = StyleSheet.create({
   },
   goldCoinText: {
     fontSize: 9.5,
-    fontWeight: "900",
-    color: "#854D0E",
+    fontWeight: '900',
+    color: '#854D0E',
     includeFontPadding: false,
     lineHeight: 11,
   },
 
   /* ------------------- Onboarding 2 Vector Styles ------------------- */
   orbitRing: {
-    position: "absolute",
+    position: 'absolute',
     width: 175,
     height: 175,
     borderRadius: 87.5,
     borderWidth: 1.5,
-    borderColor: "#BFDBFE",
-    borderStyle: "dashed",
+    borderColor: '#BFDBFE',
+    borderStyle: 'dashed',
   },
   houseCard: {
     width: 105,
     height: 105,
     borderRadius: 22,
-    backgroundColor: "#F0F6FE",
+    backgroundColor: '#F0F6FE',
     borderWidth: 1,
-    borderColor: "#DBEAFE",
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 10,
-    shadowColor: "#2563EB",
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -544,68 +487,68 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   houseIconContainer: {
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: 8,
   },
   houseRoof: {
     width: 0,
     height: 0,
-    backgroundColor: "transparent",
-    borderStyle: "solid",
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
     borderLeftWidth: 16,
     borderRightWidth: 16,
     borderBottomWidth: 12,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "#2563EB",
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#2563EB',
   },
   houseBody: {
     width: 24,
     height: 16,
     borderWidth: 2,
     borderTopWidth: 0,
-    borderColor: "#2563EB",
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "flex-end",
+    borderColor: '#2563EB',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   houseDoor: {
     width: 8,
     height: 10,
     borderTopLeftRadius: 4,
     borderTopRightRadius: 4,
-    backgroundColor: "#2563EB",
+    backgroundColor: '#2563EB',
   },
   membersPill: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: '#E2E8F0',
   },
   miniMemberDot: {
     width: 15,
     height: 15,
     borderRadius: 7.5,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   miniMemberText: {
     fontSize: 8,
   },
   satelliteBadge: {
-    position: "absolute",
+    position: 'absolute',
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#2563EB",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#2563EB",
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -617,21 +560,21 @@ const styles = StyleSheet.create({
     left: 45,
   },
   satDollarText: {
-    color: "#FFFFFF",
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: '800',
   },
   satelliteCard: {
-    position: "absolute",
+    position: 'absolute',
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000000",
+    borderColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
@@ -647,8 +590,8 @@ const styles = StyleSheet.create({
     right: 20,
   },
   chartBars: {
-    flexDirection: "row",
-    alignItems: "flex-end",
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     gap: 2.5,
   },
   chartBar: {
@@ -658,7 +601,7 @@ const styles = StyleSheet.create({
   satWallet: {
     bottom: 25,
     right: 48,
-    borderColor: "#2563EB",
+    borderColor: '#2563EB',
   },
   satReceipt: {
     bottom: 25,
@@ -672,26 +615,26 @@ const styles = StyleSheet.create({
     borderRadius: 1,
   },
   sparkleDot: {
-    position: "absolute",
+    position: 'absolute',
     width: 5,
     height: 5,
     borderRadius: 2.5,
-    backgroundColor: "#FBBF24",
+    backgroundColor: '#FBBF24',
   },
 
   /* ------------------- Onboarding 3 Vector Styles ------------------- */
   orbitRingFull: {
-    position: "absolute",
+    position: 'absolute',
     width: 185,
     height: 185,
     borderRadius: 92.5,
     borderWidth: 1.5,
-    borderColor: "#38BDF8",
-    borderStyle: "dashed",
+    borderColor: '#38BDF8',
+    borderStyle: 'dashed',
   },
   avatarCircleRing: {
-    position: "absolute",
-    alignItems: "center",
+    position: 'absolute',
+    alignItems: 'center',
     zIndex: 6,
   },
   avatarCircleInner: {
@@ -699,9 +642,9 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     borderWidth: 1.5,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,

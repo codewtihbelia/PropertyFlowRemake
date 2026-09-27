@@ -28,9 +28,12 @@ interface EmailVerificationScreenProps {
   onBack: () => void;
 }
 
-export const EmailVerificationScreen: React.FC<
-  EmailVerificationScreenProps
-> = ({ email, userName, onVerified, onBack }) => {
+export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = ({
+  email,
+  userName,
+  onVerified,
+  onBack,
+}) => {
   const insets = useSafeAreaInsets();
   const [isVerified, setIsVerified] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -74,14 +77,11 @@ export const EmailVerificationScreen: React.FC<
     const interval = setInterval(checkStatus, 2500);
 
     // Immediate check when user switches back into the app
-    const subscription = AppState.addEventListener(
-      "change",
-      (nextState: AppStateStatus) => {
-        if (nextState === "active") {
-          checkStatus();
-        }
-      },
-    );
+    const subscription = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        checkStatus();
+      }
+    });
 
     return () => {
       isMounted = false;
@@ -132,10 +132,7 @@ export const EmailVerificationScreen: React.FC<
         `A fresh verification link has been dispatched to ${email}. Please check your inbox and spam folder.`,
       );
     } catch (err: any) {
-      Alert.alert(
-        "Notice",
-        err.message || "Failed to resend verification email.",
-      );
+      Alert.alert("Notice", err.message || "Failed to resend verification email.");
     } finally {
       setResending(false);
     }
@@ -166,9 +163,7 @@ export const EmailVerificationScreen: React.FC<
               paddingTop:
                 Math.max(
                   insets.top,
-                  Platform.OS === "android"
-                    ? StatusBar.currentHeight || 24
-                    : 20,
+                  Platform.OS === "android" ? StatusBar.currentHeight || 24 : 20
                 ) + 12,
             },
           ]}
@@ -208,7 +203,7 @@ export const EmailVerificationScreen: React.FC<
               <Ionicons
                 name={isVerified ? "checkmark-circle" : "mail"}
                 size={44}
-                color={isVerified ? "#059669" : "#2563EB"}
+                color="#0F172A"
               />
             </View>
           </View>
@@ -244,11 +239,7 @@ export const EmailVerificationScreen: React.FC<
                   borderRadius: 8,
                 }}
               >
-                <Text
-                  style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 12 }}
-                >
-                  Open →
-                </Text>
+                <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 12 }}>Open →</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -359,7 +350,7 @@ export const EmailVerificationScreen: React.FC<
               {
                 paddingBottom: Math.max(
                   insets.bottom + 20,
-                  Platform.OS === "android" ? 28 : 36,
+                  Platform.OS === "android" ? 28 : 36
                 ),
               },
             ]}
@@ -428,12 +419,10 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: "flex-start",
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
@@ -482,18 +471,15 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: 42,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
   iconCircleActive: {
-    backgroundColor: "#EFF6FF",
-    borderWidth: 2,
-    borderColor: "#BFDBFE",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
   },
   iconCircleSuccess: {
-    backgroundColor: "#ECFDF5",
-    borderWidth: 2,
-    borderColor: "#A7F3D0",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
   },
   titleText: {
     fontSize: 22,

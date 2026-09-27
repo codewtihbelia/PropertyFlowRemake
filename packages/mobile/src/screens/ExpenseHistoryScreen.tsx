@@ -8,9 +8,9 @@ import {
   TextInput,
   ActivityIndicator,
   StatusBar,
+  Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { UniversalLoader } from "../components/UniversalLoader";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import {
@@ -19,6 +19,7 @@ import {
   cleanBillTitle,
 } from "../services/firebaseDataService";
 import { getCategoryMeta } from "../services/categoryService";
+import { UniversalSkeleton } from "../components/UniversalLoader";
 
 export interface ExpenseItem {
   id: string;
@@ -58,20 +59,18 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [liveExpenses, setLiveExpenses] = useState<ExpenseItem[]>([]);
-  const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [householdId, setHouseholdId] = useState<string | null>(null);
 
-  const currentUser = auth.currentUser;
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
+  );
 
-  // Fallback safety timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, []);
+  const currentUser = auth.currentUser;
 
   const loadData = async (isManualRefresh = false) => {
     if (!currentUser?.uid) {
@@ -87,16 +86,11 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       if (hid) {
         setHouseholdId(hid);
       }
-      setProfileLoaded(true);
-      if (!hid) {
-        setLoading(false);
-      }
     } catch (err) {
       console.warn("[ExpenseHistoryScreen] load profile error:", err);
-      setProfileLoaded(true);
-      setLoading(false);
     } finally {
       if (isManualRefresh) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
@@ -105,7 +99,6 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   }, [currentUser?.uid]);
 
   useEffect(() => {
-    if (!profileLoaded) return;
     if (!householdId) {
       setLoading(false);
       return;
@@ -160,7 +153,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     return () => {
       unsub();
     };
-  }, [householdId, profileLoaded]);
+  }, [householdId]);
 
   const handleRefresh = () => {
     loadData(true);
@@ -230,47 +223,47 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   }, [filteredExpenses]);
 
   return (
-    <SafeAreaView style={styles.container}>
-      {loading && (
-        <UniversalLoader
-          text="Loading bill history..."
-          subtitle="Fetching past expenses & receipts..."
-          transparent={true}
-        />
-      )}
-      {/* Top Header matching screen.png */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
+    <View style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        translucent={true}
+        backgroundColor="transparent"
+      />
+
+      {/* Top Header */}
+      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View style={styles.navBar}>
           <TouchableOpacity
-            style={styles.backBtn}
-            onPress={onBack}
+            style={styles.circleBackBtn}
+            onPress={() => (onBack ? onBack() : null)}
             activeOpacity={0.7}
           >
             <Feather name="chevron-left" size={24} color="#0F172A" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Bill History</Text>
-        </View>
 
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={styles.headerIconBtn}
-            onPress={() => setShowSearch(!showSearch)}
-            activeOpacity={0.7}
-          >
-            <Feather name="search" size={20} color="#0F172A" />
-          </TouchableOpacity>
+          <Text style={styles.navTitle}>Bill History</Text>
 
-          <TouchableOpacity
-            style={styles.headerIconBtn}
-            onPress={handleRefresh}
-            activeOpacity={0.7}
-          >
-            {refreshing ? (
-              <ActivityIndicator size="small" color="#2563EB" />
-            ) : (
-              <Feather name="rotate-cw" size={20} color="#0F172A" />
-            )}
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              style={styles.iconNavBtn}
+              onPress={() => setShowSearch(!showSearch)}
+              activeOpacity={0.7}
+            >
+              <Feather name="search" size={20} color="#0F172A" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.iconNavBtn}
+              onPress={handleRefresh}
+              activeOpacity={0.7}
+            >
+              {refreshing ? (
+                <ActivityIndicator size="small" color="#2563EB" />
+              ) : (
+                <Feather name="rotate-cw" size={20} color="#0F172A" />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -340,10 +333,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
 
       {/* Content Area */}
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="small" color="#2563EB" />
-          <Text style={styles.loadingText}>Loading expense history...</Text>
-        </View>
+        <UniversalSkeleton type="history" />
       ) : liveExpenses.length === 0 ? (
         /* Clean Empty State as requested (no hardcoded data) */
         <ScrollView
@@ -519,66 +509,63 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           )}
         </ScrollView>
       )}
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#F8FAFC",
   },
-  header: {
+  navBarContainer: {
+    backgroundColor: "#F8FAFC",
+    zIndex: 50,
+  },
+  navBar: {
+    height: 56,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  circleBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "rgba(15, 23, 42, 0.05)",
-    justifyContent: "center",
     alignItems: "center",
-    marginRight: 8,
+    justifyContent: "center",
   },
-  headerTitle: {
-    fontSize: 22,
+  iconNavBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navTitle: {
+    fontSize: 17,
     fontWeight: "800",
     color: "#0F172A",
-    letterSpacing: -0.3,
   },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-  },
-  headerIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(15, 23, 42, 0.05)",
-    justifyContent: "center",
-    alignItems: "center",
+    gap: 8,
   },
   searchBarContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 12,
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginBottom: 8,
     paddingHorizontal: 12,
-    height: 42,
+    height: 44,
   },
   searchInput: {
     flex: 1,

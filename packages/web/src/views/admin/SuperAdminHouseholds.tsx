@@ -3,11 +3,18 @@ import { adminService } from "../../services/adminService";
 import { getAppState } from "../../services/store";
 import { Layers, Home, Users, Plus } from "lucide-react";
 import { CreateRoomModal } from "../../components/CreateRoomModal";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 
-export const SuperAdminHouseholds: React.FC = () => {
+export const SuperAdminHouseholds: React.FC<{ loading?: boolean }> = ({
+  loading = false,
+}) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const households = adminService.getAllHouseholds();
   const state = getAppState();
+
+  if (loading) {
+    return <UniversalLoader variant="skeleton" type="table" count={5} />;
+  }
 
   return (
     <div className="space-y-6">

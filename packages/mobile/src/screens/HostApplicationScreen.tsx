@@ -20,6 +20,8 @@ import {
   UserProfile,
   HOST_MANAGEMENT_TYPES,
 } from "@propertyflow/shared";
+import { UniversalSkeleton } from "../components/UniversalLoader";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 
 interface HostApplicationScreenProps {
   onBack: () => void;
@@ -239,12 +241,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
-          <View style={styles.centerLoading}>
-            <ActivityIndicator size="small" color="#2563EB" />
-            <Text style={styles.loadingText}>
-              Loading application status...
-            </Text>
-          </View>
+          <UniversalSkeleton type="form" />
         ) : isAlreadyHost ? (
           /* State 1: Already Host */
           <View style={styles.cardSuccess}>
@@ -825,137 +822,100 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
       </ScrollView>
 
       {/* Modal: Host Management Type Dropdown */}
-      <Modal
+      <SmoothBottomSheetModal
         visible={showManagementModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowManagementModal(false)}
+        onClose={() => setShowManagementModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Host Management Type"
+        subtitle="Select your property administration role"
+        icon={<Feather name="shield" size={18} color="#2563EB" />}
+        maxHeight="86%"
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowManagementModal(false)}
-        >
-          <View
-            style={styles.modalSheet}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Host Management Type</Text>
-                <Text style={styles.modalSubtitle}>
-                  Select your property administration role
-                </Text>
-              </View>
+        <ScrollView style={{ maxHeight: 360, marginTop: 4 }}>
+          {managementTypesList.map((type) => {
+            const isSelected = managementType === type;
+            return (
               <TouchableOpacity
-                style={styles.modalCloseBtn}
-                onPress={() => setShowManagementModal(false)}
+                key={type}
+                style={[
+                  styles.modalOption,
+                  isSelected && styles.modalOptionSelected,
+                ]}
+                onPress={() => {
+                  setManagementType(type);
+                  setShowManagementModal(false);
+                }}
+                activeOpacity={0.7}
               >
-                <Feather name="x" size={18} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 340 }}>
-              {managementTypesList.map((type) => {
-                const isSelected = managementType === type;
-                return (
-                  <TouchableOpacity
-                    key={type}
+                <View style={styles.modalOptionLeft}>
+                  <View
                     style={[
-                      styles.modalOption,
-                      isSelected && styles.modalOptionSelected,
+                      styles.radioCircle,
+                      isSelected && styles.radioCircleSelected,
                     ]}
-                    onPress={() => {
-                      setManagementType(type);
-                      setShowManagementModal(false);
-                    }}
-                    activeOpacity={0.7}
                   >
-                    <View style={styles.modalOptionLeft}>
-                      <View
-                        style={[
-                          styles.radioCircle,
-                          isSelected && styles.radioCircleSelected,
-                        ]}
-                      >
-                        {isSelected && <View style={styles.radioDot} />}
-                      </View>
-                      <Text
-                        style={[
-                          styles.modalOptionText,
-                          isSelected && styles.modalOptionTextSelected,
-                        ]}
-                      >
-                        {type}
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Feather name="check" size={16} color="#2563EB" />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+                    {isSelected && <View style={styles.radioDot} />}
+                  </View>
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      isSelected && styles.modalOptionTextSelected,
+                    ]}
+                  >
+                    {type}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Feather name="check" size={16} color="#2563EB" />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </SmoothBottomSheetModal>
 
       {/* Modal: Host Program Information */}
-      <Modal
+      <SmoothBottomSheetModal
         visible={showInfoModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowInfoModal(false)}
+        onClose={() => setShowInfoModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Verified Host Program"
+        subtitle="Role requirements & benefits"
+        icon={<Feather name="info" size={18} color="#2563EB" />}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowInfoModal(false)}
-        >
-          <View
-            style={styles.modalSheet}
-            onStartShouldSetResponder={() => true}
-          >
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Verified Host Program</Text>
-                <Text style={styles.modalSubtitle}>
-                  Role requirements & benefits
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.modalCloseBtn}
-                onPress={() => setShowInfoModal(false)}
-              >
-                <Feather name="x" size={18} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-            <View style={{ gap: 12, paddingVertical: 8 }}>
-              <View style={styles.infoRow}>
-                <Ionicons name="water-outline" size={20} color="#2563EB" />
-                <Text style={styles.infoRowText}>
-                  Set custom per-day water attendance rates and automate monthly
-                  utility distribution.
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Ionicons name="card-outline" size={20} color="#10B981" />
-                <Text style={styles.infoRowText}>
-                  Receive direct roommate settlements to GCash, Maya, or
-                  verified bank accounts.
-                </Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Ionicons name="people-outline" size={20} color="#8B5CF6" />
-                <Text style={styles.infoRowText}>
-                  Create, lock, and manage household roommate membership with
-                  zero hassle.
-                </Text>
-              </View>
-            </View>
+        <View style={{ gap: 12, paddingVertical: 8 }}>
+          <View style={styles.infoRow}>
+            <Ionicons name="water-outline" size={20} color="#2563EB" />
+            <Text style={styles.infoRowText}>
+              Set custom per-day water attendance rates and automate monthly
+              utility distribution.
+            </Text>
           </View>
-        </TouchableOpacity>
-      </Modal>
+          <View style={styles.infoRow}>
+            <Ionicons name="card-outline" size={20} color="#10B981" />
+            <Text style={styles.infoRowText}>
+              Receive direct roommate settlements to GCash, Maya, or verified
+              bank accounts.
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Ionicons name="people-outline" size={20} color="#8B5CF6" />
+            <Text style={styles.infoRowText}>
+              Create, lock, and manage household roommate membership with zero
+              hassle.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryActionBtn, { marginTop: 12 }]}
+            onPress={() => setShowInfoModal(false)}
+          >
+            <Text style={styles.primaryActionBtnText}>Got It</Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
     </SafeAreaView>
   );
 };
@@ -1364,6 +1324,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   btnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  primaryActionBtnText: {
     fontSize: 14,
     fontWeight: "800",
     color: "#FFFFFF",

@@ -1,0 +1,320 @@
+import React, { useEffect, useRef, useState } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  ViewStyle,
+  StyleProp,
+} from "react-native";
+import { Feather } from "@expo/vector-icons";
+
+export interface SmoothBottomSheetModalProps {
+  visible: boolean;
+  onClose: () => void;
+  title?: string;
+  subtitle?: string;
+  icon?: React.ReactNode;
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+  variant?: "bottom-sheet" | "center";
+  showChipBar?: boolean;
+  showCloseBtn?: boolean;
+  maxHeight?: number | `${number}%`;
+  sheetStyle?: StyleProp<ViewStyle>;
+  dismissible?: boolean;
+}
+
+export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
+  visible,
+  onClose,
+  title,
+  subtitle,
+  icon,
+  headerRight,
+  children,
+  variant = "bottom-sheet",
+  showChipBar = true,
+  showCloseBtn,
+  maxHeight = "90%",
+  sheetStyle,
+  dismissible = true,
+}) => {
+  const [isRendered, setIsRendered] = useState(visible);
+  const animValue = useRef(new Animated.Value(0)).current;
+
+  // Decide if close button should be shown
+  const shouldShowCloseBtn =
+    showCloseBtn !== undefined
+      ? showCloseBtn
+      : Boolean(title || icon || subtitle);
+
+  useEffect(() => {
+    if (visible) {
+      setIsRendered(true);
+      Animated.timing(animValue, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.bezier(0.2, 0.9, 0.3, 1),
+        useNativeDriver: true,
+      }).start();
+    } else if (isRendered) {
+      Animated.timing(animValue, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => {
+        setIsRendered(false);
+      });
+    }
+  }, [visible]);
+
+  if (!isRendered) return null;
+
+  const isCenter = variant === "center";
+
+  // Backdrop fade
+  const backdropOpacity = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  // Slide up & fade in
+  const translateY = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [isCenter ? 40 : 160, 0],
+  });
+
+  const cardOpacity = animValue.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 0.8, 1],
+  });
+
+  const cardScale = isCenter
+    ? animValue.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.94, 1],
+      })
+    : 1;
+
+  const handleDismiss = () => {
+    if (!dismissible) return;
+    Animated.timing(animValue, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setIsRendered(false);
+      onClose();
+    });
+  };
+
+  const hasHeader = Boolean(
+    title || icon || subtitle || shouldShowCloseBtn || headerRight,
+  );
+
+  return (
+    <Modal
+      transparent
+      visible={isRendered}
+      animationType="none"
+      onRequestClose={handleDismiss}
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.keyboardContainer}
+      >
+        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+          <TouchableWithoutFeedback onPress={handleDismiss}>
+            <View style={StyleSheet.absoluteFill} />
+          </TouchableWithoutFeedback>
+        </Animated.View>
+
+        <View
+          style={[
+            styles.wrapper,
+            isCenter ? styles.wrapperCenter : styles.wrapperBottom,
+          ]}
+          pointerEvents="box-none"
+        >
+          <Animated.View
+            style={[
+              isCenter ? styles.centerCard : styles.bottomSheetCard,
+              {
+                maxHeight: maxHeight as any,
+                opacity: cardOpacity,
+                transform: [{ translateY }, { scale: cardScale }],
+              },
+              sheetStyle,
+            ]}
+          >
+            {/* Top Chip Bar (Pull Handle / Indicator) */}
+            {showChipBar && (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={handleDismiss}
+                style={styles.chipBarContainer}
+                accessibilityLabel="Modal drag handle"
+              >
+                <View style={styles.chipBar} />
+              </TouchableOpacity>
+            )}
+
+            {/* Optional Header */}
+            {hasHeader && (
+              <View style={styles.headerRow}>
+                <View style={styles.headerLeft}>
+                  {icon && <View style={styles.iconWrap}>{icon}</View>}
+                  <View style={{ flex: 1 }}>
+                    {title && <Text style={styles.titleText}>{title}</Text>}
+                    {subtitle && (
+                      <Text style={styles.subtitleText}>{subtitle}</Text>
+                    )}
+                  </View>
+                </View>
+
+                {headerRight && (
+                  <View style={{ marginRight: 8 }}>{headerRight}</View>
+                )}
+
+                {shouldShowCloseBtn && (
+                  <TouchableOpacity
+                    onPress={handleDismiss}
+                    style={styles.closeBtn}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityLabel="Close modal"
+                  >
+                    <Feather name="x" size={19} color="#64748B" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* Main Modal Body */}
+            {children}
+          </Animated.View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+    position: "relative",
+  },
+  backdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.54)",
+  },
+  wrapper: {
+    flex: 1,
+  },
+  wrapperBottom: {
+    justifyContent: "flex-end",
+  },
+  wrapperCenter: {
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  bottomSheetCard: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    paddingBottom: Platform.OS === "ios" ? 38 : 28,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    elevation: 16,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(226, 232, 240, 0.8)",
+  },
+  centerCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 8,
+    paddingBottom: 24,
+    width: "100%",
+    maxWidth: 390,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 14,
+    borderWidth: 1,
+    borderColor: "rgba(226, 232, 240, 0.8)",
+  },
+  chipBarContainer: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 8,
+    paddingBottom: 14,
+  },
+  chipBar: {
+    width: 44,
+    height: 5,
+    borderRadius: 9999,
+    backgroundColor: "#CBD5E1",
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+    gap: 10,
+  },
+  iconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  titleText: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+  },
+  subtitleText: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

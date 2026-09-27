@@ -92,7 +92,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
     if (enteredCode.length < 6) {
       Alert.alert(
         "Incomplete Code",
-        "Please enter all 6 digits of your confirmation code.",
+        "Please enter all 6 digits of your confirmation code."
       );
       return;
     }
@@ -109,7 +109,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
       } else {
         Alert.alert(
           "Invalid Code",
-          "The code you entered does not match. Please verify and try again.",
+          "The code you entered does not match. Please verify and try again."
         );
       }
     }, 600);
@@ -134,7 +134,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
       inputRefs.current[0]?.focus();
       Alert.alert(
         "Code Resent",
-        `A new confirmation code has been dispatched to ${email}.`,
+        `A new confirmation code has been dispatched to ${email}.`
       );
     } catch {
       Alert.alert("Resend Failed", "Could not resend code. Please try again.");
@@ -173,9 +173,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
               paddingTop:
                 Math.max(
                   insets.top,
-                  Platform.OS === "android"
-                    ? StatusBar.currentHeight || 24
-                    : 20,
+                  Platform.OS === "android" ? StatusBar.currentHeight || 24 : 20
                 ) + 12,
             },
           ]}
@@ -186,7 +184,9 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <Feather name="arrow-left" size={20} color="#0F172A" />
+            <View style={styles.backButtonIconCircle}>
+              <Feather name="arrow-left" size={18} color="#0F172A" />
+            </View>
             <Text style={styles.backButtonText}>Edit Details</Text>
           </TouchableOpacity>
 
@@ -208,7 +208,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
           {isSuccess ? (
             <View style={styles.successWrapper}>
               <View style={styles.successIconCircle}>
-                <Ionicons name="checkmark-sharp" size={44} color="#16A34A" />
+                <Ionicons name="checkmark-sharp" size={44} color="#0F172A" />
               </View>
               <Text style={styles.successTitle}>Account Confirmed!</Text>
               <Text style={styles.successSub}>
@@ -234,9 +234,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                 <View style={styles.demoHelperLeft}>
                   <Ionicons name="shield-checkmark" size={20} color="#2563EB" />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.demoHelperLabel}>
-                      Verification Code
-                    </Text>
+                    <Text style={styles.demoHelperLabel}>Verification Code</Text>
                     <Text style={styles.demoHelperCode}>
                       {currentExpectedCode}
                     </Text>
@@ -342,7 +340,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
               {
                 paddingBottom: Math.max(
                   insets.bottom + 20,
-                  Platform.OS === "android" ? 28 : 36,
+                  Platform.OS === "android" ? 28 : 36
                 ),
               },
             ]}
@@ -418,9 +416,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     paddingVertical: 8,
-    paddingHorizontal: 4,
     gap: 8,
     marginBottom: 16,
+  },
+  backButtonIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   backButtonText: {
     fontSize: 14,
@@ -605,9 +610,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "#DCFCE7",
-    borderWidth: 2,
-    borderColor: "#86EFAC",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,

@@ -1,13 +1,6 @@
-import React, { useState } from "react";
-import {
-  KeyRound,
-  X,
-  Loader2,
-  ArrowRight,
-  CheckCircle2,
-  AlertCircle,
-} from "lucide-react";
-import { useHousehold } from "../../contexts/HouseholdContext";
+import React, { useState } from 'react';
+import { KeyRound, X, Loader2, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useHousehold } from '../../contexts/HouseholdContext';
 
 interface JoinHouseholdModalProps {
   isOpen: boolean;
@@ -21,7 +14,7 @@ export const JoinHouseholdModal: React.FC<JoinHouseholdModalProps> = ({
   onSuccess,
 }) => {
   const { joinHousehold } = useHousehold();
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -32,7 +25,7 @@ export const JoinHouseholdModal: React.FC<JoinHouseholdModalProps> = ({
     e.preventDefault();
     const clean = code.trim();
     if (!clean) {
-      setError("Please enter your 5-6 character invite code (e.g. PF-402).");
+      setError('Please enter your 5-6 character invite code (e.g. PF-402).');
       return;
     }
 
@@ -43,26 +36,19 @@ export const JoinHouseholdModal: React.FC<JoinHouseholdModalProps> = ({
     try {
       const result = await joinHousehold(clean);
       if (result.success) {
-        setSuccessMessage(
-          "Join request sent! The room host must approve your request before you join.",
-        );
+        setSuccessMessage('Join request sent! The room host must approve your request before you join.');
         setTimeout(() => {
-          setCode("");
+          setCode('');
           setSuccessMessage(null);
           onClose();
           if (onSuccess) onSuccess();
         }, 1500);
       } else {
-        setError(
-          result.error ||
-            "No household found with that code. Please check with your host.",
-        );
+        setError(result.error || 'No household found with that code. Please check with your host.');
       }
     } catch (err: any) {
-      console.error("Failed to join household:", err);
-      setError(
-        err?.message || "Failed to join household. Please verify the code.",
-      );
+      console.error('Failed to join household:', err);
+      setError(err?.message || 'Failed to join household. Please verify the code.');
     } finally {
       setLoading(false);
     }
@@ -125,8 +111,7 @@ export const JoinHouseholdModal: React.FC<JoinHouseholdModalProps> = ({
               autoFocus
             />
             <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-              Ask your Host or Roommate for their 5 or 6-character code (shown
-              at the top of their dashboard or in Group Settings).
+              Ask your Host or Roommate for their 5 or 6-character code (shown at the top of their dashboard or in Group Settings).
             </p>
           </div>
 

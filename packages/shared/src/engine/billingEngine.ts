@@ -7,15 +7,9 @@ import {
   MemberBillItem,
   WaterAttendanceRecord,
   WaterConfig,
-} from "../types";
-import {
-  splitCentavosEvenly,
-  splitCentavosByPercentage,
-} from "../math/splitter";
-import {
-  DEFAULT_ELECTRICITY_RATE_CENTAVOS,
-  DEFAULT_WATER_RATE_CENTAVOS,
-} from "../constants";
+} from '../types';
+import { splitCentavosEvenly, splitCentavosByPercentage } from '../math/splitter';
+import { DEFAULT_ELECTRICITY_RATE_CENTAVOS, DEFAULT_WATER_RATE_CENTAVOS } from '../constants';
 
 export interface BillingEngineInput {
   billingCycle: BillingCycle;
@@ -42,9 +36,7 @@ export interface HouseholdBillingSummary {
   memberBills: MemberBill[];
 }
 
-export function calculateHouseholdBilling(
-  input: BillingEngineInput,
-): HouseholdBillingSummary {
+export function calculateHouseholdBilling(input: BillingEngineInput): HouseholdBillingSummary {
   const {
     billingCycle,
     members,
@@ -55,12 +47,8 @@ export function calculateHouseholdBilling(
     existingAdjustments = [],
   } = input;
 
-  const activeMembers = members.filter(
-    (m) => m.status === "ACTIVE" || !m.status,
-  );
-  const memberMap = new Map<string, HouseholdMember>(
-    members.map((m) => [m.userId || m.memberId, m]),
-  );
+  const activeMembers = members.filter((m) => m.status === 'ACTIVE' || !m.status);
+  const memberMap = new Map<string, HouseholdMember>(members.map((m) => [m.userId || m.memberId, m]));
 
   // Track member aggregates
   const memberRent = new Map<string, number>();
@@ -105,42 +93,30 @@ export function calculateHouseholdBilling(
   const resolveParticipants = (charge: Charge): string[] => {
     // Rent, Internet, Electricity are strictly distributed fairly across Payors only; Non-payors are exempt
     if (
-      charge.chargeType === "RENT" ||
-      charge.chargeType === "INTERNET" ||
-      charge.chargeType === "ELECTRICITY" ||
-      charge.distributionMethod === "PAYORS_ONLY"
+      charge.chargeType === 'RENT' ||
+      charge.chargeType === 'INTERNET' ||
+      charge.chargeType === 'ELECTRICITY' ||
+      charge.distributionMethod === 'PAYORS_ONLY'
     ) {
-      const payors = activeMembers
-        .filter((m) => m.role === "PAYOR")
-        .map((m) => m.userId || m.memberId);
+      const payors = activeMembers.filter((m) => m.role === 'PAYOR').map((m) => m.userId || m.memberId);
       if (payors.length > 0) return payors;
-      const eligible = activeMembers
-        .filter((m) => m.role !== "NON_PAYOR")
-        .map((m) => m.userId || m.memberId);
-      return eligible.length > 0
-        ? eligible
-        : activeMembers.map((m) => m.userId || m.memberId);
+      const eligible = activeMembers.filter((m) => m.role !== 'NON_PAYOR').map((m) => m.userId || m.memberId);
+      return eligible.length > 0 ? eligible : activeMembers.map((m) => m.userId || m.memberId);
     }
 
     switch (charge.distributionMethod) {
-      case "ALL_MEMBERS":
+      case 'ALL_MEMBERS':
         return activeMembers.map((m) => m.userId || m.memberId);
-      case "SELECTED_MEMBERS":
-      case "EQUAL_SPLIT":
+      case 'SELECTED_MEMBERS':
+      case 'EQUAL_SPLIT':
       default: {
         if (charge.participantUserIds && charge.participantUserIds.length > 0) {
           return charge.participantUserIds;
         }
-        const payors = activeMembers
-          .filter((m) => m.role === "PAYOR")
-          .map((m) => m.userId || m.memberId);
+        const payors = activeMembers.filter((m) => m.role === 'PAYOR').map((m) => m.userId || m.memberId);
         if (payors.length > 0) return payors;
-        const eligible = activeMembers
-          .filter((m) => m.role !== "NON_PAYOR")
-          .map((m) => m.userId || m.memberId);
-        return eligible.length > 0
-          ? eligible
-          : activeMembers.map((m) => m.userId || m.memberId);
+        const eligible = activeMembers.filter((m) => m.role !== 'NON_PAYOR').map((m) => m.userId || m.memberId);
+        return eligible.length > 0 ? eligible : activeMembers.map((m) => m.userId || m.memberId);
       }
     }
   };
@@ -152,18 +128,9 @@ export function calculateHouseholdBilling(
 
     let allocations: Array<{ userId: string; amountCentavos: number }> = [];
 
-    if (
-      charge.distributionMethod === "PERCENTAGE_ALLOCATION" &&
-      charge.percentages
-    ) {
-      allocations = splitCentavosByPercentage(
-        charge.amountCentavos,
-        charge.percentages,
-      );
-    } else if (
-      charge.distributionMethod === "FIXED_AMOUNTS" &&
-      charge.fixedAmounts
-    ) {
+    if (charge.distributionMethod === 'PERCENTAGE_ALLOCATION' && charge.percentages) {
+      allocations = splitCentavosByPercentage(charge.amountCentavos, charge.percentages);
+    } else if (charge.distributionMethod === 'FIXED_AMOUNTS' && charge.fixedAmounts) {
       allocations = participants.map((uid) => ({
         userId: uid,
         amountCentavos: charge.fixedAmounts?.[uid] || 0,
@@ -172,62 +139,50 @@ export function calculateHouseholdBilling(
       allocations = splitCentavosEvenly(charge.amountCentavos, participants);
     }
 
-    if (charge.chargeType === "RENT") {
+    if (charge.chargeType === 'RENT') {
       rentTotalCentavos += charge.amountCentavos;
       for (const alloc of allocations) {
-        memberRent.set(
-          alloc.userId,
-          (memberRent.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberRent.set(alloc.userId, (memberRent.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
           chargeId: charge.chargeId,
-          chargeType: "RENT",
-          name: charge.name || "Rent",
+          chargeType: 'RENT',
+          name: charge.name || 'Rent',
           amountCentavos: alloc.amountCentavos,
           details: `Rent share (${allocations.length} payors)`,
         });
       }
-    } else if (charge.chargeType === "INTERNET") {
+    } else if (charge.chargeType === 'INTERNET') {
       internetTotalCentavos += charge.amountCentavos;
       for (const alloc of allocations) {
-        memberInternet.set(
-          alloc.userId,
-          (memberInternet.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberInternet.set(alloc.userId, (memberInternet.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
           chargeId: charge.chargeId,
-          chargeType: "INTERNET",
-          name: charge.name || "Internet",
+          chargeType: 'INTERNET',
+          name: charge.name || 'Internet',
           amountCentavos: alloc.amountCentavos,
           details: `Internet share (${allocations.length} payors)`,
         });
       }
-    } else if (charge.chargeType === "ELECTRICITY") {
+    } else if (charge.chargeType === 'ELECTRICITY') {
       electricityTotalCentavos += charge.amountCentavos;
       for (const alloc of allocations) {
-        memberElectricity.set(
-          alloc.userId,
-          (memberElectricity.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberElectricity.set(alloc.userId, (memberElectricity.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
           chargeId: charge.chargeId,
-          chargeType: "ELECTRICITY",
-          name: charge.name || "Electricity",
+          chargeType: 'ELECTRICITY',
+          name: charge.name || 'Electricity',
           amountCentavos: alloc.amountCentavos,
           details: `Electricity share (${allocations.length} payors)`,
         });
       }
-    } else if (charge.chargeType === "WATER") {
+    } else if (charge.chargeType === 'WATER') {
       waterTotalCentavos += charge.amountCentavos;
       for (const alloc of allocations) {
-        memberWater.set(
-          alloc.userId,
-          (memberWater.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberWater.set(alloc.userId, (memberWater.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
           chargeId: charge.chargeId,
-          chargeType: "WATER",
-          name: charge.name || "Water",
+          chargeType: 'WATER',
+          name: charge.name || 'Water',
           amountCentavos: alloc.amountCentavos,
           details: `Water share (${allocations.length} payors)`,
         });
@@ -235,53 +190,37 @@ export function calculateHouseholdBilling(
     } else {
       customChargesTotalCentavos += charge.amountCentavos;
       for (const alloc of allocations) {
-        memberCustom.set(
-          alloc.userId,
-          (memberCustom.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberCustom.set(alloc.userId, (memberCustom.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
           chargeId: charge.chargeId,
-          chargeType: "CUSTOM",
+          chargeType: 'CUSTOM',
           name: charge.name,
           amountCentavos: alloc.amountCentavos,
-          details: charge.description || "Custom expense",
+          details: charge.description || 'Custom expense',
         });
       }
     }
   }
 
   // 2. Process Electricity from sub-meter configuration
-  if (
-    electricityConfig &&
-    electricityConfig.currentReading > electricityConfig.previousReading
-  ) {
+  if (electricityConfig && electricityConfig.currentReading > electricityConfig.previousReading) {
     const consumptionKwh = Math.max(
       0,
-      electricityConfig.currentReading - electricityConfig.previousReading,
+      electricityConfig.currentReading - electricityConfig.previousReading
     );
-    const rate =
-      electricityConfig.electricityRateCentavosPerKwh ||
-      DEFAULT_ELECTRICITY_RATE_CENTAVOS;
+    const rate = electricityConfig.electricityRateCentavosPerKwh || DEFAULT_ELECTRICITY_RATE_CENTAVOS;
     const totalElecCentavos = consumptionKwh * rate;
     electricityTotalCentavos += totalElecCentavos;
 
-    const elecParticipants = activeMembers
-      .filter((m) => m.role === "PAYOR")
-      .map((m) => m.userId);
-    const elecAllocations = splitCentavosEvenly(
-      totalElecCentavos,
-      elecParticipants,
-    );
+    const elecParticipants = activeMembers.filter((m) => m.role === 'PAYOR').map((m) => m.userId);
+    const elecAllocations = splitCentavosEvenly(totalElecCentavos, elecParticipants);
 
     for (const alloc of elecAllocations) {
-      memberElectricity.set(
-        alloc.userId,
-        (memberElectricity.get(alloc.userId) || 0) + alloc.amountCentavos,
-      );
+      memberElectricity.set(alloc.userId, (memberElectricity.get(alloc.userId) || 0) + alloc.amountCentavos);
       memberItems.get(alloc.userId)?.push({
-        chargeId: "electricity-meter-charge",
-        chargeType: "ELECTRICITY",
-        name: "Electricity Meter",
+        chargeId: 'electricity-meter-charge',
+        chargeType: 'ELECTRICITY',
+        name: 'Electricity Meter',
         amountCentavos: alloc.amountCentavos,
         details: `${consumptionKwh} kWh @ ₱${rate / 100}/kWh (${allocationsSummary(consumptionKwh, rate)})`,
       });
@@ -289,31 +228,25 @@ export function calculateHouseholdBilling(
   }
 
   // 3. Process Water (Mode 1: Per Person/Day attendance, Mode 2: Fixed Household Monthly, Mode 3: Fixed Per Person Monthly)
-  const isFixedPerPersonMonth =
-    waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH";
+  const isFixedPerPersonMonth = waterConfig?.pricingModel === 'FIXED_PER_PERSON_MONTH';
   const isFixedMonthly =
-    waterConfig?.pricingModel === "FIXED_MONTHLY" ||
-    (!isFixedPerPersonMonth &&
-      Boolean(waterConfig?.fixedMonthlyAmountCentavos) &&
-      (waterConfig?.fixedMonthlyAmountCentavos || 0) > 0);
+    waterConfig?.pricingModel === 'FIXED_MONTHLY' ||
+    (!isFixedPerPersonMonth && Boolean(waterConfig?.fixedMonthlyAmountCentavos) && (waterConfig?.fixedMonthlyAmountCentavos || 0) > 0);
 
-  const payorMembers = activeMembers.filter((m) => m.role === "PAYOR");
-  const nonPayorMembers = activeMembers.filter((m) => m.role !== "PAYOR");
+  const payorMembers = activeMembers.filter((m) => m.role === 'PAYOR');
+  const nonPayorMembers = activeMembers.filter((m) => m.role !== 'PAYOR');
 
   if (isFixedPerPersonMonth) {
     // Mode 3: Fixed Per Person Monthly (e.g. ₱150.00 / resident / month)
     const perPersonCentavos = waterConfig?.fixedPerPersonAmountCentavos || 0;
     if (perPersonCentavos > 0 && payorMembers.length > 0) {
       for (const m of payorMembers) {
-        memberWater.set(
-          m.userId,
-          (memberWater.get(m.userId) || 0) + perPersonCentavos,
-        );
+        memberWater.set(m.userId, (memberWater.get(m.userId) || 0) + perPersonCentavos);
         waterTotalCentavos += perPersonCentavos;
         memberItems.get(m.userId)?.push({
-          chargeId: "water-fixed-per-person-charge",
-          chargeType: "WATER",
-          name: "Water (Fixed / Person)",
+          chargeId: 'water-fixed-per-person-charge',
+          chargeType: 'WATER',
+          name: 'Water (Fixed / Person)',
           amountCentavos: perPersonCentavos,
           details: `Flat fee of ₱${(perPersonCentavos / 100).toFixed(2)}/resident/month`,
         });
@@ -326,17 +259,14 @@ export function calculateHouseholdBilling(
       waterTotalCentavos += fixedAmountCentavos;
       const fixedWaterAllocations = splitCentavosEvenly(
         fixedAmountCentavos,
-        payorMembers.map((m) => m.userId),
+        payorMembers.map((m) => m.userId)
       );
       for (const alloc of fixedWaterAllocations) {
-        memberWater.set(
-          alloc.userId,
-          (memberWater.get(alloc.userId) || 0) + alloc.amountCentavos,
-        );
+        memberWater.set(alloc.userId, (memberWater.get(alloc.userId) || 0) + alloc.amountCentavos);
         memberItems.get(alloc.userId)?.push({
-          chargeId: "water-fixed-charge",
-          chargeType: "WATER",
-          name: "Water (Fixed Monthly)",
+          chargeId: 'water-fixed-charge',
+          chargeType: 'WATER',
+          name: 'Water (Fixed Monthly)',
           amountCentavos: alloc.amountCentavos,
           details: `Household water bill (₱${(fixedAmountCentavos / 100).toFixed(2)}) split evenly across ${payorMembers.length} paying roommates`,
         });
@@ -344,21 +274,20 @@ export function calculateHouseholdBilling(
     }
   } else {
     // Per Person / Day (Default ₱5.00/person/day)
-    const waterRate =
-      waterConfig?.rateCentavosPerPersonPerDay || DEFAULT_WATER_RATE_CENTAVOS;
+    const waterRate = waterConfig?.rateCentavosPerPersonPerDay || DEFAULT_WATER_RATE_CENTAVOS;
     let nonPayorWaterTotalCentavos = 0;
     const payorIndividualWater = new Map<string, number>();
 
     for (const m of activeMembers) {
       const presentRecords = waterAttendance.filter(
-        (a) => a.userId === m.userId && a.status === "PRESENT",
+        (a) => a.userId === m.userId && a.status === 'PRESENT'
       );
       const daysPresent = presentRecords.length;
       memberWaterDays.set(m.userId, daysPresent);
 
       const consumptionCentavos = daysPresent * waterRate;
 
-      if (m.role === "PAYOR") {
+      if (m.role === 'PAYOR') {
         payorIndividualWater.set(m.userId, consumptionCentavos);
       } else {
         // Non-payors are exempted from paying, but their water consumption is tracked and distributed fairly to payors
@@ -370,13 +299,10 @@ export function calculateHouseholdBilling(
     // Distribute non-payors' water consumption fairly across all payors
     const nonPayorSplits =
       payorMembers.length > 0 && nonPayorWaterTotalCentavos > 0
-        ? splitCentavosEvenly(
-            nonPayorWaterTotalCentavos,
-            payorMembers.map((m) => m.userId),
-          )
+        ? splitCentavosEvenly(nonPayorWaterTotalCentavos, payorMembers.map((m) => m.userId))
         : [];
     const nonPayorSplitMap = new Map<string, number>(
-      nonPayorSplits.map((s) => [s.userId, s.amountCentavos]),
+      nonPayorSplits.map((s) => [s.userId, s.amountCentavos])
     );
 
     for (const m of payorMembers) {
@@ -384,10 +310,7 @@ export function calculateHouseholdBilling(
       const nonPayorShare = nonPayorSplitMap.get(m.userId) || 0;
       const totalPayorWater = ownWater + nonPayorShare;
 
-      memberWater.set(
-        m.userId,
-        (memberWater.get(m.userId) || 0) + totalPayorWater,
-      );
+      memberWater.set(m.userId, (memberWater.get(m.userId) || 0) + totalPayorWater);
       waterTotalCentavos += totalPayorWater;
 
       const daysPresent = memberWaterDays.get(m.userId) || 0;
@@ -397,9 +320,9 @@ export function calculateHouseholdBilling(
           : `${daysPresent} days present @ ₱${waterRate / 100}/day`;
 
       memberItems.get(m.userId)?.push({
-        chargeId: "water-attendance-charge",
-        chargeType: "WATER",
-        name: "Water Attendance",
+        chargeId: 'water-attendance-charge',
+        chargeType: 'WATER',
+        name: 'Water Attendance',
         amountCentavos: totalPayorWater,
         details,
       });
@@ -411,12 +334,12 @@ export function calculateHouseholdBilling(
     adjustmentsTotalCentavos += adj.amountCentavos;
     memberAdjustments.set(
       adj.userId,
-      (memberAdjustments.get(adj.userId) || 0) + adj.amountCentavos,
+      (memberAdjustments.get(adj.userId) || 0) + adj.amountCentavos
     );
     memberItems.get(adj.userId)?.push({
-      chargeId: "adjustment-charge",
-      chargeType: "CUSTOM",
-      name: "Adjustment",
+      chargeId: 'adjustment-charge',
+      chargeType: 'CUSTOM',
+      name: 'Adjustment',
       amountCentavos: adj.amountCentavos,
       details: adj.reason,
     });
@@ -433,30 +356,12 @@ export function calculateHouseholdBilling(
   // Build final member bills
   const memberBills: MemberBill[] = members.map((m) => {
     const id = m.userId || m.memberId;
-    const r =
-      (m.userId ? memberRent.get(m.userId) : undefined) ??
-      memberRent.get(id) ??
-      0;
-    const i =
-      (m.userId ? memberInternet.get(m.userId) : undefined) ??
-      memberInternet.get(id) ??
-      0;
-    const e =
-      (m.userId ? memberElectricity.get(m.userId) : undefined) ??
-      memberElectricity.get(id) ??
-      0;
-    const w =
-      (m.userId ? memberWater.get(m.userId) : undefined) ??
-      memberWater.get(id) ??
-      0;
-    const c =
-      (m.userId ? memberCustom.get(m.userId) : undefined) ??
-      memberCustom.get(id) ??
-      0;
-    const a =
-      (m.userId ? memberAdjustments.get(m.userId) : undefined) ??
-      memberAdjustments.get(id) ??
-      0;
+    const r = (m.userId ? memberRent.get(m.userId) : undefined) ?? memberRent.get(id) ?? 0;
+    const i = (m.userId ? memberInternet.get(m.userId) : undefined) ?? memberInternet.get(id) ?? 0;
+    const e = (m.userId ? memberElectricity.get(m.userId) : undefined) ?? memberElectricity.get(id) ?? 0;
+    const w = (m.userId ? memberWater.get(m.userId) : undefined) ?? memberWater.get(id) ?? 0;
+    const c = (m.userId ? memberCustom.get(m.userId) : undefined) ?? memberCustom.get(id) ?? 0;
+    const a = (m.userId ? memberAdjustments.get(m.userId) : undefined) ?? memberAdjustments.get(id) ?? 0;
     const totalDue = r + i + e + w + c + a;
 
     return {
@@ -464,7 +369,7 @@ export function calculateHouseholdBilling(
       householdId: billingCycle.householdId,
       billingCycleId: billingCycle.billingCycleId,
       userId: id,
-      userName: m.displayName || memberMap.get(id)?.displayName || "Resident",
+      userName: m.displayName || memberMap.get(id)?.displayName || 'Resident',
       userRole: m.role,
       rentCentavos: r,
       internetCentavos: i,
@@ -475,15 +380,9 @@ export function calculateHouseholdBilling(
       totalDueCentavos: totalDue,
       paidCentavos: 0,
       outstandingCentavos: totalDue,
-      status: totalDue === 0 ? "PAID" : "UNPAID",
-      items:
-        (m.userId ? memberItems.get(m.userId) : undefined) ||
-        memberItems.get(id) ||
-        [],
-      waterDaysPresent:
-        (m.userId ? memberWaterDays.get(m.userId) : undefined) ??
-        memberWaterDays.get(id) ??
-        0,
+      status: totalDue === 0 ? 'PAID' : 'UNPAID',
+      items: (m.userId ? memberItems.get(m.userId) : undefined) || memberItems.get(id) || [],
+      waterDaysPresent: (m.userId ? memberWaterDays.get(m.userId) : undefined) ?? memberWaterDays.get(id) ?? 0,
       finalizedAt: new Date().toISOString(),
     };
   });
@@ -503,3 +402,4 @@ export function calculateHouseholdBilling(
 function allocationsSummary(kwh: number, rateCentavos: number): string {
   return `${kwh} kWh × ₱${rateCentavos / 100}`;
 }
+

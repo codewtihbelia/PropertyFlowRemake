@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { mobileDataService } from "../services/firebaseDataService";
+import { SmoothBottomSheetModal } from "./SmoothBottomSheetModal";
 
 export type WaterPricingModel =
   | "PER_PERSON_DAY"
@@ -151,288 +152,241 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
   };
 
   return (
-    <Modal
+    <SmoothBottomSheetModal
       visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
+      onClose={onClose}
+      variant="bottom-sheet"
+      showChipBar={true}
+      title="Water Billing Settings"
+      subtitle="Configure how water is billed & logged"
+      icon={<Feather name="droplet" size={18} color="#0284C7" />}
+      maxHeight="90%"
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.modalOverlay}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollBody}
       >
-        <View style={styles.modalBackdrop}>
+        {/* Segmented Mode Selector */}
+        <Text style={styles.sectionLabel}>Select Pricing Model</Text>
+        <View style={styles.segmentContainer}>
+          {/* Mode 1 */}
           <TouchableOpacity
-            style={styles.dismissArea}
-            activeOpacity={1}
-            onPress={onClose}
-          />
-          <View style={styles.modalContainer}>
-            {/* Header */}
-            <View style={styles.headerRow}>
-              <View style={styles.titleWrap}>
-                <View style={styles.dropletIconBadge}>
-                  <Feather name="droplet" size={18} color="#0284C7" />
-                </View>
-                <View>
-                  <Text style={styles.modalTitle}>Water Billing Settings</Text>
-                  <Text style={styles.modalSubtitle}>
-                    Configure how water is billed & logged
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                <Feather name="x" size={20} color="#64748B" />
-              </TouchableOpacity>
+            style={[
+              styles.segmentBtn,
+              selectedMode === "PER_PERSON_DAY" && styles.segmentBtnActive,
+            ]}
+            onPress={() => setSelectedMode("PER_PERSON_DAY")}
+            activeOpacity={0.8}
+          >
+            <Feather
+              name="calendar"
+              size={14}
+              color={selectedMode === "PER_PERSON_DAY" ? "#0284C7" : "#64748B"}
+            />
+            <Text
+              style={[
+                styles.segmentBtnText,
+                selectedMode === "PER_PERSON_DAY" &&
+                  styles.segmentBtnTextActive,
+              ]}
+            >
+              ₱/P/D
+            </Text>
+          </TouchableOpacity>
+
+          {/* Mode 2 */}
+          <TouchableOpacity
+            style={[
+              styles.segmentBtn,
+              selectedMode === "FIXED_MONTHLY" && styles.segmentBtnActive,
+            ]}
+            onPress={() => setSelectedMode("FIXED_MONTHLY")}
+            activeOpacity={0.8}
+          >
+            <Feather
+              name="users"
+              size={14}
+              color={selectedMode === "FIXED_MONTHLY" ? "#0284C7" : "#64748B"}
+            />
+            <Text
+              style={[
+                styles.segmentBtnText,
+                selectedMode === "FIXED_MONTHLY" && styles.segmentBtnTextActive,
+              ]}
+            >
+              FMo
+            </Text>
+          </TouchableOpacity>
+
+          {/* Mode 3 */}
+          <TouchableOpacity
+            style={[
+              styles.segmentBtn,
+              selectedMode === "FIXED_PER_PERSON_MONTH" &&
+                styles.segmentBtnActive,
+            ]}
+            onPress={() => setSelectedMode("FIXED_PER_PERSON_MONTH")}
+            activeOpacity={0.8}
+          >
+            <Feather
+              name="user"
+              size={14}
+              color={
+                selectedMode === "FIXED_PER_PERSON_MONTH"
+                  ? "#0284C7"
+                  : "#64748B"
+              }
+            />
+            <Text
+              style={[
+                styles.segmentBtnText,
+                selectedMode === "FIXED_PER_PERSON_MONTH" &&
+                  styles.segmentBtnTextActive,
+              ]}
+            >
+              F/P/Mo
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Mode-Specific Input Field */}
+        {selectedMode === "PER_PERSON_DAY" && (
+          <View style={styles.inputSection}>
+            <Text style={styles.inputFieldLabel}>
+              Daily Water Rate (₱ per person / day present)
+            </Text>
+            <View style={styles.currencyInputRow}>
+              <Text style={styles.currencyPrefix}>₱</Text>
+              <TextInput
+                style={styles.currencyTextInput}
+                value={dailyRateInput}
+                onChangeText={setDailyRateInput}
+                keyboardType="decimal-pad"
+                placeholder="5.00"
+                placeholderTextColor="#94A3B8"
+              />
             </View>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.scrollBody}
-            >
-              {/* Segmented Mode Selector */}
-              <Text style={styles.sectionLabel}>Select Pricing Model</Text>
-              <View style={styles.segmentContainer}>
-                {/* Mode 1 */}
-                <TouchableOpacity
-                  style={[
-                    styles.segmentBtn,
-                    selectedMode === "PER_PERSON_DAY" &&
-                      styles.segmentBtnActive,
-                  ]}
-                  onPress={() => setSelectedMode("PER_PERSON_DAY")}
-                  activeOpacity={0.8}
-                >
-                  <Feather
-                    name="calendar"
-                    size={14}
-                    color={
-                      selectedMode === "PER_PERSON_DAY" ? "#0284C7" : "#64748B"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.segmentBtnText,
-                      selectedMode === "PER_PERSON_DAY" &&
-                        styles.segmentBtnTextActive,
-                    ]}
-                  >
-                    ₱ / Person / Day
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Mode 2 */}
-                <TouchableOpacity
-                  style={[
-                    styles.segmentBtn,
-                    selectedMode === "FIXED_MONTHLY" && styles.segmentBtnActive,
-                  ]}
-                  onPress={() => setSelectedMode("FIXED_MONTHLY")}
-                  activeOpacity={0.8}
-                >
-                  <Feather
-                    name="users"
-                    size={14}
-                    color={
-                      selectedMode === "FIXED_MONTHLY" ? "#0284C7" : "#64748B"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.segmentBtnText,
-                      selectedMode === "FIXED_MONTHLY" &&
-                        styles.segmentBtnTextActive,
-                    ]}
-                  >
-                    Fixed Monthly Total
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Mode 3 */}
-                <TouchableOpacity
-                  style={[
-                    styles.segmentBtn,
-                    selectedMode === "FIXED_PER_PERSON_MONTH" &&
-                      styles.segmentBtnActive,
-                  ]}
-                  onPress={() => setSelectedMode("FIXED_PER_PERSON_MONTH")}
-                  activeOpacity={0.8}
-                >
-                  <Feather
-                    name="user"
-                    size={14}
-                    color={
-                      selectedMode === "FIXED_PER_PERSON_MONTH"
-                        ? "#0284C7"
-                        : "#64748B"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.segmentBtnText,
-                      selectedMode === "FIXED_PER_PERSON_MONTH" &&
-                        styles.segmentBtnTextActive,
-                    ]}
-                  >
-                    Fixed / Person / Mo
-                  </Text>
-                </TouchableOpacity>
+            <View style={styles.infoCard}>
+              <View style={styles.infoIconBox}>
+                <Ionicons name="information-circle" size={18} color="#0284C7" />
               </View>
-
-              {/* Mode-Specific Input Field */}
-              {selectedMode === "PER_PERSON_DAY" && (
-                <View style={styles.inputSection}>
-                  <Text style={styles.inputFieldLabel}>
-                    Daily Water Rate (₱ per person / day present)
-                  </Text>
-                  <View style={styles.currencyInputRow}>
-                    <Text style={styles.currencyPrefix}>₱</Text>
-                    <TextInput
-                      style={styles.currencyTextInput}
-                      value={dailyRateInput}
-                      onChangeText={setDailyRateInput}
-                      keyboardType="decimal-pad"
-                      placeholder="5.00"
-                      placeholderTextColor="#94A3B8"
-                    />
-                  </View>
-
-                  <View style={styles.infoCard}>
-                    <View style={styles.infoIconBox}>
-                      <Ionicons
-                        name="information-circle"
-                        size={18}
-                        color="#0284C7"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.infoTitle}>
-                        Daily Attendance Calendar Active
-                      </Text>
-                      <Text style={styles.infoDesc}>
-                        Roommates mark their stay on the interactive calendar.
-                        Water dues equal verified days present × ₱
-                        {dailyRateInput || "0.00"}. Non-payor consumption is
-                        automatically absorbed fairly across paying roommates.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {selectedMode === "FIXED_MONTHLY" && (
-                <View style={styles.inputSection}>
-                  <Text style={styles.inputFieldLabel}>
-                    Total Household Monthly Water Bill (₱)
-                  </Text>
-                  <View style={styles.currencyInputRow}>
-                    <Text style={styles.currencyPrefix}>₱</Text>
-                    <TextInput
-                      style={styles.currencyTextInput}
-                      value={fixedMonthlyInput}
-                      onChangeText={setFixedMonthlyInput}
-                      keyboardType="decimal-pad"
-                      placeholder="1200.00"
-                      placeholderTextColor="#94A3B8"
-                    />
-                  </View>
-
-                  <View style={styles.infoCard}>
-                    <View style={styles.infoIconBox}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#059669"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.infoTitle, { color: "#065F46" }]}>
-                        No Daily Attendance Required
-                      </Text>
-                      <Text style={styles.infoDesc}>
-                        The total household bill of ₱
-                        {fixedMonthlyInput || "0.00"} is split evenly across all
-                        active paying roommates. Roommates see an informational
-                        notice instead of the attendance calendar.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {selectedMode === "FIXED_PER_PERSON_MONTH" && (
-                <View style={styles.inputSection}>
-                  <Text style={styles.inputFieldLabel}>
-                    Fixed Rate Per Person (₱ / resident / month)
-                  </Text>
-                  <View style={styles.currencyInputRow}>
-                    <Text style={styles.currencyPrefix}>₱</Text>
-                    <TextInput
-                      style={styles.currencyTextInput}
-                      value={fixedPerPersonInput}
-                      onChangeText={setFixedPerPersonInput}
-                      keyboardType="decimal-pad"
-                      placeholder="150.00"
-                      placeholderTextColor="#94A3B8"
-                    />
-                  </View>
-
-                  <View style={styles.infoCard}>
-                    <View style={styles.infoIconBox}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color="#059669"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.infoTitle, { color: "#065F46" }]}>
-                        Flat Rate Per Resident
-                      </Text>
-                      <Text style={styles.infoDesc}>
-                        Each paying roommate is charged a flat fee of ₱
-                        {fixedPerPersonInput || "0.00"} every month. Attendance
-                        logging is disabled for roommates.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-            </ScrollView>
-
-            {/* Bottom Actions */}
-            <View style={styles.bottomBar}>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={onClose}
-                disabled={saving}
-              >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveBtn, saving && { opacity: 0.7 }]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Feather
-                      name="check"
-                      size={16}
-                      color="#FFFFFF"
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text style={styles.saveBtnText}>Save Water Settings</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>
+                  Daily Attendance Calendar Active
+                </Text>
+                <Text style={styles.infoDesc}>
+                  Roommates mark their stay on the interactive calendar. Water
+                  dues equal verified days present × ₱{dailyRateInput || "0.00"}
+                  . Non-payor consumption is automatically absorbed fairly
+                  across paying roommates.
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+        )}
+
+        {selectedMode === "FIXED_MONTHLY" && (
+          <View style={styles.inputSection}>
+            <Text style={styles.inputFieldLabel}>
+              Total Household Monthly Water Bill (₱)
+            </Text>
+            <View style={styles.currencyInputRow}>
+              <Text style={styles.currencyPrefix}>₱</Text>
+              <TextInput
+                style={styles.currencyTextInput}
+                value={fixedMonthlyInput}
+                onChangeText={setFixedMonthlyInput}
+                keyboardType="decimal-pad"
+                placeholder="1200.00"
+                placeholderTextColor="#94A3B8"
+              />
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoIconBox}>
+                <Ionicons name="checkmark-circle" size={18} color="#059669" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.infoTitle, { color: "#065F46" }]}>
+                  No Daily Attendance Required
+                </Text>
+                <Text style={styles.infoDesc}>
+                  The total household bill of ₱{fixedMonthlyInput || "0.00"} is
+                  split evenly across all active paying roommates. Roommates see
+                  an informational notice instead of the attendance calendar.
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {selectedMode === "FIXED_PER_PERSON_MONTH" && (
+          <View style={styles.inputSection}>
+            <Text style={styles.inputFieldLabel}>
+              Fixed Rate Per Person (₱ / resident / month)
+            </Text>
+            <View style={styles.currencyInputRow}>
+              <Text style={styles.currencyPrefix}>₱</Text>
+              <TextInput
+                style={styles.currencyTextInput}
+                value={fixedPerPersonInput}
+                onChangeText={setFixedPerPersonInput}
+                keyboardType="decimal-pad"
+                placeholder="150.00"
+                placeholderTextColor="#94A3B8"
+              />
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoIconBox}>
+                <Ionicons name="checkmark-circle" size={18} color="#059669" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.infoTitle, { color: "#065F46" }]}>
+                  Flat Rate Per Resident
+                </Text>
+                <Text style={styles.infoDesc}>
+                  Each paying roommate is charged a flat fee of ₱
+                  {fixedPerPersonInput || "0.00"} every month. Attendance
+                  logging is disabled for roommates.
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Bottom Actions */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={styles.cancelBtn}
+          onPress={onClose}
+          disabled={saving}
+        >
+          <Text style={styles.cancelBtnText}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+          onPress={handleSave}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Feather
+                name="check"
+                size={16}
+                color="#FFFFFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.saveBtnText}>Save Water Settings</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    </SmoothBottomSheetModal>
   );
 };
 
@@ -554,7 +508,7 @@ const styles = StyleSheet.create({
   currencyInputRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#CBD5E1",
     borderRadius: 16,
     backgroundColor: "#F8FAFC",

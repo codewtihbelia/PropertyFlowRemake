@@ -4,17 +4,7 @@ import { useHousehold } from "../../contexts/HouseholdContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { JoinHouseholdModal } from "./JoinHouseholdModal";
 import { CreateRoomModal } from "../CreateRoomModal";
-import {
-  Bell,
-  Check,
-  X,
-  Shield,
-  User,
-  LogOut,
-  KeyRound,
-  Copy,
-  Plus,
-} from "lucide-react";
+import { Bell, Check, X, Shield, User, LogOut, KeyRound, Copy, Plus } from "lucide-react";
 
 export const Header: React.FC<{
   onMenuToggle?: () => void;
@@ -30,29 +20,23 @@ export const Header: React.FC<{
   const [copiedCode, setCopiedCode] = useState(false);
 
   const isUserHost = Boolean(
-    currentUser?.role === "HOST" ||
-    currentUser?.hostApplicationStatus === "APPROVED" ||
+    currentUser?.role === 'HOST' ||
+    currentUser?.hostApplicationStatus === 'APPROVED' ||
     (household?.hostId && household.hostId === currentUser?.uid) ||
     members.some(
       (m) =>
-        (m.userId === currentUser?.uid ||
-          m.memberId === currentUser?.uid ||
-          m.memberId === `mem_${currentUser?.uid}`) &&
-        m.role === "HOST",
-    ),
+        (m.userId === currentUser?.uid || m.memberId === currentUser?.uid || m.memberId === `mem_${currentUser?.uid}`) &&
+        m.role === 'HOST'
+    )
   );
 
   const hasGroup = Boolean(
     household?.householdId &&
     household?.householdName &&
-    household?.householdName !== "No household connected",
+    household?.householdName !== 'No household connected'
   );
 
-  const displayCode =
-    household?.inviteCode ||
-    (household?.householdId
-      ? `PF-${household.householdId.slice(-4).toUpperCase()}`
-      : null);
+  const displayCode = household?.inviteCode || (household?.householdId ? `PF-${household.householdId.slice(-4).toUpperCase()}` : null);
 
   const handleCopyCode = () => {
     if (!displayCode) return;
@@ -119,7 +103,7 @@ export const Header: React.FC<{
               className="ml-1 text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded-md cursor-pointer transition flex items-center gap-0.5"
               title="Copy household invite code"
             >
-              <span>{copiedCode ? "Copied" : "Copy"}</span>
+              <span>{copiedCode ? 'Copied' : 'Copy'}</span>
             </button>
           </div>
         ) : (
@@ -227,10 +211,10 @@ export const Header: React.FC<{
               {isUserHost
                 ? "HOST / PAYOR"
                 : currentUser?.role === "SUPER_ADMIN"
-                  ? "SUPER ADMIN"
-                  : currentUser?.role === "NON_PAYOR"
-                    ? "NON-PAYOR"
-                    : "PAYOR"}
+                ? "SUPER ADMIN"
+                : currentUser?.role === "NON_PAYOR"
+                ? "NON-PAYOR"
+                : "PAYOR"}
             </div>
           </div>
 

@@ -1,10 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useRef,
-  useState,
-  useCallback,
-} from "react";
+import React, { createContext, useContext, useRef, useState, useCallback } from "react";
 import {
   Animated,
   NativeSyntheticEvent,
@@ -88,7 +82,7 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
 
       lastOffsetY.current = currentY;
     },
-    [showNav, hideNav],
+    [showNav, hideNav]
   );
 
   return (

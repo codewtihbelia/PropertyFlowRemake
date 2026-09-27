@@ -1,14 +1,6 @@
-import React, { useState } from "react";
-import {
-  Home,
-  Building,
-  MapPin,
-  FileText,
-  X,
-  Sparkles,
-  Loader2,
-} from "lucide-react";
-import { useHousehold } from "../contexts/HouseholdContext";
+import React, { useState } from 'react';
+import { Home, Building, MapPin, FileText, X, Sparkles, Loader2 } from 'lucide-react';
+import { useHousehold } from '../contexts/HouseholdContext';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -16,16 +8,12 @@ interface CreateRoomModalProps {
   onSuccess?: (householdId: string) => void;
 }
 
-export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
-  isOpen,
-  onClose,
-  onSuccess,
-}) => {
+export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { createHousehold } = useHousehold();
-  const [householdName, setHouseholdName] = useState("");
-  const [apartmentName, setApartmentName] = useState("");
-  const [address, setAddress] = useState("");
-  const [description, setDescription] = useState("");
+  const [householdName, setHouseholdName] = useState('');
+  const [apartmentName, setApartmentName] = useState('');
+  const [address, setAddress] = useState('');
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +22,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!householdName.trim()) {
-      setError("Please provide a name for your room or household.");
+      setError('Please provide a name for your room or household.');
       return;
     }
 
@@ -47,17 +35,17 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
         address,
         description,
       });
-      setHouseholdName("");
-      setApartmentName("");
-      setAddress("");
-      setDescription("");
+      setHouseholdName('');
+      setApartmentName('');
+      setAddress('');
+      setDescription('');
       onClose();
       if (onSuccess) {
         onSuccess(newId);
       }
     } catch (err: any) {
-      console.error("Failed to create room:", err);
-      setError(err?.message || "Failed to create room. Please try again.");
+      console.error('Failed to create room:', err);
+      setError(err?.message || 'Failed to create room. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -118,16 +106,14 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               />
             </div>
             <p className="text-[11px] text-slate-400 mt-1">
-              This name will be shown to your roommates on invitations and
-              invoices.
+              This name will be shown to your roommates on invitations and invoices.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-                <Building className="w-3.5 h-3.5 text-slate-400" /> Apartment /
-                Building
+                <Building className="w-3.5 h-3.5 text-slate-400" /> Apartment / Building
               </label>
               <input
                 type="text"
@@ -140,8 +126,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-slate-400" /> Address /
-                Location
+                <MapPin className="w-3.5 h-3.5 text-slate-400" /> Address / Location
               </label>
               <input
                 type="text"
@@ -155,8 +140,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
-              <FileText className="w-3.5 h-3.5 text-slate-400" /> Description or
-              House Rules (Optional)
+              <FileText className="w-3.5 h-3.5 text-slate-400" /> Description or House Rules (Optional)
             </label>
             <textarea
               value={description}

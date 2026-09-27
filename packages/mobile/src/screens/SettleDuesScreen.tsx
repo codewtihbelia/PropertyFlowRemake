@@ -64,11 +64,7 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={onBack}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
           <Feather name="arrow-left" size={20} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settle Dues</Text>
@@ -98,14 +94,8 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
           {dues.map((item) => (
             <View key={item.id} style={styles.dueItem}>
               <View style={styles.dueItemLeft}>
-                <View
-                  style={[styles.dueIconWrap, { backgroundColor: item.bg }]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={18}
-                    color={item.color}
-                  />
+                <View style={[styles.dueIconWrap, { backgroundColor: item.bg }]}>
+                  <Ionicons name={item.icon as any} size={18} color={item.color} />
                 </View>
                 <View>
                   <Text style={styles.dueName}>{item.name}</Text>

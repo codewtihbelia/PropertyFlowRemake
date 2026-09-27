@@ -9,10 +9,11 @@ import {
   centavosToPesos,
 } from "@propertyflow/shared";
 import { Droplets, Check, X, Minus, Lock, Calendar } from "lucide-react";
+import { UniversalLoader } from "../../components/common/UniversalLoader";
 
 export const ClientAttendance: React.FC = () => {
   const { currentUser } = useAuth();
-  const { household, activeCycle } = useHousehold();
+  const { household, activeCycle, loading } = useHousehold();
   const state = getAppState();
 
   const currentCycle =
@@ -21,6 +22,10 @@ export const ClientAttendance: React.FC = () => {
     rateCentavosPerPersonPerDay: 500,
     mode: "BILLING_CYCLE",
   };
+
+  if (loading && currentUser.householdId) {
+    return <UniversalLoader variant="skeleton" type="attendance" />;
+  }
 
   if (!currentCycle) {
     return (

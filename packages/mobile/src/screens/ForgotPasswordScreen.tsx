@@ -111,7 +111,9 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <Feather name="chevron-left" size={20} color="#0F172A" />
+            <View style={styles.backButtonIconCircle}>
+              <Feather name="chevron-left" size={20} color="#0F172A" />
+            </View>
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
 
@@ -189,7 +191,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                 <Ionicons
                   name="mail-unread-outline"
                   size={36}
-                  color="#2563EB"
+                  color="#0F172A"
                 />
               </View>
 
@@ -341,9 +343,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     paddingVertical: 8,
-    paddingHorizontal: 4,
     gap: 8,
     marginBottom: 16,
+  },
+  backButtonIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   backButtonText: {
     fontSize: 14,
@@ -462,9 +471,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: "#EFF6FF",
-    borderWidth: 2,
-    borderColor: "#BFDBFE",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,

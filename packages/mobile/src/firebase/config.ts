@@ -21,8 +21,7 @@ const firebaseConfig = {
 export const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-export const firestoreDatabaseId =
-  process.env.EXPO_PUBLIC_FIREBASE_DATABASE_ID || "splitzy";
+export const firestoreDatabaseId = process.env.EXPO_PUBLIC_FIREBASE_DATABASE_ID || "splitzy";
 export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = (() => {
   try {

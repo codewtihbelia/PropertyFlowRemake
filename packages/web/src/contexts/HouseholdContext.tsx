@@ -128,17 +128,35 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setLoading(true);
 
-    // Safety timeout so UI never hangs in loading state
+    const initialLoadTracker = {
+      household: false,
+      members: false,
+      cycles: false,
+    };
+
+    const checkComplete = () => {
+      if (
+        initialLoadTracker.household &&
+        initialLoadTracker.members &&
+        initialLoadTracker.cycles
+      ) {
+        clearTimeout(safetyTimer);
+        setLoading(false);
+      }
+    };
+
+    // Safety timeout so UI never hangs indefinitely in loading state
     const safetyTimer = setTimeout(() => {
       setLoading(false);
-    }, 1200);
+    }, 2000);
 
     const unsubscribeHousehold = firebaseDataService.listenToHousehold(
       householdId,
       (nextHousehold) => {
-        clearTimeout(safetyTimer);
-        setLoading(false);
+        initialLoadTracker.household = true;
         if (!nextHousehold) {
+          clearTimeout(safetyTimer);
+          setLoading(false);
           setHousehold(makeEmptyHousehold(""));
           setMembers([]);
           setBillingCycles([]);
@@ -158,12 +176,14 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
           ) {
             updateProfile({ role: "HOST" }).catch(() => {});
           }
+          checkComplete();
         }
       },
     );
     const unsubscribeMembers = firebaseDataService.listenToMembers(
       householdId,
       (m) => {
+        initialLoadTracker.members = true;
         setMembers(m);
         const s = getAppState();
         s.members[householdId] = m;
@@ -182,15 +202,18 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
         ) {
           updateProfile({ role: "HOST" }).catch(() => {});
         }
+        checkComplete();
       },
     );
     const unsubscribeCycles = firebaseDataService.listenToBillingCycles(
       householdId,
       (cycles) => {
+        initialLoadTracker.cycles = true;
         setBillingCycles(cycles);
         const s = getAppState();
         s.billingCycles[householdId] = cycles;
         saveAppState(s);
+        checkComplete();
       },
     );
 
