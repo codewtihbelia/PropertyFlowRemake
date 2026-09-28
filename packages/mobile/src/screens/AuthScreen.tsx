@@ -93,11 +93,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     }
   }, []);
 
+  const fallbackGoogleClientId =
+    googleWebClientId ||
+    googleAndroidClientId ||
+    googleIosClientId ||
+    "unconfigured-google-client-id.apps.googleusercontent.com";
+
   const [googleRequest, , promptGoogleAsync] = Google.useIdTokenAuthRequest({
-    clientId: googleWebClientId || googleAndroidClientId || googleIosClientId,
-    androidClientId: googleAndroidClientId,
-    iosClientId: googleIosClientId,
-    webClientId: googleWebClientId,
+    clientId: fallbackGoogleClientId,
+    androidClientId: googleAndroidClientId || fallbackGoogleClientId,
+    iosClientId: googleIosClientId || fallbackGoogleClientId,
+    webClientId: googleWebClientId || fallbackGoogleClientId,
     selectAccount: true,
   });
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
+  Text,
   TouchableOpacity,
   StatusBar,
   Animated,
@@ -543,16 +544,90 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   );
 }
 
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errorMessage: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMessage: "" };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return {
+      hasError: true,
+      errorMessage: error?.message || "An unexpected error occurred.",
+    };
+  }
+
+  componentDidCatch(error: any, info: any) {
+    console.warn("[AppErrorBoundary] Caught runtime error:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#F8FAFC",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "700",
+              color: "#0F172A",
+              marginBottom: 8,
+            }}
+          >
+            Something went wrong
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: "#64748B",
+              textAlign: "center",
+              marginBottom: 20,
+            }}
+          >
+            {this.state.errorMessage}
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, errorMessage: "" })}
+            style={{
+              backgroundColor: "#2563EB",
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              borderRadius: 12,
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Try Again
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [rootFlow, setRootFlow] = useState<RootFlow>("splash");
 
   return (
-    <SafeAreaProvider style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
-      <NavVisibilityProvider>
-        <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
-        <CustomAlertModal />
-      </NavVisibilityProvider>
-    </SafeAreaProvider>
+    <AppErrorBoundary>
+      <SafeAreaProvider style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
+        <NavVisibilityProvider>
+          <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
+          <CustomAlertModal />
+        </NavVisibilityProvider>
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }
 

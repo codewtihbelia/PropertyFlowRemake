@@ -86,6 +86,9 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
   const [profile, setProfile] = useState<any | null>(() => cachedProfile);
   const [household, setHousehold] = useState<any | null>(() => cachedHousehold);
+  const [isProfileLoaded, setIsProfileLoaded] = useState<boolean>(() =>
+    Boolean(cachedProfile),
+  );
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [selectedCycleId, setSelectedCycleId] = useState<string>("");
@@ -95,28 +98,36 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   const [userPhotosMap, setUserPhotosMap] = useState<Record<string, string>>(
     {},
   );
-  const [isInitialLoading, setIsInitialLoading] = useState(
-    () => !cachedHousehold,
-  );
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Join Group input for non-hosts who don't have a household yet
   const [joinCodeInput, setJoinCodeInput] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
-  const householdId = profile?.householdId || household?.householdId || "";
+  const householdId =
+    profile?.householdId ||
+    household?.householdId ||
+    cachedProfile?.householdId ||
+    "";
 
   useEffect(() => {
     let mounted = true;
     if (!firebaseUser?.uid) {
-      setIsInitialLoading(false);
+      setIsProfileLoaded(true);
+      setLoading(false);
       return;
     }
-    mobileDataService.getUserProfile(firebaseUser.uid).then((p) => {
-      if (mounted) {
-        if (p) setProfile(p);
-        setIsInitialLoading(false);
-      }
-    });
+    mobileDataService
+      .getUserProfile(firebaseUser.uid)
+      .then((p) => {
+        if (mounted) {
+          if (p) setProfile(p);
+          setIsProfileLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (mounted) setIsProfileLoaded(true);
+      });
     const unsubProfile = mobileDataService.listenToUserProfile(
       firebaseUser.uid,
       (p) => {
@@ -125,7 +136,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
             setProfile(p);
             if (!p.householdId) setHousehold(null);
           }
-          setIsInitialLoading(false);
+          setIsProfileLoaded(true);
         }
       },
     );
@@ -136,13 +147,51 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   }, [firebaseUser?.uid]);
 
   useEffect(() => {
-    if (!householdId) return;
+    if (!isProfileLoaded) {
+      return;
+    }
+
+    if (!householdId) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    const groupReady = {
+      household: false,
+      expenses: false,
+      cycles: false,
+      members: false,
+    };
+
+    const checkReady = () => {
+      if (
+        groupReady.household &&
+        groupReady.expenses &&
+        groupReady.cycles &&
+        groupReady.members
+      ) {
+        setLoading(false);
+      }
+    };
+
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
     const unsubHh = mobileDataService.listenToHousehold(householdId, (hh) => {
       if (hh) setHousehold(hh);
+      groupReady.household = true;
+      checkReady();
     });
     const unsubExp = mobileDataService.listenToExpenses(
       householdId,
-      setExpenses,
+      (loadedExpenses) => {
+        setExpenses(loadedExpenses);
+        groupReady.expenses = true;
+        checkReady();
+      },
     );
     const unsubCyc = mobileDataService.listenToBillingCycles(
       householdId,
@@ -153,11 +202,17 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
             loadedCycles.find((c) => c.status === "ACTIVE") || loadedCycles[0];
           setSelectedCycleId(active.billingCycleId);
         }
+        groupReady.cycles = true;
+        checkReady();
       },
     );
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
-      setCloudMembers,
+      (loadedMembers) => {
+        setCloudMembers(loadedMembers);
+        groupReady.members = true;
+        checkReady();
+      },
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
       householdId,
@@ -165,13 +220,14 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     );
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubHh();
       unsubExp();
       unsubCyc();
       unsubMem();
       unsubWater();
     };
-  }, [householdId]);
+  }, [householdId, isProfileLoaded]);
 
   const activeCycle =
     cycles.find((c) => c.billingCycleId === selectedCycleId) ||
@@ -469,7 +525,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     }
   };
 
-  if (isInitialLoading && !householdId) {
+  if (loading) {
     return (
       <View style={styles.container}>
         <StatusBar
@@ -483,7 +539,6 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
               <Feather name="chevron-left" size={24} color="#0F172A" />
             </TouchableOpacity>
             <Text style={styles.navTitle}>Group Overview</Text>
-            <View style={{ width: 42 }} />
           </View>
         </View>
         <UniversalSkeleton type="groups" />

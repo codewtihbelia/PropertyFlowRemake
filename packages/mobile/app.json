@@ -28,18 +28,21 @@
         "resizeMode": "contain",
         "backgroundColor": "#FFFFFF"
       },
-      "package": "com.splitzy.app",
-      "navigationBar": {
-        "visible": "sticky-immersive"
-      }
-    },
-    "androidStatusBar": {
-      "translucent": true,
-      "backgroundColor": "#00000000",
-      "barStyle": "dark-content"
+      "package": "com.splitzy.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "firebase": {
+        "apiKey": "AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM",
+        "authDomain": "splitzy-d429d.firebaseapp.com",
+        "projectId": "splitzy-d429d",
+        "storageBucket": "splitzy-d429d.firebasestorage.app",
+        "messagingSenderId": "506286947370",
+        "appId": "1:506286947370:web:9a88634693baa2dbed9753",
+        "databaseId": "splitzy"
+      }
     },
     "plugins": [
       [
