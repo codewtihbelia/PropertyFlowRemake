@@ -7,6 +7,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "splitzy-d429d.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "splitzy-d429d",
@@ -24,6 +25,7 @@
         "buildType": "apk"
       },
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "splitzy-d429d.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "splitzy-d429d",
@@ -40,6 +42,7 @@
         "buildType": "apk"
       },
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "splitzy-d429d.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "splitzy-d429d",

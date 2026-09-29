@@ -14,9 +14,8 @@ import {
   Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { NavigationBar } from "expo-navigation-bar";
+import { NavigationBar } from "../utils/safeNavigationBar";
 import Svg, { Path } from "react-native-svg";
-import * as Google from "expo-auth-session/providers/google";
 import { auth } from "../firebase/config";
 import {
   signInWithEmailAndPassword,
@@ -29,9 +28,12 @@ import {
 import { mobileDataService } from "../services/firebaseDataService";
 import { assets } from "../../assets/assets";
 import { Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { useTheme } from "../context/ThemeContext";
 import { ForgotPasswordScreen } from "./ForgotPasswordScreen";
 import { EmailVerificationScreen } from "./EmailVerificationScreen";
 import { OtpVerificationScreen } from "./OtpVerificationScreen";
+import { TermsOfServiceScreen } from "./TermsOfServiceScreen";
+import { PrivacyPolicyScreen } from "./PrivacyPolicyScreen";
 
 interface AuthScreenProps {
   onLoginSuccess: (user: {
@@ -43,10 +45,16 @@ interface AuthScreenProps {
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
+  const { isDark, colors, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [authView, setAuthView] = useState<
-    "auth" | "forgot_password" | "email_verification" | "otp_verification"
+    | "auth"
+    | "forgot_password"
+    | "email_verification"
+    | "otp_verification"
+    | "terms_of_service"
+    | "privacy_policy"
   >("auth");
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -62,6 +70,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     role: string;
   } | null>(null);
 
+  const bottomBgColor = isDark ? "#141C2B" : "#2563EB";
+
   const googleAndroidClientId =
     process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || undefined;
   const googleWebClientId =
@@ -70,42 +80,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() || undefined;
 
   const isGoogleConfigured = Boolean(
-    googleAndroidClientId || googleWebClientId || googleIosClientId,
+    Platform.OS === "android"
+      ? googleAndroidClientId || googleWebClientId
+      : googleIosClientId || googleWebClientId,
   );
 
   useEffect(() => {
     if (Platform.OS === "android") {
-      try {
-        NavigationBar.setStyle("dark");
-        NavigationBar.setHidden(true);
-      } catch {
-        // Fallback safely in environments without native nav bar control
-      }
+      NavigationBar.setStyle("light");
+      NavigationBar.setHidden(true);
 
       return () => {
-        try {
-          NavigationBar.setStyle("light");
-          NavigationBar.setHidden(true);
-        } catch {
-          // Fallback safely
-        }
+        NavigationBar.setStyle(isDark ? "light" : "dark");
+        NavigationBar.setHidden(true);
       };
     }
-  }, []);
-
-  const fallbackGoogleClientId =
-    googleWebClientId ||
-    googleAndroidClientId ||
-    googleIosClientId ||
-    "unconfigured-google-client-id.apps.googleusercontent.com";
-
-  const [googleRequest, , promptGoogleAsync] = Google.useIdTokenAuthRequest({
-    clientId: fallbackGoogleClientId,
-    androidClientId: googleAndroidClientId || fallbackGoogleClientId,
-    iosClientId: googleIosClientId || fallbackGoogleClientId,
-    webClientId: googleWebClientId || fallbackGoogleClientId,
-    selectAccount: true,
-  });
+  }, [isDark]);
 
   const completeLogin = async (fbUser: any, fallbackRole: string = "PAYOR") => {
     try {
@@ -242,22 +232,42 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     if (!isGoogleConfigured) {
       Alert.alert(
         "Google Sign-In Setup Required",
-        "To enable Google Sign-In, please add your Google OAuth Web Client ID (from Google Cloud Console / Firebase Authentication) to EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in packages/mobile/.env.\n\nIn the meantime, you can sign in directly using Email & Password!",
-      );
-      return;
-    }
-
-    if (!googleRequest) {
-      Alert.alert(
-        "Google Sign-In",
-        "Google sign-in is initializing. Please try again in a moment.",
+        "To enable Google Sign-In on Android, please configure EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID and EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in packages/mobile/.env.\n\nIn the meantime, you can sign in directly using Email & Password!",
       );
       return;
     }
 
     setGoogleLoading(true);
     try {
-      const result = await promptGoogleAsync();
+      const AuthSession = require("expo-auth-session");
+      const WebBrowser = require("expo-web-browser");
+      if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
+        WebBrowser.maybeCompleteAuthSession();
+      }
+      const clientId =
+        Platform.OS === "android"
+          ? googleAndroidClientId || googleWebClientId
+          : googleIosClientId || googleWebClientId;
+      const redirectUri = AuthSession.makeRedirectUri({
+        scheme: "splitzy",
+      });
+      const discovery = {
+        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenEndpoint: "https://oauth2.googleapis.com/token",
+        revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+      };
+      const request = new AuthSession.AuthRequest({
+        clientId: clientId!,
+        scopes: ["openid", "profile", "email"],
+        redirectUri,
+        responseType: AuthSession.ResponseType.IdToken,
+        usePKCE: false,
+        extraParams: {
+          nonce: Math.random().toString(36).substring(2, 12),
+          prompt: "select_account",
+        },
+      });
+      const result = await request.promptAsync(discovery);
       if (result.type !== "success") return;
 
       const idToken = result.params?.id_token;
@@ -356,26 +366,54 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     );
   }
 
+  if (authView === "terms_of_service") {
+    return (
+      <TermsOfServiceScreen
+        onBack={() => setAuthView("auth")}
+        showAcceptButton={activeTab === "signup"}
+        onAccept={() => setAuthView("auth")}
+      />
+    );
+  }
+
+  if (authView === "privacy_policy") {
+    return (
+      <PrivacyPolicyScreen
+        onBack={() => setAuthView("auth")}
+        showAcknowledgeButton={activeTab === "signup"}
+        onAcknowledge={() => setAuthView("auth")}
+      />
+    );
+  }
+
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, { backgroundColor: bottomBgColor }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor="transparent"
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="dark" hidden={true} />
+        <NavigationBar style="light" hidden={true} />
       )}
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { backgroundColor: bottomBgColor },
+        ]}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Top white bleed ensures no blue sliver on drag */}
-        <View style={styles.topWhiteBleed} />
+        {/* Top bleed ensures no blue sliver on drag */}
+        <View
+          style={[
+            styles.topWhiteBleed,
+            isDark && { backgroundColor: colors.background },
+          ]}
+        />
 
-        {/* ================= TOP / UPPER SECTION (White Canvas) ================= */}
+        {/* ================= TOP / UPPER SECTION ================= */}
         <View
           style={[
             styles.topSection,
@@ -388,85 +426,97 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                     : 20,
                 ) + 16,
             },
+            isDark && { backgroundColor: colors.background },
           ]}
         >
-          {/* Logo Badge */}
-          <View style={styles.logoContainer}>
-            <View style={styles.logoBadge}>
-              <Image
-                source={assets.favicon}
-                style={styles.logoImage}
-                resizeMode="cover"
-              />
+          {/* Top Bar with Brand and Theme Toggle */}
+          <View style={styles.topBarRow}>
+            <View style={styles.topBarSpacer} />
+
+            {/* Logo Badge */}
+            <View style={styles.logoContainer}>
+              <View style={styles.logoBadge}>
+                <Image
+                  source={assets.favicon}
+                  style={styles.logoImage}
+                  resizeMode="cover"
+                />
+              </View>
+
+              {/* App Title */}
+              <View style={styles.brandTitleRow}>
+                <Text
+                  style={[styles.splitText, isDark && { color: colors.text }]}
+                >
+                  Split
+                </Text>
+                <Text
+                  style={[styles.zyText, isDark && { color: colors.primary }]}
+                >
+                  zy
+                </Text>
+              </View>
             </View>
 
-            {/* App Title */}
-            <View style={styles.brandTitleRow}>
-              <Text style={styles.splitText}>Split</Text>
-              <Text style={styles.zyText}>zy</Text>
-            </View>
+            {/* Theme Toggle Button */}
+            <TouchableOpacity
+              style={[
+                styles.themeToggleBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={toggleTheme}
+              activeOpacity={0.7}
+              accessibilityLabel="Toggle Theme"
+            >
+              <Feather
+                name={isDark ? "sun" : "moon"}
+                size={18}
+                color={isDark ? "#F59E0B" : "#64748B"}
+              />
+            </TouchableOpacity>
           </View>
 
           {/* Tagline */}
-          <Text style={styles.tagline}>
+          <Text
+            style={[styles.tagline, isDark && { color: colors.textSecondary }]}
+          >
             Manage, split bills, and track group expenses{"\n"}effortlessly.
           </Text>
-
-          {/* Segmented Tab Switcher */}
-          {/* <View style={styles.segmentedControl}>
-            <TouchableOpacity
-              style={[
-                styles.segmentTab,
-                activeTab === "signin" && styles.segmentTabActive,
-              ]}
-              onPress={() => setActiveTab("signin")}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  activeTab === "signin" && styles.segmentTextActive,
-                ]}
-              >
-                Sign In
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.segmentTab,
-                activeTab === "signup" && styles.segmentTabActive,
-              ]}
-              onPress={() => setActiveTab("signup")}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  activeTab === "signup" && styles.segmentTextActive,
-                ]}
-              >
-                Sign Up
-              </Text>
-            </TouchableOpacity>
-          </View> */}
 
           {/* Form Fields */}
           <View style={styles.formArea}>
             {activeTab === "signup" && (
               <View style={styles.fieldGroup}>
-                <Text style={styles.inputLabel}>Full Name</Text>
-                <View style={styles.inputWrapper}>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Full Name
+                </Text>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
                   <Feather
                     name="user"
                     size={17}
-                    color="#94A3B8"
+                    color={isDark ? colors.textMuted : "#94A3B8"}
                     style={styles.vectorIcon}
                   />
                   <TextInput
-                    style={styles.textInput}
+                    style={[styles.textInput, isDark && { color: colors.text }]}
                     placeholder="Rommel Belia"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                     value={name}
                     onChangeText={setName}
                     autoCapitalize="words"
@@ -477,18 +527,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
             {/* Email Address */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
-              <View style={styles.inputWrapper}>
+              <Text
+                style={[
+                  styles.inputLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Email Address
+              </Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="mail"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={styles.vectorIcon}
                 />
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, isDark && { color: colors.text }]}
                   placeholder="rommel.belia@example.com"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -500,30 +565,50 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             {/* Password */}
             <View style={styles.fieldGroup}>
               <View style={styles.passwordLabelRow}>
-                <Text style={styles.inputLabel}>Password</Text>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Password
+                </Text>
                 {activeTab === "signin" && (
                   <TouchableOpacity
                     onPress={() => setAuthView("forgot_password")}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.forgotPasswordText}>
+                    <Text
+                      style={[
+                        styles.forgotPasswordText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
                       Forgot Password?
                     </Text>
                   </TouchableOpacity>
                 )}
               </View>
 
-              <View style={styles.inputWrapper}>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="lock"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={styles.vectorIcon}
                 />
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, isDark && { color: colors.text }]}
                   placeholder="Enter password"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                   secureTextEntry={!showPassword}
                   value={password}
                   onChangeText={setPassword}
@@ -536,7 +621,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   <Feather
                     name={showPassword ? "eye" : "eye-off"}
                     size={17}
-                    color="#94A3B8"
+                    color={isDark ? colors.textMuted : "#94A3B8"}
                   />
                 </TouchableOpacity>
               </View>
@@ -546,6 +631,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             <TouchableOpacity
               style={[
                 styles.primaryActionButton,
+                isDark && {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                },
                 (loading || googleLoading) && styles.primaryActionDisabled,
               ]}
               onPress={handleSubmit}
@@ -566,10 +655,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           </View>
         </View>
 
-        {/* ================= BOTTOM BLUE SECTION WITH FLUID WAVY TOP ================= */}
-        <View style={styles.bottomCurvedContainer}>
-          {/* Fluid S-Curve SVG Wave: top transparent area shows pure white to seamlessly connect with topSection, curve fills with solid blue */}
-          <View style={styles.waveWrapper}>
+        {/* ================= BOTTOM SECTION WITH FLUID WAVY TOP ================= */}
+        <View
+          style={[
+            styles.bottomCurvedContainer,
+            { backgroundColor: bottomBgColor },
+          ]}
+        >
+          {/* Fluid S-Curve SVG Wave */}
+          <View
+            style={[
+              styles.waveWrapper,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
             <Svg
               width="100%"
               height={52}
@@ -579,7 +678,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             >
               <Path
                 d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill="#2563EB"
+                fill={bottomBgColor}
               />
             </Svg>
           </View>
@@ -587,28 +686,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           <View
             style={[
               styles.bottomBlueContent,
-              { paddingBottom: Math.max(insets.bottom + 24, 42) },
+              {
+                backgroundColor: bottomBgColor,
+                paddingBottom: Math.max(insets.bottom + 24, 42),
+              },
             ]}
           >
             {/* Divider "OR CONTINUE WITH" */}
             <View style={styles.orDividerContainer}>
-              <View style={styles.orDividerLine} />
-              <Text style={styles.orDividerText}>OR CONTINUE WITH</Text>
-              <View style={styles.orDividerLine} />
+              <View
+                style={[
+                  styles.orDividerLine,
+                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.orDividerText,
+                  isDark && { color: "rgba(255, 255, 255, 0.65)" },
+                ]}
+              >
+                OR CONTINUE WITH
+              </Text>
+              <View
+                style={[
+                  styles.orDividerLine,
+                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
+                ]}
+              />
             </View>
 
             {/* Google Auth Button */}
             <TouchableOpacity
-              style={styles.socialButtonWhite}
+              style={[
+                styles.socialButtonWhite,
+                isDark && {
+                  backgroundColor: colors.cardElevated,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={handleGoogleSignIn}
               disabled={loading || googleLoading}
               activeOpacity={0.88}
             >
               {googleLoading ? (
-                <ActivityIndicator color="#0F172A" size="small" />
+                <ActivityIndicator
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                  size="small"
+                />
               ) : (
                 <View style={styles.socialButtonInner}>
-                  {/* Google*/}
                   <View style={styles.googleGContainer}>
                     <Image
                       source={assets.google}
@@ -616,7 +744,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                       resizeMode="cover"
                     />
                   </View>
-                  <Text style={styles.socialButtonTextDark}>
+                  <Text
+                    style={[
+                      styles.socialButtonTextDark,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     Continue with Google
                   </Text>
                 </View>
@@ -625,7 +758,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
             {/* Apple Auth Button */}
             <TouchableOpacity
-              style={styles.socialButtonBlack}
+              style={[
+                styles.socialButtonBlack,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={handleAppleSignIn}
               activeOpacity={0.88}
             >
@@ -638,15 +778,39 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </TouchableOpacity>
 
             {/* Terms & Privacy Notice */}
-            <Text style={styles.termsText}>
+            <Text
+              style={[
+                styles.termsText,
+                isDark && { color: "rgba(255, 255, 255, 0.65)" },
+              ]}
+            >
               By continuing, you agree to Splitzy's{" "}
-              <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-              <Text style={styles.termsLink}>Privacy Policy</Text>.
+              <Text
+                style={[styles.termsLink, isDark && { color: colors.text }]}
+                onPress={() => setAuthView("terms_of_service")}
+                suppressHighlighting={false}
+              >
+                Terms of Service
+              </Text>{" "}
+              and{" "}
+              <Text
+                style={[styles.termsLink, isDark && { color: colors.text }]}
+                onPress={() => setAuthView("privacy_policy")}
+                suppressHighlighting={false}
+              >
+                Privacy Policy
+              </Text>
+              .
             </Text>
 
             {/* Switch Mode Prompt: "Don't have an account? Sign up" */}
             <View style={styles.switchModePrompt}>
-              <Text style={styles.switchModeLead}>
+              <Text
+                style={[
+                  styles.switchModeLead,
+                  isDark && { color: "rgba(255, 255, 255, 0.8)" },
+                ]}
+              >
                 {activeTab === "signin"
                   ? "Don't have an account? "
                   : "Already have an account? "}
@@ -656,7 +820,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   setActiveTab(activeTab === "signin" ? "signup" : "signin")
                 }
               >
-                <Text style={styles.switchModeLink}>
+                <Text
+                  style={[
+                    styles.switchModeLink,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   {activeTab === "signin" ? "Sign up" : "Sign in"}
                 </Text>
               </TouchableOpacity>
@@ -664,8 +833,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           </View>
         </View>
 
-        {/* Bottom blue bleed ensures full solid blue extension on scroll */}
-        <View style={styles.bottomBlueBleed} />
+        {/* Bottom bleed ensures full solid extension on scroll */}
+        <View
+          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+        />
       </ScrollView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
@@ -673,7 +844,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         pointerEvents="none"
         style={[
           styles.fixedBottomOverlay,
-          { height: Math.max(insets.bottom, 24) + 16 },
+          {
+            backgroundColor: bottomBgColor,
+            height: Math.max(insets.bottom, 24) + 16,
+          },
         ]}
       />
     </View>
@@ -718,11 +892,31 @@ const styles = StyleSheet.create({
     paddingBottom: 22,
     backgroundColor: "#FFFFFF",
   },
+  topBarRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  topBarSpacer: {
+    width: 38,
+    height: 38,
+  },
+  themeToggleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(15, 23, 42, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   logoContainer: {
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 4,
   },
   logoBadge: {
     justifyContent: "center",

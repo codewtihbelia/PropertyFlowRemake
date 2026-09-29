@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { HouseholdProvider, useHousehold } from "./contexts/HouseholdContext";
 import { NotificationProvider } from "./contexts/NotificationContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { Header } from "./components/common/Header";
 import { Sidebar } from "./components/common/Sidebar";
 import { CustomAlertModal } from "./components/CustomAlertModal";
@@ -46,8 +47,10 @@ import { SuperAdminVersions } from "./views/admin/SuperAdminVersions";
 import { SuperAdminSupport } from "./views/admin/SuperAdminSupport";
 import { ClientHostApplication } from "./views/client/ClientHostApplication";
 import { LandingPage } from "./views/landing/LandingPage";
+import { TermsOfServiceView } from "./views/legal/TermsOfServiceView";
+import { PrivacyPolicyView } from "./views/legal/PrivacyPolicyView";
 
-type WebFlow = "landing" | "onboarding" | "auth" | "app";
+type WebFlow = "landing" | "onboarding" | "auth" | "app" | "terms" | "privacy";
 
 const MainLayout: React.FC = () => {
   const {
@@ -72,6 +75,7 @@ const MainLayout: React.FC = () => {
     useState<boolean>(false);
   const [dismissVerifyBanner, setDismissVerifyBanner] =
     useState<boolean>(false);
+  const [previousFlow, setPreviousFlow] = useState<WebFlow>("landing");
 
   // Initialize flow: default to landing page
   const [webFlow, setWebFlow] = useState<WebFlow>(() => {
@@ -117,6 +121,40 @@ const MainLayout: React.FC = () => {
     }
   }, [role, isSuperAdmin, isUserHost]);
 
+  const handleOpenTerms = () => {
+    setPreviousFlow(
+      webFlow === "terms" || webFlow === "privacy" ? "landing" : webFlow,
+    );
+    setWebFlow("terms");
+  };
+
+  const handleOpenPrivacy = () => {
+    setPreviousFlow(
+      webFlow === "terms" || webFlow === "privacy" ? "landing" : webFlow,
+    );
+    setWebFlow("privacy");
+  };
+
+  // Terms of Service View
+  if (webFlow === "terms") {
+    return (
+      <TermsOfServiceView
+        onBack={() => setWebFlow(previousFlow || "landing")}
+        onNavigateToPrivacy={() => setWebFlow("privacy")}
+      />
+    );
+  }
+
+  // Privacy Policy View
+  if (webFlow === "privacy") {
+    return (
+      <PrivacyPolicyView
+        onBack={() => setWebFlow(previousFlow || "landing")}
+        onNavigateToTerms={() => setWebFlow("terms")}
+      />
+    );
+  }
+
   // Landing Screen View (Default for /web)
   if (webFlow === "landing") {
     return (
@@ -133,6 +171,8 @@ const MainLayout: React.FC = () => {
           setAuthInitialMode(mode || "signin");
           setWebFlow("auth");
         }}
+        onOpenTerms={handleOpenTerms}
+        onOpenPrivacy={handleOpenPrivacy}
       />
     );
   }
@@ -161,6 +201,8 @@ const MainLayout: React.FC = () => {
           }
         }}
         onBackToLanding={() => setWebFlow("landing")}
+        onOpenTerms={handleOpenTerms}
+        onOpenPrivacy={handleOpenPrivacy}
       />
     );
   }
@@ -202,6 +244,40 @@ const MainLayout: React.FC = () => {
   }
 
   const renderContent = () => {
+    // Global Legal Views within Portal
+    if (currentTab === "terms") {
+      return (
+        <TermsOfServiceView
+          onBack={() =>
+            setCurrentTab(
+              isSuperAdmin
+                ? "admin_dashboard"
+                : isUserHost
+                  ? "host_dashboard"
+                  : "client_dashboard",
+            )
+          }
+          onNavigateToPrivacy={() => setCurrentTab("privacy")}
+        />
+      );
+    }
+    if (currentTab === "privacy") {
+      return (
+        <PrivacyPolicyView
+          onBack={() =>
+            setCurrentTab(
+              isSuperAdmin
+                ? "admin_dashboard"
+                : isUserHost
+                  ? "host_dashboard"
+                  : "client_dashboard",
+            )
+          }
+          onNavigateToTerms={() => setCurrentTab("terms")}
+        />
+      );
+    }
+
     // Super Admin Routes
     if (isSuperAdmin) {
       switch (currentTab) {
@@ -287,7 +363,7 @@ const MainLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
       <Header
         onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
         onSignOut={async () => {
@@ -375,14 +451,16 @@ const MainLayout: React.FC = () => {
 
 export function App() {
   return (
-    <AuthProvider>
-      <HouseholdProvider>
-        <NotificationProvider>
-          <MainLayout />
-          <CustomAlertModal />
-        </NotificationProvider>
-      </HouseholdProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <HouseholdProvider>
+          <NotificationProvider>
+            <MainLayout />
+            <CustomAlertModal />
+          </NotificationProvider>
+        </HouseholdProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

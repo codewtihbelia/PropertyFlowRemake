@@ -2,9 +2,23 @@ import React, { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useHousehold } from "../../contexts/HouseholdContext";
 import { useNotifications } from "../../contexts/NotificationContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { JoinHouseholdModal } from "./JoinHouseholdModal";
 import { CreateRoomModal } from "../CreateRoomModal";
-import { Bell, Check, X, Shield, User, LogOut, KeyRound, Copy, Plus } from "lucide-react";
+import {
+  Bell,
+  Check,
+  X,
+  Shield,
+  User,
+  LogOut,
+  KeyRound,
+  Copy,
+  Plus,
+  Sun,
+  Moon,
+  Monitor,
+} from "lucide-react";
 
 export const Header: React.FC<{
   onMenuToggle?: () => void;
@@ -14,29 +28,37 @@ export const Header: React.FC<{
   const { household, members } = useHousehold();
   const { notifications, unreadCount, markAsRead, markAllAsRead } =
     useNotifications();
+  const { isDark, toggleTheme, cycleTheme, themeMode, setThemeMode } =
+    useTheme();
   const [showNotifs, setShowNotifs] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
   const isUserHost = Boolean(
-    currentUser?.role === 'HOST' ||
-    currentUser?.hostApplicationStatus === 'APPROVED' ||
+    currentUser?.role === "HOST" ||
+    currentUser?.hostApplicationStatus === "APPROVED" ||
     (household?.hostId && household.hostId === currentUser?.uid) ||
     members.some(
       (m) =>
-        (m.userId === currentUser?.uid || m.memberId === currentUser?.uid || m.memberId === `mem_${currentUser?.uid}`) &&
-        m.role === 'HOST'
-    )
+        (m.userId === currentUser?.uid ||
+          m.memberId === currentUser?.uid ||
+          m.memberId === `mem_${currentUser?.uid}`) &&
+        m.role === "HOST",
+    ),
   );
 
   const hasGroup = Boolean(
     household?.householdId &&
     household?.householdName &&
-    household?.householdName !== 'No household connected'
+    household?.householdName !== "No household connected",
   );
 
-  const displayCode = household?.inviteCode || (household?.householdId ? `PF-${household.householdId.slice(-4).toUpperCase()}` : null);
+  const displayCode =
+    household?.inviteCode ||
+    (household?.householdId
+      ? `PF-${household.householdId.slice(-4).toUpperCase()}`
+      : null);
 
   const handleCopyCode = () => {
     if (!displayCode) return;
@@ -46,11 +68,11 @@ export const Header: React.FC<{
   };
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between shadow-xs">
+    <header className="bg-white dark:bg-[#000000] border-b border-slate-200 dark:border-white/10 sticky top-0 z-40 px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between shadow-xs transition-colors duration-200">
       <div className="flex items-center gap-2.5 sm:gap-3">
         <button
           onClick={onMenuToggle}
-          className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"
+          className="lg:hidden p-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
           aria-label="Toggle Navigation Sidebar"
         >
           <svg
@@ -72,10 +94,10 @@ export const Header: React.FC<{
             S
           </div>
           <div>
-            <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+            <h1 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 leading-tight">
               PropertyFlow
             </h1>
-            <p className="hidden xs:block text-[10px] sm:text-[11px] text-slate-500 font-medium">
+            <p className="hidden xs:block text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 font-medium">
               Roommate Bill Management
             </p>
           </div>
@@ -95,32 +117,57 @@ export const Header: React.FC<{
 
         {/* Household Code or Join Group Action */}
         {hasGroup && displayCode ? (
-          <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 font-mono font-bold text-xs shadow-2xs">
-            <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+          <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl text-blue-700 dark:text-blue-300 font-mono font-bold text-xs shadow-2xs">
+            <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             <span>{displayCode}</span>
             <button
               onClick={handleCopyCode}
               className="ml-1 text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded-md cursor-pointer transition flex items-center gap-0.5"
               title="Copy household invite code"
             >
-              <span>{copiedCode ? 'Copied' : 'Copy'}</span>
+              <span>{copiedCode ? "Copied" : "Copy"}</span>
             </button>
           </div>
         ) : (
           <button
             onClick={() => setIsJoinModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition cursor-pointer shadow-2xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800 rounded-xl transition cursor-pointer shadow-2xs"
           >
             <KeyRound className="w-3.5 h-3.5" />
             <span>Join Group</span>
           </button>
         )}
 
+        {/* Global Dark Mode Theme Toggle (3-state cycle: Light -> OLED Dark -> System) */}
+        <button
+          onClick={cycleTheme}
+          className="relative p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-full transition cursor-pointer"
+          title={`Current Theme: ${
+            themeMode === "light"
+              ? "Light"
+              : themeMode === "dark"
+                ? "OLED Dark"
+                : `System Auto (${isDark ? "Dark" : "Light"})`
+          }. Tap to switch mode.`}
+          aria-label={`Toggle theme, current is ${themeMode}`}
+        >
+          {themeMode === "light" ? (
+            <Sun className="w-5 h-5 text-amber-500 hover:text-amber-400 transition" />
+          ) : themeMode === "dark" ? (
+            <Moon className="w-5 h-5 text-blue-400 hover:text-blue-300 transition" />
+          ) : (
+            <div className="relative">
+              <Monitor className="w-5 h-5 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition" />
+              <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-white dark:border-black" />
+            </div>
+          )}
+        </button>
+
         {/* Notifications Popover */}
         <div className="relative">
           <button
             onClick={() => setShowNotifs(!showNotifs)}
-            className="relative p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full transition cursor-pointer"
+            className="relative p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition cursor-pointer"
             title="Notifications"
           >
             <Bell className="w-5 h-5" />
@@ -132,14 +179,14 @@ export const Header: React.FC<{
           </button>
 
           {showNotifs && (
-            <div className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-auto sm:mt-2 w-[calc(100vw-1rem)] sm:w-96 max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 py-3 z-50 animate-in fade-in slide-in-from-top-2">
-              <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+            <div className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-auto sm:mt-2 w-[calc(100vw-1rem)] sm:w-96 max-w-sm bg-white dark:bg-[#1E293B] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-3 z-50 animate-in fade-in slide-in-from-top-2">
+              <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm text-slate-900">
+                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
                     Notifications
                   </span>
                   {unreadCount > 0 && (
-                    <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-semibold">
+                    <span className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-semibold">
                       {unreadCount} new
                     </span>
                   )}
@@ -147,39 +194,39 @@ export const Header: React.FC<{
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllAsRead}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1 cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" /> Mark all read
                   </button>
                 )}
               </div>
 
-              <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
+              <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                 {notifications.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 text-xs">
+                  <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                     No notifications yet.
                   </div>
                 ) : (
                   notifications.map((n) => (
                     <div
                       key={n.notificationId}
-                      className={`p-3.5 hover:bg-slate-50 transition cursor-pointer ${
-                        !n.readStatus ? "bg-blue-50/50" : ""
+                      className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition cursor-pointer ${
+                        !n.readStatus ? "bg-blue-50/50 dark:bg-blue-950/30" : ""
                       }`}
                       onClick={() => markAsRead(n.notificationId)}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="font-semibold text-xs text-slate-900">
+                        <div className="font-semibold text-xs text-slate-900 dark:text-slate-100">
                           {n.title}
                         </div>
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500">
                           {new Date(n.createdTimestamp).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 line-clamp-2">
                         {n.message}
                       </p>
                     </div>
@@ -191,7 +238,7 @@ export const Header: React.FC<{
         </div>
 
         {/* User Pill & Action Buttons */}
-        <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
+        <div className="flex items-center gap-3 pl-3 border-l border-slate-200 dark:border-slate-800">
           {currentUser?.profilePicture || (currentUser as any)?.photoURL ? (
             <img
               src={currentUser.profilePicture || (currentUser as any).photoURL}
@@ -199,22 +246,22 @@ export const Header: React.FC<{
               className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/20 shadow-xs"
             />
           ) : (
-            <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm ring-2 ring-blue-500/20">
+            <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold flex items-center justify-center text-sm ring-2 ring-blue-500/20">
               {currentUser?.displayName?.charAt(0) || "U"}
             </div>
           )}
           <div className="hidden sm:block text-left">
-            <div className="text-xs font-bold text-slate-900">
+            <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
               {currentUser?.displayName || "User"}
             </div>
-            <div className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">
+            <div className="text-[10px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wide">
               {isUserHost
                 ? "HOST / PAYOR"
                 : currentUser?.role === "SUPER_ADMIN"
-                ? "SUPER ADMIN"
-                : currentUser?.role === "NON_PAYOR"
-                ? "NON-PAYOR"
-                : "PAYOR"}
+                  ? "SUPER ADMIN"
+                  : currentUser?.role === "NON_PAYOR"
+                    ? "NON-PAYOR"
+                    : "PAYOR"}
             </div>
           </div>
 
@@ -223,7 +270,7 @@ export const Header: React.FC<{
               <button
                 onClick={onSignOut}
                 title="Sign Out"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-slate-200 hover:border-rose-200 transition cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800 transition cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Sign Out</span>

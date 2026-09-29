@@ -227,6 +227,7 @@ service cloud.firestore {
       );
       allow create: if isAuthenticated() && (
         request.resource.data.recipientId == request.auth.uid ||
+        (request.resource.data.householdId != null && isHouseholdMember(request.resource.data.householdId)) ||
         isHost(request.resource.data.householdId) ||
         isSuperAdmin()
       );

@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,6 +23,7 @@ import {
 } from "@propertyflow/shared";
 import { UniversalSkeleton } from "../components/UniversalLoader";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { useTheme } from "../context/ThemeContext";
 
 interface HostApplicationScreenProps {
   onBack: () => void;
@@ -49,6 +51,7 @@ const AVATAR_COLORS = [
 export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
   onBack,
 }) => {
+  const { isDark, colors } = useTheme();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [application, setApplication] = useState<HostApplication | null>(null);
   const [households, setHouseholds] = useState<any[]>([]);
@@ -216,23 +219,55 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
     profile?.role === "HOST" || profile?.role === "SUPER_ADMIN";
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+      edges={["top", "left", "right"]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        translucent={true}
+        backgroundColor="transparent"
+      />
       {/* Top Header Bar matching attached screenshot */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <TouchableOpacity
-          style={styles.circleIconBtn}
+          style={[
+            styles.circleIconBtn,
+            isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+          ]}
           onPress={onBack}
           activeOpacity={0.7}
         >
-          <Feather name="chevron-left" size={22} color="#0F172A" />
+          <Feather
+            name="chevron-left"
+            size={22}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Host Application</Text>
+        <Text style={[styles.headerTitle, isDark && { color: colors.text }]}>
+          Host Application
+        </Text>
         <TouchableOpacity
-          style={styles.circleIconBtn}
+          style={[
+            styles.circleIconBtn,
+            isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+          ]}
           onPress={() => setShowInfoModal(true)}
           activeOpacity={0.7}
         >
-          <Feather name="info" size={18} color="#0F172A" />
+          <Feather
+            name="info"
+            size={18}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
       </View>
 
@@ -244,14 +279,39 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
           <UniversalSkeleton type="form" />
         ) : isAlreadyHost ? (
           /* State 1: Already Host */
-          <View style={styles.cardSuccess}>
+          <View
+            style={[
+              styles.cardSuccess,
+              isDark && {
+                backgroundColor: "rgba(5, 150, 105, 0.15)",
+                borderColor: "rgba(5, 150, 105, 0.35)",
+              },
+            ]}
+          >
             <View style={styles.statusRow}>
-              <View style={styles.successIconWrap}>
+              <View
+                style={[
+                  styles.successIconWrap,
+                  isDark && { backgroundColor: "rgba(5, 150, 105, 0.25)" },
+                ]}
+              >
                 <Ionicons name="checkmark-circle" size={26} color="#059669" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardSuccessTitle}>Verified Host Admin</Text>
-                <Text style={styles.cardSuccessSubtitle}>
+                <Text
+                  style={[
+                    styles.cardSuccessTitle,
+                    isDark && { color: "#6EE7B7" },
+                  ]}
+                >
+                  Verified Host Admin
+                </Text>
+                <Text
+                  style={[
+                    styles.cardSuccessSubtitle,
+                    isDark && { color: "#A7F3D0" },
+                  ]}
+                >
                   You already possess Host Administrator privileges to create
                   roommate groups, manage utility splits, and verify member
                   attendance.
@@ -261,16 +321,39 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
           </View>
         ) : application?.status === "PENDING" ? (
           /* State 2: Under Review */
-          <View style={styles.cardPending}>
+          <View
+            style={[
+              styles.cardPending,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: "rgba(217, 119, 6, 0.4)",
+              },
+            ]}
+          >
             <View style={styles.statusRow}>
-              <View style={styles.pendingIconWrap}>
+              <View
+                style={[
+                  styles.pendingIconWrap,
+                  isDark && { backgroundColor: "rgba(217, 119, 6, 0.2)" },
+                ]}
+              >
                 <Ionicons name="time" size={24} color="#D97706" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardPendingTitle}>
+                <Text
+                  style={[
+                    styles.cardPendingTitle,
+                    isDark && { color: "#FCD34D" },
+                  ]}
+                >
                   Application Under Review
                 </Text>
-                <Text style={styles.cardPendingSubtitle}>
+                <Text
+                  style={[
+                    styles.cardPendingSubtitle,
+                    isDark && { color: "#FBBF24" },
+                  ]}
+                >
                   Submitted on{" "}
                   {new Date(
                     application.createdAt ||
@@ -280,33 +363,78 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 </Text>
               </View>
             </View>
-            <View style={styles.pendingDetailsBox}>
+            <View
+              style={[
+                styles.pendingDetailsBox,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Full Name</Text>
-                <Text style={styles.detailValue}>
+                <Text
+                  style={[
+                    styles.detailLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Full Name
+                </Text>
+                <Text
+                  style={[styles.detailValue, isDark && { color: colors.text }]}
+                >
                   {application.applicantName || "Not provided"}
                 </Text>
               </View>
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Contact Number</Text>
-                <Text style={styles.detailValue}>
+                <Text
+                  style={[
+                    styles.detailLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Contact Number
+                </Text>
+                <Text
+                  style={[styles.detailValue, isDark && { color: colors.text }]}
+                >
                   {application.phoneNumber ||
                     application.applicantPhone ||
                     "Not provided"}
                 </Text>
               </View>
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Property Address</Text>
-                <Text style={styles.detailValue}>
+                <Text
+                  style={[
+                    styles.detailLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Property Address
+                </Text>
+                <Text
+                  style={[styles.detailValue, isDark && { color: colors.text }]}
+                >
                   {application.propertyAddress}
                 </Text>
               </View>
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Host Management Type</Text>
+                <Text
+                  style={[
+                    styles.detailLabel,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Host Management Type
+                </Text>
                 <Text
                   style={[
                     styles.detailValue,
-                    { color: "#2563EB", fontWeight: "700" },
+                    {
+                      color: isDark ? colors.primary : "#2563EB",
+                      fontWeight: "700",
+                    },
                   ]}
                 >
                   {application.managementType}
@@ -314,16 +442,40 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
               </View>
               {application.roommateGroupName ? (
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Roommate Group</Text>
-                  <Text style={styles.detailValue}>
+                  <Text
+                    style={[
+                      styles.detailLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Roommate Group
+                  </Text>
+                  <Text
+                    style={[
+                      styles.detailValue,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     {application.roommateGroupName}
                   </Text>
                 </View>
               ) : null}
               {application.unitOrRoom ? (
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Unit, Apt or Floor</Text>
-                  <Text style={styles.detailValue}>
+                  <Text
+                    style={[
+                      styles.detailLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Unit, Apt or Floor
+                  </Text>
+                  <Text
+                    style={[
+                      styles.detailValue,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     {application.unitOrRoom}
                   </Text>
                 </View>
@@ -331,11 +483,21 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
               {application.estimatedMonthlyBills ||
               application.monthlyRentOrShare ? (
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Est. Monthly Bills</Text>
+                  <Text
+                    style={[
+                      styles.detailLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Est. Monthly Bills
+                  </Text>
                   <Text
                     style={[
                       styles.detailValue,
-                      { color: "#059669", fontWeight: "700" },
+                      {
+                        color: isDark ? "#34D399" : "#059669",
+                        fontWeight: "700",
+                      },
                     ]}
                   >
                     ₱
@@ -345,9 +507,26 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 </View>
               ) : null}
             </View>
-            <View style={styles.pendingNotice}>
-              <Ionicons name="shield-checkmark" size={16} color="#B45309" />
-              <Text style={styles.pendingNoticeText}>
+            <View
+              style={[
+                styles.pendingNotice,
+                isDark && {
+                  backgroundColor: "rgba(217, 119, 6, 0.15)",
+                  borderColor: "rgba(217, 119, 6, 0.3)",
+                },
+              ]}
+            >
+              <Ionicons
+                name="shield-checkmark"
+                size={16}
+                color={isDark ? "#FCD34D" : "#B45309"}
+              />
+              <Text
+                style={[
+                  styles.pendingNoticeText,
+                  isDark && { color: "#FDE68A" },
+                ]}
+              >
                 Super Administrators review host requests to protect group
                 billing. You will be notified once approved.
               </Text>
@@ -357,7 +536,15 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
           /* State 3: Requested UI Layout */
           <View style={styles.contentWrap}>
             {/* Blue Hero Card Banner */}
-            <View style={styles.heroCard}>
+            <View
+              style={[
+                styles.heroCard,
+                isDark && {
+                  borderWidth: 1,
+                  borderColor: "rgba(255, 255, 255, 0.15)",
+                },
+              ]}
+            >
               <View style={styles.heroTopRow}>
                 <View style={styles.verifiedBadge}>
                   <View style={styles.greenPulseDot} />
@@ -384,7 +571,15 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
             </View>
 
             {/* Stepper Progress Bar */}
-            <View style={styles.stepperContainer}>
+            <View
+              style={[
+                styles.stepperContainer,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               {/* Step 1 */}
               <TouchableOpacity
                 style={styles.stepItem}
@@ -394,12 +589,14 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 <View
                   style={[
                     styles.stepCircle,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
                     activeStep === 1 && styles.stepCircleActive,
                   ]}
                 >
                   <Text
                     style={[
                       styles.stepCircleText,
+                      isDark && { color: colors.textSecondary },
                       activeStep === 1 && styles.stepCircleTextActive,
                     ]}
                   >
@@ -410,7 +607,11 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                   <Text
                     style={[
                       styles.stepLabel,
-                      activeStep === 1 && styles.stepLabelActive,
+                      isDark && { color: colors.textMuted },
+                      activeStep === 1 && [
+                        styles.stepLabelActive,
+                        isDark && { color: colors.text },
+                      ],
                     ]}
                   >
                     Property &{"\n"}Terms
@@ -419,7 +620,12 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
               </TouchableOpacity>
 
               {/* Connecting Line 1 */}
-              <View style={styles.stepConnector} />
+              <View
+                style={[
+                  styles.stepConnector,
+                  isDark && { backgroundColor: colors.border },
+                ]}
+              />
 
               {/* Step 2 */}
               <TouchableOpacity
@@ -430,12 +636,14 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 <View
                   style={[
                     styles.stepCircle,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
                     activeStep === 2 && styles.stepCircleActive,
                   ]}
                 >
                   <Text
                     style={[
                       styles.stepCircleText,
+                      isDark && { color: colors.textSecondary },
                       activeStep === 2 && styles.stepCircleTextActive,
                     ]}
                   >
@@ -446,7 +654,11 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                   <Text
                     style={[
                       styles.stepLabel,
-                      activeStep === 2 && styles.stepLabelActive,
+                      isDark && { color: colors.textMuted },
+                      activeStep === 2 && [
+                        styles.stepLabelActive,
+                        isDark && { color: colors.text },
+                      ],
                     ]}
                   >
                     KYC &{"\n"}Payout
@@ -455,7 +667,12 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
               </TouchableOpacity>
 
               {/* Connecting Line 2 */}
-              <View style={styles.stepConnector} />
+              <View
+                style={[
+                  styles.stepConnector,
+                  isDark && { backgroundColor: colors.border },
+                ]}
+              />
 
               {/* Step 3 */}
               <TouchableOpacity
@@ -466,12 +683,14 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 <View
                   style={[
                     styles.stepCircle,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
                     activeStep === 3 && styles.stepCircleActive,
                   ]}
                 >
                   <Text
                     style={[
                       styles.stepCircleText,
+                      isDark && { color: colors.textSecondary },
                       activeStep === 3 && styles.stepCircleTextActive,
                     ]}
                   >
@@ -483,44 +702,76 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
             {/* 1. Full Name */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
                 Full Name <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <View style={styles.inputWithIcon}>
+              <View
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="user"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={{ marginRight: 10 }}
                 />
                 <TextInput
-                  style={styles.textInputStyle}
+                  style={[
+                    styles.textInputStyle,
+                    isDark && { color: colors.text },
+                  ]}
                   value={applicantName}
                   onChangeText={setApplicantName}
                   placeholder="e.g. Juan dela Cruz"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 />
               </View>
             </View>
 
             {/* 2. Contact Number */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
                 Contact Number <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <View style={styles.inputWithIcon}>
+              <View
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="phone"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={{ marginRight: 10 }}
                 />
                 <TextInput
-                  style={styles.textInputStyle}
+                  style={[
+                    styles.textInputStyle,
+                    isDark && { color: colors.text },
+                  ]}
                   value={phoneNumber}
                   onChangeText={setPhoneNumber}
                   placeholder="e.g. +63 917 123 4567"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                   keyboardType="phone-pad"
                 />
               </View>
@@ -529,25 +780,71 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
             {/* 3. Select Roommate Group (Optional) + Empty State */}
             <View style={styles.formFieldBlock}>
               <View style={styles.labelRow}>
-                <Text style={styles.fieldHeaderLabel}>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   Select Roommate Group
                 </Text>
-                <View style={styles.optionalBadge}>
-                  <Text style={styles.optionalBadgeText}>Optional</Text>
+                <View
+                  style={[
+                    styles.optionalBadge,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.optionalBadgeText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Optional
+                  </Text>
                 </View>
               </View>
 
               {households.length === 0 ? (
                 /* Empty State: No groups created yet */
-                <View style={styles.emptyGroupCard}>
-                  <View style={styles.emptyIconCircle}>
-                    <Feather name="users" size={20} color="#64748B" />
+                <View
+                  style={[
+                    styles.emptyGroupCard,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.emptyIconCircle,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="users"
+                      size={20}
+                      color={isDark ? colors.textSecondary : "#64748B"}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.emptyGroupTitle}>
+                    <Text
+                      style={[
+                        styles.emptyGroupTitle,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       No Roommate Groups Available
                     </Text>
-                    <Text style={styles.emptyGroupSubtitle}>
+                    <Text
+                      style={[
+                        styles.emptyGroupSubtitle,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
                       Non-hosts cannot create groups yet. You can submit without
                       a group and create your household once approved as a Host.
                     </Text>
@@ -581,7 +878,13 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                           styles.groupCard,
                           isSelected
                             ? styles.groupCardSelected
-                            : styles.groupCardUnselected,
+                            : [
+                                styles.groupCardUnselected,
+                                isDark && {
+                                  backgroundColor: colors.card,
+                                  borderColor: colors.border,
+                                },
+                              ],
                         ]}
                         onPress={() => handleSelectGroup(hh)}
                         activeOpacity={0.88}
@@ -592,7 +895,10 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                               styles.groupTagText,
                               isSelected
                                 ? styles.groupTagTextSelected
-                                : styles.groupTagTextUnselected,
+                                : [
+                                    styles.groupTagTextUnselected,
+                                    isDark && { color: colors.textMuted },
+                                  ],
                             ]}
                           >
                             {idx === 0 ? "Primary Group" : "Available Group"}
@@ -606,7 +912,12 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                               />
                             </View>
                           ) : (
-                            <View style={styles.radioOutline} />
+                            <View
+                              style={[
+                                styles.radioOutline,
+                                isDark && { borderColor: colors.border },
+                              ]}
+                            />
                           )}
                         </View>
 
@@ -615,7 +926,10 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                             styles.groupCardTitle,
                             isSelected
                               ? styles.groupCardTitleSelected
-                              : styles.groupCardTitleUnselected,
+                              : [
+                                  styles.groupCardTitleUnselected,
+                                  isDark && { color: colors.text },
+                                ],
                           ]}
                           numberOfLines={1}
                         >
@@ -626,7 +940,10 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                             styles.groupCardSub,
                             isSelected
                               ? styles.groupCardSubSelected
-                              : styles.groupCardSubUnselected,
+                              : [
+                                  styles.groupCardSubUnselected,
+                                  isDark && { color: colors.textSecondary },
+                                ],
                           ]}
                         >
                           {subtitle}
@@ -649,6 +966,11 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                                       left: mIdx * 14,
                                       zIndex: 3 - mIdx,
                                     },
+                                    isDark && {
+                                      borderColor: isSelected
+                                        ? "#2563EB"
+                                        : colors.card,
+                                    },
                                   ]}
                                 >
                                   <Text style={styles.avatarInitials}>
@@ -664,7 +986,10 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                                 styles.moreCountText,
                                 isSelected
                                   ? styles.moreCountTextSelected
-                                  : styles.moreCountTextUnselected,
+                                  : [
+                                      styles.moreCountTextUnselected,
+                                      isDark && { color: colors.textSecondary },
+                                    ],
                               ]}
                             >
                               +{membersCount - 3} more
@@ -680,86 +1005,175 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
             {/* 4. Property Address */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
                 Property Address <Text style={styles.requiredStar}>*</Text>
               </Text>
-              <View style={styles.inputWithIcon}>
+              <View
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="map-pin"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={{ marginRight: 10 }}
                 />
                 <TextInput
-                  style={styles.textInputStyle}
+                  style={[
+                    styles.textInputStyle,
+                    isDark && { color: colors.text },
+                  ]}
                   value={propertyAddress}
                   onChangeText={setPropertyAddress}
                   placeholder="e.g. 452 Greenfield St, Unit 402, Metro Manila"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 />
               </View>
             </View>
 
             {/* 5. Host Management Type with dropdowns */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
                 Host Management Type <Text style={styles.requiredStar}>*</Text>
               </Text>
               <TouchableOpacity
-                style={styles.inputWithIcon}
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
                 onPress={() => setShowManagementModal(true)}
                 activeOpacity={0.8}
               >
                 <Text
                   style={[
                     styles.selectInputText,
-                    !managementType && { color: "#94A3B8" },
+                    isDark && { color: colors.text },
+                    !managementType && {
+                      color: isDark ? colors.textMuted : "#94A3B8",
+                    },
                   ]}
                   numberOfLines={1}
                 >
                   {managementType ||
                     "Select your property management designation"}
                 </Text>
-                <Feather name="chevron-down" size={18} color="#64748B" />
+                <Feather
+                  name="chevron-down"
+                  size={18}
+                  color={isDark ? colors.textSecondary : "#64748B"}
+                />
               </TouchableOpacity>
             </View>
 
             {/* 6. Unit, Apt or Floor (Optional) */}
             <View style={styles.formFieldBlock}>
               <View style={styles.labelRow}>
-                <Text style={styles.fieldHeaderLabel}>Unit, Apt or Floor</Text>
-                <View style={styles.optionalBadge}>
-                  <Text style={styles.optionalBadgeText}>Optional</Text>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Unit, Apt or Floor
+                </Text>
+                <View
+                  style={[
+                    styles.optionalBadge,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.optionalBadgeText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Optional
+                  </Text>
                 </View>
               </View>
-              <View style={styles.inputWithIcon}>
+              <View
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Feather
                   name="home"
                   size={17}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={{ marginRight: 10 }}
                 />
                 <TextInput
-                  style={styles.textInputStyle}
+                  style={[
+                    styles.textInputStyle,
+                    isDark && { color: colors.text },
+                  ]}
                   value={unitOrRoom}
                   onChangeText={setUnitOrRoom}
                   placeholder="e.g. Unit 402, 4th Floor"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 />
               </View>
             </View>
 
             {/* 7. Est Monthly Bills */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>Est. Monthly Bills</Text>
-              <View style={styles.inputWithIcon}>
-                <Text style={styles.currencyPrefix}>₱</Text>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Est. Monthly Bills
+              </Text>
+              <View
+                style={[
+                  styles.inputWithIcon,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.currencyPrefix,
+                    isDark && { color: "#34D399" },
+                  ]}
+                >
+                  ₱
+                </Text>
                 <TextInput
-                  style={styles.textInputStyle}
+                  style={[
+                    styles.textInputStyle,
+                    isDark && { color: colors.text },
+                  ]}
                   value={monthlyRentOrShare}
                   onChangeText={setMonthlyRentOrShare}
                   placeholder="e.g. 15000"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                   keyboardType="numeric"
                 />
               </View>
@@ -767,16 +1181,29 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
             {/* 8. Why do you want to become a host */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
                 Why do you want to become a host{" "}
                 <Text style={styles.requiredStar}>*</Text>
               </Text>
               <TextInput
-                style={[styles.textInputStyle, styles.textAreaInput]}
+                style={[
+                  styles.textInputStyle,
+                  styles.textAreaInput,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={reasonForApplying}
                 onChangeText={setReasonForApplying}
                 placeholder="Explain why you want to become a host (e.g. I am the primary leaseholder and organize utility splits and water attendance for roommates)..."
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
@@ -785,13 +1212,28 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
             {/* 9. Property Experience */}
             <View style={styles.formFieldBlock}>
-              <Text style={styles.fieldHeaderLabel}>Property Experience</Text>
+              <Text
+                style={[
+                  styles.fieldHeaderLabel,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Property Experience
+              </Text>
               <TextInput
-                style={[styles.textInputStyle, styles.textAreaInput]}
+                style={[
+                  styles.textInputStyle,
+                  styles.textAreaInput,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={experience}
                 onChangeText={setExperience}
                 placeholder="Describe your prior experience managing leases, collecting utility shares, or hosting shared accommodations..."
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
@@ -840,7 +1282,13 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 key={type}
                 style={[
                   styles.modalOption,
-                  isSelected && styles.modalOptionSelected,
+                  isSelected &&
+                    (isDark
+                      ? {
+                          backgroundColor: "rgba(59, 130, 246, 0.18)",
+                          borderColor: "rgba(59, 130, 246, 0.4)",
+                        }
+                      : styles.modalOptionSelected),
                 ]}
                 onPress={() => {
                   setManagementType(type);
@@ -852,6 +1300,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                   <View
                     style={[
                       styles.radioCircle,
+                      isDark && { borderColor: colors.border },
                       isSelected && styles.radioCircleSelected,
                     ]}
                   >
@@ -860,14 +1309,22 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                   <Text
                     style={[
                       styles.modalOptionText,
-                      isSelected && styles.modalOptionTextSelected,
+                      isDark && { color: colors.text },
+                      isSelected &&
+                        (isDark
+                          ? { color: colors.primary }
+                          : styles.modalOptionTextSelected),
                     ]}
                   >
                     {type}
                   </Text>
                 </View>
                 {isSelected && (
-                  <Feather name="check" size={16} color="#2563EB" />
+                  <Feather
+                    name="check"
+                    size={16}
+                    color={isDark ? colors.primary : "#2563EB"}
+                  />
                 )}
               </TouchableOpacity>
             );
@@ -888,21 +1345,36 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         <View style={{ gap: 12, paddingVertical: 8 }}>
           <View style={styles.infoRow}>
             <Ionicons name="water-outline" size={20} color="#2563EB" />
-            <Text style={styles.infoRowText}>
+            <Text
+              style={[
+                styles.infoRowText,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Set custom per-day water attendance rates and automate monthly
               utility distribution.
             </Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="card-outline" size={20} color="#10B981" />
-            <Text style={styles.infoRowText}>
+            <Text
+              style={[
+                styles.infoRowText,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Receive direct roommate settlements to GCash, Maya, or verified
               bank accounts.
             </Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="people-outline" size={20} color="#8B5CF6" />
-            <Text style={styles.infoRowText}>
+            <Text
+              style={[
+                styles.infoRowText,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Create, lock, and manage household roommate membership with zero
               hassle.
             </Text>

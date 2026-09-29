@@ -3,28 +3,19 @@
     "allowJs": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",
-    "lib": [
-      "DOM",
-      "ESNext"
-    ],
+    "lib": ["DOM", "ESNext"],
     "module": "preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
-    "customConditions": [
-      "react-native"
-    ],
+    "customConditions": ["react-native"],
     "noEmit": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "target": "ESNext",
     "strict": true,
     "paths": {
-      "@propertyflow/shared": [
-        "../shared/src"
-      ],
-      "@splitzy/shared": [
-        "../shared/src"
-      ],
+      "@propertyflow/shared": ["./src/shared", "../shared/src"],
+      "@splitzy/shared": ["./src/shared", "../shared/src"],
       "@firebase/auth": [
         "./node_modules/firebase/node_modules/@firebase/auth/dist/index.d.ts"
       ]

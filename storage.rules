@@ -23,11 +23,8 @@ service firebase.storage {
     }
 
     // Payment proof uploads
-    match /payment_proofs/{householdId}/{paymentId}/{fileName} {
-      allow read: if isAuthenticated() &&
-                  firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.householdId == householdId;
-      allow write: if isAuthenticated()
-                   && isImageOrPdf() && isValidSize(10 * 1024 * 1024);
+    match /payment_proofs/{allPaths=**} {
+      allow read, write: if isAuthenticated();
     }
 
     // Support ticket attachments

@@ -24,6 +24,7 @@ import {
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
+import { useTheme } from "../context/ThemeContext";
 
 export interface ViewGroupScreenProps {
   onBack: () => void;
@@ -69,6 +70,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   onOpenHostApplication,
   currentUser = { name: "Resident", avatar: "R" },
 }) => {
+  const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
@@ -527,18 +529,45 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
-            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+            <TouchableOpacity
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                },
+              ]}
+              onPress={onBack}
+            >
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Group Overview</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Group Overview
+            </Text>
           </View>
         </View>
         <UniversalSkeleton type="groups" />
@@ -548,18 +577,45 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
   if (!householdId) {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
-            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+            <TouchableOpacity
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                },
+              ]}
+              onPress={onBack}
+            >
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Join a Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Join a Group
+            </Text>
             <View style={{ width: 42 }} />
           </View>
         </View>
@@ -568,28 +624,75 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
           contentContainerStyle={[styles.scrollContent, { paddingTop: 24 }]}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.infoHeroCard}>
-            <View style={styles.infoHeroIconWrap}>
-              <Feather name="users" size={26} color="#2563EB" />
+          <View
+            style={[
+              styles.infoHeroCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.infoHeroIconWrap,
+                isDark && { backgroundColor: colors.primaryLight },
+              ]}
+            >
+              <Feather
+                name="users"
+                size={26}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
-            <Text style={styles.infoHeroTitle}>No Active Household</Text>
-            <Text style={styles.infoHeroSub}>
+            <Text
+              style={[styles.infoHeroTitle, isDark && { color: colors.text }]}
+            >
+              No Active Household
+            </Text>
+            <Text
+              style={[
+                styles.infoHeroSub,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Enter the invite code shared by your property host to join your
               household group and view shared bills.
             </Text>
 
             <View style={{ width: "100%", marginTop: 18 }}>
-              <Text style={styles.inputLabel}>Household Invite Code</Text>
+              <Text
+                style={[
+                  styles.inputLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Household Invite Code
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={joinCodeInput}
                 onChangeText={setJoinCodeInput}
                 placeholder="e.g. PF-402"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 autoCapitalize="characters"
               />
               <TouchableOpacity
-                style={[styles.primaryPillBtn, { marginTop: 14 }]}
+                style={[
+                  styles.primaryPillBtn,
+                  { marginTop: 14 },
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
+                ]}
                 onPress={handleJoinGroup}
                 disabled={joinLoading}
               >
@@ -605,16 +708,27 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
             {onOpenHostApplication && (
               <TouchableOpacity
-                style={styles.secondaryOutlineBtn}
+                style={[
+                  styles.secondaryOutlineBtn,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
                 onPress={onOpenHostApplication}
               >
                 <Feather
                   name="shield"
                   size={15}
-                  color="#2563EB"
+                  color={isDark ? colors.accent : "#2563EB"}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.secondaryOutlineBtnText}>
+                <Text
+                  style={[
+                    styles.secondaryOutlineBtnText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   Apply to Become a Host Instead
                 </Text>
               </TouchableOpacity>
@@ -626,20 +740,47 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent
         backgroundColor="transparent"
       />
 
       {/* Top Header - Informational Only (No Edit/Manage Menu) */}
-      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+      <View
+        style={[
+          styles.navBarContainer,
+          { paddingTop: topInset },
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <View style={styles.navBar}>
-          <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-            <Feather name="chevron-left" size={24} color="#0F172A" />
+          <TouchableOpacity
+            style={[
+              styles.circleBackBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderWidth: 1,
+              },
+            ]}
+            onPress={onBack}
+          >
+            <Feather
+              name="chevron-left"
+              size={24}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
-          <Text style={styles.navTitle}>Group Overview</Text>
+          <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+            Group Overview
+          </Text>
         </View>
       </View>
 
@@ -651,16 +792,47 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {/* Household Information Banner Card */}
-        <View style={styles.householdSummaryCard}>
+        <View
+          style={[
+            styles.householdSummaryCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderWidth: 1,
+              borderColor: colors.border,
+              shadowOpacity: 0,
+              elevation: 0,
+            },
+          ]}
+        >
           <View style={styles.householdSummaryTopRow}>
-            <View style={styles.householdIconBadge}>
-              <Feather name="home" size={22} color="#FFFFFF" />
+            <View
+              style={[
+                styles.householdIconBadge,
+                isDark && { backgroundColor: colors.primaryLight },
+              ]}
+            >
+              <Feather
+                name="home"
+                size={22}
+                color={isDark ? colors.accent : "#FFFFFF"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.householdNameText} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.householdNameText,
+                  isDark && { color: colors.text },
+                ]}
+                numberOfLines={1}
+              >
                 {currentGroupName}
               </Text>
-              <Text style={styles.householdHostSubText}>
+              <Text
+                style={[
+                  styles.householdHostSubText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Hosted by{" "}
                 {hostMember?.displayName ||
                   hostMember?.name ||
@@ -668,26 +840,59 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                   "Property Host"}
               </Text>
             </View>
-            <View style={styles.memberRolePill}>
-              <Text style={styles.memberRolePillText}>
+            <View
+              style={[
+                styles.memberRolePill,
+                isDark && { backgroundColor: "rgba(59, 130, 246, 0.15)" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.memberRolePillText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
                 {myParticipant?.role === "NON_PAYOR" ? "NON-PAYOR" : "PAYOR"}
               </Text>
             </View>
           </View>
 
-          <View style={styles.householdDivider} />
+          <View
+            style={[
+              styles.householdDivider,
+              isDark && { backgroundColor: colors.border },
+            ]}
+          />
 
           <View style={styles.householdMetaRow}>
             <View style={styles.householdMetaItem}>
-              <Feather name="users" size={14} color="#DBEAFE" />
-              <Text style={styles.householdMetaText}>
+              <Feather
+                name="users"
+                size={14}
+                color={isDark ? colors.accent : "#DBEAFE"}
+              />
+              <Text
+                style={[
+                  styles.householdMetaText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 {participants.length} Active{" "}
                 {participants.length === 1 ? "Member" : "Members"}
               </Text>
             </View>
             <View style={styles.householdMetaItem}>
-              <Feather name="calendar" size={14} color="#DBEAFE" />
-              <Text style={styles.householdMetaText}>
+              <Feather
+                name="calendar"
+                size={14}
+                color={isDark ? colors.accent : "#DBEAFE"}
+              />
+              <Text
+                style={[
+                  styles.householdMetaText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 {activeCycle ? activeCycle.name || "Active Cycle" : "No Cycle"}
               </Text>
             </View>
@@ -696,10 +901,26 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
         {/* Billing Cycle Section (Informational Only - No Add/Edit/Delete Buttons) */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeading}>Billing Cycle</Text>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
+            Billing Cycle
+          </Text>
           {activeCycle?.status && (
-            <View style={styles.cycleStatusBadge}>
-              <Text style={styles.cycleStatusBadgeText}>
+            <View
+              style={[
+                styles.cycleStatusBadge,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.16)",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cycleStatusBadgeText,
+                  isDark && { color: colors.success },
+                ]}
+              >
                 {activeCycle.status}
               </Text>
             </View>
@@ -707,10 +928,31 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         </View>
 
         {cycles.length === 0 ? (
-          <View style={styles.emptyInfoCard}>
-            <Ionicons name="calendar-outline" size={24} color="#64748B" />
-            <Text style={styles.emptyInfoTitle}>No Active Billing Cycle</Text>
-            <Text style={styles.emptyInfoSub}>
+          <View
+            style={[
+              styles.emptyInfoCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name="calendar-outline"
+              size={24}
+              color={isDark ? colors.textMuted : "#64748B"}
+            />
+            <Text
+              style={[styles.emptyInfoTitle, isDark && { color: colors.text }]}
+            >
+              No Active Billing Cycle
+            </Text>
+            <Text
+              style={[
+                styles.emptyInfoSub,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Your household host has not started a billing cycle yet.
             </Text>
           </View>
@@ -729,14 +971,28 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                     key={c.billingCycleId}
                     style={[
                       styles.cycleChip,
-                      isSelected && styles.cycleChipActive,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                      isSelected &&
+                        (isDark
+                          ? {
+                              backgroundColor: colors.primary,
+                              borderColor: colors.primary,
+                            }
+                          : styles.cycleChipActive),
                     ]}
                     onPress={() => setSelectedCycleId(c.billingCycleId)}
                   >
                     <Text
                       style={[
                         styles.cycleChipText,
-                        isSelected && styles.cycleChipTextActive,
+                        isDark && { color: colors.textSecondary },
+                        isSelected && [
+                          styles.cycleChipTextActive,
+                          isDark && { color: "#FFFFFF" },
+                        ],
                       ]}
                     >
                       {c.name || "Cycle"}
@@ -748,31 +1004,57 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
             {activeCycle && (
               <View style={styles.dateRangeRow}>
-                <View style={styles.datePill}>
+                <View
+                  style={[
+                    styles.datePill,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
                   <Feather
                     name="calendar"
                     size={13}
-                    color="#64748B"
+                    color={isDark ? colors.accent : "#64748B"}
                     style={{ marginRight: 6 }}
                   />
-                  <Text style={styles.datePillText}>
+                  <Text
+                    style={[
+                      styles.datePillText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {formatShortDate(activeCycle.startDate)}
                   </Text>
                 </View>
                 <Feather
                   name="arrow-right"
                   size={14}
-                  color="#94A3B8"
+                  color={isDark ? colors.textMuted : "#94A3B8"}
                   style={{ marginHorizontal: 10 }}
                 />
-                <View style={styles.datePill}>
+                <View
+                  style={[
+                    styles.datePill,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
                   <Feather
                     name="calendar"
                     size={13}
-                    color="#64748B"
+                    color={isDark ? colors.accent : "#64748B"}
                     style={{ marginRight: 6 }}
                   />
-                  <Text style={styles.datePillText}>
+                  <Text
+                    style={[
+                      styles.datePillText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {formatShortDate(activeCycle.endDate)}
                   </Text>
                 </View>
@@ -782,14 +1064,43 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         )}
 
         {/* Water Billing Info Card (Read-Only - No Configure Button) */}
-        <View style={styles.waterConfigCard}>
+        <View
+          style={[
+            styles.waterConfigCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <View style={styles.waterConfigHeader}>
-            <View style={styles.waterConfigIconWrap}>
-              <Feather name="droplet" size={18} color="#0284C7" />
+            <View
+              style={[
+                styles.waterConfigIconWrap,
+                isDark && { backgroundColor: "rgba(59, 130, 246, 0.15)" },
+              ]}
+            >
+              <Feather
+                name="droplet"
+                size={18}
+                color={isDark ? colors.accent : "#0284C7"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.waterConfigTitle}>Water Billing Rule</Text>
-              <Text style={styles.waterConfigSub}>
+              <Text
+                style={[
+                  styles.waterConfigTitle,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Water Billing Rule
+              </Text>
+              <Text
+                style={[
+                  styles.waterConfigSub,
+                  isDark && { color: colors.accent },
+                ]}
+              >
                 {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                   ? `Flat Rate · ₱${((waterConfig?.fixedPerPersonAmountCentavos || 0) / 100).toFixed(2)} / resident / mo`
                   : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -798,9 +1109,27 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
               </Text>
             </View>
           </View>
-          <View style={styles.waterConfigDetailsRow}>
-            <View style={styles.waterModeTag}>
-              <Text style={styles.waterModeTagText}>
+          <View
+            style={[
+              styles.waterConfigDetailsRow,
+              isDark && { borderTopColor: colors.border },
+            ]}
+          >
+            <View
+              style={[
+                styles.waterModeTag,
+                isDark && {
+                  backgroundColor: "rgba(59, 130, 246, 0.12)",
+                  borderColor: "rgba(59, 130, 246, 0.25)",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.waterModeTagText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
                 {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                   ? "Flat Fee Mode"
                   : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -808,7 +1137,13 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                     : "Attendance Based"}
               </Text>
             </View>
-            <Text style={styles.waterModeSummary} numberOfLines={2}>
+            <Text
+              style={[
+                styles.waterModeSummary,
+                isDark && { color: colors.textSecondary },
+              ]}
+              numberOfLines={2}
+            >
               {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                 ? "Each paying roommate is billed a fixed monthly water rate."
                 : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -820,36 +1155,105 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
         {/* Summary Metric Cards */}
         <View style={styles.metricCardsRow}>
-          <View style={styles.metricCard}>
-            <View style={styles.metricIconWrap}>
-              <Ionicons name="wallet-outline" size={20} color="#2563EB" />
+          <View
+            style={[
+              styles.metricCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.metricIconWrap,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="wallet-outline"
+                size={20}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
-            <Text style={styles.metricValue}>{formatPesos(myDuesCents)}</Text>
-            <Text style={styles.metricLabel}>Your Unpaid Dues</Text>
+            <Text
+              style={[styles.metricValue, isDark && { color: colors.text }]}
+            >
+              {formatPesos(myDuesCents)}
+            </Text>
+            <Text
+              style={[
+                styles.metricLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Your Unpaid Dues
+            </Text>
           </View>
 
-          <View style={styles.metricCard}>
-            <View style={styles.metricIconWrap}>
-              <Ionicons name="receipt-outline" size={20} color="#0F172A" />
+          <View
+            style={[
+              styles.metricCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.metricIconWrap,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="receipt-outline"
+                size={20}
+                color={isDark ? colors.textSecondary : "#0F172A"}
+              />
             </View>
-            <Text style={styles.metricValue}>
+            <Text
+              style={[styles.metricValue, isDark && { color: colors.text }]}
+            >
               {formatPesos(totalExpenseCents)}
             </Text>
-            <Text style={styles.metricLabel}>Total Group Bills</Text>
+            <Text
+              style={[
+                styles.metricLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Total Group Bills
+            </Text>
           </View>
         </View>
 
         {/* Cycle Bills List (Read-Only - No Add Button) */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeading}>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
             Household Bills ({currentCycleExpenses.length})
           </Text>
         </View>
 
-        <View style={styles.expenseBox}>
+        <View
+          style={[
+            styles.expenseBox,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           {currentCycleExpenses.length === 0 ? (
             <View style={styles.emptyExpenseBox}>
-              <Text style={styles.emptyExpenseText}>
+              <Text
+                style={[
+                  styles.emptyExpenseText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 No bills have been posted for this billing cycle yet.
               </Text>
             </View>
@@ -859,17 +1263,31 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                 exp.status === "PAID" || exp.isPaid === true;
               const catMeta = getCategoryMeta(exp.category);
               return (
-                <View key={exp.id} style={styles.expenseItemRow}>
+                <View
+                  key={exp.id}
+                  style={[
+                    styles.expenseItemRow,
+                    isDark && { borderBottomColor: colors.border },
+                  ]}
+                >
                   <View
                     style={[
                       styles.expenseCategoryIconWrap,
-                      { backgroundColor: catMeta.bgColor },
+                      {
+                        backgroundColor: isDark
+                          ? catMeta.darkBgColor || "rgba(255, 255, 255, 0.08)"
+                          : catMeta.bgColor,
+                      },
                     ]}
                   >
                     <Feather
                       name={catMeta.featherIcon as any}
                       size={15}
-                      color={catMeta.color}
+                      color={
+                        isDark
+                          ? catMeta.darkColor || catMeta.color
+                          : catMeta.color
+                      }
                     />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -880,33 +1298,64 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.expenseItemTitle}>
+                      <Text
+                        style={[
+                          styles.expenseItemTitle,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {cleanBillTitle(exp.title, exp.category)}
                       </Text>
                       <View
                         style={
                           isExpensePaid
-                            ? styles.statusBadgePaid
-                            : styles.statusBadgeUnpaid
+                            ? [
+                                styles.statusBadgePaid,
+                                isDark && {
+                                  backgroundColor: "rgba(16, 185, 129, 0.16)",
+                                },
+                              ]
+                            : [
+                                styles.statusBadgeUnpaid,
+                                isDark && {
+                                  backgroundColor: "rgba(244, 63, 94, 0.16)",
+                                },
+                              ]
                         }
                       >
                         <Text
                           style={
                             isExpensePaid
-                              ? styles.statusBadgeTextPaid
-                              : styles.statusBadgeTextUnpaid
+                              ? [
+                                  styles.statusBadgeTextPaid,
+                                  isDark && { color: colors.success },
+                                ]
+                              : [
+                                  styles.statusBadgeTextUnpaid,
+                                  isDark && { color: colors.danger },
+                                ]
                           }
                         >
                           {isExpensePaid ? "PAID" : "UNPAID"}
                         </Text>
                       </View>
                     </View>
-                    <Text style={styles.expenseItemSub}>
+                    <Text
+                      style={[
+                        styles.expenseItemSub,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
                       Posted by {exp.payerName || "Host"} •{" "}
                       {formatShortDate(exp.date)}
                     </Text>
                   </View>
-                  <Text style={styles.expenseItemAmount}>
+                  <Text
+                    style={[
+                      styles.expenseItemAmount,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     {formatPesos(exp.amountCents)}
                   </Text>
                 </View>
@@ -917,21 +1366,42 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
         {/* Roommates / Participants List (Read-Only - No Invite/Role/Remove Buttons) */}
         <View style={[styles.sectionRow, { marginTop: 24 }]}>
-          <Text style={styles.sectionHeading}>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
             Household Members ({participants.length})
           </Text>
         </View>
 
         <View style={styles.participantsList}>
           {participants.length === 0 ? (
-            <View style={styles.emptyExpenseBox}>
-              <Text style={styles.emptyExpenseText}>
+            <View
+              style={[
+                styles.emptyExpenseBox,
+                isDark && { backgroundColor: colors.card },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.emptyExpenseText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 No active members found.
               </Text>
             </View>
           ) : (
             participants.map((p) => (
-              <View key={p.id} style={styles.participantCard}>
+              <View
+                key={p.id}
+                style={[
+                  styles.participantCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.participantRow}>
                   <View style={styles.participantAvatar}>
                     {p.profilePicture ? (
@@ -955,14 +1425,34 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.participantName}>{p.name}</Text>
+                      <Text
+                        style={[
+                          styles.participantName,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        {p.name}
+                      </Text>
                       {p.role === "HOST" ? (
                         <View style={styles.hostBadge}>
                           <Text style={styles.hostBadgeText}>HOST</Text>
                         </View>
                       ) : p.role === "NON_PAYOR" ? (
-                        <View style={styles.nonPayorBadge}>
-                          <Text style={styles.nonPayorBadgeText}>
+                        <View
+                          style={[
+                            styles.nonPayorBadge,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.nonPayorBadgeText,
+                              isDark && { color: colors.textMuted },
+                            ]}
+                          >
                             NON-PAYOR
                           </Text>
                         </View>
@@ -987,13 +1477,24 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                           styles.statusText,
                           {
                             color:
-                              p.status === "Settled" ? "#059669" : "#E11D48",
+                              p.status === "Settled"
+                                ? isDark
+                                  ? colors.success
+                                  : "#059669"
+                                : isDark
+                                  ? colors.danger
+                                  : "#E11D48",
                           },
                         ]}
                       >
                         {p.status}
                       </Text>
-                      <Text style={styles.participantSubInfo}>
+                      <Text
+                        style={[
+                          styles.participantSubInfo,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
                         {p.role === "NON_PAYOR"
                           ? "• Exempt from bill splits"
                           : p.role === "HOST"
@@ -1005,8 +1506,17 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                       p.waterShareCents !== undefined &&
                       p.waterShareCents > 0 && (
                         <View style={styles.participantWaterBreakdownWrap}>
-                          <Feather name="droplet" size={11} color="#0284C7" />
-                          <Text style={styles.participantWaterBreakdownText}>
+                          <Feather
+                            name="droplet"
+                            size={11}
+                            color={isDark ? colors.accent : "#0284C7"}
+                          />
+                          <Text
+                            style={[
+                              styles.participantWaterBreakdownText,
+                              isDark && { color: colors.accent },
+                            ]}
+                          >
                             {formatPesos(p.waterShareCents)} (
                             {p.waterDaysPresent || 0}d own
                             {p.waterNonPayorCents && p.waterNonPayorCents > 0
@@ -1018,14 +1528,24 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                       )}
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.participantOwesText}>
+                    <Text
+                      style={[
+                        styles.participantOwesText,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       {p.role === "NON_PAYOR"
                         ? "Exempt"
                         : p.owesCents > 0
                           ? formatPesos(p.owesCents)
                           : "Settled"}
                     </Text>
-                    <Text style={styles.participantOwesSub}>
+                    <Text
+                      style={[
+                        styles.participantOwesSub,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
                       {p.role === "NON_PAYOR"
                         ? "Non-Payor"
                         : p.owesCents > 0
@@ -1041,7 +1561,14 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
 
         {myDuesCents > 0 && onOpenSettleDues && (
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            style={[
+              styles.primaryPillBtn,
+              { marginTop: 24 },
+              isDark && {
+                backgroundColor: colors.primary,
+                shadowColor: colors.primary,
+              },
+            ]}
             onPress={onOpenSettleDues}
           >
             <Ionicons

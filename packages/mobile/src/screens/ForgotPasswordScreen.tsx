@@ -15,10 +15,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { NavigationBar } from "expo-navigation-bar";
+import { NavigationBar } from "../utils/safeNavigationBar";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../firebase/config";
 import { assets } from "../../assets/assets";
+import { useTheme } from "../context/ThemeContext";
 
 interface ForgotPasswordScreenProps {
   initialEmail?: string;
@@ -31,18 +32,23 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
   onBack,
   onSuccess,
 }) => {
+  const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState(initialEmail);
   const [loading, setLoading] = useState(false);
   const [isSent, setIsSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
+  const bottomBgColor = isDark ? "#141C2B" : "#2563EB";
+
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (countdown > 0) {
       timer = setTimeout(() => setCountdown(countdown - 1), 1000);
     }
-    return () => clearTimeout(timer);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [countdown]);
 
   const handleSendReset = async () => {
@@ -74,23 +80,31 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
   };
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, { backgroundColor: bottomBgColor }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor="transparent"
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="dark" hidden={true} />
+        <NavigationBar style="light" hidden={true} />
       )}
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { backgroundColor: bottomBgColor },
+        ]}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <View style={styles.topWhiteBleed} />
-        {/* Top White Section */}
+        <View
+          style={[
+            styles.topWhiteBleed,
+            isDark && { backgroundColor: colors.background },
+          ]}
+        />
+        {/* Top Section */}
         <View
           style={[
             styles.topSection,
@@ -103,6 +117,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                     : 20,
                 ) + 12,
             },
+            isDark && { backgroundColor: colors.background },
           ]}
         >
           {/* Header Navigation */}
@@ -111,10 +126,27 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <View style={styles.backButtonIconCircle}>
-              <Feather name="chevron-left" size={20} color="#0F172A" />
+            <View
+              style={[
+                styles.backButtonIconCircle,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Feather
+                name="chevron-left"
+                size={20}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
-            <Text style={styles.backButtonText}>Back</Text>
+            <Text
+              style={[styles.backButtonText, isDark && { color: colors.text }]}
+            >
+              Back
+            </Text>
           </TouchableOpacity>
 
           {/* Logo Badge */}
@@ -127,33 +159,70 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
               />
             </View>
             <View style={styles.brandTitleRow}>
-              <Text style={styles.splitText}>Split</Text>
-              <Text style={styles.zyText}>zy</Text>
+              <Text
+                style={[styles.splitText, isDark && { color: colors.text }]}
+              >
+                Split
+              </Text>
+              <Text
+                style={[styles.zyText, isDark && { color: colors.primary }]}
+              >
+                zy
+              </Text>
             </View>
           </View>
 
           {!isSent ? (
             <>
-              <Text style={styles.mainTitle}>Forgot Password?</Text>
-              <Text style={styles.description}>
+              <Text
+                style={[styles.mainTitle, isDark && { color: colors.text }]}
+              >
+                Forgot Password?
+              </Text>
+              <Text
+                style={[
+                  styles.description,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Don't worry! Enter the email associated with your Splitzy
                 account and we'll send you a password recovery link.
               </Text>
 
               <View style={styles.formArea}>
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.inputLabel}>Email Address</Text>
-                  <View style={styles.inputWrapper}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Email Address
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
                     <Feather
                       name="mail"
                       size={18}
-                      color="#94A3B8"
+                      color={isDark ? colors.textMuted : "#94A3B8"}
                       style={styles.vectorIcon}
                     />
                     <TextInput
-                      style={styles.textInput}
+                      style={[
+                        styles.textInput,
+                        isDark && { color: colors.text },
+                      ]}
                       placeholder="e.g. rommel.belia@example.com"
-                      placeholderTextColor="#94A3B8"
+                      placeholderTextColor={
+                        isDark ? colors.textMuted : "#94A3B8"
+                      }
                       value={email}
                       onChangeText={setEmail}
                       autoCapitalize="none"
@@ -166,6 +235,10 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                 <TouchableOpacity
                   style={[
                     styles.primaryActionButton,
+                    isDark && {
+                      backgroundColor: colors.primary,
+                      shadowColor: colors.primary,
+                    },
                     loading && styles.primaryActionDisabled,
                   ]}
                   onPress={handleSendReset}
@@ -187,28 +260,63 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             </>
           ) : (
             <View style={styles.successCard}>
-              <View style={styles.successIconCircle}>
+              <View
+                style={[
+                  styles.successIconCircle,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.16)",
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <Ionicons
                   name="mail-unread-outline"
                   size={36}
-                  color="#0F172A"
+                  color={isDark ? colors.accent : "#0F172A"}
                 />
               </View>
 
-              <Text style={styles.successTitle}>Check Your Inbox</Text>
-              <Text style={styles.successSubtitle}>
+              <Text
+                style={[styles.successTitle, isDark && { color: colors.text }]}
+              >
+                Check Your Inbox
+              </Text>
+              <Text
+                style={[
+                  styles.successSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 We've sent a password reset link to:{"\n"}
-                <Text style={styles.emailHighlight}>{email.trim()}</Text>
+                <Text
+                  style={[
+                    styles.emailHighlight,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  {email.trim()}
+                </Text>
               </Text>
 
-              <View style={styles.infoTipBox}>
+              <View
+                style={[
+                  styles.infoTipBox,
+                  isDark && {
+                    backgroundColor: "rgba(16, 185, 129, 0.14)",
+                    borderColor: "rgba(16, 185, 129, 0.3)",
+                  },
+                ]}
+              >
                 <Ionicons
                   name="information-circle-outline"
                   size={18}
-                  color="#2563EB"
+                  color={isDark ? "#34D399" : "#2563EB"}
                   style={{ marginTop: 2 }}
                 />
-                <Text style={styles.infoTipText}>
+                <Text
+                  style={[styles.infoTipText, isDark && { color: "#34D399" }]}
+                >
                   Click the link inside the email to choose a new password. If
                   you don't see it within a minute, please check your spam
                   folder.
@@ -216,7 +324,13 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
               </View>
 
               <TouchableOpacity
-                style={styles.primaryActionButton}
+                style={[
+                  styles.primaryActionButton,
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
+                ]}
                 onPress={onBack}
                 activeOpacity={0.88}
               >
@@ -229,11 +343,21 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
               </TouchableOpacity>
 
               <View style={styles.resendArea}>
-                <Text style={styles.resendPrompt}>
+                <Text
+                  style={[
+                    styles.resendPrompt,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Didn't receive the email?{" "}
                 </Text>
                 {countdown > 0 ? (
-                  <Text style={styles.countdownText}>
+                  <Text
+                    style={[
+                      styles.countdownText,
+                      isDark && { color: colors.textMuted },
+                    ]}
+                  >
                     Resend in {countdown}s
                   </Text>
                 ) : (
@@ -241,7 +365,14 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                     onPress={handleSendReset}
                     disabled={loading}
                   >
-                    <Text style={styles.resendLink}>Resend Email</Text>
+                    <Text
+                      style={[
+                        styles.resendLink,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      Resend Email
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -249,9 +380,19 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
           )}
         </View>
 
-        {/* Bottom Blue Section with S-Curve wave */}
-        <View style={styles.bottomCurvedContainer}>
-          <View style={styles.waveWrapper}>
+        {/* Bottom Section with S-Curve wave */}
+        <View
+          style={[
+            styles.bottomCurvedContainer,
+            { backgroundColor: bottomBgColor },
+          ]}
+        >
+          <View
+            style={[
+              styles.waveWrapper,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
             <Svg
               width="100%"
               height={52}
@@ -261,7 +402,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             >
               <Path
                 d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill="#2563EB"
+                fill={bottomBgColor}
               />
             </Svg>
           </View>
@@ -269,17 +410,31 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
           <View
             style={[
               styles.bottomBlueContent,
-              { paddingBottom: Math.max(insets.bottom + 20, 36) },
+              {
+                backgroundColor: bottomBgColor,
+                paddingBottom: Math.max(insets.bottom + 20, 36),
+              },
             ]}
           >
             <Text style={styles.bottomNeedHelpText}>Need help signing in?</Text>
-            <Text style={styles.bottomHelpSubtext}>
+            <Text
+              style={[
+                styles.bottomHelpSubtext,
+                isDark && { color: "rgba(255, 255, 255, 0.7)" },
+              ]}
+            >
               Contact your apartment host or Splitzy support for identity
               verification.
             </Text>
 
             <TouchableOpacity
-              style={styles.returnSignInBtn}
+              style={[
+                styles.returnSignInBtn,
+                isDark && {
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  borderColor: "rgba(255, 255, 255, 0.18)",
+                },
+              ]}
               onPress={onBack}
               activeOpacity={0.8}
             >
@@ -288,8 +443,10 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
           </View>
         </View>
 
-        {/* Bottom blue bleed ensures full solid blue extension on scroll */}
-        <View style={styles.bottomBlueBleed} />
+        {/* Bottom bleed ensures full solid extension on scroll */}
+        <View
+          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+        />
       </ScrollView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
@@ -297,7 +454,10 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
         pointerEvents="none"
         style={[
           styles.fixedBottomOverlay,
-          { height: Math.max(insets.bottom, 24) + 16 },
+          {
+            backgroundColor: bottomBgColor,
+            height: Math.max(insets.bottom, 24) + 16,
+          },
         ]}
       />
     </View>

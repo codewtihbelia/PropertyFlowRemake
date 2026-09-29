@@ -12,6 +12,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
 import { cleanBillTitle } from "../services/firebaseDataService";
+import { useTheme } from "../context/ThemeContext";
 
 interface ExpenseDetailsScreenProps {
   expense: {
@@ -44,16 +45,14 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
   expense,
   onBack,
 }) => {
+  const { isDark, colors } = useTheme();
+
   const isExpensePaid =
     expense.status === "PAID" ||
     expense.status === "Paid" ||
     expense.isPaid === true;
 
   const catMeta = getCategoryMeta(expense.categoryLabel || expense.title);
-  const displayEmoji =
-    expense.icon && expense.icon.length <= 4 && !expense.icon.includes("-")
-      ? expense.icon
-      : catMeta.emoji;
 
   // Real split participants from bill or fallback
   const participants =
@@ -94,7 +93,8 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           {
             name: "Dennis Tan",
             role: "Payor",
-            shareCents: expense.amountCents - Math.round(expense.amountCents / 4) * 3,
+            shareCents:
+              expense.amountCents - Math.round(expense.amountCents / 4) * 3,
             status: isExpensePaid ? "Paid" : "Pending",
             isExempt: false,
             note: undefined,
@@ -102,12 +102,39 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
         ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
-          <Feather name="arrow-left" size={20} color="#0F172A" />
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.backBtn,
+            {
+              backgroundColor: isDark ? colors.card : "rgba(15, 23, 42, 0.05)",
+              borderColor: colors.border,
+              borderWidth: isDark ? 1 : 0,
+            },
+          ]}
+          onPress={onBack}
+          activeOpacity={0.7}
+        >
+          <Feather
+            name="arrow-left"
+            size={20}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Bill Details</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Bill Details
+        </Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -116,46 +143,162 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {/* Main Expense Hero Card */}
-        <View style={styles.heroCard}>
-          <View style={[styles.heroIconWrap, { backgroundColor: catMeta.bgColor }]}>
-            <Ionicons name={catMeta.ionicon as any} size={32} color={catMeta.color} />
+        <View
+          style={[
+            styles.heroCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.heroIconWrap,
+              {
+                backgroundColor: isDark
+                  ? "rgba(255, 255, 255, 0.06)"
+                  : catMeta.bgColor,
+              },
+            ]}
+          >
+            <Ionicons
+              name={catMeta.ionicon as any}
+              size={32}
+              color={catMeta.color}
+            />
           </View>
-          <Text style={styles.heroTitle}>{cleanBillTitle(expense.title, expense.categoryLabel)}</Text>
-          <Text style={styles.heroAmount}>
+          <Text style={[styles.heroTitle, { color: colors.text }]}>
+            {cleanBillTitle(expense.title, expense.categoryLabel)}
+          </Text>
+          <Text
+            style={[
+              styles.heroAmount,
+              { color: isDark ? colors.text : "#2563EB" },
+            ]}
+          >
             {formatPesos(expense.amountCents)}
           </Text>
           <View style={styles.tagWrap}>
-            <View style={[styles.categoryTagWrap, { backgroundColor: catMeta.bgColor, borderColor: catMeta.color }]}>
-              <Text style={[styles.categoryTag, { color: catMeta.color }]}>{expense.categoryLabel}</Text>
-            </View>
-            <Text style={styles.cycleTag}>{expense.cycle}</Text>
-            <Text
+            <View
               style={[
-                styles.statusBadge,
-                isExpensePaid
-                  ? styles.statusPaid
-                  : { backgroundColor: "#FEF2F2", borderColor: "#FECACA", color: "#B91C1C" },
+                styles.categoryTagWrap,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.06)"
+                    : catMeta.bgColor,
+                  borderColor: isDark ? colors.border : catMeta.color,
+                },
               ]}
             >
-              {isExpensePaid ? "PAID" : "UNPAID BILL"}
-            </Text>
+              <Text style={[styles.categoryTag, { color: catMeta.color }]}>
+                {expense.categoryLabel}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.cycleTagWrap,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#EFF6FF",
+                  borderColor: colors.border,
+                  borderWidth: isDark ? 1 : 0,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cycleTag,
+                  { color: isDark ? colors.accent : "#2563EB" },
+                ]}
+              >
+                {expense.cycle}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.statusBadgeWrap,
+                isExpensePaid
+                  ? {
+                      backgroundColor: isDark
+                        ? "rgba(16, 185, 129, 0.14)"
+                        : "#DCFCE7",
+                      borderColor: isDark
+                        ? "rgba(16, 185, 129, 0.28)"
+                        : "#BBF7D0",
+                    }
+                  : {
+                      backgroundColor: isDark
+                        ? "rgba(239, 68, 68, 0.14)"
+                        : "#FEF2F2",
+                      borderColor: isDark
+                        ? "rgba(239, 68, 68, 0.28)"
+                        : "#FECACA",
+                    },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.statusBadgeText,
+                  {
+                    color: isExpensePaid
+                      ? isDark
+                        ? "#34D399"
+                        : "#16A34A"
+                      : isDark
+                        ? "#F87171"
+                        : "#B91C1C",
+                  },
+                ]}
+              >
+                {isExpensePaid ? "PAID" : "UNPAID BILL"}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* Payer Info matching proposedUI */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionHeading}>
+        {/* Payer Info */}
+        <View
+          style={[
+            styles.sectionCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.sectionHeading,
+              { color: isDark ? colors.textSecondary : "#0F172A" },
+            ]}
+          >
             {isExpensePaid ? "Who Paid" : "Bill Status & Payer"}
           </Text>
           <View style={styles.payerRow}>
-            <View style={styles.payerAvatar}>
-              <Text style={styles.payerAvatarText}>
+            <View
+              style={[
+                styles.payerAvatar,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#DBEAFE",
+                  borderColor: colors.border,
+                  borderWidth: isDark ? 1 : 0,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.payerAvatarText,
+                  { color: isDark ? colors.accent : "#1E40AF" },
+                ]}
+              >
                 {expense.payer.charAt(0).toUpperCase()}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.payerName}>{expense.payer}</Text>
-              <Text style={styles.payerSub}>
+              <Text style={[styles.payerName, { color: colors.text }]}>
+                {expense.payer}
+              </Text>
+              <Text style={[styles.payerSub, { color: colors.textSecondary }]}>
                 {isExpensePaid
                   ? `Paid in Full on ${expense.date}`
                   : `Billed to Household on ${expense.date} · Due from payors`}
@@ -164,13 +307,37 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             <View
               style={[
                 styles.paidMethodBadge,
-                !isExpensePaid && { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
+                isExpensePaid
+                  ? {
+                      backgroundColor: isDark
+                        ? "rgba(16, 185, 129, 0.14)"
+                        : "#DCFCE7",
+                      borderColor: isDark
+                        ? "rgba(16, 185, 129, 0.28)"
+                        : "#BBF7D0",
+                    }
+                  : {
+                      backgroundColor: isDark
+                        ? "rgba(239, 68, 68, 0.14)"
+                        : "#FEF2F2",
+                      borderColor: isDark
+                        ? "rgba(239, 68, 68, 0.28)"
+                        : "#FECACA",
+                    },
               ]}
             >
               <Text
                 style={[
                   styles.paidMethodText,
-                  !isExpensePaid && { color: "#B91C1C" },
+                  {
+                    color: isExpensePaid
+                      ? isDark
+                        ? "#34D399"
+                        : "#166534"
+                      : isDark
+                        ? "#F87171"
+                        : "#B91C1C",
+                  },
                 ]}
               >
                 {isExpensePaid ? "Cash / Bank" : "Unpaid Bill"}
@@ -179,42 +346,113 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           </View>
         </View>
 
-        {/* Split Breakdown matching proposedUI */}
-        <View style={styles.sectionCard}>
+        {/* Split Breakdown */}
+        <View
+          style={[
+            styles.sectionCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionHeading}>Split Breakdown</Text>
-            <Text style={styles.splitRule}>{expense.splitMethod}</Text>
+            <Text
+              style={[
+                styles.sectionHeading,
+                { color: isDark ? colors.textSecondary : "#0F172A" },
+              ]}
+            >
+              Split Breakdown
+            </Text>
+            <Text
+              style={[
+                styles.splitRule,
+                { color: isDark ? colors.accent : "#2563EB" },
+              ]}
+            >
+              {expense.splitMethod}
+            </Text>
           </View>
 
           {participants.map((p, idx) => (
-            <View key={idx} style={styles.splitItem}>
-              <View style={styles.userInitials}>
-                <Text style={styles.userInitialsText}>{p.name.charAt(0)}</Text>
+            <View
+              key={idx}
+              style={[
+                styles.splitItem,
+                {
+                  borderBottomColor: colors.borderSubtle,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.userInitials,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
+                    borderColor: colors.border,
+                    borderWidth: isDark ? 1 : 0,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.userInitialsText,
+                    { color: isDark ? colors.textSecondary : "#475569" },
+                  ]}
+                >
+                  {p.name.charAt(0)}
+                </Text>
               </View>
               <View style={{ flex: 1, paddingRight: 6 }}>
-                <Text style={styles.splitUserName}>{p.name}</Text>
-                <Text style={styles.splitUserRole}>{p.role}</Text>
+                <Text style={[styles.splitUserName, { color: colors.text }]}>
+                  {p.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.splitUserRole,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {p.role}
+                </Text>
                 {p.note && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-                    <Feather name="info" size={11} color="#0284C7" />
-                    <Text style={{ fontSize: 11, color: "#0284C7" }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 2,
+                    }}
+                  >
+                    <Feather
+                      name="info"
+                      size={11}
+                      color={isDark ? colors.accent : "#0284C7"}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: isDark ? colors.accent : "#0284C7",
+                      }}
+                    >
                       {p.note}
                     </Text>
                   </View>
                 )}
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.splitAmount}>
+                <Text style={[styles.splitAmount, { color: colors.text }]}>
                   {formatPesos(p.shareCents)}
                 </Text>
                 <Text
                   style={[
                     styles.statusBadge,
                     p.status === "Paid"
-                      ? styles.statusPaid
+                      ? { color: isDark ? "#34D399" : "#16A34A" }
                       : p.status === "Exempt"
-                      ? { backgroundColor: "#F1F5F9", borderColor: "#E2E8F0", color: "#64748B" }
-                      : styles.statusPending,
+                        ? { color: colors.textMuted }
+                        : { color: isDark ? "#FBBF24" : "#EAB308" },
                   ]}
                 >
                   {p.status}
@@ -224,22 +462,57 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           ))}
         </View>
 
-        {/* Receipt Proof matching proposedUI */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionHeading}>Receipt / Proof</Text>
+        {/* Receipt Proof */}
+        <View
+          style={[
+            styles.sectionCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.sectionHeading,
+              { color: isDark ? colors.textSecondary : "#0F172A" },
+            ]}
+          >
+            Receipt / Proof
+          </Text>
           {expense.receiptUrl ? (
             <Image
               source={{ uri: expense.receiptUrl }}
-              style={styles.receiptImage}
+              style={[styles.receiptImage, { borderColor: colors.border }]}
               resizeMode="cover"
             />
           ) : (
-            <View style={styles.receiptPlaceholder}>
-              <Feather name="file-text" size={26} color="#94A3B8" style={{ marginBottom: 6 }} />
-              <Text style={styles.placeholderText}>
+            <View
+              style={[
+                styles.receiptPlaceholder,
+                {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Feather
+                name="file-text"
+                size={26}
+                color={colors.textMuted}
+                style={{ marginBottom: 6 }}
+              />
+              <Text
+                style={[
+                  styles.placeholderText,
+                  { color: isDark ? colors.text : "#334155" },
+                ]}
+              >
                 Official Document Uploaded
               </Text>
-              <Text style={styles.placeholderSub}>
+              <Text
+                style={[styles.placeholderSub, { color: colors.textSecondary }]}
+              >
                 Validated & Archived for Audit
               </Text>
             </View>
@@ -248,9 +521,31 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
 
         {/* Notes & Audit Info */}
         {expense.notes && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionHeading}>Notes & Meter Readings</Text>
-            <Text style={styles.notesText}>{expense.notes}</Text>
+          <View
+            style={[
+              styles.sectionCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.sectionHeading,
+                { color: isDark ? colors.textSecondary : "#0F172A" },
+              ]}
+            >
+              Notes & Meter Readings
+            </Text>
+            <Text
+              style={[
+                styles.notesText,
+                { color: isDark ? colors.textSecondary : "#475569" },
+              ]}
+            >
+              {expense.notes}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -259,35 +554,29 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
   },
   backBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
-  backBtnText: { fontSize: 20, color: "#0F172A", fontWeight: "bold" },
-  headerTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  headerTitle: { fontSize: 18, fontWeight: "800" },
   scrollContent: { padding: 20, paddingBottom: 40 },
   heroCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 20,
     padding: 24,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#F1F5F9",
     marginBottom: 16,
     shadowColor: "#000",
     shadowOpacity: 0.03,
@@ -298,7 +587,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
@@ -306,17 +594,21 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 17,
     fontWeight: "800",
-    color: "#0F172A",
     textAlign: "center",
   },
   heroAmount: {
     fontSize: 28,
     fontWeight: "900",
-    color: "#2563EB",
     marginTop: 6,
     marginBottom: 12,
   },
-  tagWrap: { flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center" },
+  tagWrap: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
   categoryTagWrap: {
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -327,28 +619,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
-  cycleTag: {
-    backgroundColor: "#EFF6FF",
-    color: "#2563EB",
-    fontSize: 12,
-    fontWeight: "700",
+  cycleTagWrap: {
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
   },
+  cycleTag: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  statusBadgeWrap: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
   sectionCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#F1F5F9",
   },
   sectionHeading: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "800",
-    color: "#0F172A",
     marginBottom: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   sectionHeaderRow: {
     flexDirection: "row",
@@ -356,61 +657,59 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-  splitRule: { fontSize: 12, fontWeight: "600", color: "#2563EB" },
+  splitRule: { fontSize: 12, fontWeight: "700" },
   payerRow: { flexDirection: "row", alignItems: "center" },
   payerAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#DBEAFE",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
   },
-  payerAvatarText: { fontSize: 18, fontWeight: "900", color: "#1E40AF" },
-  payerName: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
-  payerSub: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  payerAvatarText: { fontSize: 18, fontWeight: "900" },
+  payerName: { fontSize: 14, fontWeight: "700" },
+  payerSub: { fontSize: 12, marginTop: 2 },
   paidMethodBadge: {
-    backgroundColor: "#DCFCE7",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
+    borderWidth: 1,
   },
-  paidMethodText: { fontSize: 11, fontWeight: "700", color: "#166534" },
+  paidMethodText: { fontSize: 11, fontWeight: "700" },
   splitItem: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#F8FAFC",
   },
   userInitials: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
   },
-  userInitialsText: { fontSize: 14, fontWeight: "bold", color: "#475569" },
-  splitUserName: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
-  splitUserRole: { fontSize: 11, color: "#64748B" },
-  splitAmount: { fontSize: 14, fontWeight: "800", color: "#0F172A" },
+  userInitialsText: { fontSize: 14, fontWeight: "bold" },
+  splitUserName: { fontSize: 13, fontWeight: "700" },
+  splitUserRole: { fontSize: 11 },
+  splitAmount: { fontSize: 14, fontWeight: "800" },
   statusBadge: { fontSize: 10, fontWeight: "800", marginTop: 2 },
-  statusPaid: { color: "#16A34A" },
-  statusPending: { color: "#EAB308" },
   receiptPlaceholder: {
     padding: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    borderWidth: 1.5,
     borderStyle: "dashed",
     alignItems: "center",
-    backgroundColor: "#F8FAFC",
   },
-  receiptImage: { width: "100%", height: 180, borderRadius: 12 },
-  placeholderText: { fontSize: 13, fontWeight: "700", color: "#334155" },
-  placeholderSub: { fontSize: 11, color: "#94A3B8", marginTop: 2 },
-  notesText: { fontSize: 13, color: "#475569", lineHeight: 20 },
+  receiptImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  placeholderText: { fontSize: 13, fontWeight: "700" },
+  placeholderSub: { fontSize: 11, marginTop: 2 },
+  notesText: { fontSize: 13, lineHeight: 20 },
 });

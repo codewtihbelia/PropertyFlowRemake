@@ -15,8 +15,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { NavigationBar } from "expo-navigation-bar";
+import { NavigationBar } from "../utils/safeNavigationBar";
 import { assets } from "../../assets/assets";
+import { useTheme } from "../context/ThemeContext";
 
 interface OtpVerificationScreenProps {
   email: string;
@@ -35,6 +36,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
   onResendCode,
   onBack,
 }) => {
+  const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [currentExpectedCode, setCurrentExpectedCode] = useState(expectedCode);
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
@@ -44,12 +46,16 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
+  const bottomBgColor = isDark ? "#141C2B" : "#2563EB";
+
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (countdown > 0) {
       timer = setTimeout(() => setCountdown(countdown - 1), 1000);
     }
-    return () => clearTimeout(timer);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [countdown]);
 
   const handleDigitChange = (text: string, index: number) => {
@@ -92,7 +98,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
     if (enteredCode.length < 6) {
       Alert.alert(
         "Incomplete Code",
-        "Please enter all 6 digits of your confirmation code."
+        "Please enter all 6 digits of your confirmation code.",
       );
       return;
     }
@@ -109,7 +115,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
       } else {
         Alert.alert(
           "Invalid Code",
-          "The code you entered does not match. Please verify and try again."
+          "The code you entered does not match. Please verify and try again.",
         );
       }
     }, 600);
@@ -134,7 +140,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
       inputRefs.current[0]?.focus();
       Alert.alert(
         "Code Resent",
-        `A new confirmation code has been dispatched to ${email}.`
+        `A new confirmation code has been dispatched to ${email}.`,
       );
     } catch {
       Alert.alert("Resend Failed", "Could not resend code. Please try again.");
@@ -150,22 +156,30 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
   };
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, { backgroundColor: bottomBgColor }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor="transparent"
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="dark" hidden={true} />
+        <NavigationBar style="light" hidden={true} />
       )}
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { backgroundColor: bottomBgColor },
+        ]}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <View style={styles.topWhiteBleed} />
+        <View
+          style={[
+            styles.topWhiteBleed,
+            isDark && { backgroundColor: colors.background },
+          ]}
+        />
         <View
           style={[
             styles.topSection,
@@ -173,9 +187,12 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
               paddingTop:
                 Math.max(
                   insets.top,
-                  Platform.OS === "android" ? StatusBar.currentHeight || 24 : 20
+                  Platform.OS === "android"
+                    ? StatusBar.currentHeight || 24
+                    : 20,
                 ) + 12,
             },
+            isDark && { backgroundColor: colors.background },
           ]}
         >
           {/* Back Action */}
@@ -184,10 +201,27 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <View style={styles.backButtonIconCircle}>
-              <Feather name="arrow-left" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.backButtonIconCircle,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Feather
+                name="arrow-left"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
-            <Text style={styles.backButtonText}>Edit Details</Text>
+            <Text
+              style={[styles.backButtonText, isDark && { color: colors.text }]}
+            >
+              Edit Details
+            </Text>
           </TouchableOpacity>
 
           {/* Logo Badge */}
@@ -200,48 +234,121 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
               />
             </View>
             <View style={styles.brandTitleRow}>
-              <Text style={styles.splitText}>Split</Text>
-              <Text style={styles.zyText}>zy</Text>
+              <Text
+                style={[styles.splitText, isDark && { color: colors.text }]}
+              >
+                Split
+              </Text>
+              <Text
+                style={[styles.zyText, isDark && { color: colors.primary }]}
+              >
+                zy
+              </Text>
             </View>
           </View>
 
           {isSuccess ? (
             <View style={styles.successWrapper}>
-              <View style={styles.successIconCircle}>
-                <Ionicons name="checkmark-sharp" size={44} color="#0F172A" />
+              <View
+                style={[
+                  styles.successIconCircle,
+                  isDark && {
+                    backgroundColor: "rgba(16, 185, 129, 0.16)",
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="checkmark-sharp"
+                  size={44}
+                  color={isDark ? colors.success : "#0F172A"}
+                />
               </View>
-              <Text style={styles.successTitle}>Account Confirmed!</Text>
-              <Text style={styles.successSub}>
+              <Text
+                style={[styles.successTitle, isDark && { color: colors.text }]}
+              >
+                Account Confirmed!
+              </Text>
+              <Text
+                style={[
+                  styles.successSub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Welcome to Splitzy, {userName || "Resident"}! Setting up your
                 household dashboard...
               </Text>
               <ActivityIndicator
                 size="small"
-                color="#2563EB"
+                color={colors.primary}
                 style={{ marginTop: 20 }}
               />
             </View>
           ) : (
             <>
-              <Text style={styles.mainTitle}>Verify Your Email</Text>
-              <Text style={styles.description}>
+              <Text
+                style={[styles.mainTitle, isDark && { color: colors.text }]}
+              >
+                Verify Your Email
+              </Text>
+              <Text
+                style={[
+                  styles.description,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 We've sent a 6-digit confirmation code to:{"\n"}
-                <Text style={styles.emailHighlight}>{email}</Text>
+                <Text
+                  style={[
+                    styles.emailHighlight,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  {email}
+                </Text>
               </Text>
 
               {/* Demo Helper Banner for easy testing in mobile preview */}
-              <View style={styles.demoHelperBox}>
+              <View
+                style={[
+                  styles.demoHelperBox,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.14)",
+                    borderColor: "rgba(59, 130, 246, 0.3)",
+                  },
+                ]}
+              >
                 <View style={styles.demoHelperLeft}>
-                  <Ionicons name="shield-checkmark" size={20} color="#2563EB" />
+                  <Ionicons
+                    name="shield-checkmark"
+                    size={20}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.demoHelperLabel}>Verification Code</Text>
-                    <Text style={styles.demoHelperCode}>
+                    <Text
+                      style={[
+                        styles.demoHelperLabel,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      Verification Code
+                    </Text>
+                    <Text
+                      style={[
+                        styles.demoHelperCode,
+                        isDark && { color: "#FFFFFF" },
+                      ]}
+                    >
                       {currentExpectedCode}
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.autoFillButton}
+                  style={[
+                    styles.autoFillButton,
+                    isDark && { backgroundColor: colors.primary },
+                  ]}
                   onPress={handleAutoFill}
                   activeOpacity={0.8}
                 >
@@ -262,8 +369,25 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                       }}
                       style={[
                         styles.otpBox,
-                        isFocused && styles.otpBoxFocused,
-                        isFilled && styles.otpBoxFilled,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                          borderColor: colors.border,
+                          color: colors.text,
+                        },
+                        isFocused && [
+                          styles.otpBoxFocused,
+                          isDark && {
+                            borderColor: colors.primary,
+                            backgroundColor: colors.cardElevated,
+                          },
+                        ],
+                        isFilled && [
+                          styles.otpBoxFilled,
+                          isDark && {
+                            borderColor: "rgba(59, 130, 246, 0.5)",
+                            backgroundColor: "rgba(59, 130, 246, 0.12)",
+                          },
+                        ],
                       ]}
                       keyboardType="number-pad"
                       maxLength={1}
@@ -282,6 +406,10 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
               <TouchableOpacity
                 style={[
                   styles.primaryActionButton,
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
                   loading && styles.primaryActionDisabled,
                 ]}
                 onPress={handleVerify}
@@ -302,14 +430,33 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
 
               {/* Resend Code Section */}
               <View style={styles.resendArea}>
-                <Text style={styles.resendPrompt}>Didn't receive code? </Text>
+                <Text
+                  style={[
+                    styles.resendPrompt,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Didn't receive code?{" "}
+                </Text>
                 {countdown > 0 ? (
-                  <Text style={styles.countdownText}>
+                  <Text
+                    style={[
+                      styles.countdownText,
+                      isDark && { color: colors.textMuted },
+                    ]}
+                  >
                     Resend in {countdown}s
                   </Text>
                 ) : (
                   <TouchableOpacity onPress={handleResend} disabled={loading}>
-                    <Text style={styles.resendLink}>Resend Code</Text>
+                    <Text
+                      style={[
+                        styles.resendLink,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      Resend Code
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -318,8 +465,18 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
         </View>
 
         {/* Bottom S-Curve Blue Section */}
-        <View style={styles.bottomCurvedContainer}>
-          <View style={styles.waveWrapper}>
+        <View
+          style={[
+            styles.bottomCurvedContainer,
+            { backgroundColor: bottomBgColor },
+          ]}
+        >
+          <View
+            style={[
+              styles.waveWrapper,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
             <Svg
               width="100%"
               height={52}
@@ -329,7 +486,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             >
               <Path
                 d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill="#2563EB"
+                fill={bottomBgColor}
               />
             </Svg>
           </View>
@@ -338,9 +495,10 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             style={[
               styles.bottomBlueContent,
               {
+                backgroundColor: bottomBgColor,
                 paddingBottom: Math.max(
                   insets.bottom + 20,
-                  Platform.OS === "android" ? 28 : 36
+                  Platform.OS === "android" ? 28 : 36,
                 ),
               },
             ]}
@@ -355,14 +513,21 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                 End-to-End Account Verification
               </Text>
             </View>
-            <Text style={styles.securityNoteSub}>
+            <Text
+              style={[
+                styles.securityNoteSub,
+                isDark && { color: "rgba(255, 255, 255, 0.7)" },
+              ]}
+            >
               Protecting apartment financial data & roommate bill allocations.
             </Text>
           </View>
         </View>
 
-        {/* Bottom blue bleed ensures full solid blue extension on scroll */}
-        <View style={styles.bottomBlueBleed} />
+        {/* Bottom bleed ensures full solid extension on scroll */}
+        <View
+          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+        />
       </ScrollView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
@@ -370,7 +535,10 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
         pointerEvents="none"
         style={[
           styles.fixedBottomOverlay,
-          { height: Math.max(insets.bottom, 24) + 16 },
+          {
+            backgroundColor: bottomBgColor,
+            height: Math.max(insets.bottom, 24) + 16,
+          },
         ]}
       />
     </View>

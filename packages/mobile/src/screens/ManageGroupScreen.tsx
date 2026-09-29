@@ -23,17 +23,19 @@ import {
   isPayorMember,
 } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
-import { getCategoryMeta } from "../services/categoryService";
+import { BILL_CATEGORIES, getCategoryMeta } from "../services/categoryService";
 import { WaterSettingsModal } from "../components/WaterSettingsModal";
 import { UniversalSkeleton } from "../components/UniversalLoader";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { ViewGroupScreen } from "./ViewGroupScreen";
+import { useTheme } from "../context/ThemeContext";
 
 export interface ManageGroupScreenProps {
   onBack: () => void;
   onOpenAddExpense?: () => void;
   onOpenSettleDues?: () => void;
   onOpenHostApplication?: () => void;
+  onOpenPaymentMethodConfiguration?: () => void;
   currentUser?: {
     name: string;
     avatar: string;
@@ -67,9 +69,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   onOpenAddExpense,
   onOpenSettleDues,
   onOpenHostApplication,
+  onOpenPaymentMethodConfiguration,
   currentUser = { name: "Resident", avatar: "R" },
   initialView = "details",
 }) => {
+  const { isDark, colors } = useTheme();
   const [viewMode, setViewMode] = useState<
     "details" | "edit" | "create" | "success" | "join"
   >(initialView);
@@ -109,6 +113,28 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showWaterSettingsModal, setShowWaterSettingsModal] = useState(false);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
+
+  // Edit & Delete Bill State (Host)
+  const [showEditExpenseModal, setShowEditExpenseModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<MobileExpense | null>(
+    null,
+  );
+  const [editExpenseTitle, setEditExpenseTitle] = useState("");
+  const [editExpenseCategory, setEditExpenseCategory] = useState("Rent");
+  const [editExpenseAmount, setEditExpenseAmount] = useState("");
+  const [editExpenseNotes, setEditExpenseNotes] = useState("");
+  const [editExpenseStatus, setEditExpenseStatus] = useState<"PAID" | "UNPAID">(
+    "UNPAID",
+  );
+  const [editExpenseCycleId, setEditExpenseCycleId] = useState("");
+  const [editExpenseSplitMethod, setEditExpenseSplitMethod] = useState<
+    "Equal" | "% Custom"
+  >("Equal");
+  const [editExpenseSplitDetails, setEditExpenseSplitDetails] = useState<any[]>(
+    [],
+  );
+  const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
+  const [showAllBills, setShowAllBills] = useState(false);
 
   // Edit Cycle Form State
   const [editCycleName, setEditCycleName] = useState("");
@@ -848,6 +874,128 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     );
   };
 
+  const handleOpenEditExpense = (exp: MobileExpense) => {
+    setEditingExpense(exp);
+    setEditExpenseTitle(cleanBillTitle(exp.title, exp.category));
+    setEditExpenseCategory(exp.category || "Rent");
+    setEditExpenseAmount(
+      exp.amountCents
+        ? (exp.amountCents / 100).toFixed(2).replace(/\.00$/, "")
+        : "",
+    );
+    setEditExpenseNotes(exp.notes || "");
+    setEditExpenseStatus(
+      exp.status === "PAID" || exp.isPaid ? "PAID" : "UNPAID",
+    );
+    setEditExpenseCycleId(exp.billingCycleId || selectedCycleId || "");
+    setEditExpenseSplitMethod(
+      (exp.splitMethod as "Equal" | "% Custom") || "Equal",
+    );
+    setEditExpenseSplitDetails(exp.splitDetails || []);
+    setShowEditExpenseModal(true);
+  };
+
+  const handleDeleteExpense = (exp: MobileExpense) => {
+    if (!householdId) return;
+    const billTitle = cleanBillTitle(exp.title, exp.category);
+    Alert.alert(
+      "Delete Bill",
+      `Are you sure you want to delete "${billTitle}" (${formatPesos(exp.amountCents)})?\n\nThis will permanently remove the bill from the group and automatically recalculate all roommate dues and balances.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Bill",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const success = await mobileDataService.deleteExpense(
+                householdId,
+                exp.id,
+              );
+              if (editingExpense?.id === exp.id) {
+                setShowEditExpenseModal(false);
+                setEditingExpense(null);
+              }
+              setLoading(false);
+              if (success) {
+                Alert.alert(
+                  "Bill Deleted",
+                  `"${billTitle}" has been removed and group dues have been recalculated.`,
+                );
+              }
+            } catch (err: any) {
+              setLoading(false);
+              Alert.alert("Error", err.message || "Could not delete bill.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleSaveEditExpense = async () => {
+    if (!editingExpense || !householdId) return;
+
+    if (!editExpenseTitle.trim()) {
+      Alert.alert("Required", "Please enter a title for the bill.");
+      return;
+    }
+
+    const cleanAmountStr = editExpenseAmount.replace(/,/g, "").trim();
+    const parsedAmount = parseFloat(cleanAmountStr);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert(
+        "Invalid Amount",
+        "Please enter a valid amount greater than 0.",
+      );
+      return;
+    }
+
+    const amountCents = Math.round(parsedAmount * 100);
+    const isPaid = editExpenseStatus === "PAID";
+
+    // Recalculate equal splits if splitMethod is Equal
+    let updatedSplits = editExpenseSplitDetails;
+    if (
+      editExpenseSplitMethod === "Equal" &&
+      Array.isArray(updatedSplits) &&
+      updatedSplits.length > 0
+    ) {
+      const payors = updatedSplits.filter((s: any) => !s.isExempt);
+      const count = Math.max(1, payors.length);
+      const perPayorCents = Math.round(amountCents / count);
+      updatedSplits = updatedSplits.map((s: any) => ({
+        ...s,
+        shareCentavos: s.isExempt ? 0 : perPayorCents,
+        isPaid: s.isExempt ? true : isPaid,
+      }));
+    }
+
+    setIsUpdatingExpense(true);
+    try {
+      await mobileDataService.updateExpense(householdId, editingExpense.id, {
+        title: editExpenseTitle.trim(),
+        category: editExpenseCategory,
+        amountCents,
+        notes: editExpenseNotes.trim(),
+        status: editExpenseStatus,
+        isPaid,
+        billingCycleId: editExpenseCycleId || undefined,
+        splitMethod: editExpenseSplitMethod,
+        splitDetails: updatedSplits,
+      });
+
+      setIsUpdatingExpense(false);
+      setShowEditExpenseModal(false);
+      setEditingExpense(null);
+      Alert.alert("Success", "Bill has been updated successfully.");
+    } catch (err: any) {
+      setIsUpdatingExpense(false);
+      Alert.alert("Error", err.message || "Failed to update bill.");
+    }
+  };
+
   const handleExpensePress = (exp: MobileExpense) => {
     if (!householdId) return;
     const isCurrentlyPaid = exp.status === "PAID" || exp.isPaid === true;
@@ -856,9 +1004,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       const nextStatus = isCurrentlyPaid ? "UNPAID" : "PAID";
       Alert.alert(
         billTitle,
-        `Amount: ${formatPesos(exp.amountCents)}\nCurrent Status: ${isCurrentlyPaid ? "PAID" : "UNPAID (Upcoming)"}\n\nWould you like to mark this bill as ${nextStatus}?`,
+        `Amount: ${formatPesos(exp.amountCents)}\nCurrent Status: ${isCurrentlyPaid ? "PAID" : "UNPAID (Upcoming)"}\nCategory: ${exp.category || "General"}\nDate: ${formatShortDate(exp.date)}`,
         [
           { text: "Cancel", style: "cancel" },
+          {
+            text: "✏️ Edit Bill",
+            onPress: () => handleOpenEditExpense(exp),
+          },
           {
             text: `Mark as ${nextStatus}`,
             onPress: async () => {
@@ -875,6 +1027,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 );
               }
             },
+          },
+          {
+            text: "🗑️ Delete Bill",
+            style: "destructive",
+            onPress: () => handleDeleteExpense(exp),
           },
         ],
       );
@@ -1109,9 +1266,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // --------------------------------------------------------------------------
   if (viewMode === "success") {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
@@ -1160,15 +1322,25 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 },
               ]}
             />
-            <View style={styles.starBadgeCircle}>
+            <View
+              style={[
+                styles.starBadgeCircle,
+                isDark && { backgroundColor: colors.primary },
+              ]}
+            >
               <Ionicons name="star" size={54} color="#FFFFFF" />
             </View>
           </View>
 
-          <Text style={styles.successTitle}>
+          <Text style={[styles.successTitle, isDark && { color: colors.text }]}>
             Your Group is Created Successfully!
           </Text>
-          <Text style={styles.successSub}>
+          <Text
+            style={[
+              styles.successSub,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
             {createdGroupName || "Your Group"} is now active. You can now add
             billing cycles, record expenses, and invite roommates.
           </Text>
@@ -1177,7 +1349,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
           <View style={{ width: "100%", gap: 12, marginBottom: 16 }}>
             <TouchableOpacity
-              style={[styles.primaryPillBtn, { width: "100%" }]}
+              style={[
+                styles.primaryPillBtn,
+                { width: "100%" },
+                isDark && { backgroundColor: colors.primary },
+              ]}
               onPress={() => setViewMode("details")}
             >
               <Text style={styles.primaryPillBtnText}>View Group Details</Text>
@@ -1188,9 +1364,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 styles.primaryPillBtn,
                 {
                   width: "100%",
-                  backgroundColor: "#EFF6FF",
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#EFF6FF",
                   borderWidth: 1,
-                  borderColor: "#BFDBFE",
+                  borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
                 },
               ]}
               onPress={() => {
@@ -1201,7 +1379,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 }
               }}
             >
-              <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+              <Text
+                style={[
+                  styles.primaryPillBtnText,
+                  { color: isDark ? colors.accent : "#2563EB" },
+                ]}
+              >
                 + Add Expense
               </Text>
             </TouchableOpacity>
@@ -1216,7 +1399,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               onPress={onBack}
             >
               <Text
-                style={{ fontSize: 15, fontWeight: "600", color: "#64748B" }}
+                style={{
+                  fontSize: 15,
+                  fontWeight: "600",
+                  color: isDark ? colors.textSecondary : "#64748B",
+                }}
               >
                 Back to Home
               </Text>
@@ -1233,21 +1420,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   if (viewMode === "create") {
     if (profile && !isHost) {
       return (
-        <View style={styles.container}>
+        <View
+          style={[
+            styles.container,
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <StatusBar
-            barStyle="dark-content"
+            barStyle={isDark ? "light-content" : "dark-content"}
             translucent={true}
             backgroundColor="transparent"
           />
-          <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+          <View
+            style={[
+              styles.navBarContainer,
+              { paddingTop: topInset },
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
             <View style={styles.navBar}>
               <TouchableOpacity
-                style={styles.circleBackBtn}
+                style={[
+                  styles.circleBackBtn,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
                 onPress={handleBackFromCreate}
               >
-                <Feather name="chevron-left" size={24} color="#0F172A" />
+                <Feather
+                  name="chevron-left"
+                  size={24}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
               </TouchableOpacity>
-              <Text style={styles.navTitle}>Create Group</Text>
+              <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+                Create Group
+              </Text>
               <View style={{ width: 42 }} />
             </View>
           </View>
@@ -1269,20 +1480,28 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 72,
                 height: 72,
                 borderRadius: 36,
-                backgroundColor: "rgba(15, 23, 42, 0.05)",
+                backgroundColor: isDark
+                  ? colors.card
+                  : "rgba(15, 23, 42, 0.05)",
+                borderWidth: isDark ? 1 : 0,
+                borderColor: colors.border,
                 justifyContent: "center",
                 alignItems: "center",
                 marginBottom: 18,
               }}
             >
-              <Feather name="shield" size={36} color="#0F172A" />
+              <Feather
+                name="shield"
+                size={36}
+                color={isDark ? colors.accent : "#0F172A"}
+              />
             </View>
 
             <Text
               style={{
                 fontSize: 20,
                 fontWeight: "800",
-                color: "#0F172A",
+                color: isDark ? colors.text : "#0F172A",
                 marginBottom: 8,
                 textAlign: "center",
               }}
@@ -1293,7 +1512,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             <Text
               style={{
                 fontSize: 14,
-                color: "#64748B",
+                color: isDark ? colors.textSecondary : "#64748B",
                 textAlign: "center",
                 lineHeight: 22,
                 maxWidth: 320,
@@ -1307,10 +1526,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
             <View
               style={{
-                backgroundColor: "#F8FAFC",
+                backgroundColor: isDark ? colors.card : "#F8FAFC",
                 borderRadius: 16,
                 borderWidth: 1,
-                borderColor: "#E2E8F0",
+                borderColor: isDark ? colors.border : "#E2E8F0",
                 padding: 16,
                 width: "100%",
                 maxWidth: 340,
@@ -1328,7 +1547,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 <Feather
                   name="home"
                   size={16}
-                  color="#2563EB"
+                  color={isDark ? colors.accent : "#2563EB"}
                   style={{ marginTop: 2 }}
                 />
                 <View style={{ flex: 1 }}>
@@ -1336,7 +1555,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     style={{
                       fontSize: 13,
                       fontWeight: "700",
-                      color: "#1E293B",
+                      color: isDark ? colors.text : "#1E293B",
                     }}
                   >
                     Are you the Property Host?
@@ -1344,7 +1563,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   <Text
                     style={{
                       fontSize: 12,
-                      color: "#64748B",
+                      color: isDark ? colors.textSecondary : "#64748B",
                       marginTop: 2,
                       lineHeight: 17,
                     }}
@@ -1355,7 +1574,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 </View>
               </View>
 
-              <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+              <View
+                style={{
+                  height: 1,
+                  backgroundColor: isDark ? colors.border : "#E2E8F0",
+                }}
+              />
 
               <View
                 style={{
@@ -1367,7 +1591,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 <Feather
                   name="users"
                   size={16}
-                  color="#059669"
+                  color={isDark ? colors.success : "#059669"}
                   style={{ marginTop: 2 }}
                 />
                 <View style={{ flex: 1 }}>
@@ -1375,7 +1599,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     style={{
                       fontSize: 13,
                       fontWeight: "700",
-                      color: "#1E293B",
+                      color: isDark ? colors.text : "#1E293B",
                     }}
                   >
                     Are you a Resident?
@@ -1383,7 +1607,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   <Text
                     style={{
                       fontSize: 12,
-                      color: "#64748B",
+                      color: isDark ? colors.textSecondary : "#64748B",
                       marginTop: 2,
                       lineHeight: 17,
                     }}
@@ -1397,7 +1621,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
             <View style={{ width: "100%", maxWidth: 340, gap: 12 }}>
               <TouchableOpacity
-                style={styles.primaryPillBtn}
+                style={[
+                  styles.primaryPillBtn,
+                  isDark && { backgroundColor: colors.primary },
+                ]}
                 onPress={() => {
                   if (onOpenHostApplication) {
                     onOpenHostApplication();
@@ -1424,9 +1651,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 style={[
                   styles.primaryPillBtn,
                   {
-                    backgroundColor: "#EFF6FF",
+                    backgroundColor: isDark
+                      ? "rgba(59, 130, 246, 0.15)"
+                      : "#EFF6FF",
                     borderWidth: 1,
-                    borderColor: "#BFDBFE",
+                    borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
                   },
                 ]}
                 onPress={() => setViewMode("join")}
@@ -1434,10 +1663,15 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 <Feather
                   name="hash"
                   size={16}
-                  color="#2563EB"
+                  color={isDark ? colors.accent : "#2563EB"}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+                <Text
+                  style={[
+                    styles.primaryPillBtnText,
+                    { color: isDark ? colors.accent : "#2563EB" },
+                  ]}
+                >
                   Join with Invite Code
                 </Text>
               </TouchableOpacity>
@@ -1447,7 +1681,11 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 onPress={handleBackFromCreate}
               >
                 <Text
-                  style={{ fontSize: 13, color: "#64748B", fontWeight: "600" }}
+                  style={{
+                    fontSize: 13,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                    fontWeight: "600",
+                  }}
                 >
                   Cancel & Return
                 </Text>
@@ -1459,21 +1697,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     }
 
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
             <TouchableOpacity
-              style={styles.circleBackBtn}
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={handleBackFromCreate}
             >
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Create Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Create Group
+            </Text>
             <View style={{ width: 42 }} />
           </View>
         </View>
@@ -1483,26 +1745,65 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Group Name</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Group Name
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={groupNameInput}
               onChangeText={setGroupNameInput}
               placeholder="e.g. Sunshine Residence Unit 4B"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <View style={[styles.inputGroup, { marginTop: 24 }]}>
-            <Text style={styles.inputLabel}>Add Roommates</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Add Roommates
+            </Text>
             {addedMembers.map((m) => (
-              <View key={m.id} style={styles.addedMemberRow}>
-                <View style={styles.memberSmallAvatar}>
-                  <Text style={styles.memberSmallAvatarText}>
+              <View
+                key={m.id}
+                style={[
+                  styles.addedMemberRow,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.memberSmallAvatar,
+                    isDark && {
+                      backgroundColor: "rgba(59, 130, 246, 0.2)",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.memberSmallAvatarText,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
                     {m.name.charAt(0).toUpperCase()}
                   </Text>
                 </View>
-                <Text style={styles.addedMemberName}>{m.name}</Text>
+                <Text
+                  style={[
+                    styles.addedMemberName,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  {m.name}
+                </Text>
                 <TouchableOpacity
                   onPress={() =>
                     setAddedMembers(
@@ -1510,23 +1811,41 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     )
                   }
                 >
-                  <Feather name="x" size={18} color="#94A3B8" />
+                  <Feather
+                    name="x"
+                    size={18}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                  />
                 </TouchableOpacity>
               </View>
             ))}
 
             <View style={styles.inviteInputRow}>
-              <View style={styles.inviteInnerBox}>
+              <View
+                style={[
+                  styles.inviteInnerBox,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <TextInput
-                  style={styles.inviteTextInput}
+                  style={[
+                    styles.inviteTextInput,
+                    isDark && { color: colors.text },
+                  ]}
                   placeholder="Enter Name or Phone"
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                   value={newMemberInput}
                   onChangeText={setNewMemberInput}
                 />
               </View>
               <TouchableOpacity
-                style={styles.inviteBtn}
+                style={[
+                  styles.inviteBtn,
+                  isDark && { backgroundColor: colors.primary },
+                ]}
                 onPress={() => {
                   if (newMemberInput.trim()) {
                     setAddedMembers([
@@ -1543,9 +1862,21 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         </ScrollView>
 
-        <View style={styles.bottomBar}>
+        <View
+          style={[
+            styles.bottomBar,
+            isDark && {
+              backgroundColor: colors.surface,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={styles.primaryPillBtn}
+            style={[
+              styles.primaryPillBtn,
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleCreateGroup}
             disabled={loading}
           >
@@ -1565,40 +1896,77 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // --------------------------------------------------------------------------
   if (viewMode === "join") {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
             <TouchableOpacity
-              style={styles.circleBackBtn}
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={handleBackFromJoin}
             >
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Join Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Join Group
+            </Text>
             <View style={{ width: 42 }} />
           </View>
         </View>
 
         <View style={[styles.scrollContent, { flex: 1 }]}>
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Household Code or Link</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Household Code or Link
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={joinLinkInput}
               onChangeText={setJoinLinkInput}
               placeholder="e.g. PF-402 or hh_..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               autoCapitalize="characters"
             />
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            style={[
+              styles.primaryPillBtn,
+              { marginTop: 24 },
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleJoinGroup}
             disabled={loading}
           >
@@ -1618,26 +1986,61 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // --------------------------------------------------------------------------
   if (viewMode === "edit") {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
             <TouchableOpacity
-              style={styles.circleBackBtn}
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setViewMode("details")}
             >
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Edit Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Edit Group
+            </Text>
             <TouchableOpacity
-              style={styles.iconNavBtn}
+              style={[
+                styles.iconNavBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setShowMenu(true)}
             >
-              <Feather name="more-vertical" size={22} color="#0F172A" />
+              <Feather
+                name="more-vertical"
+                size={22}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -1647,30 +2050,62 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Apartment / Group Name</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Apartment / Group Name
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={editGroupName}
               onChangeText={setEditGroupName}
               placeholder="Group or Apartment Name"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <View style={[styles.sectionRow, { marginTop: 28 }]}>
-            <Text style={styles.sectionHeading}>
+            <Text
+              style={[styles.sectionHeading, isDark && { color: colors.text }]}
+            >
               Participants ({participants.length})
             </Text>
             <TouchableOpacity onPress={() => setShowInviteModal(true)}>
-              <Text style={styles.sectionActionText}>+ Invite</Text>
+              <Text
+                style={[
+                  styles.sectionActionText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                + Invite
+              </Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.participantsList}>
             {participants.map((p) => (
-              <View key={p.id} style={styles.participantCard}>
+              <View
+                key={p.id}
+                style={[
+                  styles.participantCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.participantRow}>
-                  <View style={styles.participantAvatar}>
+                  <View
+                    style={[
+                      styles.participantAvatar,
+                      isDark && { backgroundColor: colors.surfaceInset },
+                    ]}
+                  >
                     {p.profilePicture ? (
                       <Image
                         source={{ uri: p.profilePicture }}
@@ -1678,7 +2113,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         resizeMode="cover"
                       />
                     ) : (
-                      <Text style={styles.participantAvatarText}>
+                      <Text
+                        style={[
+                          styles.participantAvatarText,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {p.avatar}
                       </Text>
                     )}
@@ -1691,7 +2131,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.participantName}>{p.name}</Text>
+                      <Text
+                        style={[
+                          styles.participantName,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        {p.name}
+                      </Text>
                       {p.role === "HOST" ? (
                         <View style={styles.hostBadge}>
                           <Text style={styles.hostBadgeText}>HOST</Text>
@@ -1708,7 +2155,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         </View>
                       )}
                     </View>
-                    <Text style={styles.participantRoleTag}>
+                    <Text
+                      style={[
+                        styles.participantRoleTag,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
                       {p.role === "HOST"
                         ? "Host Administrator"
                         : p.role === "NON_PAYOR"
@@ -1725,20 +2177,43 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                       }}
                     >
                       <TouchableOpacity
-                        style={styles.editModeToggleRoleBtn}
+                        style={[
+                          styles.editModeToggleRoleBtn,
+                          isDark && {
+                            backgroundColor: colors.surfaceInset,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                          },
+                        ]}
                         onPress={() => handleToggleMemberRole(p)}
                       >
-                        <Text style={styles.editModeToggleRoleText}>
+                        <Text
+                          style={[
+                            styles.editModeToggleRoleText,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
                           {p.role === "NON_PAYOR"
                             ? "Make Payor"
                             : "Make Non-Payor"}
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={styles.deleteParticipantBtn}
+                        style={[
+                          styles.deleteParticipantBtn,
+                          isDark && {
+                            backgroundColor: "rgba(239, 68, 68, 0.15)",
+                            borderWidth: 1,
+                            borderColor: "rgba(239, 68, 68, 0.3)",
+                          },
+                        ]}
                         onPress={() => handleRemoveMember(p)}
                       >
-                        <Feather name="trash-2" size={18} color="#EF4444" />
+                        <Feather
+                          name="trash-2"
+                          size={18}
+                          color={isDark ? colors.danger : "#EF4444"}
+                        />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1748,9 +2223,21 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         </ScrollView>
 
-        <View style={styles.bottomBar}>
+        <View
+          style={[
+            styles.bottomBar,
+            isDark && {
+              backgroundColor: colors.surface,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={styles.primaryPillBtn}
+            style={[
+              styles.primaryPillBtn,
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleUpdateGroup}
           >
             <Text style={styles.primaryPillBtnText}>Update Group</Text>
@@ -1767,18 +2254,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // If initial profile & household are loading, show UniversalSkeleton groups
   if (isInitialLoading && !householdId && viewMode === "details") {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
-            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+            <TouchableOpacity
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={onBack}
+            >
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Manage Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Manage Group
+            </Text>
             <View style={{ width: 42 }} />
           </View>
         </View>
@@ -1790,18 +2304,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // If no household exists, show clean empty state instead of phantom active household
   if (!householdId) {
     return (
-      <View style={styles.container}>
+      <View
+        style={[
+          styles.container,
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <StatusBar
-          barStyle="dark-content"
+          barStyle={isDark ? "light-content" : "dark-content"}
           translucent={true}
           backgroundColor="transparent"
         />
-        <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+        <View
+          style={[
+            styles.navBarContainer,
+            { paddingTop: topInset },
+            isDark && { backgroundColor: colors.background },
+          ]}
+        >
           <View style={styles.navBar}>
-            <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-              <Feather name="chevron-left" size={24} color="#0F172A" />
+            <TouchableOpacity
+              style={[
+                styles.circleBackBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={onBack}
+            >
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
-            <Text style={styles.navTitle}>Manage Group</Text>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Manage Group
+            </Text>
             <View style={{ width: 42 }} />
           </View>
         </View>
@@ -1819,19 +2360,25 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               width: 68,
               height: 68,
               borderRadius: 22,
-              backgroundColor: "rgba(15, 23, 42, 0.05)",
+              backgroundColor: isDark ? colors.card : "rgba(15, 23, 42, 0.05)",
+              borderWidth: isDark ? 1 : 0,
+              borderColor: colors.border,
               justifyContent: "center",
               alignItems: "center",
               marginBottom: 16,
             }}
           >
-            <Feather name="home" size={32} color="#0F172A" />
+            <Feather
+              name="home"
+              size={32}
+              color={isDark ? colors.accent : "#0F172A"}
+            />
           </View>
           <Text
             style={{
               fontSize: 20,
               fontWeight: "700",
-              color: "#0F172A",
+              color: isDark ? colors.text : "#0F172A",
               marginBottom: 8,
               textAlign: "center",
             }}
@@ -1841,7 +2388,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <Text
             style={{
               fontSize: 14,
-              color: "#64748B",
+              color: isDark ? colors.textSecondary : "#64748B",
               textAlign: "center",
               marginBottom: 28,
               lineHeight: 22,
@@ -1855,14 +2402,20 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <View style={{ width: "100%", maxWidth: 320, gap: 12 }}>
             {isHost ? (
               <TouchableOpacity
-                style={styles.primaryPillBtn}
+                style={[
+                  styles.primaryPillBtn,
+                  isDark && { backgroundColor: colors.primary },
+                ]}
                 onPress={() => setViewMode("create")}
               >
                 <Text style={styles.primaryPillBtnText}>+ Create Group</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={styles.primaryPillBtn}
+                style={[
+                  styles.primaryPillBtn,
+                  isDark && { backgroundColor: colors.primary },
+                ]}
                 onPress={() =>
                   onOpenHostApplication
                     ? onOpenHostApplication()
@@ -1884,14 +2437,21 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               style={[
                 styles.primaryPillBtn,
                 {
-                  backgroundColor: "#EFF6FF",
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#EFF6FF",
                   borderWidth: 1,
-                  borderColor: "#BFDBFE",
+                  borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
                 },
               ]}
               onPress={() => setViewMode("join")}
             >
-              <Text style={[styles.primaryPillBtnText, { color: "#2563EB" }]}>
+              <Text
+                style={[
+                  styles.primaryPillBtnText,
+                  { color: isDark ? colors.accent : "#2563EB" },
+                ]}
+              >
                 Join with Invite Code
               </Text>
             </TouchableOpacity>
@@ -1907,25 +2467,63 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   // VIEW: GROUP DETAILS (Default View - Matched to Image)
   // --------------------------------------------------------------------------
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent={true}
         backgroundColor="transparent"
       />
 
       {/* Top Header with Circular Back Button */}
-      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+      <View
+        style={[
+          styles.navBarContainer,
+          { paddingTop: topInset },
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <View style={styles.navBar}>
-          <TouchableOpacity style={styles.circleBackBtn} onPress={onBack}>
-            <Feather name="chevron-left" size={24} color="#0F172A" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>Manage Group</Text>
           <TouchableOpacity
-            style={styles.iconNavBtn}
+            style={[
+              styles.circleBackBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={onBack}
+          >
+            <Feather
+              name="chevron-left"
+              size={24}
+              color={isDark ? colors.text : "#0F172A"}
+            />
+          </TouchableOpacity>
+          <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+            Manage Group
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.iconNavBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => setShowMenu(true)}
           >
-            <Feather name="more-vertical" size={22} color="#0F172A" />
+            <Feather
+              name="more-vertical"
+              size={22}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -1946,7 +2544,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.groupPill}
+            style={[
+              styles.groupPill,
+              isDark && {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => {
               if (!isHost) {
                 setShowHostRequiredModal(true);
@@ -1955,10 +2560,17 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               }
             }}
           >
-            <Text style={styles.groupPillTitle}>
+            <Text
+              style={[styles.groupPillTitle, isDark && { color: colors.text }]}
+            >
               {isHost ? "+ New Group" : "+ Add / Join"}
             </Text>
-            <Text style={styles.groupPillSub}>
+            <Text
+              style={[
+                styles.groupPillSub,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               {isHost ? "Create Group" : "Host Guarded"}
             </Text>
           </TouchableOpacity>
@@ -1966,28 +2578,68 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         {/* Billing Cycle Section */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeading}>Billing Cycle</Text>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
+            Billing Cycle
+          </Text>
           <TouchableOpacity onPress={() => setShowCreateCycleModal(true)}>
-            <Text style={styles.sectionActionText}>+ Add Cycle</Text>
+            <Text
+              style={[
+                styles.sectionActionText,
+                isDark && { color: colors.accent },
+              ]}
+            >
+              + Add Cycle
+            </Text>
           </TouchableOpacity>
         </View>
 
         {cycles.length === 0 ? (
           /* Dashed Card for Empty Cycle - styled like image document upload */
           <TouchableOpacity
-            style={styles.emptyCycleDashedBox}
+            style={[
+              styles.emptyCycleDashedBox,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => setShowCreateCycleModal(true)}
             activeOpacity={0.8}
           >
-            <View style={styles.cycleIconBadge}>
-              <Ionicons name="calendar-outline" size={24} color="#0F172A" />
+            <View
+              style={[
+                styles.cycleIconBadge,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={24}
+                color={isDark ? colors.accent : "#0F172A"}
+              />
             </View>
-            <Text style={styles.emptyCycleTitle}>No Active Billing Cycle</Text>
-            <Text style={styles.emptyCycleSub}>
+            <Text
+              style={[styles.emptyCycleTitle, isDark && { color: colors.text }]}
+            >
+              No Active Billing Cycle
+            </Text>
+            <Text
+              style={[
+                styles.emptyCycleSub,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Tap to create a billing cycle (Cycle Name, Start & End Date) to
               calculate roommate dues and track expenses.
             </Text>
-            <View style={styles.createCyclePillBtn}>
+            <View
+              style={[
+                styles.createCyclePillBtn,
+                isDark && { backgroundColor: colors.primary },
+              ]}
+            >
               <Text style={styles.createCyclePillBtnText}>
                 + Create Billing Cycle
               </Text>
@@ -2009,14 +2661,25 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     key={c.billingCycleId}
                     style={[
                       styles.cycleChip,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
                       isSelected && styles.cycleChipActive,
+                      isSelected &&
+                        isDark && {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        },
                     ]}
                     onPress={() => setSelectedCycleId(c.billingCycleId)}
                   >
                     <Text
                       style={[
                         styles.cycleChipText,
+                        isDark && { color: colors.textSecondary },
                         isSelected && styles.cycleChipTextActive,
+                        isSelected && isDark && { color: "#FFFFFF" },
                       ]}
                     >
                       {c.name || "Cycle"}
@@ -2025,10 +2688,22 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 );
               })}
               <TouchableOpacity
-                style={[styles.cycleChip, { borderStyle: "dashed" }]}
+                style={[
+                  styles.cycleChip,
+                  { borderStyle: "dashed" },
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
                 onPress={() => setShowCreateCycleModal(true)}
               >
-                <Text style={[styles.cycleChipText, { color: "#2563EB" }]}>
+                <Text
+                  style={[
+                    styles.cycleChipText,
+                    { color: isDark ? colors.accent : "#2563EB" },
+                  ]}
+                >
                   + New Cycle
                 </Text>
               </TouchableOpacity>
@@ -2038,31 +2713,57 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             {activeCycle && (
               <View style={{ marginVertical: 10 }}>
                 <View style={styles.dateRangeRow}>
-                  <View style={styles.datePill}>
+                  <View
+                    style={[
+                      styles.datePill,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
                     <Feather
                       name="calendar"
                       size={13}
-                      color="#64748B"
+                      color={isDark ? colors.accent : "#64748B"}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.datePillText}>
+                    <Text
+                      style={[
+                        styles.datePillText,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       {formatShortDate(activeCycle.startDate)}
                     </Text>
                   </View>
                   <Feather
                     name="arrow-right"
                     size={14}
-                    color="#94A3B8"
+                    color={isDark ? colors.textMuted : "#94A3B8"}
                     style={{ marginHorizontal: 10 }}
                   />
-                  <View style={styles.datePill}>
+                  <View
+                    style={[
+                      styles.datePill,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
                     <Feather
                       name="calendar"
                       size={13}
-                      color="#64748B"
+                      color={isDark ? colors.accent : "#64748B"}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.datePillText}>
+                    <Text
+                      style={[
+                        styles.datePillText,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       {formatShortDate(activeCycle.endDate)}
                     </Text>
                   </View>
@@ -2085,22 +2786,26 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         paddingHorizontal: 14,
                         paddingVertical: 7,
                         borderRadius: 14,
-                        backgroundColor: "#EFF6FF",
+                        backgroundColor: isDark
+                          ? "rgba(59, 130, 246, 0.15)"
+                          : "#EFF6FF",
                         borderWidth: 1,
-                        borderColor: "#BFDBFE",
+                        borderColor: isDark
+                          ? "rgba(59, 130, 246, 0.3)"
+                          : "#BFDBFE",
                       }}
                     >
                       <Feather
                         name="edit-2"
                         size={12}
-                        color="#2563EB"
+                        color={isDark ? colors.accent : "#2563EB"}
                         style={{ marginRight: 5 }}
                       />
                       <Text
                         style={{
                           fontSize: 12,
                           fontWeight: "700",
-                          color: "#2563EB",
+                          color: isDark ? colors.accent : "#2563EB",
                         }}
                       >
                         Edit Cycle
@@ -2115,22 +2820,26 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         paddingHorizontal: 14,
                         paddingVertical: 7,
                         borderRadius: 14,
-                        backgroundColor: "#FEF2F2",
+                        backgroundColor: isDark
+                          ? "rgba(220, 38, 38, 0.15)"
+                          : "#FEF2F2",
                         borderWidth: 1,
-                        borderColor: "#FECACA",
+                        borderColor: isDark
+                          ? "rgba(220, 38, 38, 0.3)"
+                          : "#FECACA",
                       }}
                     >
                       <Feather
                         name="trash-2"
                         size={12}
-                        color="#DC2626"
+                        color={isDark ? colors.danger : "#DC2626"}
                         style={{ marginRight: 5 }}
                       />
                       <Text
                         style={{
                           fontSize: 12,
                           fontWeight: "700",
-                          color: "#DC2626",
+                          color: isDark ? colors.danger : "#DC2626",
                         }}
                       >
                         Delete Cycle
@@ -2145,16 +2854,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         {/* Water Billing Configuration Card */}
         {householdId ? (
-          <View style={styles.waterConfigCard}>
+          <View
+            style={[
+              styles.waterConfigCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
             <View style={styles.waterConfigHeader}>
-              <View style={styles.waterConfigIconWrap}>
-                <Feather name="droplet" size={18} color="#0284C7" />
+              <View
+                style={[
+                  styles.waterConfigIconWrap,
+                  isDark && {
+                    backgroundColor: "rgba(2, 132, 199, 0.15)",
+                  },
+                ]}
+              >
+                <Feather
+                  name="droplet"
+                  size={18}
+                  color={isDark ? colors.accent : "#0284C7"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.waterConfigTitle}>
+                <Text
+                  style={[
+                    styles.waterConfigTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   Water Billing Configuration
                 </Text>
-                <Text style={styles.waterConfigSub}>
+                <Text
+                  style={[
+                    styles.waterConfigSub,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                     ? `Flat Rate · ₱${((waterConfig?.fixedPerPersonAmountCentavos || 0) / 100).toFixed(2)} / resident / mo`
                     : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -2164,24 +2902,52 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               </View>
               {isHost && (
                 <TouchableOpacity
-                  style={styles.waterConfigEditBtn}
+                  style={[
+                    styles.waterConfigEditBtn,
+                    isDark && {
+                      backgroundColor: "rgba(2, 132, 199, 0.15)",
+                      borderColor: "rgba(2, 132, 199, 0.3)",
+                    },
+                  ]}
                   onPress={() => setShowWaterSettingsModal(true)}
                   activeOpacity={0.8}
                 >
                   <Feather
                     name="settings"
                     size={13}
-                    color="#0284C7"
+                    color={isDark ? colors.accent : "#0284C7"}
                     style={{ marginRight: 4 }}
                   />
-                  <Text style={styles.waterConfigEditBtnText}>Configure</Text>
+                  <Text
+                    style={[
+                      styles.waterConfigEditBtnText,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
+                    Configure
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            <View style={styles.waterConfigDetailsRow}>
-              <View style={styles.waterModeTag}>
-                <Text style={styles.waterModeTagText}>
+            <View
+              style={[
+                styles.waterConfigDetailsRow,
+                isDark && { borderTopColor: colors.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.waterModeTag,
+                  isDark && { backgroundColor: colors.surfaceInset },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.waterModeTagText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                     ? "Flat Fee Mode"
                     : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -2189,7 +2955,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                       : "Calendar Active"}
                 </Text>
               </View>
-              <Text style={styles.waterModeSummary} numberOfLines={2}>
+              <Text
+                style={[
+                  styles.waterModeSummary,
+                  isDark && { color: colors.textSecondary },
+                ]}
+                numberOfLines={2}
+              >
                 {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
                   ? "Billed directly as a flat fee to each paying roommate. No calendar logging."
                   : waterConfig?.pricingModel === "FIXED_MONTHLY"
@@ -2200,32 +2972,207 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         ) : null}
 
+        {/* Host Payment Methods Configuration Card */}
+        {householdId && isHost && (
+          <View
+            style={[
+              styles.waterConfigCard,
+              { marginTop: 12 },
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.waterConfigHeader}>
+              <View
+                style={[
+                  styles.waterConfigIconWrap,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(16, 185, 129, 0.15)"
+                      : "rgba(16, 185, 129, 0.1)",
+                  },
+                ]}
+              >
+                <Feather
+                  name="credit-card"
+                  size={18}
+                  color={isDark ? colors.success : "#10B981"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.waterConfigTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Payment Methods & QR
+                </Text>
+                <Text
+                  style={[
+                    styles.waterConfigSub,
+                    isDark && { color: colors.success },
+                  ]}
+                >
+                  {household?.paymentMethods &&
+                  Array.isArray(household.paymentMethods) &&
+                  household.paymentMethods.length > 0
+                    ? `${household.paymentMethods.filter((m: any) => m.isEnabled !== false).length} Active Methods · QR Ready`
+                    : "GCash, Maya, Bank Transfer, Cash"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.waterConfigEditBtn,
+                  isDark && {
+                    backgroundColor: "rgba(16, 185, 129, 0.15)",
+                    borderColor: "rgba(16, 185, 129, 0.3)",
+                  },
+                ]}
+                onPress={() =>
+                  onOpenPaymentMethodConfiguration
+                    ? onOpenPaymentMethodConfiguration()
+                    : Alert.alert(
+                        "Payment Configuration",
+                        "Opening host payment methods setup...",
+                      )
+                }
+                activeOpacity={0.8}
+              >
+                <Feather
+                  name="settings"
+                  size={13}
+                  color={isDark ? colors.success : "#10B981"}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.waterConfigEditBtnText,
+                    { color: isDark ? colors.success : "#059669" },
+                  ]}
+                >
+                  Configure
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View
+              style={[
+                styles.waterConfigDetailsRow,
+                isDark && { borderTopColor: colors.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.waterModeTag,
+                  isDark && { backgroundColor: colors.surfaceInset },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.waterModeTagText,
+                    { color: isDark ? colors.success : "#059669" },
+                  ]}
+                >
+                  QR & Accounts
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.waterModeSummary,
+                  isDark && { color: colors.textSecondary },
+                ]}
+                numberOfLines={2}
+              >
+                Upload payment QR codes or bank account numbers so payors can
+                settle bills easily.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Two Metric Cards - Real Calculated Values (Zero if empty) */}
         <View style={styles.metricCardsRow}>
-          <View style={styles.metricCard}>
-            <View style={styles.metricIconWrap}>
-              <Ionicons name="wallet-outline" size={20} color="#0F172A" />
+          <View
+            style={[
+              styles.metricCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.metricIconWrap,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="wallet-outline"
+                size={20}
+                color={isDark ? colors.accent : "#0F172A"}
+              />
             </View>
-            <Text style={styles.metricValue}>
+            <Text
+              style={[styles.metricValue, isDark && { color: colors.text }]}
+            >
               {formatPesos(totalDuesCents)}
             </Text>
-            <Text style={styles.metricLabel}>Total Dues</Text>
+            <Text
+              style={[
+                styles.metricLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Total Dues
+            </Text>
           </View>
 
-          <View style={styles.metricCard}>
-            <View style={styles.metricIconWrap}>
-              <Ionicons name="receipt-outline" size={20} color="#0F172A" />
+          <View
+            style={[
+              styles.metricCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.metricIconWrap,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="receipt-outline"
+                size={20}
+                color={isDark ? colors.accent : "#0F172A"}
+              />
             </View>
-            <Text style={styles.metricValue}>
+            <Text
+              style={[styles.metricValue, isDark && { color: colors.text }]}
+            >
               {formatPesos(totalExpenseCents)}
             </Text>
-            <Text style={styles.metricLabel}>Total Expense</Text>
+            <Text
+              style={[
+                styles.metricLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Total Expense
+            </Text>
           </View>
         </View>
 
         {/* Expenses Section */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeading}>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
             Bills ({currentCycleExpenses.length})
           </Text>
           <TouchableOpacity
@@ -2235,110 +3182,274 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 : Alert.alert("Add Expense", "Opening expense modal...")
             }
           >
-            <Text style={styles.sectionActionText}>+ Add</Text>
+            <Text
+              style={[
+                styles.sectionActionText,
+                isDark && { color: colors.accent },
+              ]}
+            >
+              + Add
+            </Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.expenseBox}>
+        <View
+          style={[
+            styles.expenseBox,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           {currentCycleExpenses.length === 0 ? (
             <View style={styles.emptyExpenseBox}>
-              <Text style={styles.emptyExpenseText}>
+              <Text
+                style={[
+                  styles.emptyExpenseText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 No expenses logged for this cycle yet.
               </Text>
               <TouchableOpacity
-                style={styles.addExpenseInlineBtn}
+                style={[
+                  styles.addExpenseInlineBtn,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.15)",
+                  },
+                ]}
                 onPress={() =>
                   onOpenAddExpense
                     ? onOpenAddExpense()
                     : Alert.alert("Add Expense", "Opening expense modal...")
                 }
               >
-                <Text style={styles.addExpenseInlineBtnText}>
+                <Text
+                  style={[
+                    styles.addExpenseInlineBtnText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   + Add First Expense
                 </Text>
               </TouchableOpacity>
             </View>
           ) : (
-            currentCycleExpenses.slice(0, 5).map((exp) => {
-              const isExpensePaid =
-                exp.status === "PAID" || exp.isPaid === true;
-              const catMeta = getCategoryMeta(exp.category);
-              return (
-                <TouchableOpacity
-                  key={exp.id}
-                  style={styles.expenseItemRow}
-                  activeOpacity={0.7}
-                  onPress={() => handleExpensePress(exp)}
-                >
-                  <View
+            <>
+              {(showAllBills
+                ? currentCycleExpenses
+                : currentCycleExpenses.slice(0, 5)
+              ).map((exp) => {
+                const isExpensePaid =
+                  exp.status === "PAID" || exp.isPaid === true;
+                const catMeta = getCategoryMeta(exp.category);
+                return (
+                  <TouchableOpacity
+                    key={exp.id}
                     style={[
-                      styles.expenseCategoryIconWrap,
-                      { backgroundColor: catMeta.bgColor },
+                      styles.expenseItemRow,
+                      isDark && { borderBottomColor: colors.border },
                     ]}
+                    activeOpacity={0.7}
+                    onPress={() => handleExpensePress(exp)}
                   >
-                    <Feather
-                      name={catMeta.featherIcon as any}
-                      size={15}
-                      color={catMeta.color}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
                     <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
+                      style={[
+                        styles.expenseCategoryIconWrap,
+                        { backgroundColor: catMeta.bgColor },
+                      ]}
                     >
-                      <Text style={styles.expenseItemTitle}>
-                        {cleanBillTitle(exp.title, exp.category)}
-                      </Text>
+                      <Feather
+                        name={catMeta.featherIcon as any}
+                        size={15}
+                        color={catMeta.color}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
                       <View
-                        style={
-                          isExpensePaid
-                            ? styles.statusBadgePaid
-                            : styles.statusBadgeUnpaid
-                        }
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
                       >
                         <Text
-                          style={
-                            isExpensePaid
-                              ? styles.statusBadgeTextPaid
-                              : styles.statusBadgeTextUnpaid
-                          }
+                          style={[
+                            styles.expenseItemTitle,
+                            isDark && { color: colors.text },
+                          ]}
                         >
-                          {isExpensePaid ? "PAID" : "UNPAID"}
+                          {cleanBillTitle(exp.title, exp.category)}
                         </Text>
+                        <View
+                          style={[
+                            isExpensePaid
+                              ? styles.statusBadgePaid
+                              : styles.statusBadgeUnpaid,
+                            isDark && {
+                              backgroundColor: isExpensePaid
+                                ? "rgba(16, 185, 129, 0.16)"
+                                : "rgba(239, 68, 68, 0.16)",
+                              borderColor: isExpensePaid
+                                ? "rgba(16, 185, 129, 0.3)"
+                                : "rgba(239, 68, 68, 0.3)",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              isExpensePaid
+                                ? styles.statusBadgeTextPaid
+                                : styles.statusBadgeTextUnpaid,
+                              isDark && {
+                                color: isExpensePaid
+                                  ? colors.success
+                                  : colors.danger,
+                              },
+                            ]}
+                          >
+                            {isExpensePaid ? "PAID" : "UNPAID"}
+                          </Text>
+                        </View>
                       </View>
+                      <Text
+                        style={[
+                          styles.expenseItemSub,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        {isExpensePaid
+                          ? `${exp.payerName || "Household"}`
+                          : `Added by ${exp.payerName || "Host"}`}{" "}
+                        • {formatShortDate(exp.date)}
+                      </Text>
                     </View>
-                    <Text style={styles.expenseItemSub}>
-                      {isExpensePaid
-                        ? `${exp.payerName || "Household"}`
-                        : `Added by ${exp.payerName || "Host"}`}{" "}
-                      • {formatShortDate(exp.date)}
-                    </Text>
-                  </View>
-                  <Text style={styles.expenseItemAmount}>
-                    {formatPesos(exp.amountCents)}
+                    <View style={{ alignItems: "flex-end", gap: 5 }}>
+                      <Text
+                        style={[
+                          styles.expenseItemAmount,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        {formatPesos(exp.amountCents)}
+                      </Text>
+                      {isHost && (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <TouchableOpacity
+                            style={[
+                              styles.billActionIconBtn,
+                              isDark && {
+                                backgroundColor: "rgba(59, 130, 246, 0.18)",
+                                borderColor: "rgba(59, 130, 246, 0.35)",
+                              },
+                            ]}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditExpense(exp);
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Edit bill"
+                          >
+                            <Feather
+                              name="edit-2"
+                              size={12}
+                              color={isDark ? colors.accent : "#2563EB"}
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.billActionIconBtn,
+                              styles.billActionIconBtnDelete,
+                              isDark && {
+                                backgroundColor: "rgba(239, 68, 68, 0.18)",
+                                borderColor: "rgba(239, 68, 68, 0.35)",
+                              },
+                            ]}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleDeleteExpense(exp);
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Delete bill"
+                          >
+                            <Feather
+                              name="trash-2"
+                              size={12}
+                              color={isDark ? colors.danger : "#EF4444"}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              {currentCycleExpenses.length > 5 && (
+                <TouchableOpacity
+                  style={[
+                    styles.viewAllBillsBtn,
+                    isDark && { borderTopColor: colors.border },
+                  ]}
+                  onPress={() => setShowAllBills((prev) => !prev)}
+                >
+                  <Text
+                    style={[
+                      styles.viewAllBillsBtnText,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
+                    {showAllBills
+                      ? "Show Less"
+                      : `View All Bills (${currentCycleExpenses.length})`}
                   </Text>
+                  <Feather
+                    name={showAllBills ? "chevron-up" : "chevron-down"}
+                    size={14}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
                 </TouchableOpacity>
-              );
-            })
+              )}
+            </>
           )}
         </View>
 
         {/* Pending Join Requests (Requires Host Approval) */}
         {isHost && pendingRequests.length > 0 && (
-          <View style={styles.pendingRequestsContainer}>
+          <View
+            style={[
+              styles.pendingRequestsContainer,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: "rgba(217, 119, 6, 0.3)",
+              },
+            ]}
+          >
             <View style={styles.pendingRequestsHeader}>
               <View style={styles.pendingIconWrap}>
                 <Feather name="clock" size={16} color="#D97706" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.pendingRequestsTitle}>
+                <Text
+                  style={[
+                    styles.pendingRequestsTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   Pending Join Requests ({pendingRequests.length})
                 </Text>
-                <Text style={styles.pendingRequestsSubtitle}>
+                <Text
+                  style={[
+                    styles.pendingRequestsSubtitle,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Roommates who used your invite code awaiting approval
                 </Text>
               </View>
@@ -2351,7 +3462,16 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 const isProcessing = processingRequestId === reqId;
 
                 return (
-                  <View key={reqId} style={styles.pendingRequestCard}>
+                  <View
+                    key={reqId}
+                    style={[
+                      styles.pendingRequestCard,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
                     <View
                       style={{
                         flexDirection: "row",
@@ -2366,21 +3486,39 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                           style={styles.pendingAvatarImage}
                         />
                       ) : (
-                        <View style={styles.pendingAvatarFallback}>
-                          <Text style={styles.pendingAvatarText}>
+                        <View
+                          style={[
+                            styles.pendingAvatarFallback,
+                            isDark && {
+                              backgroundColor: "rgba(245, 158, 11, 0.2)",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.pendingAvatarText,
+                              isDark && { color: colors.accent },
+                            ]}
+                          >
                             {reqName.charAt(0).toUpperCase()}
                           </Text>
                         </View>
                       )}
                       <View style={{ flex: 1 }}>
                         <Text
-                          style={styles.pendingMemberName}
+                          style={[
+                            styles.pendingMemberName,
+                            isDark && { color: colors.text },
+                          ]}
                           numberOfLines={1}
                         >
                           {reqName}
                         </Text>
                         <Text
-                          style={styles.pendingMemberEmail}
+                          style={[
+                            styles.pendingMemberEmail,
+                            isDark && { color: colors.textSecondary },
+                          ]}
                           numberOfLines={1}
                         >
                           {req.email ||
@@ -2388,7 +3526,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                             "Invite code applicant"}
                         </Text>
                         {req.requestedDate && (
-                          <Text style={styles.pendingMemberDate}>
+                          <Text
+                            style={[
+                              styles.pendingMemberDate,
+                              isDark && { color: colors.textMuted },
+                            ]}
+                          >
                             Requested: {formatShortDate(req.requestedDate)}
                           </Text>
                         )}
@@ -2397,7 +3540,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
                     <View style={styles.pendingActionButtonsRow}>
                       <TouchableOpacity
-                        style={styles.pendingApproveBtn}
+                        style={[
+                          styles.pendingApproveBtn,
+                          isDark && { backgroundColor: colors.success },
+                        ]}
                         disabled={isProcessing}
                         onPress={() => handleApproveRequest(reqId)}
                       >
@@ -2414,15 +3560,32 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.pendingRejectBtn}
+                        style={[
+                          styles.pendingRejectBtn,
+                          isDark && {
+                            backgroundColor: "rgba(239, 68, 68, 0.15)",
+                            borderColor: "rgba(239, 68, 68, 0.3)",
+                          },
+                        ]}
                         disabled={isProcessing}
                         onPress={() => {
                           setRejectingMember(req);
                           setRejectReason("");
                         }}
                       >
-                        <Feather name="x" size={14} color="#BE123C" />
-                        <Text style={styles.pendingRejectBtnText}>Reject</Text>
+                        <Feather
+                          name="x"
+                          size={14}
+                          color={isDark ? colors.danger : "#BE123C"}
+                        />
+                        <Text
+                          style={[
+                            styles.pendingRejectBtnText,
+                            isDark && { color: colors.danger },
+                          ]}
+                        >
+                          Reject
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -2434,26 +3597,54 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         {/* Total Participants Section */}
         <View style={[styles.sectionRow, { marginTop: 24 }]}>
-          <Text style={styles.sectionHeading}>
+          <Text
+            style={[styles.sectionHeading, isDark && { color: colors.text }]}
+          >
             Total Participants ({participants.length})
           </Text>
           <TouchableOpacity onPress={() => setShowInviteModal(true)}>
-            <Text style={styles.sectionActionText}>+ Invite</Text>
+            <Text
+              style={[
+                styles.sectionActionText,
+                isDark && { color: colors.accent },
+              ]}
+            >
+              + Invite
+            </Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.participantsList}>
           {participants.length === 0 ? (
             <View style={styles.emptyExpenseBox}>
-              <Text style={styles.emptyExpenseText}>
+              <Text
+                style={[
+                  styles.emptyExpenseText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 No roommates added yet.
               </Text>
             </View>
           ) : (
             participants.map((p) => (
-              <View key={p.id} style={styles.participantCard}>
+              <View
+                key={p.id}
+                style={[
+                  styles.participantCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.participantRow}>
-                  <View style={styles.participantAvatar}>
+                  <View
+                    style={[
+                      styles.participantAvatar,
+                      isDark && { backgroundColor: colors.surfaceInset },
+                    ]}
+                  >
                     {p.profilePicture ? (
                       <Image
                         source={{ uri: p.profilePicture }}
@@ -2461,7 +3652,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         resizeMode="cover"
                       />
                     ) : (
-                      <Text style={styles.participantAvatarText}>
+                      <Text
+                        style={[
+                          styles.participantAvatarText,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {p.avatar}
                       </Text>
                     )}
@@ -2475,7 +3671,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.participantName}>{p.name}</Text>
+                      <Text
+                        style={[
+                          styles.participantName,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        {p.name}
+                      </Text>
                       {p.role === "HOST" ? (
                         <View style={styles.hostBadge}>
                           <Text style={styles.hostBadgeText}>HOST</Text>
@@ -2498,7 +3701,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                           styles.statusDot,
                           {
                             backgroundColor:
-                              p.status === "Settled" ? "#10B981" : "#F43F5E",
+                              p.status === "Settled"
+                                ? isDark
+                                  ? colors.success
+                                  : "#10B981"
+                                : isDark
+                                  ? colors.danger
+                                  : "#F43F5E",
                           },
                         ]}
                       />
@@ -2507,13 +3716,24 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                           styles.statusText,
                           {
                             color:
-                              p.status === "Settled" ? "#059669" : "#E11D48",
+                              p.status === "Settled"
+                                ? isDark
+                                  ? colors.success
+                                  : "#059669"
+                                : isDark
+                                  ? colors.danger
+                                  : "#E11D48",
                           },
                         ]}
                       >
                         {p.status}
                       </Text>
-                      <Text style={styles.participantSubInfo}>
+                      <Text
+                        style={[
+                          styles.participantSubInfo,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
                         {p.role === "NON_PAYOR"
                           ? "• Exempt from bill splits"
                           : p.role === "HOST"
@@ -2524,9 +3744,26 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     {p.role !== "NON_PAYOR" &&
                       p.waterShareCents !== undefined &&
                       p.waterShareCents > 0 && (
-                        <View style={styles.participantWaterBreakdownWrap}>
-                          <Feather name="droplet" size={11} color="#0284C7" />
-                          <Text style={styles.participantWaterBreakdownText}>
+                        <View
+                          style={[
+                            styles.participantWaterBreakdownWrap,
+                            isDark && {
+                              backgroundColor: "rgba(2, 132, 199, 0.15)",
+                              borderColor: "rgba(2, 132, 199, 0.3)",
+                            },
+                          ]}
+                        >
+                          <Feather
+                            name="droplet"
+                            size={11}
+                            color={isDark ? colors.accent : "#0284C7"}
+                          />
+                          <Text
+                            style={[
+                              styles.participantWaterBreakdownText,
+                              isDark && { color: colors.accent },
+                            ]}
+                          >
                             {formatPesos(p.waterShareCents)} (
                             {p.waterDaysPresent || 0}d own
                             {p.waterNonPayorCents && p.waterNonPayorCents > 0
@@ -2537,12 +3774,24 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                         </View>
                       )}
                     {p.role === "NON_PAYOR" && (
-                      <View style={styles.participantWaterBreakdownWrap}>
-                        <Feather name="droplet" size={11} color="#64748B" />
+                      <View
+                        style={[
+                          styles.participantWaterBreakdownWrap,
+                          isDark && {
+                            backgroundColor: "rgba(100, 116, 139, 0.15)",
+                            borderColor: "rgba(100, 116, 139, 0.3)",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="droplet"
+                          size={11}
+                          color={isDark ? colors.textMuted : "#64748B"}
+                        />
                         <Text
                           style={[
                             styles.participantWaterBreakdownText,
-                            { color: "#64748B" },
+                            { color: isDark ? colors.textMuted : "#64748B" },
                           ]}
                         >
                           {p.waterDaysPresent || 0}d
@@ -2551,14 +3800,24 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     )}
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.participantOwesText}>
+                    <Text
+                      style={[
+                        styles.participantOwesText,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       {p.role === "NON_PAYOR"
                         ? "Exempt"
                         : p.owesCents > 0
                           ? formatPesos(p.owesCents)
                           : "Settled"}
                     </Text>
-                    <Text style={styles.participantOwesSub}>
+                    <Text
+                      style={[
+                        styles.participantOwesSub,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
                       {p.role === "NON_PAYOR"
                         ? "Non-Payor"
                         : p.owesCents > 0
@@ -2570,24 +3829,44 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
                 {/* Host actions on member: Toggle Payor/Non-Payor & Delete */}
                 {isHost && p.role !== "HOST" && (
-                  <View style={styles.hostActionButtonsRow}>
+                  <View
+                    style={[
+                      styles.hostActionButtonsRow,
+                      isDark && { borderTopColor: colors.border },
+                    ]}
+                  >
                     <TouchableOpacity
-                      style={styles.roleTogglePill}
+                      style={[
+                        styles.roleTogglePill,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                          borderColor: colors.border,
+                        },
+                      ]}
                       onPress={() => handleToggleMemberRole(p)}
                       activeOpacity={0.7}
                     >
                       <Feather
                         name={p.role === "NON_PAYOR" ? "check-circle" : "slash"}
                         size={13}
-                        color={p.role === "NON_PAYOR" ? "#2563EB" : "#7C3AED"}
+                        color={
+                          isDark
+                            ? colors.accent
+                            : p.role === "NON_PAYOR"
+                              ? "#2563EB"
+                              : "#7C3AED"
+                        }
                         style={{ marginRight: 5 }}
                       />
                       <Text
                         style={[
                           styles.roleTogglePillText,
                           {
-                            color:
-                              p.role === "NON_PAYOR" ? "#2563EB" : "#7C3AED",
+                            color: isDark
+                              ? colors.accent
+                              : p.role === "NON_PAYOR"
+                                ? "#2563EB"
+                                : "#7C3AED",
                           },
                         ]}
                       >
@@ -2598,17 +3877,30 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={styles.removeMemberPill}
+                      style={[
+                        styles.removeMemberPill,
+                        isDark && {
+                          backgroundColor: "rgba(220, 38, 38, 0.15)",
+                          borderColor: "rgba(220, 38, 38, 0.3)",
+                        },
+                      ]}
                       onPress={() => handleRemoveMember(p)}
                       activeOpacity={0.7}
                     >
                       <Feather
                         name="trash-2"
                         size={13}
-                        color="#DC2626"
+                        color={isDark ? colors.danger : "#DC2626"}
                         style={{ marginRight: 5 }}
                       />
-                      <Text style={styles.removeMemberPillText}>Remove</Text>
+                      <Text
+                        style={[
+                          styles.removeMemberPillText,
+                          isDark && { color: colors.danger },
+                        ]}
+                      >
+                        Remove
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -2619,10 +3911,23 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       </ScrollView>
 
       {/* Bottom Floating Bar */}
-      <View style={styles.bottomBar}>
+      <View
+        style={[
+          styles.bottomBar,
+          isDark && {
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+          },
+        ]}
+      >
         <View style={{ flexDirection: "row", gap: 12 }}>
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { flex: 1 }]}
+            style={[
+              styles.primaryPillBtn,
+              { flex: 1 },
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={() => setViewMode("edit")}
           >
             <Feather
@@ -2635,16 +3940,32 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.secondaryPillBtn, { flex: 1 }]}
+            style={[
+              styles.secondaryPillBtn,
+              {
+                flex: 1,
+                backgroundColor: isDark
+                  ? "rgba(59, 130, 246, 0.15)"
+                  : "#EFF6FF",
+                borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
+              },
+            ]}
             onPress={handleCopyInviteCode}
           >
             <Feather
               name="share-2"
               size={16}
-              color="#2563EB"
+              color={isDark ? colors.accent : "#2563EB"}
               style={{ marginRight: 6 }}
             />
-            <Text style={styles.secondaryPillBtnText}>Invite Code</Text>
+            <Text
+              style={[
+                styles.secondaryPillBtnText,
+                isDark && { color: colors.accent },
+              ]}
+            >
+              Invite Code
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -2666,6 +3987,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
       {/* MODAL: Host Required Guard Modal */}
       {renderHostRequiredModal()}
+
+      {/* MODAL: Edit Expense / Bill (Host Only) */}
+      {renderEditExpenseModal()}
 
       {/* MODAL: Water Billing Settings Modal */}
       {householdId ? (
@@ -2695,46 +4019,87 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         showChipBar={true}
         title="Create Billing Cycle"
         subtitle="Set up a billing cycle (e.g. monthly) to track rent, electricity, and water dues"
-        icon={<Feather name="calendar" size={18} color="#2563EB" />}
+        icon={
+          <Feather
+            name="calendar"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
       >
         <View style={{ paddingTop: 4 }}>
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Cycle Name</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Cycle Name
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={cycleNameInput}
               onChangeText={setCycleNameInput}
               placeholder="e.g. October 2026 Cycle"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Start Date (YYYY-MM-DD)
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={cycleStartInput}
                 onChangeText={setCycleStartInput}
                 placeholder="2026-10-01"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                End Date (YYYY-MM-DD)
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={cycleEndInput}
                 onChangeText={setCycleEndInput}
                 placeholder="2026-10-31"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            style={[
+              styles.primaryPillBtn,
+              { marginTop: 24 },
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleCreateBillingCycle}
             disabled={loading}
           >
@@ -2758,79 +4123,141 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         showChipBar={true}
         title="Edit Billing Cycle"
         subtitle="Update cycle name, duration dates, or billing status"
-        icon={<Feather name="edit-3" size={18} color="#2563EB" />}
+        icon={
+          <Feather
+            name="edit-3"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
       >
         <View style={{ paddingTop: 4 }}>
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Cycle Name</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Cycle Name
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={editCycleName}
               onChangeText={setEditCycleName}
               placeholder="e.g. October 2026 Cycle"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.inputLabel}>Start Date (YYYY-MM-DD)</Text>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Start Date (YYYY-MM-DD)
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={editCycleStart}
                 onChangeText={setEditCycleStart}
                 placeholder="2026-10-01"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.inputLabel}>End Date (YYYY-MM-DD)</Text>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                End Date (YYYY-MM-DD)
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
                 value={editCycleEnd}
                 onChangeText={setEditCycleEnd}
                 placeholder="2026-10-31"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
           </View>
 
           <View style={[styles.inputGroup, { marginTop: 14 }]}>
-            <Text style={styles.inputLabel}>Status</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Status
+            </Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-              {["ACTIVE", "FINALIZED", "ARCHIVED"].map((status) => (
-                <TouchableOpacity
-                  key={status}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 9,
-                    borderRadius: 12,
-                    alignItems: "center",
-                    backgroundColor:
-                      editCycleStatus === status ? "#EFF6FF" : "#F8FAFC",
-                    borderWidth: 1,
-                    borderColor:
-                      editCycleStatus === status ? "#2563EB" : "#E2E8F0",
-                  }}
-                  onPress={() => setEditCycleStatus(status)}
-                >
-                  <Text
+              {["ACTIVE", "FINALIZED", "ARCHIVED"].map((status) => {
+                const isSelected = editCycleStatus === status;
+                return (
+                  <TouchableOpacity
+                    key={status}
                     style={{
-                      fontSize: 11,
-                      fontWeight: "700",
-                      color: editCycleStatus === status ? "#2563EB" : "#64748B",
+                      flex: 1,
+                      paddingVertical: 9,
+                      borderRadius: 12,
+                      alignItems: "center",
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? "rgba(59, 130, 246, 0.2)"
+                          : "#EFF6FF"
+                        : isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                      borderWidth: 1,
+                      borderColor: isSelected
+                        ? isDark
+                          ? colors.accent
+                          : "#2563EB"
+                        : isDark
+                          ? colors.border
+                          : "#E2E8F0",
                     }}
+                    onPress={() => setEditCycleStatus(status)}
                   >
-                    {status}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "700",
+                        color: isSelected
+                          ? isDark
+                            ? colors.accent
+                            : "#2563EB"
+                          : isDark
+                            ? colors.textSecondary
+                            : "#64748B",
+                      }}
+                    >
+                      {status}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            style={[
+              styles.primaryPillBtn,
+              { marginTop: 24 },
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleUpdateBillingCycle}
             disabled={loading}
           >
@@ -2854,33 +4281,61 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         showChipBar={true}
         title="Invite Roommate"
         subtitle="Add a new resident to your household room"
-        icon={<Feather name="user-plus" size={18} color="#2563EB" />}
+        icon={
+          <Feather
+            name="user-plus"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
       >
         <View style={{ paddingTop: 4 }}>
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Roommate Name</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Roommate Name
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={inviteName}
               onChangeText={setInviteName}
               placeholder="e.g. John Doe"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <View style={[styles.inputGroup, { marginTop: 14 }]}>
-            <Text style={styles.inputLabel}>Email or Phone (Optional)</Text>
+            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+              Email or Phone (Optional)
+            </Text>
             <TextInput
-              style={styles.textInput}
+              style={[
+                styles.textInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={inviteContact}
               onChangeText={setInviteContact}
               placeholder="e.g. roommate@email.com or +63 912..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             />
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryPillBtn, { marginTop: 24 }]}
+            style={[
+              styles.primaryPillBtn,
+              { marginTop: 24 },
+              isDark && { backgroundColor: colors.primary },
+            ]}
             onPress={handleInviteRoommate}
             disabled={loading}
           >
@@ -2904,11 +4359,20 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         showChipBar={true}
         title="Group Options"
         subtitle="Manage apartment details & memberships"
-        icon={<Feather name="more-horizontal" size={18} color="#2563EB" />}
+        icon={
+          <Feather
+            name="more-horizontal"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
       >
         <View style={{ paddingTop: 6, paddingBottom: 10 }}>
           <TouchableOpacity
-            style={styles.menuItem}
+            style={[
+              styles.menuItem,
+              isDark && { borderBottomColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setShowMenu(false);
@@ -2920,25 +4384,106 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#EFF6FF",
+                backgroundColor: isDark ? colors.surfaceInset : "#EFF6FF",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="edit-3" size={18} color="#2563EB" />
+              <Feather
+                name="edit-3"
+                size={18}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Edit Apartment & Members</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Edit Apartment & Members
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Update name, rent cost, and member list
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
 
+          {isHost && (
+            <TouchableOpacity
+              style={[
+                styles.menuItem,
+                isDark && { borderBottomColor: colors.border },
+              ]}
+              activeOpacity={0.7}
+              onPress={() => {
+                setShowMenu(false);
+                if (onOpenPaymentMethodConfiguration) {
+                  onOpenPaymentMethodConfiguration();
+                }
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.15)"
+                    : "#ECFDF5",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 12,
+                }}
+              >
+                <Feather
+                  name="credit-card"
+                  size={18}
+                  color={isDark ? colors.success : "#10B981"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Payment Methods & QR
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                    marginTop: 2,
+                  }}
+                >
+                  Configure QR codes, GCash, Maya & bank accounts
+                </Text>
+              </View>
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={isDark ? colors.textMuted : "#94A3B8"}
+              />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
-            style={styles.menuItem}
+            style={[
+              styles.menuItem,
+              isDark && { borderBottomColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setShowMenu(false);
@@ -2950,26 +4495,49 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#F0FDF4",
+                backgroundColor: isDark
+                  ? "rgba(16, 185, 129, 0.15)"
+                  : "#F0FDF4",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="calendar" size={18} color="#059669" />
+              <Feather
+                name="calendar"
+                size={18}
+                color={isDark ? colors.success : "#059669"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Create New Billing Cycle</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Create New Billing Cycle
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Start a new month or tracking period
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
 
           {isHost ? (
             <TouchableOpacity
-              style={styles.menuItem}
+              style={[
+                styles.menuItem,
+                isDark && { borderBottomColor: colors.border },
+              ]}
               activeOpacity={0.7}
               onPress={() => {
                 setShowMenu(false);
@@ -2981,25 +4549,51 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   width: 36,
                   height: 36,
                   borderRadius: 10,
-                  backgroundColor: "#FAF5FF",
+                  backgroundColor: isDark
+                    ? "rgba(124, 58, 237, 0.15)"
+                    : "#FAF5FF",
                   alignItems: "center",
                   justifyContent: "center",
                   marginRight: 12,
                 }}
               >
-                <Feather name="plus-circle" size={18} color="#7C3AED" />
+                <Feather
+                  name="plus-circle"
+                  size={18}
+                  color={isDark ? "#A78BFA" : "#7C3AED"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.menuItemText}>Create Another Group</Text>
-                <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Create Another Group
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                    marginTop: 2,
+                  }}
+                >
                   Add another unit or roommate property
                 </Text>
               </View>
-              <Feather name="chevron-right" size={18} color="#94A3B8" />
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={isDark ? colors.textMuted : "#94A3B8"}
+              />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={styles.menuItem}
+              style={[
+                styles.menuItem,
+                isDark && { borderBottomColor: colors.border },
+              ]}
               activeOpacity={0.7}
               onPress={() => {
                 setShowMenu(false);
@@ -3015,33 +4609,53 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   width: 36,
                   height: 36,
                   borderRadius: 10,
-                  backgroundColor: "#EFF6FF",
+                  backgroundColor: isDark ? colors.surfaceInset : "#EFF6FF",
                   alignItems: "center",
                   justifyContent: "center",
                   marginRight: 12,
                 }}
               >
-                <Feather name="shield" size={18} color="#2563EB" />
+                <Feather
+                  name="shield"
+                  size={18}
+                  color={isDark ? colors.accent : "#2563EB"}
+                />
               </View>
               <View style={{ flex: 1 }}>
                 <Text
                   style={[
                     styles.menuItemText,
-                    { color: "#2563EB", fontWeight: "700" },
+                    {
+                      color: isDark ? colors.accent : "#2563EB",
+                      fontWeight: "700",
+                    },
                   ]}
                 >
                   Apply to Become a Host
                 </Text>
-                <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                    marginTop: 2,
+                  }}
+                >
                   Unlock host privileges to create groups
                 </Text>
               </View>
-              <Feather name="chevron-right" size={18} color="#94A3B8" />
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={isDark ? colors.textMuted : "#94A3B8"}
+              />
             </TouchableOpacity>
           )}
 
           <TouchableOpacity
-            style={styles.menuItem}
+            style={[
+              styles.menuItem,
+              isDark && { borderBottomColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setShowMenu(false);
@@ -3053,21 +4667,39 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#F1F5F9",
+                backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="link" size={18} color="#0F172A" />
+              <Feather
+                name="link"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Join with Code or Link</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Join with Code or Link
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Enter a code to join another apartment
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -3080,28 +4712,45 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#EFF6FF",
+                backgroundColor: isDark ? colors.surfaceInset : "#EFF6FF",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="copy" size={18} color="#2563EB" />
+              <Feather
+                name="copy"
+                size={18}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text
                 style={[
                   styles.menuItemText,
-                  { color: "#2563EB", fontWeight: "700" },
+                  {
+                    color: isDark ? colors.accent : "#2563EB",
+                    fontWeight: "700",
+                  },
                 ]}
               >
                 Copy Household Code
               </Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Share code with roommates
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
         </View>
       </SmoothBottomSheetModal>
@@ -3125,7 +4774,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         icon={<Feather name="alert-triangle" size={18} color="#BE123C" />}
       >
         <View style={{ paddingTop: 4 }}>
-          <Text style={styles.sheetSub}>
+          <Text
+            style={[styles.sheetSub, isDark && { color: colors.textSecondary }]}
+          >
             The applicant will see this reason in their app so they understand
             why they were not approved.
           </Text>
@@ -3134,9 +4785,14 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             style={[
               styles.textInput,
               { height: 90, textAlignVertical: "top", paddingTop: 10 },
+              isDark && {
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+                color: colors.text,
+              },
             ]}
             placeholder="e.g. Unit is already at maximum capacity / Room code not intended for this tenant."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             multiline
             numberOfLines={3}
             value={rejectReason}
@@ -3146,16 +4802,31 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
           <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
             <TouchableOpacity
-              style={[styles.secondaryPillBtn, { flex: 1 }]}
+              style={[
+                styles.secondaryPillBtn,
+                { flex: 1 },
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setRejectingMember(null)}
               disabled={isProcessing}
             >
-              <Text style={styles.secondaryPillBtnText}>Cancel</Text>
+              <Text
+                style={[
+                  styles.secondaryPillBtnText,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.dangerPillBtn,
                 { flex: 1 },
+                isDark && { backgroundColor: colors.danger },
                 (!rejectReason.trim() || isProcessing) && { opacity: 0.6 },
               ]}
               onPress={handleRejectRequest}
@@ -3189,21 +4860,25 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               width: 58,
               height: 58,
               borderRadius: 29,
-              backgroundColor: "#EFF6FF",
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "#EFF6FF",
               borderWidth: 2,
-              borderColor: "#BFDBFE",
+              borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
               justifyContent: "center",
               alignItems: "center",
               marginBottom: 12,
             }}
           >
-            <Feather name="shield" size={28} color="#2563EB" />
+            <Feather
+              name="shield"
+              size={28}
+              color={isDark ? colors.accent : "#2563EB"}
+            />
           </View>
           <Text
             style={{
               fontSize: 18,
               fontWeight: "800",
-              color: "#0F172A",
+              color: isDark ? colors.text : "#0F172A",
               textAlign: "center",
               marginBottom: 6,
             }}
@@ -3213,7 +4888,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <Text
             style={{
               fontSize: 13,
-              color: "#64748B",
+              color: isDark ? colors.textSecondary : "#64748B",
               textAlign: "center",
               lineHeight: 19,
               marginBottom: 16,
@@ -3227,10 +4902,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           {/* Informational Guidance Box */}
           <View
             style={{
-              backgroundColor: "#F8FAFC",
+              backgroundColor: isDark ? colors.card : "#F8FAFC",
               borderRadius: 14,
               borderWidth: 1,
-              borderColor: "#E2E8F0",
+              borderColor: isDark ? colors.border : "#E2E8F0",
               padding: 12,
               width: "100%",
               marginBottom: 18,
@@ -3247,7 +4922,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               <Feather
                 name="home"
                 size={16}
-                color="#2563EB"
+                color={isDark ? colors.accent : "#2563EB"}
                 style={{ marginTop: 2 }}
               />
               <View style={{ flex: 1 }}>
@@ -3255,7 +4930,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   style={{
                     fontSize: 12,
                     fontWeight: "700",
-                    color: "#1E293B",
+                    color: isDark ? colors.text : "#1E293B",
                   }}
                 >
                   Property Hosts
@@ -3263,7 +4938,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 <Text
                   style={{
                     fontSize: 11,
-                    color: "#64748B",
+                    color: isDark ? colors.textSecondary : "#64748B",
                     marginTop: 1,
                     lineHeight: 15,
                   }}
@@ -3274,7 +4949,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               </View>
             </View>
 
-            <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+            <View
+              style={{
+                height: 1,
+                backgroundColor: isDark ? colors.border : "#E2E8F0",
+              }}
+            />
 
             <View
               style={{
@@ -3286,7 +4966,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               <Feather
                 name="users"
                 size={16}
-                color="#059669"
+                color={isDark ? colors.success : "#059669"}
                 style={{ marginTop: 2 }}
               />
               <View style={{ flex: 1 }}>
@@ -3294,7 +4974,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   style={{
                     fontSize: 12,
                     fontWeight: "700",
-                    color: "#1E293B",
+                    color: isDark ? colors.text : "#1E293B",
                   }}
                 >
                   Roommates / Residents
@@ -3302,7 +4982,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                 <Text
                   style={{
                     fontSize: 11,
-                    color: "#64748B",
+                    color: isDark ? colors.textSecondary : "#64748B",
                     marginTop: 1,
                     lineHeight: 15,
                   }}
@@ -3317,7 +4997,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <TouchableOpacity
             style={{
               width: "100%",
-              backgroundColor: "#2563EB",
+              backgroundColor: colors.primary,
               paddingVertical: 13,
               borderRadius: 14,
               alignItems: "center",
@@ -3347,9 +5027,9 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <TouchableOpacity
             style={{
               width: "100%",
-              backgroundColor: "#EFF6FF",
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "#EFF6FF",
               borderWidth: 1,
-              borderColor: "#BFDBFE",
+              borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
               paddingVertical: 13,
               borderRadius: 14,
               alignItems: "center",
@@ -3363,8 +5043,18 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               setViewMode("join");
             }}
           >
-            <Feather name="hash" size={15} color="#2563EB" />
-            <Text style={{ color: "#2563EB", fontWeight: "700", fontSize: 14 }}>
+            <Feather
+              name="hash"
+              size={15}
+              color={isDark ? colors.accent : "#2563EB"}
+            />
+            <Text
+              style={{
+                color: isDark ? colors.accent : "#2563EB",
+                fontWeight: "700",
+                fontSize: 14,
+              }}
+            >
               Join with Invite Code
             </Text>
           </TouchableOpacity>
@@ -3373,11 +5063,477 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
             style={{ paddingVertical: 8 }}
             onPress={() => setShowHostRequiredModal(false)}
           >
-            <Text style={{ color: "#94A3B8", fontWeight: "600", fontSize: 13 }}>
+            <Text
+              style={{
+                color: isDark ? colors.textSecondary : "#94A3B8",
+                fontWeight: "600",
+                fontSize: 13,
+              }}
+            >
               Dismiss
             </Text>
           </TouchableOpacity>
         </View>
+      </SmoothBottomSheetModal>
+    );
+  }
+
+  function renderEditExpenseModal() {
+    if (!editingExpense) return null;
+    return (
+      <SmoothBottomSheetModal
+        visible={showEditExpenseModal}
+        onClose={() => {
+          if (!isUpdatingExpense) {
+            setShowEditExpenseModal(false);
+            setEditingExpense(null);
+          }
+        }}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Edit Bill"
+        subtitle="Update bill name, category, amount, or status"
+        icon={
+          <Feather
+            name="edit-3"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
+      >
+        <ScrollView
+          style={{ maxHeight: 520 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={{ paddingTop: 4, paddingBottom: 24 }}>
+            {/* Bill Title Input */}
+            <View style={styles.inputGroup}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Bill Title
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                value={editExpenseTitle}
+                onChangeText={setEditExpenseTitle}
+                placeholder="e.g. Meralco Electric Bill"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+              />
+            </View>
+
+            {/* Category Selector */}
+            <View style={[styles.inputGroup, { marginTop: 14 }]}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Category
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+              >
+                {BILL_CATEGORIES.map((cat) => {
+                  const isSelected = editExpenseCategory === cat.name;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={[
+                        styles.categorySelectChip,
+                        isSelected && {
+                          backgroundColor: isDark
+                            ? cat.darkBgColor
+                            : cat.bgColor,
+                          borderColor: cat.color,
+                        },
+                        isDark &&
+                          !isSelected && {
+                            backgroundColor: colors.surfaceInset,
+                            borderColor: colors.border,
+                          },
+                      ]}
+                      onPress={() => setEditExpenseCategory(cat.name)}
+                    >
+                      <Feather
+                        name={cat.featherIcon as any}
+                        size={13}
+                        color={
+                          isSelected
+                            ? cat.color
+                            : isDark
+                              ? colors.textSecondary
+                              : "#64748B"
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.categorySelectChipText,
+                          isSelected && {
+                            color: cat.color,
+                            fontWeight: "700",
+                          },
+                          isDark &&
+                            !isSelected && {
+                              color: colors.textSecondary,
+                            },
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Amount Input */}
+            <View style={[styles.inputGroup, { marginTop: 14 }]}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Total Amount (₱)
+              </Text>
+              <View
+                style={[
+                  styles.currencyInputWrap,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.currencySymbolBadge,
+                    isDark && { borderRightColor: colors.border },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.currencySymbolText,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
+                    ₱
+                  </Text>
+                </View>
+                <TextInput
+                  style={[
+                    styles.currencyInputField,
+                    isDark && { color: colors.text },
+                  ]}
+                  value={editExpenseAmount}
+                  onChangeText={setEditExpenseAmount}
+                  placeholder="0.00"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+
+            {/* Status (PAID / UNPAID) */}
+            <View style={[styles.inputGroup, { marginTop: 14 }]}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Payment Status
+              </Text>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.statusToggleBtn,
+                    editExpenseStatus === "UNPAID" &&
+                      styles.statusToggleBtnActiveUnpaid,
+                    isDark &&
+                      editExpenseStatus !== "UNPAID" && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    isDark &&
+                      editExpenseStatus === "UNPAID" && {
+                        backgroundColor: "rgba(239, 68, 68, 0.16)",
+                        borderColor: "rgba(239, 68, 68, 0.5)",
+                      },
+                  ]}
+                  onPress={() => setEditExpenseStatus("UNPAID")}
+                >
+                  <View
+                    style={[
+                      styles.statusToggleDot,
+                      { backgroundColor: "#EF4444" },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.statusToggleBtnText,
+                      editExpenseStatus === "UNPAID" && {
+                        color: "#EF4444",
+                        fontWeight: "700",
+                      },
+                      isDark &&
+                        editExpenseStatus !== "UNPAID" && {
+                          color: colors.textSecondary,
+                        },
+                    ]}
+                  >
+                    UNPAID (Upcoming)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.statusToggleBtn,
+                    editExpenseStatus === "PAID" &&
+                      styles.statusToggleBtnActivePaid,
+                    isDark &&
+                      editExpenseStatus !== "PAID" && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    isDark &&
+                      editExpenseStatus === "PAID" && {
+                        backgroundColor: "rgba(16, 185, 129, 0.16)",
+                        borderColor: "rgba(16, 185, 129, 0.5)",
+                      },
+                  ]}
+                  onPress={() => setEditExpenseStatus("PAID")}
+                >
+                  <View
+                    style={[
+                      styles.statusToggleDot,
+                      { backgroundColor: "#10B981" },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.statusToggleBtnText,
+                      editExpenseStatus === "PAID" && {
+                        color: "#10B981",
+                        fontWeight: "700",
+                      },
+                      isDark &&
+                        editExpenseStatus !== "PAID" && {
+                          color: colors.textSecondary,
+                        },
+                    ]}
+                  >
+                    PAID (Settled)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Billing Cycle Selector (if cycles exist) */}
+            {cycles.length > 0 && (
+              <View style={[styles.inputGroup, { marginTop: 14 }]}>
+                <Text
+                  style={[styles.inputLabel, isDark && { color: colors.text }]}
+                >
+                  Billing Cycle
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+                >
+                  {cycles.map((c) => {
+                    const isSelected = editExpenseCycleId === c.billingCycleId;
+                    return (
+                      <TouchableOpacity
+                        key={c.billingCycleId}
+                        style={[
+                          styles.cycleSelectChip,
+                          isSelected && styles.cycleSelectChipActive,
+                          isDark &&
+                            !isSelected && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                            },
+                          isDark &&
+                            isSelected && {
+                              backgroundColor: "rgba(59, 130, 246, 0.2)",
+                              borderColor: colors.accent,
+                            },
+                        ]}
+                        onPress={() => setEditExpenseCycleId(c.billingCycleId)}
+                      >
+                        <Feather
+                          name="calendar"
+                          size={12}
+                          color={
+                            isSelected
+                              ? isDark
+                                ? colors.accent
+                                : "#2563EB"
+                              : isDark
+                                ? colors.textSecondary
+                                : "#64748B"
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.cycleSelectChipText,
+                            isSelected && {
+                              color: isDark ? colors.accent : "#2563EB",
+                              fontWeight: "700",
+                            },
+                            isDark &&
+                              !isSelected && {
+                                color: colors.textSecondary,
+                              },
+                          ]}
+                        >
+                          {c.cycleName || "Cycle"}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Notes / Details */}
+            <View style={[styles.inputGroup, { marginTop: 14 }]}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Notes & Description (Optional)
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  { minHeight: 65, textAlignVertical: "top" },
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                value={editExpenseNotes}
+                onChangeText={setEditExpenseNotes}
+                placeholder="Invoice number, meter readings, or notes..."
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                multiline
+              />
+            </View>
+
+            {/* Split Members Info */}
+            {editExpenseSplitDetails && editExpenseSplitDetails.length > 0 && (
+              <View
+                style={[
+                  styles.splitPreviewCard,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 6,
+                  }}
+                >
+                  <Feather
+                    name="users"
+                    size={13}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.splitPreviewTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Split Breakdown ({editExpenseSplitMethod})
+                  </Text>
+                </View>
+                {editExpenseSplitDetails.map((s, idx) => (
+                  <View key={s.userId || idx} style={styles.splitPreviewRow}>
+                    <Text
+                      style={[
+                        styles.splitPreviewMemberName,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {s.displayName || "Roommate"}{" "}
+                      {s.isExempt ? "(Exempt)" : ""}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.splitPreviewShare,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      {s.isExempt ? "₱0.00" : formatPesos(s.shareCentavos)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Save Button */}
+            <TouchableOpacity
+              style={[
+                styles.primaryPillBtn,
+                { marginTop: 22 },
+                isDark && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleSaveEditExpense}
+              disabled={isUpdatingExpense}
+            >
+              {isUpdatingExpense ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryPillBtnText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Delete Button (Host Option) */}
+            <TouchableOpacity
+              style={[
+                styles.deleteBillBtn,
+                { marginTop: 12 },
+                isDark && {
+                  backgroundColor: "rgba(239, 68, 68, 0.12)",
+                  borderColor: "rgba(239, 68, 68, 0.3)",
+                },
+              ]}
+              onPress={() => {
+                if (editingExpense) {
+                  handleDeleteExpense(editingExpense);
+                }
+              }}
+              disabled={isUpdatingExpense}
+            >
+              <Feather
+                name="trash-2"
+                size={15}
+                color={isDark ? colors.danger : "#EF4444"}
+              />
+              <Text
+                style={[
+                  styles.deleteBillBtnText,
+                  isDark && { color: colors.danger },
+                ]}
+              >
+                Delete This Bill
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </SmoothBottomSheetModal>
     );
   }
@@ -3695,6 +5851,177 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  billActionIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.2)",
+  },
+  billActionIconBtnDelete: {
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+    borderColor: "rgba(239, 68, 68, 0.2)",
+  },
+  viewAllBillsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  viewAllBillsBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  categorySelectChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  categorySelectChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  currencyInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    overflow: "hidden",
+  },
+  currencySymbolBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRightWidth: 1,
+    borderRightColor: "#E2E8F0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  currencySymbolText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  currencyInputField: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  statusToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  statusToggleBtnActiveUnpaid: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#EF4444",
+  },
+  statusToggleBtnActivePaid: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#10B981",
+  },
+  statusToggleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusToggleBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  cycleSelectChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  cycleSelectChipActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#2563EB",
+  },
+  cycleSelectChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  splitPreviewCard: {
+    marginTop: 14,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+  },
+  splitPreviewTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  splitPreviewRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  splitPreviewMemberName: {
+    fontSize: 12,
+    color: "#64748B",
+    flex: 1,
+  },
+  splitPreviewShare: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginLeft: 8,
+  },
+  deleteBillBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  deleteBillBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#EF4444",
   },
   participantsList: {
     gap: 10,

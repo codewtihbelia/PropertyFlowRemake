@@ -13,11 +13,12 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { NavigationBar } from "expo-navigation-bar";
+import { NavigationBar } from "./utils/safeNavigationBar";
 import {
   NavVisibilityProvider,
   useNavVisibility,
 } from "./context/NavVisibilityContext";
+import { ThemeProvider, useTheme } from "./context/ThemeContext";
 
 import { SplashScreen } from "./screens/SplashScreen";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
@@ -35,6 +36,10 @@ import { ReportScreen } from "./screens/ReportScreen";
 import { ManageGroupScreen } from "./screens/ManageGroupScreen";
 import { ViewGroupScreen } from "./screens/ViewGroupScreen";
 import { HostApplicationScreen } from "./screens/HostApplicationScreen";
+import { PaymentMethodConfigurationScreen } from "./screens/PaymentMethodConfigurationScreen";
+import { NotificationsScreen } from "./screens/NotificationsScreen";
+import { TermsOfServiceScreen } from "./screens/TermsOfServiceScreen";
+import { PrivacyPolicyScreen } from "./screens/PrivacyPolicyScreen";
 import { registerForPushNotificationsAsync } from "./services/pushNotificationService";
 import { mobileDataService } from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
@@ -54,6 +59,7 @@ type MainTab =
   | "profile";
 type OverlayScreen =
   | "none"
+  | "notifications"
   | "add_expense"
   | "settle_dues"
   | "expense_history"
@@ -61,63 +67,70 @@ type OverlayScreen =
   | "reports"
   | "manage_group"
   | "view_group"
-  | "host_application";
+  | "host_application"
+  | "payment_method_configuration"
+  | "terms_of_service"
+  | "privacy_policy";
 
 interface NavItemConfig {
   key: MainTab;
   label: string;
-  renderIcon: (active: boolean) => React.ReactNode;
+  renderIcon: (active: boolean, isDark?: boolean) => React.ReactNode;
 }
 
 const NAV_ITEMS: NavItemConfig[] = [
   {
     key: "home",
     label: "Home",
-    renderIcon: (active) => (
-      <Feather name="home" size={20} color={active ? "#FFFFFF" : "#64748B"} />
+    renderIcon: (active, isDark) => (
+      <Feather
+        name="home"
+        size={20}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
+      />
     ),
   },
   {
     key: "groups",
     label: "Groups",
-    renderIcon: (active) => (
+    renderIcon: (active, isDark) => (
       <Ionicons
         name={active ? "people" : "people-outline"}
         size={22}
-        color={active ? "#FFFFFF" : "#64748B"}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
       />
     ),
   },
   {
     key: "bills",
     label: "Bills",
-    renderIcon: (active) => (
+    renderIcon: (active, isDark) => (
       <Ionicons
         name={active ? "receipt" : "receipt-outline"}
         size={20}
-        color={active ? "#FFFFFF" : "#64748B"}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
       />
     ),
   },
   {
     key: "attendance",
     label: "Attendance",
-    renderIcon: (active) => (
+    renderIcon: (active, isDark) => (
       <Ionicons
         name={active ? "calendar" : "calendar-outline"}
         size={20}
-        color={active ? "#FFFFFF" : "#64748B"}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
       />
     ),
   },
   {
     key: "profile",
     label: "Settings",
-    renderIcon: (active) => (
+    renderIcon: (active, isDark) => (
       <Ionicons
         name={active ? "settings" : "settings-outline"}
         size={20}
-        color={active ? "#FFFFFF" : "#64748B"}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
       />
     ),
   },
@@ -132,6 +145,7 @@ function FloatingNavBar({
 }) {
   const insets = useSafeAreaInsets();
   const { navAnim, isVisible } = useNavVisibility();
+  const { isDark, colors } = useTheme();
   // With phone navigation bar hidden on Android, position menu sleekly near bottom
   const bottomOffset =
     Platform.OS === "android" ? 14 : Math.max(insets.bottom + 4, 18);
@@ -158,18 +172,39 @@ function FloatingNavBar({
       ]}
       pointerEvents={isVisible ? "box-none" : "none"}
     >
-      <View style={styles.floatingPill}>
+      <View
+        style={[
+          styles.floatingPill,
+          {
+            backgroundColor: colors.navBackground,
+            borderColor: colors.navBorder,
+          },
+          isDark && {
+            shadowColor: "#000000",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.55,
+            shadowRadius: 20,
+            elevation: 12,
+          },
+        ]}
+      >
         {NAV_ITEMS.map((item) => {
           const isActive = currentTab === item.key;
           return (
             <TouchableOpacity
               key={item.key}
-              style={[styles.navButton, isActive && styles.navButtonActive]}
+              style={[
+                styles.navButton,
+                isActive && {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                },
+              ]}
               onPress={() => onSelectTab(item.key)}
               activeOpacity={0.8}
               accessibilityLabel={item.label}
             >
-              {item.renderIcon(isActive)}
+              {item.renderIcon(isActive, isDark)}
             </TouchableOpacity>
           );
         })}
@@ -185,6 +220,7 @@ interface MainAppContentProps {
 
 function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const { showNav } = useNavVisibility();
+  const { isDark, colors } = useTheme();
   const [currentTab, setCurrentTab] = useState<MainTab>("home");
   const [billsInitialSubView, setBillsInitialSubView] = useState<
     "overview" | "pay"
@@ -346,7 +382,12 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   }
 
   if (overlayScreen === "reports") {
-    return <ReportScreen onBack={() => setOverlayScreen("none")} />;
+    return (
+      <ReportScreen
+        onBack={() => setOverlayScreen("none")}
+        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+      />
+    );
   }
 
   if (overlayScreen === "view_group") {
@@ -392,14 +433,66 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           setOverlayScreen("host_application");
           setManageGroupInitialView("details");
         }}
+        onOpenPaymentMethodConfiguration={() => {
+          setOverlayScreen("payment_method_configuration");
+        }}
         currentUser={currentUser}
         initialView={manageGroupInitialView}
       />
     );
   }
 
+  if (overlayScreen === "payment_method_configuration") {
+    return (
+      <PaymentMethodConfigurationScreen
+        onBack={() => setOverlayScreen("manage_group")}
+        onOpenHostApplication={() => setOverlayScreen("host_application")}
+      />
+    );
+  }
+
   if (overlayScreen === "host_application") {
     return <HostApplicationScreen onBack={() => setOverlayScreen("none")} />;
+  }
+
+  if (overlayScreen === "terms_of_service") {
+    return <TermsOfServiceScreen onBack={() => setOverlayScreen("none")} />;
+  }
+
+  if (overlayScreen === "privacy_policy") {
+    return <PrivacyPolicyScreen onBack={() => setOverlayScreen("none")} />;
+  }
+
+  if (overlayScreen === "notifications") {
+    return (
+      <NotificationsScreen
+        onBack={() => setOverlayScreen("none")}
+        householdId={householdId}
+        onNavigate={(tab: any) => {
+          setOverlayScreen("none");
+          if (tab === "payments") {
+            setBillsInitialSubView("pay");
+            setCurrentTab("bills");
+          } else if (tab === "bills") {
+            setBillsInitialSubView("overview");
+            setCurrentTab("bills");
+          } else {
+            setCurrentTab(tab);
+          }
+        }}
+        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenExpenseHistory={() => setOverlayScreen("expense_history")}
+        onOpenViewGroup={() => setOverlayScreen("view_group")}
+        onOpenManageGroup={(mode) => {
+          if (!isHostUser && (!mode || mode === "details")) {
+            setOverlayScreen("view_group");
+            return;
+          }
+          setManageGroupInitialView(mode || "details");
+          setOverlayScreen("manage_group");
+        }}
+      />
+    );
   }
 
   const renderTabContent = () => {
@@ -461,6 +554,8 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             }}
             onOpenReports={() => setOverlayScreen("reports")}
             onOpenOnboarding={() => setRootFlow("onboarding")}
+            onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
+            onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
             onSignOut={async () => {
               await auth.signOut();
               mobileDataService.clearCache();
@@ -513,19 +608,24 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             }}
             onOpenReports={() => setOverlayScreen("reports")}
             onOpenHostApplication={() => setOverlayScreen("host_application")}
+            onOpenNotifications={() => setOverlayScreen("notifications")}
           />
         );
     }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={colors.statusBar}
         translucent
         backgroundColor="transparent"
       />
-      <View style={styles.mainContent}>{renderTabContent()}</View>
+      <View
+        style={[styles.mainContent, { backgroundColor: colors.background }]}
+      >
+        {renderTabContent()}
+      </View>
 
       <FloatingNavBar
         currentTab={currentTab}
@@ -621,12 +721,14 @@ export default function App() {
 
   return (
     <AppErrorBoundary>
-      <SafeAreaProvider style={{ flex: 1, backgroundColor: "#F8FAFC" }}>
-        <NavVisibilityProvider>
-          <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
-          <CustomAlertModal />
-        </NavVisibilityProvider>
-      </SafeAreaProvider>
+      <ThemeProvider>
+        <SafeAreaProvider style={{ flex: 1, backgroundColor: "#111215" }}>
+          <NavVisibilityProvider>
+            <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
+            <CustomAlertModal />
+          </NavVisibilityProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
     </AppErrorBoundary>
   );
 }

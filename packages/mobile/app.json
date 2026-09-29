@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.splitzy.app"
+      "bundleIdentifier": "com.splitzy.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "icon": "./assets/icon.png",
@@ -28,7 +31,13 @@
         "resizeMode": "contain",
         "backgroundColor": "#FFFFFF"
       },
-      "package": "com.splitzy.app"
+      "package": "com.splitzy.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,6 +51,14 @@
         "messagingSenderId": "506286947370",
         "appId": "1:506286947370:web:9a88634693baa2dbed9753",
         "databaseId": "splitzy"
+      },
+      "expo-navigation-bar": {
+        "enforceContrast": false,
+        "style": "light",
+        "hidden": true
+      },
+      "eas": {
+        "projectId": "bc0bb695-d19f-44ed-af2e-4ec21899a49a"
       }
     },
     "plugins": [

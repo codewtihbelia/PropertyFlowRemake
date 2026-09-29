@@ -14,9 +14,16 @@ import { LandingFooter } from "../../components/landing/LandingFooter";
 interface LandingPageProps {
   onOpenApp: () => void;
   onOpenAuth?: (mode?: "signin" | "register") => void;
+  onOpenTerms?: () => void;
+  onOpenPrivacy?: () => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAuth }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({
+  onOpenApp,
+  onOpenAuth,
+  onOpenTerms,
+  onOpenPrivacy,
+}) => {
   const handleScrollTo = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) {
@@ -73,6 +80,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAuth 
       <LandingFooter
         onScrollTo={handleScrollTo}
         onOpenApp={onOpenApp}
+        onOpenTerms={onOpenTerms}
+        onOpenPrivacy={onOpenPrivacy}
       />
     </div>
   );

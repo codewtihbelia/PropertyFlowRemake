@@ -7,9 +7,7 @@ import {
   Modal,
   Animated,
   Easing,
-  Platform,
   TouchableWithoutFeedback,
-  Dimensions,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import {
@@ -18,8 +16,10 @@ import {
   CustomAlertButton,
   AlertType,
 } from "../services/alertService";
+import { useTheme } from "../context/ThemeContext";
 
 export const CustomAlertModal: React.FC = () => {
+  const { isDark, colors } = useTheme();
   const [config, setConfig] = useState<CustomAlertConfig | null>(null);
   const animValue = useRef(new Animated.Value(0)).current;
   const isClosingRef = useRef(false);
@@ -110,39 +110,119 @@ export const CustomAlertModal: React.FC = () => {
     switch (type) {
       case "success":
         return (
-          <View style={[styles.iconCircle, styles.iconCircleSuccess]}>
-            <Feather name="check" size={26} color="#16A34A" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(16, 185, 129, 0.15)"
+                  : "#F0FDF4",
+                borderColor: isDark ? "rgba(16, 185, 129, 0.3)" : "#BBF7D0",
+              },
+            ]}
+          >
+            <Feather
+              name="check"
+              size={26}
+              color={isDark ? "#34D399" : "#16A34A"}
+            />
           </View>
         );
       case "error":
         return (
-          <View style={[styles.iconCircle, styles.iconCircleError]}>
-            <Feather name="alert-circle" size={26} color="#DC2626" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#FEF2F2",
+                borderColor: isDark ? "rgba(239, 68, 68, 0.3)" : "#FECACA",
+              },
+            ]}
+          >
+            <Feather
+              name="alert-circle"
+              size={26}
+              color={isDark ? "#F87171" : "#DC2626"}
+            />
           </View>
         );
       case "warning":
         return (
-          <View style={[styles.iconCircle, styles.iconCircleWarning]}>
-            <Feather name="alert-triangle" size={24} color="#D97706" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(245, 158, 11, 0.15)"
+                  : "#FFFBEB",
+                borderColor: isDark ? "rgba(245, 158, 11, 0.3)" : "#FDE68A",
+              },
+            ]}
+          >
+            <Feather
+              name="alert-triangle"
+              size={24}
+              color={isDark ? "#FBBF24" : "#D97706"}
+            />
           </View>
         );
       case "destructive":
         return (
-          <View style={[styles.iconCircle, styles.iconCircleDestructive]}>
-            <Feather name="trash-2" size={24} color="#E11D48" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#FFF1F2",
+                borderColor: isDark ? "rgba(239, 68, 68, 0.3)" : "#FECDD3",
+              },
+            ]}
+          >
+            <Feather
+              name="trash-2"
+              size={24}
+              color={isDark ? "#F87171" : "#E11D48"}
+            />
           </View>
         );
       case "confirm":
         return (
-          <View style={[styles.iconCircle, styles.iconCircleConfirm]}>
-            <Feather name="help-circle" size={26} color="#2563EB" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(59, 130, 246, 0.15)"
+                  : "#EFF6FF",
+                borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#BFDBFE",
+              },
+            ]}
+          >
+            <Feather
+              name="help-circle"
+              size={26}
+              color={isDark ? colors.accent : "#2563EB"}
+            />
           </View>
         );
       case "info":
       default:
         return (
-          <View style={[styles.iconCircle, styles.iconCircleInfo]}>
-            <Feather name="info" size={26} color="#2563EB" />
+          <View
+            style={[
+              styles.iconCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(59, 130, 246, 0.15)"
+                  : "#EFF6FF",
+                borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "#DBEAFE",
+              },
+            ]}
+          >
+            <Feather
+              name="info"
+              size={26}
+              color={isDark ? colors.accent : "#2563EB"}
+            />
           </View>
         );
     }
@@ -177,6 +257,8 @@ export const CustomAlertModal: React.FC = () => {
           style={[
             styles.card,
             {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
               opacity: cardOpacity,
               transform: [{ scale: cardScale }, { translateY: cardTranslateY }],
             },
@@ -187,12 +269,16 @@ export const CustomAlertModal: React.FC = () => {
 
           {/* Title */}
           {Boolean(config.title) && (
-            <Text style={styles.titleText}>{config.title}</Text>
+            <Text style={[styles.titleText, { color: colors.text }]}>
+              {config.title}
+            </Text>
           )}
 
           {/* Message Description */}
           {Boolean(config.message) && (
-            <Text style={styles.messageText}>{config.message}</Text>
+            <Text style={[styles.messageText, { color: colors.textSecondary }]}>
+              {config.message}
+            </Text>
           )}
 
           {/* Action Buttons */}
@@ -203,9 +289,12 @@ export const CustomAlertModal: React.FC = () => {
                 onPress={() => handleButtonPress(buttons[0])}
                 style={[
                   styles.button,
-                  config.type === "error" || config.type === "destructive"
-                    ? styles.buttonDestructive
-                    : styles.buttonPrimary,
+                  {
+                    backgroundColor:
+                      config.type === "error" || config.type === "destructive"
+                        ? "#DC2626"
+                        : colors.primary,
+                  },
                 ]}
               >
                 <Text style={styles.buttonPrimaryText}>{buttons[0].text}</Text>
@@ -229,17 +318,21 @@ export const CustomAlertModal: React.FC = () => {
                         styles.button,
                         styles.halfButton,
                         isCancel
-                          ? styles.buttonCancel
+                          ? {
+                              backgroundColor: colors.surfaceInset,
+                              borderWidth: 1,
+                              borderColor: colors.border,
+                            }
                           : isDestructive
                             ? styles.buttonDestructive
-                            : styles.buttonPrimary,
+                            : { backgroundColor: colors.primary },
                       ]}
                     >
                       <Text
                         style={[
                           styles.buttonText,
                           isCancel
-                            ? styles.buttonCancelText
+                            ? { color: colors.textSecondary }
                             : styles.buttonPrimaryText,
                         ]}
                       >
@@ -263,17 +356,21 @@ export const CustomAlertModal: React.FC = () => {
                       style={[
                         styles.button,
                         isCancel
-                          ? styles.buttonCancel
+                          ? {
+                              backgroundColor: colors.surfaceInset,
+                              borderWidth: 1,
+                              borderColor: colors.border,
+                            }
                           : isDestructive
                             ? styles.buttonDestructive
-                            : styles.buttonPrimary,
+                            : { backgroundColor: colors.primary },
                       ]}
                     >
                       <Text
                         style={[
                           styles.buttonText,
                           isCancel
-                            ? styles.buttonCancelText
+                            ? { color: colors.textSecondary }
                             : styles.buttonPrimaryText,
                         ]}
                       >
@@ -296,7 +393,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
   },
   backdrop: {
     position: "absolute",
@@ -304,24 +401,22 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.58)",
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
   },
   card: {
     width: "100%",
     maxWidth: 340,
-    backgroundColor: "#FFFFFF",
     borderRadius: 24,
     paddingHorizontal: 22,
     paddingTop: 24,
     paddingBottom: 20,
     alignItems: "center",
-    shadowColor: "#0F172A",
+    shadowColor: "#000000",
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.35,
     shadowRadius: 28,
     elevation: 20,
     borderWidth: 1,
-    borderColor: "rgba(226, 232, 240, 0.95)",
   },
   iconCircle: {
     width: 56,
@@ -332,41 +427,15 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     marginBottom: 14,
   },
-  iconCircleSuccess: {
-    backgroundColor: "#F0FDF4",
-    borderColor: "#BBF7D0",
-  },
-  iconCircleError: {
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FECACA",
-  },
-  iconCircleWarning: {
-    backgroundColor: "#FFFBEB",
-    borderColor: "#FDE68A",
-  },
-  iconCircleDestructive: {
-    backgroundColor: "#FFF1F2",
-    borderColor: "#FECDD3",
-  },
-  iconCircleConfirm: {
-    backgroundColor: "#EFF6FF",
-    borderColor: "#BFDBFE",
-  },
-  iconCircleInfo: {
-    backgroundColor: "#EFF6FF",
-    borderColor: "#DBEAFE",
-  },
   titleText: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#0F172A",
     textAlign: "center",
     letterSpacing: -0.3,
   },
   messageText: {
     fontSize: 14,
     fontWeight: "400",
-    color: "#64748B",
     textAlign: "center",
     lineHeight: 20,
     marginTop: 8,
@@ -397,14 +466,6 @@ const styles = StyleSheet.create({
   halfButton: {
     flex: 1,
   },
-  buttonPrimary: {
-    backgroundColor: "#2563EB",
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 6,
-    elevation: 3,
-  },
   buttonDestructive: {
     backgroundColor: "#DC2626",
     shadowColor: "#DC2626",
@@ -413,22 +474,12 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  buttonCancel: {
-    backgroundColor: "#F1F5F9",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
   buttonText: {
     fontSize: 14,
     fontWeight: "700",
   },
   buttonPrimaryText: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  buttonCancelText: {
-    color: "#475569",
     fontSize: 14,
     fontWeight: "700",
   },

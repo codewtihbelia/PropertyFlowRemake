@@ -16,10 +16,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { NavigationBar } from "expo-navigation-bar";
+import { NavigationBar } from "../utils/safeNavigationBar";
 import { auth } from "../firebase/config";
 import { sendEmailVerification } from "firebase/auth";
 import { assets } from "../../assets/assets";
+import { useTheme } from "../context/ThemeContext";
 
 interface EmailVerificationScreenProps {
   email: string;
@@ -28,18 +29,18 @@ interface EmailVerificationScreenProps {
   onBack: () => void;
 }
 
-export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = ({
-  email,
-  userName,
-  onVerified,
-  onBack,
-}) => {
+export const EmailVerificationScreen: React.FC<
+  EmailVerificationScreenProps
+> = ({ email, userName, onVerified, onBack }) => {
+  const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [isVerified, setIsVerified] = useState(false);
   const [checking, setChecking] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(45);
   const [resending, setResending] = useState(false);
   const hasTriggeredRef = useRef(false);
+
+  const bottomBgColor = isDark ? "#141C2B" : "#2563EB";
 
   // 1. Resend timer countdown
   useEffect(() => {
@@ -77,11 +78,14 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
     const interval = setInterval(checkStatus, 2500);
 
     // Immediate check when user switches back into the app
-    const subscription = AppState.addEventListener("change", (nextState: AppStateStatus) => {
-      if (nextState === "active") {
-        checkStatus();
-      }
-    });
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextState: AppStateStatus) => {
+        if (nextState === "active") {
+          checkStatus();
+        }
+      },
+    );
 
     return () => {
       isMounted = false;
@@ -132,29 +136,40 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
         `A fresh verification link has been dispatched to ${email}. Please check your inbox and spam folder.`,
       );
     } catch (err: any) {
-      Alert.alert("Notice", err.message || "Failed to resend verification email.");
+      Alert.alert(
+        "Notice",
+        err.message || "Failed to resend verification email.",
+      );
     } finally {
       setResending(false);
     }
   };
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, { backgroundColor: bottomBgColor }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor="transparent"
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="dark" hidden={true} />
+        <NavigationBar style="light" hidden={true} />
       )}
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { backgroundColor: bottomBgColor },
+        ]}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <View style={styles.topWhiteBleed} />
+        <View
+          style={[
+            styles.topWhiteBleed,
+            isDark && { backgroundColor: colors.background },
+          ]}
+        />
         {/* Top Header Card */}
         <View
           style={[
@@ -163,18 +178,32 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
               paddingTop:
                 Math.max(
                   insets.top,
-                  Platform.OS === "android" ? StatusBar.currentHeight || 24 : 20
+                  Platform.OS === "android"
+                    ? StatusBar.currentHeight || 24
+                    : 20,
                 ) + 12,
             },
+            isDark && { backgroundColor: colors.background },
           ]}
         >
           {/* Back button */}
           <TouchableOpacity
-            style={styles.backButton}
+            style={[
+              styles.backButton,
+              isDark && {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={onBack}
             activeOpacity={0.7}
           >
-            <Feather name="arrow-left" size={20} color="#1E293B" />
+            <Feather
+              name="arrow-left"
+              size={20}
+              color={isDark ? colors.text : "#1E293B"}
+            />
           </TouchableOpacity>
 
           {/* Logo Badge */}
@@ -187,8 +216,16 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
               />
             </View>
             <View style={styles.brandTitleRow}>
-              <Text style={styles.splitText}>Split</Text>
-              <Text style={styles.zyText}>zy</Text>
+              <Text
+                style={[styles.splitText, isDark && { color: colors.text }]}
+              >
+                Split
+              </Text>
+              <Text
+                style={[styles.zyText, isDark && { color: colors.primary }]}
+              >
+                zy
+              </Text>
             </View>
           </View>
 
@@ -198,93 +235,213 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
               style={[
                 styles.iconCircle,
                 isVerified ? styles.iconCircleSuccess : styles.iconCircleActive,
+                isDark && {
+                  backgroundColor: isVerified
+                    ? "rgba(16, 185, 129, 0.16)"
+                    : "rgba(59, 130, 246, 0.16)",
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
               ]}
             >
               <Ionicons
                 name={isVerified ? "checkmark-circle" : "mail"}
                 size={44}
-                color="#0F172A"
+                color={
+                  isVerified
+                    ? isDark
+                      ? colors.success
+                      : "#059669"
+                    : isDark
+                      ? colors.accent
+                      : "#0F172A"
+                }
               />
             </View>
           </View>
 
           {/* Title & Description */}
-          <Text style={styles.titleText}>
+          <Text style={[styles.titleText, isDark && { color: colors.text }]}>
             {isVerified ? "Email Verified!" : "Verify Your Email"}
           </Text>
 
-          <Text style={styles.bodyDescription}>
+          <Text
+            style={[
+              styles.bodyDescription,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
             {isVerified
               ? "Your account has been confirmed! Redirecting to your dashboard..."
               : `We've sent a verification link to:\n`}
-            {!isVerified && <Text style={styles.boldEmail}>{email}</Text>}
+            {!isVerified && (
+              <Text
+                style={[styles.boldEmail, isDark && { color: colors.text }]}
+              >
+                {email}
+              </Text>
+            )}
           </Text>
 
           {/* Verified Success Box */}
           {isVerified ? (
-            <View style={styles.verifiedSuccessBox}>
-              <Ionicons name="checkmark-circle" size={22} color="#059669" />
+            <View
+              style={[
+                styles.verifiedSuccessBox,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.14)",
+                  borderColor: "rgba(16, 185, 129, 0.3)",
+                },
+              ]}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={22}
+                color={isDark ? colors.success : "#059669"}
+              />
               <View style={{ flex: 1 }}>
-                <Text style={styles.verifiedTitle}>Email Confirmed!</Text>
-                <Text style={styles.verifiedSubtitle}>
+                <Text
+                  style={[
+                    styles.verifiedTitle,
+                    isDark && { color: colors.success },
+                  ]}
+                >
+                  Email Confirmed!
+                </Text>
+                <Text
+                  style={[
+                    styles.verifiedSubtitle,
+                    isDark && { color: "#34D399" },
+                  ]}
+                >
                   Opening your dashboard now...
                 </Text>
               </View>
               <TouchableOpacity
                 onPress={() => onVerified()}
                 style={{
-                  backgroundColor: "#059669",
+                  backgroundColor: colors.primary,
                   paddingHorizontal: 12,
                   paddingVertical: 8,
                   borderRadius: 8,
                 }}
               >
-                <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 12 }}>Open →</Text>
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontWeight: "700",
+                    fontSize: 12,
+                  }}
+                >
+                  Open →
+                </Text>
               </TouchableOpacity>
             </View>
           ) : (
             <>
               {/* Step Instructions Card */}
-              <View style={styles.instructionsCard}>
+              <View
+                style={[
+                  styles.instructionsCard,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.stepRow}>
-                  <View style={styles.stepNumBadge}>
+                  <View
+                    style={[
+                      styles.stepNumBadge,
+                      isDark && { backgroundColor: colors.primary },
+                    ]}
+                  >
                     <Text style={styles.stepNumText}>1</Text>
                   </View>
-                  <Text style={styles.stepText}>
+                  <Text
+                    style={[
+                      styles.stepText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     Open your email inbox (check Spam if needed).
                   </Text>
                 </View>
 
                 <View style={styles.stepRow}>
-                  <View style={styles.stepNumBadge}>
+                  <View
+                    style={[
+                      styles.stepNumBadge,
+                      isDark && { backgroundColor: colors.primary },
+                    ]}
+                  >
                     <Text style={styles.stepNumText}>2</Text>
                   </View>
-                  <Text style={styles.stepText}>
+                  <Text
+                    style={[
+                      styles.stepText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     Click the verification link from Splitzy.
                   </Text>
                 </View>
 
                 <View style={styles.stepRow}>
-                  <View style={styles.stepNumBadge}>
+                  <View
+                    style={[
+                      styles.stepNumBadge,
+                      isDark && { backgroundColor: colors.primary },
+                    ]}
+                  >
                     <Text style={styles.stepNumText}>3</Text>
                   </View>
-                  <Text style={styles.stepText}>
+                  <Text
+                    style={[
+                      styles.stepText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     Return here — verification is detected automatically.
                   </Text>
                 </View>
               </View>
 
               {/* Real-time Listening Pill */}
-              <View style={styles.statusPill}>
-                <View style={styles.pulseDot} />
-                <Text style={styles.statusPillText}>
+              <View
+                style={[
+                  styles.statusPill,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.14)",
+                    borderColor: "rgba(59, 130, 246, 0.3)",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.pulseDot,
+                    isDark && { backgroundColor: colors.accent },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.statusPillText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
                   Waiting for verification link click...
                 </Text>
               </View>
 
               {/* Manual Confirmation Button */}
               <TouchableOpacity
-                style={styles.primaryCheckBtn}
+                style={[
+                  styles.primaryCheckBtn,
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
+                ]}
                 onPress={handleManualCheck}
                 disabled={checking}
                 activeOpacity={0.88}
@@ -309,12 +466,16 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
                 activeOpacity={0.7}
               >
                 {resending ? (
-                  <ActivityIndicator color="#2563EB" size="small" />
+                  <ActivityIndicator color={colors.primary} size="small" />
                 ) : (
                   <Text
                     style={[
                       styles.resendBtnText,
-                      resendCountdown > 0 && styles.resendBtnDisabled,
+                      isDark && { color: colors.accent },
+                      resendCountdown > 0 && [
+                        styles.resendBtnDisabled,
+                        isDark && { color: colors.textMuted },
+                      ],
                     ]}
                   >
                     {resendCountdown > 0
@@ -328,8 +489,18 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
         </View>
 
         {/* Bottom Curved Wave Container */}
-        <View style={styles.bottomCurvedContainer}>
-          <View style={styles.waveWrapper}>
+        <View
+          style={[
+            styles.bottomCurvedContainer,
+            { backgroundColor: bottomBgColor },
+          ]}
+        >
+          <View
+            style={[
+              styles.waveWrapper,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
             <Svg
               width="100%"
               height={52}
@@ -339,7 +510,7 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
             >
               <Path
                 d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill="#2563EB"
+                fill={bottomBgColor}
               />
             </Svg>
           </View>
@@ -348,15 +519,24 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
             style={[
               styles.bottomBlueContent,
               {
+                backgroundColor: bottomBgColor,
                 paddingBottom: Math.max(
                   insets.bottom + 20,
-                  Platform.OS === "android" ? 28 : 36
+                  Platform.OS === "android" ? 28 : 36,
                 ),
               },
             ]}
           >
             <TouchableOpacity
-              style={styles.returnToAuthBtn}
+              style={[
+                styles.returnToAuthBtn,
+                isDark && {
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  borderColor: "rgba(255, 255, 255, 0.18)",
+                  borderWidth: 1,
+                  borderRadius: 12,
+                },
+              ]}
               onPress={onBack}
               activeOpacity={0.8}
             >
@@ -366,8 +546,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
           </View>
         </View>
 
-        {/* Bottom blue bleed ensures full solid blue extension on scroll */}
-        <View style={styles.bottomBlueBleed} />
+        {/* Bottom bleed ensures full solid extension on scroll */}
+        <View
+          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+        />
       </ScrollView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
@@ -375,7 +557,10 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = (
         pointerEvents="none"
         style={[
           styles.fixedBottomOverlay,
-          { height: Math.max(insets.bottom, 24) + 16 },
+          {
+            backgroundColor: bottomBgColor,
+            height: Math.max(insets.bottom, 24) + 16,
+          },
         ]}
       />
     </View>

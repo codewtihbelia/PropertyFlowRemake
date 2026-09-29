@@ -29,6 +29,7 @@ import { UniversalSkeleton } from "../components/UniversalLoader";
 import { getCategoryMeta } from "../services/categoryService";
 import { getBillDueStatus } from "./HomeScreen";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { useTheme } from "../context/ThemeContext";
 
 export interface BillsScreenProps {
   onBack?: () => void;
@@ -43,6 +44,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   householdId,
   initialSubView = "overview",
 }) => {
+  const { isDark, colors } = useTheme();
   const [subView, setSubView] = useState<"overview" | "pay">(initialSubView);
   const [showMenu, setShowMenu] = useState(false);
   const currentUser = auth.currentUser;
@@ -57,12 +59,19 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
   const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
   const [attendanceSubmissions, setAttendanceSubmissions] = useState<
     Record<string, any>
   >({});
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (initialSubView) {
+      setSubView(initialSubView);
+    }
+  }, [initialSubView]);
 
   const insets = useSafeAreaInsets();
   const topInset = Math.max(
@@ -161,12 +170,17 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       resolvedHouseholdId,
       setWaterConfig,
     );
+    const unsubPayments = mobileDataService.listenToPayments(
+      resolvedHouseholdId,
+      (data) => setPayments(data),
+    );
     return () => {
       clearTimeout(safetyTimer);
       unsubExpenses();
       unsubCycles();
       unsubMembers();
       unsubWater();
+      unsubPayments();
     };
   }, [resolvedHouseholdId, isProfileLoaded]);
 
@@ -251,6 +265,10 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
         (s: any) => s.userId === currentUser?.uid,
       );
 
+      if (mySplit?.isPaid) {
+        return sum;
+      }
+
       if (isWater && mySplit && typeof mySplit.shareCentavos === "number") {
         return sum + mySplit.shareCentavos;
       }
@@ -275,6 +293,14 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     }, 0);
   }, [expenses, activePayors, currentUser?.uid, isCurrentUserPayor]);
 
+  const userPayments = useMemo(() => {
+    return payments.filter((p) => p.userId === currentUser?.uid);
+  }, [payments, currentUser?.uid]);
+
+  const totalUserPaymentsCentavos = useMemo(() => {
+    return userPayments.reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
+  }, [userPayments]);
+
   const totalHouseholdCents = expenses.reduce(
     (acc, cur) => acc + cur.amountCents,
     0,
@@ -283,8 +309,12 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     myBill && typeof myBill.totalPaidCentavos === "number"
       ? myBill.totalPaidCentavos
       : 0;
+  const effectivePaidCentavos = Math.max(
+    paidCentavos,
+    totalUserPaymentsCentavos,
+  );
   const myShareCents = isCurrentUserPayor
-    ? Math.max(0, liveUnpaidShareCents - paidCentavos)
+    ? Math.max(0, liveUnpaidShareCents - effectivePaidCentavos)
     : 0;
 
   // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
@@ -337,30 +367,66 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent={true}
         backgroundColor="transparent"
       />
 
       {/* Top Header */}
-      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+      <View
+        style={[
+          styles.navBarContainer,
+          { paddingTop: topInset },
+          isDark && {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <View style={styles.navBar}>
           <TouchableOpacity
-            style={styles.circleBackBtn}
+            style={[
+              styles.circleBackBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => (onBack ? onBack() : null)}
             activeOpacity={0.7}
           >
-            <Feather name="chevron-left" size={24} color="#0F172A" />
+            <Feather
+              name="chevron-left"
+              size={24}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
-          <Text style={styles.navTitle}>Bills & Dues</Text>
+          <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+            Bills & Dues
+          </Text>
           <TouchableOpacity
-            style={styles.iconNavBtn}
+            style={[
+              styles.iconNavBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => setShowMenu(true)}
             activeOpacity={0.7}
           >
-            <Feather name="more-vertical" size={22} color="#0F172A" />
+            <Feather
+              name="more-vertical"
+              size={22}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -381,14 +447,32 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
             onScroll={onScroll}
             scrollEventThrottle={16}
           >
-            <Text style={styles.title}>My Current Bill</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.title, isDark && { color: colors.text }]}>
+              My Current Bill
+            </Text>
+            <Text
+              style={[
+                styles.subtitle,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               {activeCycle
                 ? `${activeCycle.name || "Billing cycle"} · Cloud synced`
                 : "Cloud synced"}
             </Text>
 
-            <View style={styles.heroCard}>
+            <View
+              style={[
+                styles.heroCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  shadowOpacity: 0,
+                  elevation: 0,
+                },
+              ]}
+            >
               {!isCurrentUserPayor && (
                 <View
                   style={{
@@ -400,7 +484,9 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 >
                   <View
                     style={{
-                      backgroundColor: "#E2E8F0",
+                      backgroundColor: isDark
+                        ? colors.cardSecondary
+                        : "#E2E8F0",
                       paddingHorizontal: 8,
                       paddingVertical: 3,
                       borderRadius: 6,
@@ -410,7 +496,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       style={{
                         fontSize: 11,
                         fontWeight: "800",
-                        color: "#475569",
+                        color: isDark ? colors.textSecondary : "#475569",
                       }}
                     >
                       EXEMPT (NON-PAYOR)
@@ -418,29 +504,101 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   </View>
                 </View>
               )}
-              <Text style={styles.heroLabel}>Total Remaining Due</Text>
-              <Text style={styles.heroAmount}>{formatPesos(myShareCents)}</Text>
-              <Text style={styles.heroSub}>
+              <Text
+                style={[
+                  styles.heroLabel,
+                  isDark && { color: colors.textMuted },
+                ]}
+              >
+                Total Remaining Due
+              </Text>
+              <Text
+                style={[
+                  styles.heroAmount,
+                  isDark && { color: colors.text },
+                  myShareCents === 0 && {
+                    color: isDark ? "#34D399" : "#16A34A",
+                  },
+                ]}
+              >
+                {formatPesos(myShareCents)}
+              </Text>
+              {myShareCents === 0 && isCurrentUserPayor && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    marginTop: 2,
+                    marginBottom: 4,
+                  }}
+                >
+                  <Feather name="check-circle" size={14} color="#10B981" />
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: "700",
+                      color: isDark ? "#34D399" : "#16A34A",
+                    }}
+                  >
+                    All Settled! No remaining balance
+                  </Text>
+                </View>
+              )}
+              <Text
+                style={[
+                  styles.heroSub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 {isCurrentUserPayor
-                  ? `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
+                  ? myShareCents === 0 && totalUserPaymentsCentavos > 0
+                    ? `You paid ${formatPesos(totalUserPaymentsCentavos)} towards this cycle. You're completely up to date.`
+                    : `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
                   : `Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
               </Text>
 
               {isCurrentUserPayor && (
                 <TouchableOpacity
-                  style={styles.payNowBtn}
+                  style={[
+                    styles.payNowBtn,
+                    isDark && { backgroundColor: colors.primary },
+                    myShareCents === 0 && {
+                      backgroundColor: isDark
+                        ? "rgba(16, 185, 129, 0.2)"
+                        : "#DCFCE7",
+                      borderWidth: 1,
+                      borderColor: isDark
+                        ? "rgba(16, 185, 129, 0.4)"
+                        : "#86EFAC",
+                    },
+                  ]}
                   onPress={() => {
                     if (onPayPress) onPayPress();
                     setSubView("pay");
                   }}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.payNowText}>Pay with GCash / Bank →</Text>
+                  <Text
+                    style={[
+                      styles.payNowText,
+                      isDark && { color: "#FFFFFF" },
+                      myShareCents === 0 && {
+                        color: isDark ? "#34D399" : "#15803D",
+                      },
+                    ]}
+                  >
+                    {myShareCents === 0
+                      ? "Pay Extra / Upload Receipt →"
+                      : "Pay with GCash / Bank →"}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={[styles.sectionTitle, isDark && { color: colors.text }]}
+            >
               Itemized Charges (
               {expenses.length > 0
                 ? `${expenses.length} recorded`
@@ -574,14 +732,29 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                         typeof mySplit.shareCentavos === "number"
                       ? mySplit.shareCentavos
                       : Math.round(e.amountCents / payorCount);
-                const dueInfo = getBillDueStatus(e, activeCycle, cycles);
+                const dueInfo = getBillDueStatus(
+                  e,
+                  activeCycle,
+                  cycles,
+                  isDark,
+                );
 
                 return (
-                  <View key={e.id} style={styles.billItem}>
+                  <View
+                    key={e.id}
+                    style={[
+                      styles.billItem,
+                      isDark && { borderBottomColor: colors.border },
+                    ]}
+                  >
                     <View
                       style={[
                         styles.billIconWrap,
-                        { backgroundColor: catMeta.bgColor },
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(255, 255, 255, 0.06)"
+                            : catMeta.bgColor,
+                        },
                       ]}
                     >
                       <Feather
@@ -599,12 +772,32 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                           flexWrap: "wrap",
                         }}
                       >
-                        <Text style={styles.billName}>
+                        <Text
+                          style={[
+                            styles.billName,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
                           {cleanBillTitle(e.title, e.category)}
                         </Text>
                         {isExpensePaid ? (
-                          <View style={styles.statusBadgePaid}>
-                            <Text style={styles.statusBadgeTextPaid}>PAID</Text>
+                          <View
+                            style={[
+                              styles.statusBadgePaid,
+                              isDark && {
+                                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                borderColor: "rgba(16, 185, 129, 0.3)",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusBadgeTextPaid,
+                                isDark && { color: "#34D399" },
+                              ]}
+                            >
+                              PAID
+                            </Text>
                           </View>
                         ) : (
                           <View
@@ -627,14 +820,24 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                           </View>
                         )}
                       </View>
-                      <Text style={styles.billPayer}>
+                      <Text
+                        style={[
+                          styles.billPayer,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
                         {isExpensePaid
                           ? `${e.date} · Paid by ${e.payerName}`
                           : `${e.date} · Added by ${e.payerName || "Host"}`}
                       </Text>
                     </View>
                     <View style={{ alignItems: "flex-end", marginTop: 2 }}>
-                      <Text style={styles.billValue}>
+                      <Text
+                        style={[
+                          styles.billValue,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {formatPesos(
                           isWater && waterTotalCentavos > 0
                             ? waterTotalCentavos
@@ -644,7 +847,13 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       <Text
                         style={{
                           fontSize: 11,
-                          color: isCurrentUserPayor ? "#2563EB" : "#94A3B8",
+                          color: isCurrentUserPayor
+                            ? isDark
+                              ? colors.accent
+                              : "#2563EB"
+                            : isDark
+                              ? colors.textMuted
+                              : "#94A3B8",
                           fontWeight: "700",
                           marginTop: 2,
                         }}
@@ -658,6 +867,118 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 );
               })
             )}
+
+            {userPayments.length > 0 && (
+              <View style={{ marginTop: 24, marginBottom: 20 }}>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    isDark && { color: colors.text },
+                    { marginBottom: 12 },
+                  ]}
+                >
+                  Recorded Payments & Receipts ({userPayments.length})
+                </Text>
+                {userPayments.map((p) => {
+                  return (
+                    <View
+                      key={p.paymentId || p.id}
+                      style={[
+                        styles.billItem,
+                        isDark && { borderBottomColor: colors.border },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.billIconWrap,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(16, 185, 129, 0.15)"
+                              : "#DCFCE7",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="check-circle"
+                          size={18}
+                          color={isDark ? "#34D399" : "#16A34A"}
+                        />
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.billName,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
+                            Paid via {p.paymentMethod || "GCash"}
+                          </Text>
+                          <View
+                            style={[
+                              styles.statusBadgePaid,
+                              isDark && {
+                                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                borderColor: "rgba(16, 185, 129, 0.3)",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusBadgeTextPaid,
+                                isDark && { color: "#34D399" },
+                              ]}
+                            >
+                              SETTLED
+                            </Text>
+                          </View>
+                        </View>
+                        <Text
+                          style={[
+                            styles.billPayer,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          {p.paymentDate ||
+                            p.createdDate?.slice(0, 10) ||
+                            "Recent"}{" "}
+                          · Ref: {p.referenceNumber || "Direct"}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end", marginTop: 2 }}>
+                        <Text
+                          style={[
+                            styles.billValue,
+                            {
+                              color: isDark ? "#34D399" : "#16A34A",
+                              fontWeight: "900",
+                            },
+                          ]}
+                        >
+                          -{formatPesos(p.amountCentavos)}
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            color: isDark ? colors.textMuted : "#64748B",
+                            fontWeight: "600",
+                            marginTop: 2,
+                          }}
+                        >
+                          Credited
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </ScrollView>
         </Animated.View>
       )}
@@ -670,11 +991,20 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
         showChipBar={true}
         title="Bill Options"
         subtitle="Manage billing cycle & payment actions"
-        icon={<Feather name="layers" size={18} color="#2563EB" />}
+        icon={
+          <Feather
+            name="layers"
+            size={18}
+            color={isDark ? colors.accent : "#2563EB"}
+          />
+        }
       >
         <View style={{ paddingTop: 6, paddingBottom: 10 }}>
           <TouchableOpacity
-            style={styles.menuItem}
+            style={[
+              styles.menuItem,
+              isDark && { borderBottomColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setShowMenu(false);
@@ -687,25 +1017,46 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#EFF6FF",
+                backgroundColor: isDark ? colors.surfaceInset : "#EFF6FF",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="credit-card" size={18} color="#2563EB" />
+              <Feather
+                name="credit-card"
+                size={18}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Pay / Settle Dues</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Pay / Settle Dues
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Submit payment receipt or pay outstanding balance
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.menuItem}
+            style={[
+              styles.menuItem,
+              isDark && { borderBottomColor: colors.border },
+            ]}
             activeOpacity={0.7}
             onPress={() => {
               setShowMenu(false);
@@ -723,21 +1074,41 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#F0FDF4",
+                backgroundColor: isDark
+                  ? "rgba(16, 185, 129, 0.15)"
+                  : "#F0FDF4",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="refresh-cw" size={18} color="#059669" />
+              <Feather
+                name="refresh-cw"
+                size={18}
+                color={isDark ? "#34D399" : "#059669"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Recalculate & Sync Splits</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Recalculate & Sync Splits
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 Recompute centavos distribution for all roommates
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -758,21 +1129,39 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 width: 36,
                 height: 36,
                 borderRadius: 10,
-                backgroundColor: "#F8FAFC",
+                backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
                 alignItems: "center",
                 justifyContent: "center",
                 marginRight: 12,
               }}
             >
-              <Feather name="info" size={18} color="#0F172A" />
+              <Feather
+                name="info"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuItemText}>Billing Cycle Details</Text>
-              <Text style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>
+              <Text
+                style={[styles.menuItemText, isDark && { color: colors.text }]}
+              >
+                Billing Cycle Details
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  marginTop: 2,
+                }}
+              >
                 View active cycle dates and period status
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#94A3B8" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
           </TouchableOpacity>
         </View>
       </SmoothBottomSheetModal>

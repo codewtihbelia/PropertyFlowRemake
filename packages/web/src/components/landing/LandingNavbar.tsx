@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Building2, 
-  Calculator, 
-  Smartphone, 
-  Sparkles, 
-  Menu, 
-  X, 
+import {
+  Building2,
+  Calculator,
+  Smartphone,
+  Sparkles,
+  Menu,
+  X,
   ArrowRight,
   ShieldCheck,
   LayoutDashboard,
@@ -15,9 +15,13 @@ import {
   ChevronDown,
   Workflow,
   Users,
-  HelpCircle
+  HelpCircle,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 
 interface LandingNavbarProps {
   onOpenApp: () => void;
@@ -25,12 +29,13 @@ interface LandingNavbarProps {
   onScrollTo: (sectionId: string) => void;
 }
 
-export const LandingNavbar: React.FC<LandingNavbarProps> = ({ 
-  onOpenApp, 
-  onOpenAuth, 
-  onScrollTo 
+export const LandingNavbar: React.FC<LandingNavbarProps> = ({
+  onOpenApp,
+  onOpenAuth,
+  onScrollTo,
 }) => {
   const { currentUser, isAuthenticated, signOut } = useAuth();
+  const { isDark, cycleTheme, themeMode, setThemeMode } = useTheme();
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -47,7 +52,10 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
   // Handle outside click and Escape key for More dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (moreDropdownRef.current && !moreDropdownRef.current.contains(event.target as Node)) {
+      if (
+        moreDropdownRef.current &&
+        !moreDropdownRef.current.contains(event.target as Node)
+      ) {
         setMoreMenuOpen(false);
       }
     };
@@ -71,26 +79,29 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
   ];
 
   const moreNavItems = [
-    { 
-      label: "How It Works", 
+    {
+      label: "How It Works",
       target: "how-it-works",
       description: "4-step automated household split cycle",
       icon: Workflow,
-      iconColor: "text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white"
+      iconColor:
+        "text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white",
     },
-    { 
-      label: "Roles & Permissions", 
+    {
+      label: "Roles & Permissions",
       target: "roles",
       description: "Host dashboard vs Resident roommate experience",
       icon: Users,
-      iconColor: "text-emerald-600 bg-emerald-50 group-hover:bg-emerald-600 group-hover:text-white"
+      iconColor:
+        "text-emerald-600 bg-emerald-50 group-hover:bg-emerald-600 group-hover:text-white",
     },
-    { 
-      label: "FAQ", 
+    {
+      label: "FAQ",
       target: "faq",
       description: "Absence math, payments, and security policies",
       icon: HelpCircle,
-      iconColor: "text-purple-600 bg-purple-50 group-hover:bg-purple-600 group-hover:text-white"
+      iconColor:
+        "text-purple-600 bg-purple-50 group-hover:bg-purple-600 group-hover:text-white",
     },
   ];
 
@@ -121,13 +132,13 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
       id="landing-navbar"
       className={`sticky top-0 z-50 transition-all duration-300 ${
         isScrolled
-          ? "bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200/80 py-3"
-          : "bg-white/80 backdrop-blur-sm border-b border-slate-100 py-4"
+          ? "bg-white/95 dark:bg-[#000000]/95 backdrop-blur-md shadow-sm border-b border-slate-200/80 dark:border-white/10 py-3"
+          : "bg-white/80 dark:bg-[#000000]/80 backdrop-blur-sm border-b border-slate-100 dark:border-white/10 py-4"
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
         {/* Brand Logo */}
-        <div 
+        <div
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           className="flex items-center gap-3 cursor-pointer group shrink-0"
         >
@@ -167,24 +178,24 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
               id="nav-more-dropdown-btn"
               onClick={() => setMoreMenuOpen(!moreMenuOpen)}
               className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold rounded-lg transition-colors cursor-pointer ${
-                moreMenuOpen 
-                  ? "text-brand-600 bg-brand-50 shadow-xs" 
+                moreMenuOpen
+                  ? "text-brand-600 bg-brand-50 shadow-xs"
                   : "text-slate-600 hover:text-brand-600 hover:bg-slate-50"
               }`}
               aria-haspopup="true"
               aria-expanded={moreMenuOpen}
             >
               <span>More</span>
-              <ChevronDown 
+              <ChevronDown
                 className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
                   moreMenuOpen ? "rotate-180 text-brand-600" : ""
-                }`} 
+                }`}
               />
             </button>
 
             {/* Dropdown Panel */}
             {moreMenuOpen && (
-              <div 
+              <div
                 id="nav-more-dropdown-menu"
                 className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
               >
@@ -201,7 +212,9 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
                         onClick={() => handleNavClick(item.target)}
                         className="w-full text-left p-2.5 rounded-xl hover:bg-slate-50 flex items-start gap-3 transition group cursor-pointer"
                       >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${item.iconColor}`}>
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${item.iconColor}`}
+                        >
                           <IconComponent className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
@@ -249,13 +262,38 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
 
         {/* Right CTA Actions (Desktop md+) */}
         <div className="hidden md:flex items-center gap-2.5 lg:gap-3 shrink-0">
+          {/* Quick 3-mode theme cycle button */}
+          <button
+            onClick={cycleTheme}
+            className="p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-full transition cursor-pointer"
+            title={`Current Theme: ${
+              themeMode === "light"
+                ? "Light"
+                : themeMode === "dark"
+                  ? "OLED Dark"
+                  : `System Auto (${isDark ? "Dark" : "Light"})`
+            }. Tap to switch mode.`}
+            aria-label="Toggle display theme"
+          >
+            {themeMode === "light" ? (
+              <Sun className="w-5 h-5 text-amber-500 hover:text-amber-400 transition" />
+            ) : themeMode === "dark" ? (
+              <Moon className="w-5 h-5 text-blue-400 hover:text-blue-300 transition" />
+            ) : (
+              <div className="relative">
+                <Monitor className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-white dark:border-black" />
+              </div>
+            )}
+          </button>
+
           {isAuthenticated ? (
             <div className="flex items-center gap-2">
-              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-xs">
+              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-xs">
                 <div className="w-5 h-5 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-[10px]">
                   {currentUser.displayName?.charAt(0) || "U"}
                 </div>
-                <span className="font-semibold text-slate-800 max-w-[110px] truncate">
+                <span className="font-semibold text-slate-800 dark:text-slate-200 max-w-[110px] truncate">
                   {currentUser.displayName || "Resident"}
                 </span>
               </div>
@@ -273,7 +311,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
               <button
                 onClick={() => signOut()}
                 title="Sign Out"
-                className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-slate-200 transition cursor-pointer"
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg border border-slate-200 dark:border-white/10 transition cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -283,18 +321,18 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
               <button
                 id="nav-signin-btn"
                 onClick={handleSignInClick}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold text-slate-700 hover:text-brand-600 transition cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 hover:text-brand-600 dark:hover:text-brand-400 transition cursor-pointer whitespace-nowrap"
               >
-                <LogIn className="w-4 h-4 text-slate-500" />
+                <LogIn className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                 <span>Sign In</span>
               </button>
 
               <button
                 id="nav-register-btn"
                 onClick={handleRegisterClick}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all hover:shadow hover:-translate-y-0.5 cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 rounded-lg shadow-sm transition-all hover:shadow hover:-translate-y-0.5 cursor-pointer whitespace-nowrap"
               >
-                <Sparkles className="w-4 h-4 text-brand-400" />
+                <Sparkles className="w-4 h-4 text-brand-400 dark:text-brand-600" />
                 <span>Get Started</span>
               </button>
             </div>
@@ -303,6 +341,22 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
 
         {/* Mobile & Tablet Header Controls (< md) */}
         <div className="flex md:hidden items-center gap-2">
+          {/* Quick theme toggle for mobile header */}
+          <button
+            onClick={cycleTheme}
+            className="p-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-lg border border-slate-200/80 dark:border-white/10 transition cursor-pointer"
+            title={`Toggle Theme (${themeMode})`}
+            aria-label="Toggle display theme"
+          >
+            {themeMode === "light" ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : themeMode === "dark" ? (
+              <Moon className="w-4 h-4 text-blue-400" />
+            ) : (
+              <Monitor className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            )}
+          </button>
+
           {isAuthenticated ? (
             <button
               onClick={onOpenApp}
@@ -314,26 +368,30 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
           ) : (
             <button
               onClick={handleSignInClick}
-              className="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 rounded-lg shadow-xs flex items-center gap-1.5"
             >
-              <LogIn className="w-3.5 h-3.5 text-brand-400" />
+              <LogIn className="w-3.5 h-3.5 text-brand-400 dark:text-brand-600" />
               <span>Sign In</span>
             </button>
           )}
 
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200/80 transition"
+            className="p-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-lg border border-slate-200/80 dark:border-white/10 transition"
             aria-label="Toggle navigation menu"
           >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileMenuOpen ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
           </button>
         </div>
       </div>
 
       {/* Mobile & Tablet Drawer Menu (< md) */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-white/98 backdrop-blur-md border-b border-slate-200 px-4 pt-3 pb-6 space-y-4 shadow-xl animate-fadeIn">
+        <div className="md:hidden bg-white/98 dark:bg-[#000000]/98 backdrop-blur-md border-b border-slate-200 dark:border-white/10 px-4 pt-3 pb-6 space-y-4 shadow-xl animate-fadeIn">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3 pb-1">
               Core Pages
@@ -370,12 +428,64 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-100 flex flex-col gap-2.5">
+          {/* Mobile Drawer 3-Mode Theme Selector */}
+          <div className="pt-2 border-t border-slate-100 dark:border-white/10 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-1">
+              <span>Theme Appearance</span>
+              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                {themeMode === "dark"
+                  ? "OLED Dark"
+                  : themeMode === "light"
+                    ? "Light"
+                    : "System"}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-neutral-900 border border-slate-200 dark:border-white/10 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setThemeMode("light")}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  themeMode === "light"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>Light</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode("dark")}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  themeMode === "dark"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5 text-blue-300" />
+                <span>Dark</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode("system")}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  themeMode === "system"
+                    ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span>Auto</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 dark:border-white/10 flex flex-col gap-2.5">
             <button
               onClick={() => handleNavClick("calculator")}
-              className="w-full py-3 px-4 text-sm font-semibold text-center text-brand-700 bg-brand-50 hover:bg-brand-100 rounded-xl border border-brand-200 flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 text-sm font-semibold text-center text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/40 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-xl border border-brand-200 dark:border-brand-900/60 flex items-center justify-center gap-2"
             >
-              <Calculator className="w-4 h-4 text-brand-600" />
+              <Calculator className="w-4 h-4 text-brand-600 dark:text-brand-400" />
               <span>Interactive Split Calculator</span>
             </button>
 
@@ -396,10 +506,12 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
                     setMobileMenuOpen(false);
                     signOut();
                   }}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-center text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-center text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 rounded-xl flex items-center justify-center gap-1.5"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out ({currentUser.displayName || "Resident"})</span>
+                  <span>
+                    Sign Out ({currentUser.displayName || "Resident"})
+                  </span>
                 </button>
               </>
             ) : (
@@ -409,7 +521,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
                     setMobileMenuOpen(false);
                     handleSignInClick();
                   }}
-                  className="py-2.5 px-3 text-sm font-bold text-center text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center gap-2"
+                  className="py-2.5 px-3 text-sm font-bold text-center text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-neutral-900 hover:bg-slate-200 dark:hover:bg-neutral-800 rounded-xl flex items-center justify-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
                   <span>Sign In</span>
@@ -419,9 +531,9 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
                     setMobileMenuOpen(false);
                     handleRegisterClick();
                   }}
-                  className="py-2.5 px-3 text-sm font-bold text-center text-white bg-slate-900 hover:bg-slate-800 rounded-xl flex items-center justify-center gap-2 shadow-sm"
+                  className="py-2.5 px-3 text-sm font-bold text-center text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 rounded-xl flex items-center justify-center gap-2 shadow-sm"
                 >
-                  <Sparkles className="w-4 h-4 text-brand-400" />
+                  <Sparkles className="w-4 h-4 text-brand-400 dark:text-brand-600" />
                   <span>Get Started</span>
                 </button>
               </div>

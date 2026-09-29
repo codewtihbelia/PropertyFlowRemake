@@ -22,6 +22,7 @@ import {
   isPayorMember,
 } from "../services/firebaseDataService";
 import { BILL_CATEGORIES, getCategoryMeta } from "../services/categoryService";
+import { useTheme } from "../context/ThemeContext";
 
 interface AddExpenseScreenProps {
   onBack: () => void;
@@ -57,6 +58,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   onBack,
   onSaveExpense,
 }) => {
+  const { isDark, colors } = useTheme();
   const [selectedGroupIndex, setSelectedGroupIndex] = useState(0);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("Rent");
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
@@ -540,22 +542,42 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     : true;
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent={true}
         backgroundColor="transparent"
       />
       {/* Header matching screen.png */}
-      <View style={[styles.header, { paddingTop: topInset + 6 }]}>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: topInset + 6 },
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <TouchableOpacity
-          style={styles.backBtn}
+          style={[
+            styles.backBtn,
+            isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+          ]}
           onPress={onBack}
           activeOpacity={0.7}
         >
-          <Feather name="chevron-left" size={24} color="#0F172A" />
+          <Feather
+            name="chevron-left"
+            size={24}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Add Bill</Text>
+        <Text style={[styles.headerTitle, isDark && { color: colors.text }]}>
+          Add Bill
+        </Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -567,9 +589,23 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {profile && !isHost && (
-          <View style={styles.permissionBanner}>
-            <Text style={styles.permissionTitle}>Host Permission Required</Text>
-            <Text style={styles.permissionText}>
+          <View
+            style={[
+              styles.permissionBanner,
+              isDark && {
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                borderColor: "rgba(239, 68, 68, 0.25)",
+              },
+            ]}
+          >
+            <Text
+              style={[styles.permissionTitle, isDark && { color: "#FCA5A5" }]}
+            >
+              Host Permission Required
+            </Text>
+            <Text
+              style={[styles.permissionText, isDark && { color: "#F87171" }]}
+            >
               You are signed in as a resident. Only household hosts can record
               bills. Roommates can review charges and settle their share in the
               Bills tab.
@@ -594,7 +630,13 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                   styles.groupCard,
                   isSelected
                     ? styles.groupCardSelected
-                    : styles.groupCardUnselected,
+                    : [
+                        styles.groupCardUnselected,
+                        isDark && {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ],
                 ]}
                 onPress={() => setSelectedGroupIndex(idx)}
                 activeOpacity={0.9}
@@ -602,7 +644,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                 <Text
                   style={[
                     styles.groupCardTitle,
-                    isSelected ? styles.textWhite : styles.textDark,
+                    isSelected
+                      ? styles.textWhite
+                      : [styles.textDark, isDark && { color: colors.text }],
                   ]}
                   numberOfLines={1}
                 >
@@ -612,7 +656,12 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                 <Text
                   style={[
                     styles.groupCardSub,
-                    isSelected ? styles.textWhiteSub : styles.textMuted,
+                    isSelected
+                      ? styles.textWhiteSub
+                      : [
+                          styles.textMuted,
+                          isDark && { color: colors.textSecondary },
+                        ],
                   ]}
                 >
                   Total Bills: {grp.totalExpenses}
@@ -634,6 +683,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                         source={{ uri: photo }}
                         style={[
                           styles.avatarCircle,
+                          isDark && {
+                            borderColor: isSelected ? "#2563EB" : colors.card,
+                          },
                           { marginLeft: mIdx === 0 ? 0 : -8 },
                         ]}
                       />
@@ -645,6 +697,11 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                           {
                             backgroundColor: bgColor,
                             marginLeft: mIdx === 0 ? 0 : -8,
+                            borderColor: isDark
+                              ? isSelected
+                                ? "#2563EB"
+                                : colors.card
+                              : "#FFFFFF",
                           },
                         ]}
                       >
@@ -660,8 +717,16 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                         styles.avatarBadgeExtra,
                         { marginLeft: -8 },
                         isSelected
-                          ? { backgroundColor: "#DBEAFE" }
-                          : { backgroundColor: "#E2E8F0" },
+                          ? {
+                              backgroundColor: "#DBEAFE",
+                              borderColor: isDark ? "#2563EB" : "#FFFFFF",
+                            }
+                          : isDark
+                            ? {
+                                backgroundColor: "rgba(255, 255, 255, 0.12)",
+                                borderColor: colors.card,
+                              }
+                            : { backgroundColor: "#E2E8F0" },
                       ]}
                     >
                       <Text
@@ -669,7 +734,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                           styles.avatarBadgeText,
                           isSelected
                             ? { color: "#1D4ED8" }
-                            : { color: "#475569" },
+                            : isDark
+                              ? { color: colors.textSecondary }
+                              : { color: "#475569" },
                         ]}
                       >
                         +{grp.extraCount}
@@ -684,12 +751,24 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                     styles.cardActionBtn,
                     isSelected
                       ? styles.cardActionBtnSelected
-                      : styles.cardActionBtnUnselected,
+                      : [
+                          styles.cardActionBtnUnselected,
+                          isDark && {
+                            backgroundColor: "rgba(59, 130, 246, 0.15)",
+                          },
+                        ],
                   ]}
                   onPress={() => setSelectedGroupIndex(idx)}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.cardActionBtnText}>Add Bills</Text>
+                  <Text
+                    style={[
+                      styles.cardActionBtnText,
+                      !isSelected && isDark && { color: colors.primary },
+                    ]}
+                  >
+                    Add Bills
+                  </Text>
                 </TouchableOpacity>
               </TouchableOpacity>
             );
@@ -698,9 +777,21 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
         {/* Category Field - Beautiful Dropdown Mode (Not in Modal) */}
         <View style={styles.categorySectionHeader}>
-          <Text style={styles.label}>Bill Category</Text>
-          <View style={styles.categoryCountPill}>
-            <Text style={styles.categoryCountPillText}>
+          <Text style={[styles.label, isDark && { color: colors.text }]}>
+            Bill Category
+          </Text>
+          <View
+            style={[
+              styles.categoryCountPill,
+              isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+            ]}
+          >
+            <Text
+              style={[
+                styles.categoryCountPillText,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               {BILL_CATEGORIES.length} Categories
             </Text>
           </View>
@@ -709,7 +800,17 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         <TouchableOpacity
           style={[
             styles.dropdownSelector,
-            isCategoryDropdownOpen && styles.dropdownSelectorActive,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+            isCategoryDropdownOpen &&
+              (isDark
+                ? {
+                    borderColor: colors.primary,
+                    backgroundColor: "rgba(59, 130, 246, 0.1)",
+                  }
+                : styles.dropdownSelectorActive),
           ]}
           onPress={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
           activeOpacity={0.8}
@@ -731,19 +832,42 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
               >
-                <Text style={styles.dropdownTitle}>
+                <Text
+                  style={[
+                    styles.dropdownTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   {selectedCategoryId === "Others" &&
                   otherCategorySpecified.trim()
                     ? `Others: ${otherCategorySpecified.trim()}`
                     : activeCategoryMeta.name}
                 </Text>
                 {selectedCategoryId === "Water" && (
-                  <View style={styles.waterMiniBadge}>
-                    <Text style={styles.waterMiniBadgeText}>₱5/day</Text>
+                  <View
+                    style={[
+                      styles.waterMiniBadge,
+                      isDark && { backgroundColor: "rgba(2, 132, 199, 0.2)" },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.waterMiniBadgeText,
+                        isDark && { color: "#38BDF8" },
+                      ]}
+                    >
+                      ₱5/day
+                    </Text>
                   </View>
                 )}
               </View>
-              <Text style={styles.dropdownSubtitle} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.dropdownSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+                numberOfLines={1}
+              >
                 {selectedCategoryId === "Others" &&
                 otherCategorySpecified.trim()
                   ? `Custom category specified: "${otherCategorySpecified.trim()}"`
@@ -754,20 +878,40 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
           <View
             style={[
               styles.chevronBadge,
-              isCategoryDropdownOpen && styles.chevronBadgeActive,
+              isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+              isCategoryDropdownOpen &&
+                (isDark
+                  ? { backgroundColor: "rgba(59, 130, 246, 0.2)" }
+                  : styles.chevronBadgeActive),
             ]}
           >
             <Feather
               name={isCategoryDropdownOpen ? "chevron-up" : "chevron-down"}
               size={18}
-              color={isCategoryDropdownOpen ? "#2563EB" : "#64748B"}
+              color={
+                isCategoryDropdownOpen
+                  ? isDark
+                    ? colors.primary
+                    : "#2563EB"
+                  : isDark
+                    ? colors.textSecondary
+                    : "#64748B"
+              }
             />
           </View>
         </TouchableOpacity>
 
         {/* Inline Category Dropdown List (Expanded) */}
         {isCategoryDropdownOpen && (
-          <View style={styles.inlineDropdownList}>
+          <View
+            style={[
+              styles.inlineDropdownList,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
             {BILL_CATEGORIES.map((cat) => {
               const isSelected = selectedCategoryId === cat.id;
               return (
@@ -775,7 +919,14 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                   key={cat.id}
                   style={[
                     styles.inlineDropdownItem,
-                    isSelected && styles.inlineDropdownItemActive,
+                    isSelected &&
+                      (isDark
+                        ? {
+                            backgroundColor: "rgba(59, 130, 246, 0.15)",
+                            borderWidth: 1,
+                            borderColor: "rgba(59, 130, 246, 0.35)",
+                          }
+                        : styles.inlineDropdownItemActive),
                   ]}
                   onPress={() => {
                     setSelectedCategoryId(cat.id);
@@ -806,20 +957,42 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                       <Text
                         style={[
                           styles.inlineCatName,
-                          isSelected && styles.inlineCatNameActive,
+                          isDark && { color: colors.text },
+                          isSelected &&
+                            (isDark
+                              ? { color: colors.primary }
+                              : styles.inlineCatNameActive),
                         ]}
                       >
                         {cat.name}
                       </Text>
                       {cat.id === "Water" && (
-                        <View style={styles.waterPillTag}>
-                          <Text style={styles.waterPillTagText}>
+                        <View
+                          style={[
+                            styles.waterPillTag,
+                            isDark && {
+                              backgroundColor: "rgba(2, 132, 199, 0.2)",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.waterPillTagText,
+                              isDark && { color: "#38BDF8" },
+                            ]}
+                          >
                             Attendance Mode
                           </Text>
                         </View>
                       )}
                     </View>
-                    <Text style={styles.inlineCatDesc} numberOfLines={1}>
+                    <Text
+                      style={[
+                        styles.inlineCatDesc,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
                       {cat.description}
                     </Text>
                   </View>
@@ -828,7 +1001,12 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                       <Feather name="check" size={13} color="#FFFFFF" />
                     </View>
                   ) : (
-                    <View style={styles.unselectedRadioCircle} />
+                    <View
+                      style={[
+                        styles.unselectedRadioCircle,
+                        isDark && { borderColor: colors.border },
+                      ]}
+                    />
                   )}
                 </TouchableOpacity>
               );
@@ -838,25 +1016,59 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
         {/* If user selects "Others", prompt them to specify */}
         {selectedCategoryId === "Others" && (
-          <View style={styles.specifyCategoryCard}>
+          <View
+            style={[
+              styles.specifyCategoryCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
             <View style={styles.specifyCategoryHeader}>
-              <View style={styles.specifyIconWrap}>
-                <Feather name="edit-3" size={15} color="#0F172A" />
+              <View
+                style={[
+                  styles.specifyIconWrap,
+                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                ]}
+              >
+                <Feather
+                  name="edit-3"
+                  size={15}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.specifyCategoryTitle}>
+                <Text
+                  style={[
+                    styles.specifyCategoryTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   Specify Category Name *
                 </Text>
-                <Text style={styles.specifyCategorySub}>
+                <Text
+                  style={[
+                    styles.specifyCategorySub,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Please specify what this bill is for (e.g. Parking Fee, Pest
                   Control, Aircon Cleaning)
                 </Text>
               </View>
             </View>
             <TextInput
-              style={styles.specifyCategoryInput}
+              style={[
+                styles.specifyCategoryInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: "rgba(59, 130, 246, 0.4)",
+                  color: colors.text,
+                },
+              ]}
               placeholder="e.g., Parking Fee, Building Maintenance, Gym..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               value={otherCategorySpecified}
               onChangeText={setOtherCategorySpecified}
               maxLength={40}
@@ -872,12 +1084,22 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                 }}
               >
                 <Feather name="tag" size={12} color="#0284C7" />
-                <Text style={styles.specifyCategoryTip}>
+                <Text
+                  style={[
+                    styles.specifyCategoryTip,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   This custom category name will sync to all roommates' bill
                   lists.
                 </Text>
               </View>
-              <Text style={styles.charCountText}>
+              <Text
+                style={[
+                  styles.charCountText,
+                  isDark && { color: colors.textMuted },
+                ]}
+              >
                 {otherCategorySpecified.length}/40
               </Text>
             </View>
@@ -886,7 +1108,15 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
         {/* Water Mode Indicator if Category is Water */}
         {selectedCategoryId === "Water" && (
-          <View style={styles.waterInfoNotice}>
+          <View
+            style={[
+              styles.waterInfoNotice,
+              isDark && {
+                backgroundColor: "rgba(2, 132, 199, 0.12)",
+                borderColor: "rgba(2, 132, 199, 0.25)",
+              },
+            ]}
+          >
             <View
               style={{
                 flexDirection: "row",
@@ -896,11 +1126,15 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               }}
             >
               <Feather name="droplet" size={15} color="#0284C7" />
-              <Text style={styles.waterInfoTitle}>
+              <Text
+                style={[styles.waterInfoTitle, isDark && { color: "#38BDF8" }]}
+              >
                 Water Billing Mode: ₱5 / person / day
               </Text>
             </View>
-            <Text style={styles.waterInfoText}>
+            <Text
+              style={[styles.waterInfoText, isDark && { color: "#BAE6FD" }]}
+            >
               Non-payor members are exempted. Water consumption incurred by
               non-payor members is split fairly and reallocated across paying
               roommates with an explanatory breakdown note.
@@ -909,12 +1143,22 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         )}
 
         {/* Amount Field matching screen.png */}
-        <Text style={styles.label}>Amount</Text>
-        <View style={styles.inputContainer}>
+        <Text style={[styles.label, isDark && { color: colors.text }]}>
+          Amount
+        </Text>
+        <View
+          style={[
+            styles.inputContainer,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TextInput
-            style={styles.input}
+            style={[styles.input, isDark && { color: colors.text }]}
             placeholder="₱0.00"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             keyboardType="decimal-pad"
             value={amount}
             onChangeText={(val) => {
@@ -931,11 +1175,25 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         </View>
 
         {/* Document (Optional) matching screen.png */}
-        <Text style={styles.label}>
-          Document <Text style={styles.optionalLabel}>(Optional)</Text>
+        <Text style={[styles.label, isDark && { color: colors.text }]}>
+          Document{" "}
+          <Text
+            style={[
+              styles.optionalLabel,
+              isDark && { color: colors.textMuted },
+            ]}
+          >
+            (Optional)
+          </Text>
         </Text>
         <TouchableOpacity
-          style={styles.uploadDashedBox}
+          style={[
+            styles.uploadDashedBox,
+            isDark && {
+              backgroundColor: "rgba(255, 255, 255, 0.02)",
+              borderColor: "rgba(59, 130, 246, 0.3)",
+            },
+          ]}
           onPress={handlePickImage}
           activeOpacity={0.8}
         >
@@ -943,43 +1201,97 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
             <View style={styles.previewContainer}>
               <Image source={{ uri: imageUri }} style={styles.previewImage} />
               <View style={styles.changeOverlay}>
-                <Feather name="refresh-cw" size={14} color="#2563EB" />
-                <Text style={styles.changeText}>Change Document</Text>
+                <Feather
+                  name="refresh-cw"
+                  size={14}
+                  color={isDark ? colors.primary : "#2563EB"}
+                />
+                <Text
+                  style={[
+                    styles.changeText,
+                    isDark && { color: colors.primary },
+                  ]}
+                >
+                  Change Document
+                </Text>
               </View>
             </View>
           ) : (
             <View style={styles.uploadPlaceholder}>
-              <View style={styles.uploadIconCircle}>
-                <Feather name="image" size={20} color="#0F172A" />
+              <View
+                style={[
+                  styles.uploadIconCircle,
+                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                ]}
+              >
+                <Feather
+                  name="image"
+                  size={20}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
               </View>
-              <Text style={styles.uploadText}>Upload Image or Video</Text>
+              <Text
+                style={[styles.uploadText, isDark && { color: colors.primary }]}
+              >
+                Upload Image or Video
+              </Text>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Description (Optional) matching screen.png */}
-        <Text style={styles.label}>
-          Description <Text style={styles.optionalLabel}>(Optional)</Text>
+        <Text style={[styles.label, isDark && { color: colors.text }]}>
+          Description{" "}
+          <Text
+            style={[
+              styles.optionalLabel,
+              isDark && { color: colors.textMuted },
+            ]}
+          >
+            (Optional)
+          </Text>
         </Text>
-        <View style={styles.inputContainer}>
+        <View
+          style={[
+            styles.inputContainer,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TextInput
-            style={styles.input}
+            style={[styles.input, isDark && { color: colors.text }]}
             placeholder="Add a note or context"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             value={description}
             onChangeText={setDescription}
           />
         </View>
 
         {/* Split Method matching screen.png */}
-        <Text style={styles.label}>Split Method</Text>
+        <Text style={[styles.label, isDark && { color: colors.text }]}>
+          Split Method
+        </Text>
         <View style={styles.splitRow}>
           <TouchableOpacity
             style={[
               styles.splitOptionBtn,
               splitMethod === "Equal"
-                ? styles.splitOptionActive
-                : styles.splitOptionInactive,
+                ? [
+                    styles.splitOptionActive,
+                    isDark && {
+                      backgroundColor: "rgba(59, 130, 246, 0.18)",
+                      borderColor: colors.primary,
+                    },
+                  ]
+                : [
+                    styles.splitOptionInactive,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ],
             ]}
             onPress={() => setSplitMethod("Equal")}
             activeOpacity={0.8}
@@ -988,8 +1300,14 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               style={[
                 styles.splitOptionText,
                 splitMethod === "Equal"
-                  ? styles.splitTextActive
-                  : styles.splitTextInactive,
+                  ? [
+                      styles.splitTextActive,
+                      isDark && { color: colors.primary },
+                    ]
+                  : [
+                      styles.splitTextInactive,
+                      isDark && { color: colors.textSecondary },
+                    ],
               ]}
             >
               Equal
@@ -1000,8 +1318,20 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
             style={[
               styles.splitOptionBtn,
               splitMethod === "% Custom"
-                ? styles.splitOptionActive
-                : styles.splitOptionInactive,
+                ? [
+                    styles.splitOptionActive,
+                    isDark && {
+                      backgroundColor: "rgba(59, 130, 246, 0.18)",
+                      borderColor: colors.primary,
+                    },
+                  ]
+                : [
+                    styles.splitOptionInactive,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ],
             ]}
             onPress={() => setSplitMethod("% Custom")}
             activeOpacity={0.8}
@@ -1010,8 +1340,14 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               style={[
                 styles.splitOptionText,
                 splitMethod === "% Custom"
-                  ? styles.splitTextActive
-                  : styles.splitTextInactive,
+                  ? [
+                      styles.splitTextActive,
+                      isDark && { color: colors.primary },
+                    ]
+                  : [
+                      styles.splitTextInactive,
+                      isDark && { color: colors.textSecondary },
+                    ],
               ]}
             >
               % Custom
@@ -1020,14 +1356,33 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         </View>
 
         {/* Fair Split on Payors Only Info Banner */}
-        <View style={styles.fairSplitBadge}>
+        <View
+          style={[
+            styles.fairSplitBadge,
+            isDark && {
+              backgroundColor: "rgba(16, 185, 129, 0.12)",
+              borderColor: "rgba(16, 185, 129, 0.25)",
+            },
+          ]}
+        >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather name="shield" size={14} color="#2563EB" />
-            <Text style={styles.fairSplitBadgeTitle}>
+            <Feather
+              name="shield"
+              size={14}
+              color={isDark ? "#34D399" : "#2563EB"}
+            />
+            <Text
+              style={[
+                styles.fairSplitBadgeTitle,
+                isDark && { color: "#34D399" },
+              ]}
+            >
               Fair Split on Payors Only
             </Text>
           </View>
-          <Text style={styles.fairSplitBadgeDesc}>
+          <Text
+            style={[styles.fairSplitBadgeDesc, isDark && { color: "#A7F3D0" }]}
+          >
             {activePayors.length} active payor(s) share this bill equally.{" "}
             {activeNonPayors.length > 0
               ? `${activeNonPayors.length} non-payor member(s) are exempted.`
@@ -1037,8 +1392,23 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
         {/* Member Allocation Breakdown for Equal Split */}
         {splitMethod === "Equal" && (
-          <View style={styles.equalSplitCard}>
-            <Text style={styles.equalSplitHeader}>Calculated Member Share</Text>
+          <View
+            style={[
+              styles.equalSplitCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.equalSplitHeader,
+                isDark && { color: colors.text },
+              ]}
+            >
+              Calculated Member Share
+            </Text>
             {activeMembers.map((m) => {
               const isPayor = isPayorMember(m);
               const isWater = isWaterCategory;
@@ -1082,7 +1452,10 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               return (
                 <View
                   key={m.userId || m.memberId}
-                  style={styles.memberShareRow}
+                  style={[
+                    styles.memberShareRow,
+                    isDark && { borderBottomColor: colors.borderSubtle },
+                  ]}
                 >
                   <View style={{ flex: 1, paddingRight: 8 }}>
                     <View
@@ -1092,31 +1465,65 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                         gap: 6,
                       }}
                     >
-                      <Text style={styles.memberShareName}>
+                      <Text
+                        style={[
+                          styles.memberShareName,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {m.displayName || "Roommate"}
                       </Text>
                       <View
                         style={
-                          isPayor ? styles.badgePayor : styles.badgeNonPayor
+                          isPayor
+                            ? [
+                                styles.badgePayor,
+                                isDark && {
+                                  backgroundColor: "rgba(59, 130, 246, 0.2)",
+                                },
+                              ]
+                            : [
+                                styles.badgeNonPayor,
+                                isDark && {
+                                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                                },
+                              ]
                         }
                       >
                         <Text
                           style={
                             isPayor
-                              ? styles.badgeTextPayor
-                              : styles.badgeTextNonPayor
+                              ? [
+                                  styles.badgeTextPayor,
+                                  isDark && { color: "#93C5FD" },
+                                ]
+                              : [
+                                  styles.badgeTextNonPayor,
+                                  isDark && { color: colors.textSecondary },
+                                ]
                           }
                         >
                           {isPayor ? "Payor" : "Non-Payor"}
                         </Text>
                       </View>
                     </View>
-                    <Text style={styles.memberShareNote}>{note}</Text>
+                    <Text
+                      style={[
+                        styles.memberShareNote,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      {note}
+                    </Text>
                   </View>
                   <Text
                     style={[
                       styles.memberShareAmount,
-                      !isPayor && styles.memberShareAmountExempt,
+                      isDark && { color: colors.primary },
+                      !isPayor &&
+                        (isDark
+                          ? { color: colors.textMuted }
+                          : styles.memberShareAmountExempt),
                     ]}
                   >
                     ₱{(memberShareCents / 100).toFixed(2)}
@@ -1129,8 +1536,21 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
         {/* Custom Split breakdown if % Custom is selected */}
         {splitMethod === "% Custom" && (
-          <View style={styles.customSplitsCard}>
-            <Text style={styles.customSplitsHeader}>
+          <View
+            style={[
+              styles.customSplitsCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.customSplitsHeader,
+                isDark && { color: colors.text },
+              ]}
+            >
               Roommate Split Allocation (%)
             </Text>
             {activeMembers.map((m) => {
@@ -1149,17 +1569,42 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                       gap: 6,
                     }}
                   >
-                    <Text style={styles.customSplitName}>
+                    <Text
+                      style={[
+                        styles.customSplitName,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
                       {m.displayName || "Roommate"}
                     </Text>
                     <View
-                      style={isPayor ? styles.badgePayor : styles.badgeNonPayor}
+                      style={
+                        isPayor
+                          ? [
+                              styles.badgePayor,
+                              isDark && {
+                                backgroundColor: "rgba(59, 130, 246, 0.2)",
+                              },
+                            ]
+                          : [
+                              styles.badgeNonPayor,
+                              isDark && {
+                                backgroundColor: "rgba(255, 255, 255, 0.08)",
+                              },
+                            ]
+                      }
                     >
                       <Text
                         style={
                           isPayor
-                            ? styles.badgeTextPayor
-                            : styles.badgeTextNonPayor
+                            ? [
+                                styles.badgeTextPayor,
+                                isDark && { color: "#93C5FD" },
+                              ]
+                            : [
+                                styles.badgeTextNonPayor,
+                                isDark && { color: colors.textSecondary },
+                              ]
                         }
                       >
                         {isPayor ? "Payor" : "Exempt"}
@@ -1167,9 +1612,20 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                     </View>
                   </View>
                   {isPayor ? (
-                    <View style={styles.customSplitInputWrap}>
+                    <View
+                      style={[
+                        styles.customSplitInputWrap,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
                       <TextInput
-                        style={styles.customSplitInput}
+                        style={[
+                          styles.customSplitInput,
+                          isDark && { color: colors.text },
+                        ]}
                         keyboardType="number-pad"
                         value={String(currentVal)}
                         onChangeText={(txt) => {
@@ -1177,13 +1633,20 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                           setCustomSplits((prev) => ({ ...prev, [uid]: num }));
                         }}
                       />
-                      <Text style={styles.customSplitPercent}>%</Text>
+                      <Text
+                        style={[
+                          styles.customSplitPercent,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        %
+                      </Text>
                     </View>
                   ) : (
                     <Text
                       style={{
                         fontSize: 12,
-                        color: "#64748B",
+                        color: isDark ? colors.textMuted : "#64748B",
                         fontWeight: "600",
                       }}
                     >
@@ -1202,7 +1665,11 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
             styles.updateBtn,
             (!isHost || uploading) && {
               opacity: 0.6,
-              backgroundColor: !isHost ? "#94A3B8" : "#2563EB",
+              backgroundColor: !isHost
+                ? isDark
+                  ? "rgba(255, 255, 255, 0.15)"
+                  : "#94A3B8"
+                : "#2563EB",
             },
           ]}
           onPress={handleSave}

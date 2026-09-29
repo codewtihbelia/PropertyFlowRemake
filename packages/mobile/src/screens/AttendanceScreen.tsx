@@ -22,6 +22,7 @@ import {
   UniversalLoader,
   UniversalSkeleton,
 } from "../components/UniversalLoader";
+import { useTheme } from "../context/ThemeContext";
 
 interface CycleDate {
   iso: string;
@@ -167,6 +168,7 @@ export const AttendanceScreen: React.FC<{
   userId?: string;
   onBack?: () => void;
 }> = ({ householdId, billingCycleId, userId, onBack }) => {
+  const { isDark, colors } = useTheme();
   const currentUser = auth.currentUser;
   const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
   const [profile, setProfile] = useState<any | null>(() => cachedProfile);
@@ -654,38 +656,86 @@ export const AttendanceScreen: React.FC<{
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       {/* Top Bar with circular buttons matching Image 1 */}
-      <View style={styles.topBar}>
+      <View
+        style={[
+          styles.topBar,
+          isDark && {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
-          style={styles.circleIconBtn}
+          style={[
+            styles.circleIconBtn,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
           onPress={() => (onBack ? onBack() : null)}
           activeOpacity={0.7}
         >
-          <Feather name="chevron-left" size={22} color="#0F172A" />
+          <Feather
+            name="chevron-left"
+            size={22}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
 
         <View style={styles.topBarCenter}>
-          <Text style={styles.topBarTitle}>Attendance</Text>
-          <Text style={styles.topBarSubtitle}>Water Utility Tracking</Text>
+          <Text style={[styles.topBarTitle, isDark && { color: colors.text }]}>
+            Attendance
+          </Text>
+          <Text
+            style={[
+              styles.topBarSubtitle,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
+            Water Utility Tracking
+          </Text>
         </View>
 
         <View style={styles.topBarRight}>
           <TouchableOpacity
-            style={styles.circleIconBtn}
+            style={[
+              styles.circleIconBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={handleRefresh}
             disabled={isRefreshing}
             activeOpacity={0.7}
           >
             {isRefreshing ? (
-              <ActivityIndicator size="small" color="#2563EB" />
+              <ActivityIndicator size="small" color={colors.accent} />
             ) : (
-              <Ionicons name="refresh-outline" size={20} color="#0F172A" />
+              <Ionicons
+                name="refresh-outline"
+                size={20}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.circleIconBtn}
+            style={[
+              styles.circleIconBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => {
               if (isHost) {
                 setShowWaterSettingsModal(true);
@@ -702,7 +752,11 @@ export const AttendanceScreen: React.FC<{
             }}
             activeOpacity={0.7}
           >
-            <Feather name="more-vertical" size={20} color="#0F172A" />
+            <Feather
+              name="more-vertical"
+              size={20}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -717,10 +771,27 @@ export const AttendanceScreen: React.FC<{
           scrollEventThrottle={16}
         >
           {!resolvedHouseholdId || !activeCycle ? (
-            <View style={styles.emptyCard}>
+            <View
+              style={[
+                styles.emptyCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <Ionicons name="calendar-outline" size={40} color="#94A3B8" />
-              <Text style={styles.emptyTitle}>No Active Billing Cycle</Text>
-              <Text style={styles.emptySub}>
+              <Text
+                style={[styles.emptyTitle, isDark && { color: colors.text }]}
+              >
+                No Active Billing Cycle
+              </Text>
+              <Text
+                style={[
+                  styles.emptySub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Ask your host to create a billing cycle to log and calculate
                 water attendance.
               </Text>
@@ -730,29 +801,74 @@ export const AttendanceScreen: React.FC<{
               {/* =========================================================================
                 BLUE HERO CARD - Pixel perfect match to Image 1
                 ========================================================================= */}
-              <View style={styles.heroCard}>
+              <View
+                style={[
+                  styles.heroCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    shadowOpacity: 0,
+                    elevation: 0,
+                  },
+                ]}
+              >
                 <View style={styles.heroTopRow}>
-                  <View style={styles.activeCyclePill}>
+                  <View
+                    style={[
+                      styles.activeCyclePill,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.18)",
+                        borderColor: colors.borderHighlighted,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
                     <View style={styles.activeCycleDot} />
-                    <Text style={styles.activeCyclePillText}>
+                    <Text
+                      style={[
+                        styles.activeCyclePillText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
                       Active Billing Cycle
                     </Text>
                   </View>
-                  <Text style={styles.totalDaysText}>
+                  <Text
+                    style={[
+                      styles.totalDaysText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {totalDays} Total Days
                   </Text>
                 </View>
 
-                <Text style={styles.heroCycleRange}>
+                <Text
+                  style={[
+                    styles.heroCycleRange,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   {formatCycleRangeTitle(
                     activeCycle.startDate,
                     activeCycle.endDate,
                   )}
                 </Text>
 
-                <Text style={styles.heroWaterRate}>
+                <Text
+                  style={[
+                    styles.heroWaterRate,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Water Bill:{" "}
-                  <Text style={styles.heroWaterRateBold}>
+                  <Text
+                    style={[
+                      styles.heroWaterRateBold,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
                     {pricingModel === "FIXED_MONTHLY"
                       ? `₱${fixedMonthlyPesos.toFixed(2)} / month total`
                       : pricingModel === "FIXED_PER_PERSON_MONTH"
@@ -763,22 +879,82 @@ export const AttendanceScreen: React.FC<{
 
                 {/* 3 Translucent Metric Cards */}
                 <View style={styles.heroMetricsRow}>
-                  <View style={styles.heroMetricBox}>
-                    <Text style={styles.heroMetricLabel}>Present Days</Text>
-                    <Text style={styles.heroMetricValue}>{presentCount}</Text>
+                  <View
+                    style={[
+                      styles.heroMetricBox,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.heroMetricLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Present Days
+                    </Text>
+                    <Text
+                      style={[
+                        styles.heroMetricValue,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      {presentCount}
+                    </Text>
                   </View>
 
-                  <View style={styles.heroMetricBox}>
-                    <Text style={styles.heroMetricLabel}>Absent Days</Text>
-                    <Text style={styles.heroMetricValue}>{absentCount}</Text>
+                  <View
+                    style={[
+                      styles.heroMetricBox,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.heroMetricLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Absent Days
+                    </Text>
+                    <Text
+                      style={[
+                        styles.heroMetricValue,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      {absentCount}
+                    </Text>
                   </View>
 
-                  <View style={styles.heroMetricBox}>
-                    <Text style={styles.heroMetricLabel}>Your Due</Text>
+                  <View
+                    style={[
+                      styles.heroMetricBox,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.heroMetricLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Your Due
+                    </Text>
                     <Text
                       style={[
                         styles.heroMetricValue,
                         styles.heroMetricValueDue,
+                        isDark && { color: colors.accent },
                       ]}
                     >
                       ₱{waterFee.toFixed(2)}
@@ -790,14 +966,43 @@ export const AttendanceScreen: React.FC<{
               {/* =========================================================================
                 WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
                 ========================================================================= */}
-              <View style={styles.feeBarCard}>
-                <View style={styles.feeIconCircle}>
-                  <Ionicons name="water" size={18} color="#2563EB" />
+              <View
+                style={[
+                  styles.feeBarCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.feeIconCircle,
+                    isDark && { backgroundColor: colors.primaryLight },
+                  ]}
+                >
+                  <Ionicons
+                    name="water"
+                    size={18}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
                 </View>
 
                 <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={styles.feeBarTitle}>Water Utility Fee</Text>
-                  <Text style={styles.feeBarSubtitle}>
+                  <Text
+                    style={[
+                      styles.feeBarTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Water Utility Fee
+                  </Text>
+                  <Text
+                    style={[
+                      styles.feeBarSubtitle,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {pricingModel === "FIXED_MONTHLY"
                       ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
                       : pricingModel === "FIXED_PER_PERSON_MONTH"
@@ -809,21 +1014,45 @@ export const AttendanceScreen: React.FC<{
                 {!isFixedMode && (
                   <View style={styles.feeBarActions}>
                     <TouchableOpacity
-                      style={styles.markAllBtn}
+                      style={[
+                        styles.markAllBtn,
+                        isDark && { backgroundColor: colors.primaryLight },
+                      ]}
                       onPress={markAll}
                       disabled={isBatching}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.markAllBtnText}>Mark All</Text>
+                      <Text
+                        style={[
+                          styles.markAllBtnText,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        Mark All
+                      </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={styles.clearBtn}
+                      style={[
+                        styles.clearBtn,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={clearAll}
                       disabled={isBatching}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.clearBtnText}>Clear</Text>
+                      <Text
+                        style={[
+                          styles.clearBtnText,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        Clear
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -833,18 +1062,41 @@ export const AttendanceScreen: React.FC<{
                 CALENDAR SECTION - Grouped by Month with Clean Dates ONLY (No ₱5)
                 ========================================================================= */}
               {isFixedMode ? (
-                <View style={styles.fixedNoticeCard}>
-                  <View style={styles.fixedNoticeIconBox}>
+                <View
+                  style={[
+                    styles.fixedNoticeCard,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.fixedNoticeIconBox,
+                      isDark && { backgroundColor: "rgba(16, 185, 129, 0.15)" },
+                    ]}
+                  >
                     <Ionicons
                       name="checkmark-circle"
                       size={32}
-                      color="#059669"
+                      color={isDark ? colors.success : "#059669"}
                     />
                   </View>
-                  <Text style={styles.fixedNoticeTitle}>
+                  <Text
+                    style={[
+                      styles.fixedNoticeTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     Daily attendance is not required for your apartment.
                   </Text>
-                  <Text style={styles.fixedNoticeSub}>
+                  <Text
+                    style={[
+                      styles.fixedNoticeSub,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {pricingModel === "FIXED_MONTHLY"
                       ? `Household water bill (₱${fixedMonthlyPesos.toFixed(
                           2,
@@ -853,9 +1105,26 @@ export const AttendanceScreen: React.FC<{
                           2,
                         )} / resident.`}
                   </Text>
-                  <View style={styles.fixedHostTag}>
-                    <Feather name="shield" size={13} color="#0369A1" />
-                    <Text style={styles.fixedHostTagText}>
+                  <View
+                    style={[
+                      styles.fixedHostTag,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.12)",
+                        borderColor: "rgba(59, 130, 246, 0.25)",
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="shield"
+                      size={13}
+                      color={isDark ? colors.accent : "#0369A1"}
+                    />
+                    <Text
+                      style={[
+                        styles.fixedHostTagText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
                       Set by Property Host ({hostName})
                     </Text>
                   </View>
@@ -882,22 +1151,60 @@ export const AttendanceScreen: React.FC<{
                   ];
 
                   return (
-                    <View key={sec.monthKey} style={styles.calendarCard}>
+                    <View
+                      key={sec.monthKey}
+                      style={[
+                        styles.calendarCard,
+                        isDark && {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
                       {/* Month Header */}
                       <View style={styles.monthHeaderRow}>
                         <View style={styles.monthTitleLeft}>
-                          <View style={styles.monthDot} />
-                          <Text style={styles.monthTitleText}>
+                          <View
+                            style={[
+                              styles.monthDot,
+                              isDark && { backgroundColor: colors.accent },
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.monthTitleText,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
                             {sec.monthName} {sec.year}
                           </Text>
-                          <View style={styles.monthRangePill}>
-                            <Text style={styles.monthRangePillText}>
+                          <View
+                            style={[
+                              styles.monthRangePill,
+                              isDark && {
+                                backgroundColor: colors.surfaceInset,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.monthRangePillText,
+                                isDark && { color: colors.textSecondary },
+                              ]}
+                            >
                               {rangeLabel}
                             </Text>
                           </View>
                         </View>
 
-                        <Text style={styles.monthPresentRatio}>
+                        <Text
+                          style={[
+                            styles.monthPresentRatio,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
                           {sectionPresentCount} / {totalInSec} Present
                         </Text>
                       </View>
@@ -905,7 +1212,13 @@ export const AttendanceScreen: React.FC<{
                       {/* Weekday Row */}
                       <View style={styles.weekdaysRow}>
                         {weekdayLabels.map((w) => (
-                          <Text key={w} style={styles.weekdayText}>
+                          <Text
+                            key={w}
+                            style={[
+                              styles.weekdayText,
+                              isDark && { color: colors.textMuted },
+                            ]}
+                          >
                             {w}
                           </Text>
                         ))}
@@ -932,8 +1245,22 @@ export const AttendanceScreen: React.FC<{
                               style={[
                                 styles.dayBox,
                                 isPresent
-                                  ? styles.dayBoxPresent
-                                  : styles.dayBoxAbsent,
+                                  ? [
+                                      styles.dayBoxPresent,
+                                      isDark && {
+                                        backgroundColor: colors.primary,
+                                        borderColor: colors.primary,
+                                        shadowColor: colors.primary,
+                                      },
+                                    ]
+                                  : [
+                                      styles.dayBoxAbsent,
+                                      isDark && {
+                                        backgroundColor: colors.surfaceInset,
+                                        borderColor:
+                                          "rgba(255, 255, 255, 0.12)",
+                                      },
+                                    ],
                               ]}
                               onPress={() => toggleDay(d.iso)}
                               activeOpacity={0.7}
@@ -943,7 +1270,12 @@ export const AttendanceScreen: React.FC<{
                                   styles.dayNumberText,
                                   isPresent
                                     ? styles.dayNumberTextPresent
-                                    : styles.dayNumberTextAbsent,
+                                    : [
+                                        styles.dayNumberTextAbsent,
+                                        isDark && {
+                                          color: colors.textSecondary,
+                                        },
+                                      ],
                                 ]}
                               >
                                 {d.dayNum}
@@ -960,10 +1292,30 @@ export const AttendanceScreen: React.FC<{
               {/* =========================================================================
                 ROOMMATES BREAKDOWN CARD - Pixel perfect match to Image 2
                 ========================================================================= */}
-              <View style={styles.breakdownCard}>
+              <View
+                style={[
+                  styles.breakdownCard,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.breakdownHeader}>
-                  <Text style={styles.breakdownTitle}>Roommates Breakdown</Text>
-                  <Text style={styles.breakdownMemberCount}>
+                  <Text
+                    style={[
+                      styles.breakdownTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Roommates Breakdown
+                  </Text>
+                  <Text
+                    style={[
+                      styles.breakdownMemberCount,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
                     {members.length} Member{members.length === 1 ? "" : "s"}
                   </Text>
                 </View>
@@ -1043,7 +1395,15 @@ export const AttendanceScreen: React.FC<{
                         key={mUid}
                         style={[
                           styles.memberCard,
-                          isMe && styles.memberCardHighlight,
+                          isDark && {
+                            backgroundColor: isMe
+                              ? "rgba(59, 130, 246, 0.12)"
+                              : colors.surfaceInset,
+                            borderColor: isMe
+                              ? colors.borderHighlighted
+                              : colors.border,
+                          },
+                          !isDark && isMe && styles.memberCardHighlight,
                         ]}
                       >
                         {/* Avatar */}
@@ -1070,22 +1430,62 @@ export const AttendanceScreen: React.FC<{
                         {/* Details */}
                         <View style={styles.memberInfoCol}>
                           <View style={styles.memberNameRow}>
-                            <Text style={styles.memberName} numberOfLines={1}>
+                            <Text
+                              style={[
+                                styles.memberName,
+                                isDark && { color: colors.text },
+                              ]}
+                              numberOfLines={1}
+                            >
                               {member.displayName || "Roommate"}
                               {isMe ? " (You)" : ""}
                             </Text>
 
                             {/* Synced Badge */}
                             {isSubmitted && (
-                              <View style={styles.syncedPill}>
+                              <View
+                                style={[
+                                  styles.syncedPill,
+                                  isDark && {
+                                    backgroundColor: colors.primary,
+                                  },
+                                ]}
+                              >
                                 <Text style={styles.syncedPillText}>
                                   Synced
                                 </Text>
                               </View>
                             )}
+
+                            {/* Exempt Badge */}
+                            {!isPayor && (
+                              <View
+                                style={[
+                                  styles.exemptPill,
+                                  isDark && {
+                                    backgroundColor: colors.surfaceInset,
+                                    borderColor: colors.border,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.exemptPillText,
+                                    isDark && { color: colors.textMuted },
+                                  ]}
+                                >
+                                  Exempt
+                                </Text>
+                              </View>
+                            )}
                           </View>
 
-                          <Text style={styles.memberStaySub}>
+                          <Text
+                            style={[
+                              styles.memberStaySub,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                          >
                             {memberPresentCount} days present •{" "}
                             {memberAbsentCount} off
                           </Text>
@@ -1093,15 +1493,26 @@ export const AttendanceScreen: React.FC<{
 
                         {/* Right Due & Status */}
                         <View style={styles.memberDueCol}>
-                          <Text style={styles.memberDueAmount}>
+                          <Text
+                            style={[
+                              styles.memberDueAmount,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
                             ₱{memberWaterTotal.toFixed(2)}
                           </Text>
                           <Text
                             style={[
                               styles.memberStatusLabel,
                               hasMarked || isSubmitted
-                                ? styles.memberStatusMarked
-                                : styles.memberStatusPending,
+                                ? [
+                                    styles.memberStatusMarked,
+                                    isDark && { color: colors.success },
+                                  ]
+                                : [
+                                    styles.memberStatusPending,
+                                    isDark && { color: colors.textMuted },
+                                  ],
                             ]}
                           >
                             {hasMarked || isSubmitted
@@ -1130,6 +1541,16 @@ export const AttendanceScreen: React.FC<{
                     isMyAttendanceSubmitted
                       ? styles.submissionNoticeBoxSubmitted
                       : styles.submissionNoticeBoxPending,
+                    isDark &&
+                      (isMyAttendanceSubmitted
+                        ? {
+                            backgroundColor: "rgba(16, 185, 129, 0.12)",
+                            borderColor: "rgba(16, 185, 129, 0.25)",
+                          }
+                        : {
+                            backgroundColor: "rgba(59, 130, 246, 0.12)",
+                            borderColor: "rgba(59, 130, 246, 0.25)",
+                          }),
                   ]}
                 >
                   <Ionicons
@@ -1139,13 +1560,24 @@ export const AttendanceScreen: React.FC<{
                         : "water-outline"
                     }
                     size={18}
-                    color={isMyAttendanceSubmitted ? "#059669" : "#2563EB"}
+                    color={
+                      isMyAttendanceSubmitted
+                        ? isDark
+                          ? colors.success
+                          : "#059669"
+                        : isDark
+                          ? colors.accent
+                          : "#2563EB"
+                    }
                   />
                   <Text
                     style={[
                       styles.submissionNoticeText,
                       isMyAttendanceSubmitted &&
                         styles.submissionNoticeTextSubmitted,
+                      isDark && {
+                        color: isMyAttendanceSubmitted ? "#6EE7B7" : "#93C5FD",
+                      },
                     ]}
                   >
                     {isMyAttendanceSubmitted
@@ -1159,6 +1591,10 @@ export const AttendanceScreen: React.FC<{
                 <TouchableOpacity
                   style={[
                     styles.submitButton,
+                    isDark && {
+                      backgroundColor: colors.primary,
+                      shadowColor: colors.primary,
+                    },
                     isSubmitting && { opacity: 0.75 },
                   ]}
                   onPress={handleSubmitAttendance}
@@ -1184,7 +1620,12 @@ export const AttendanceScreen: React.FC<{
                   )}
                 </TouchableOpacity>
 
-                <Text style={styles.submissionFootnote}>
+                <Text
+                  style={[
+                    styles.submissionFootnote,
+                    isDark && { color: colors.textMuted },
+                  ]}
+                >
                   {isMyAttendanceSubmitted
                     ? "✓ Real-time synced · Tap any day to edit and re-sync"
                     : "Tap above to mark days present, then submit to sync dues"}

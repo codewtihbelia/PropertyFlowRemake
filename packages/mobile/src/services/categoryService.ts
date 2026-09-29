@@ -6,8 +6,16 @@ export interface BillCategory {
   ionicon: string;
   color: string;
   bgColor: string;
-  accentColor?: string;
+  darkColor: string;
+  darkBgColor: string;
+  accentColor: string;
   description: string;
+}
+
+export interface CategoryVisuals {
+  iconColor: string;
+  bgColor: string;
+  borderColor: string;
 }
 
 export const BILL_CATEGORIES: BillCategory[] = [
@@ -17,9 +25,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏠",
     featherIcon: "home",
     ionicon: "home-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#2563EB",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Monthly room or apartment lease",
   },
   {
@@ -28,9 +38,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "⚡",
     featherIcon: "zap",
     ionicon: "flash-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#D97706",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Electric power, Meralco & sub-meters",
   },
   {
@@ -39,9 +51,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "💧",
     featherIcon: "droplet",
     ionicon: "water-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#0284C7",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Water bills (daily attendance or fixed monthly)",
   },
   {
@@ -50,9 +64,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "📶",
     featherIcon: "wifi",
     ionicon: "wifi-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#7C3AED",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Fiber, broadband & internet connection",
   },
   {
@@ -61,9 +77,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🛒",
     featherIcon: "shopping-cart",
     ionicon: "cart-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#059669",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Shared food, drinking water & kitchen goods",
   },
   {
@@ -72,9 +90,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🧹",
     featherIcon: "trash-2",
     ionicon: "sparkles-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#DB2777",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Housekeeping, trash bags & laundry supplies",
   },
   {
@@ -83,9 +103,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🔧",
     featherIcon: "tool",
     ionicon: "construct-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#EA580C",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Aircon cleaning, plumbing & handyman fixes",
   },
   {
@@ -94,9 +116,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏢",
     featherIcon: "shield",
     ionicon: "business-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#4F46E5",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "HOA fees, condo dues, security & admin dues",
   },
   {
@@ -105,9 +129,11 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🔥",
     featherIcon: "sun",
     ionicon: "flame-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
-    accentColor: "#DC2626",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
+    accentColor: "#64748B",
     description: "Cooking gas cylinder & refill",
   },
   {
@@ -116,12 +142,32 @@ export const BILL_CATEGORIES: BillCategory[] = [
     emoji: "🏷️",
     featherIcon: "tag",
     ionicon: "pricetag-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
     accentColor: "#64748B",
     description: "Custom or miscellaneous expense (Specify below)",
   },
 ];
+
+export function getCategoryVisuals(
+  categoryMeta: BillCategory,
+  isDark?: boolean,
+): CategoryVisuals {
+  if (isDark) {
+    return {
+      iconColor: categoryMeta.darkColor || "#60A5FA",
+      bgColor: categoryMeta.darkBgColor || "rgba(255, 255, 255, 0.08)",
+      borderColor: "rgba(255, 255, 255, 0.06)",
+    };
+  }
+  return {
+    iconColor: categoryMeta.color,
+    bgColor: categoryMeta.bgColor,
+    borderColor: "transparent",
+  };
+}
 
 export function getCategoryMeta(rawCategory?: string): BillCategory {
   if (!rawCategory) {
@@ -131,7 +177,11 @@ export function getCategoryMeta(rawCategory?: string): BillCategory {
   const clean = rawCategory.trim();
   const lower = clean.toLowerCase();
 
-  if (lower.includes("rent") || lower.includes("room") || lower.includes("lease")) {
+  if (
+    lower.includes("rent") ||
+    lower.includes("room") ||
+    lower.includes("lease")
+  ) {
     return BILL_CATEGORIES.find((c) => c.id === "Rent")!;
   }
   if (
@@ -214,8 +264,10 @@ export function getCategoryMeta(rawCategory?: string): BillCategory {
     emoji: "🏷️",
     featherIcon: "tag",
     ionicon: "pricetag-outline",
-    color: "#0F172A",
-    bgColor: "rgba(15, 23, 42, 0.05)",
+    color: "#475569",
+    bgColor: "rgba(100, 116, 139, 0.12)",
+    darkColor: "#94A3B8",
+    darkBgColor: "rgba(148, 163, 184, 0.20)",
     accentColor: "#64748B",
     description: displayLabel,
   };

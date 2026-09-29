@@ -21,6 +21,8 @@ import {
   MobileExpense,
   isPayorMember,
   cleanBillTitle,
+  buildRealNotificationsList,
+  isNotificationItemUnread,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -32,6 +34,7 @@ import {
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { getCategoryMeta } from "../services/categoryService";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { useTheme } from "../context/ThemeContext";
 
 interface HomeScreenProps {
   onNavigate: (tab: string) => void;
@@ -43,6 +46,7 @@ interface HomeScreenProps {
   onOpenManageGroup?: (mode?: "details" | "create" | "join") => void;
   onOpenReports?: () => void;
   onOpenHostApplication?: () => void;
+  onOpenNotifications?: () => void;
   currentUser?: { name: string; avatar: string };
 }
 
@@ -103,6 +107,7 @@ export function getBillDueStatus(
   bill: any,
   activeCycle?: any,
   cycles?: any[],
+  isDark?: boolean,
 ): {
   status: "pay_now" | "due_soon" | "due_far";
   label: string;
@@ -163,9 +168,9 @@ export function getBillDueStatus(
     return {
       status: "pay_now",
       label: "Pay now",
-      badgeBg: "#FEE2E2",
-      badgeBorder: "#FECACA",
-      textColor: "#DC2626",
+      badgeBg: isDark ? "rgba(239, 68, 68, 0.16)" : "#FEE2E2",
+      badgeBorder: isDark ? "rgba(239, 68, 68, 0.3)" : "#FECACA",
+      textColor: isDark ? "#F87171" : "#DC2626",
       diffDays,
     };
   } else if (diffDays <= 3) {
@@ -173,9 +178,9 @@ export function getBillDueStatus(
     return {
       status: "due_soon",
       label: "Due soon",
-      badgeBg: "#FEF3C7",
-      badgeBorder: "#FDE68A",
-      textColor: "#D97706",
+      badgeBg: isDark ? "rgba(245, 158, 11, 0.16)" : "#FEF3C7",
+      badgeBorder: isDark ? "rgba(245, 158, 11, 0.3)" : "#FDE68A",
+      textColor: isDark ? "#FBBF24" : "#D97706",
       diffDays,
     };
   } else {
@@ -183,9 +188,9 @@ export function getBillDueStatus(
     return {
       status: "due_far",
       label: diffDays <= 7 ? `Due in ${diffDays}d` : "Due later",
-      badgeBg: "#DCFCE7",
-      badgeBorder: "#BBF7D0",
-      textColor: "#16A34A",
+      badgeBg: isDark ? "rgba(16, 185, 129, 0.16)" : "#DCFCE7",
+      badgeBorder: isDark ? "rgba(16, 185, 129, 0.3)" : "#BBF7D0",
+      textColor: isDark ? "#34D399" : "#16A34A",
       diffDays,
     };
   }
@@ -201,8 +206,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenManageGroup,
   onOpenReports,
   onOpenHostApplication,
+  onOpenNotifications,
   currentUser = { name: "Resident", avatar: "R" },
 }) => {
+  const { isDark, toggleTheme, cycleTheme, themeMode, colors } = useTheme();
   const firebaseUser = auth.currentUser;
   const cachedInitialProfile = mobileDataService.getCachedProfile(
     firebaseUser?.uid,
@@ -247,6 +254,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     useState<boolean>(false);
   const [joinCodeInput, setJoinCodeInput] = useState<string>("");
   const [joinLoading, setJoinLoading] = useState<boolean>(false);
+  const [cloudNotifications, setCloudNotifications] = useState<any[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<
+    Record<string, boolean>
+  >(() => mobileDataService.getCachedReadNotifications());
 
   const activeCycle =
     cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
@@ -329,6 +340,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       ]).start();
     }
   }, [initialLoading]);
+
+  useEffect(() => {
+    const uid = firebaseUser?.uid;
+    const unsubRead = mobileDataService.listenToReadNotificationIds(
+      uid,
+      setReadNotificationIds,
+    );
+    const unsubNotifs = mobileDataService.listenToNotifications(
+      uid,
+      setCloudNotifications,
+    );
+    return () => {
+      unsubRead();
+      unsubNotifs();
+    };
+  }, [firebaseUser?.uid]);
 
   useEffect(() => {
     let mounted = true;
@@ -996,6 +1023,66 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const latestActivity = recentActivities[0];
 
+  const realNotifications = useMemo(() => {
+    const hhName =
+      household?.householdName ||
+      household?.name ||
+      profile?.householdName ||
+      profile?.apartmentName ||
+      "Household";
+    return buildRealNotificationsList({
+      uid: firebaseUser?.uid,
+      householdId,
+      groupName: hhName,
+      expenses,
+      payments,
+      cycles,
+      cycleAttendance,
+      members,
+      cloudNotifications,
+    });
+  }, [
+    firebaseUser?.uid,
+    householdId,
+    household?.householdName,
+    household?.name,
+    profile?.householdName,
+    profile?.apartmentName,
+    expenses,
+    payments,
+    cycles,
+    cycleAttendance,
+    members,
+    cloudNotifications,
+  ]);
+
+  useEffect(() => {
+    if (!firebaseUser?.uid || initialLoading || realNotifications.length === 0)
+      return;
+    mobileDataService
+      .syncRealNotificationsToCloud(
+        firebaseUser.uid,
+        householdId,
+        realNotifications,
+        cloudNotifications,
+        readNotificationIds,
+      )
+      .catch(() => {});
+  }, [
+    firebaseUser?.uid,
+    householdId,
+    initialLoading,
+    realNotifications,
+    cloudNotifications,
+    readNotificationIds,
+  ]);
+
+  const hasUnreadNotifications = useMemo(() => {
+    return realNotifications.some((item) =>
+      isNotificationItemUnread(item, readNotificationIds),
+    );
+  }, [realNotifications, readNotificationIds]);
+
   const recentPayerName =
     payments.length > 0 && payments[0]?.payerName
       ? payments[0].payerName
@@ -1046,9 +1133,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent
         backgroundColor="transparent"
       />
@@ -1062,22 +1149,74 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       >
         {/* Fixed Status Bar Shield & Top Bar: Splitzy Logo & Actions */}
         <View
-          style={[styles.fixedHeaderContainer, { paddingTop: topInset + 6 }]}
+          style={[
+            styles.fixedHeaderContainer,
+            {
+              paddingTop: topInset + 6,
+              backgroundColor: colors.background,
+              borderBottomColor: colors.border,
+            },
+          ]}
         >
           <View style={styles.topBar}>
-            <Text style={styles.logoText}>Splitzy</Text>
+            <Text style={[styles.logoText, { color: colors.text }]}>
+              Splitzy
+            </Text>
 
             <View style={styles.topBarActions}>
-              {/* Notification Bell with red dot */}
+              {/* Quick 3-Mode Theme Toggle (Light -> OLED Dark -> System) */}
               <TouchableOpacity
-                style={styles.iconCircleButton}
+                style={[
+                  styles.iconCircleButton,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+                activeOpacity={0.75}
+                onPress={cycleTheme}
+                accessibilityLabel={`Theme mode ${themeMode}, tap to switch`}
+                accessibilityHint="Cycles between Light, OLED Dark, and System theme"
+              >
+                {themeMode === "light" ? (
+                  <Feather name="sun" size={19} color="#D97706" />
+                ) : themeMode === "dark" ? (
+                  <Feather name="moon" size={19} color="#60A5FA" />
+                ) : (
+                  <Ionicons
+                    name="phone-portrait-outline"
+                    size={18}
+                    color={isDark ? "#FFFFFF" : "#0F172A"}
+                  />
+                )}
+              </TouchableOpacity>
+
+              {/* Notification Bell with red dot shown ONLY when there are unread notifications */}
+              <TouchableOpacity
+                style={[
+                  styles.iconCircleButton,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
                 activeOpacity={0.8}
                 onPress={() => {
-                  setShowActivitiesModal(true);
+                  if (onOpenNotifications) {
+                    onOpenNotifications();
+                  } else {
+                    setShowActivitiesModal(true);
+                  }
                 }}
               >
-                <Feather name="bell" size={20} color="#0F172A" />
-                <View style={styles.notificationDot} />
+                <Feather
+                  name="bell"
+                  size={20}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+                {hasUnreadNotifications && (
+                  <View style={styles.notificationDot} />
+                )}
               </TouchableOpacity>
 
               {/* Profile Avatar Image */}
@@ -1126,21 +1265,48 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           >
             {/* Greeting Section */}
             <View style={styles.greetingSection}>
-              <Text style={styles.greetingTitle}>Hi {greetingName}!</Text>
-              <Text style={styles.greetingSubtitle}>
+              <Text
+                style={[styles.greetingTitle, isDark && { color: colors.text }]}
+              >
+                Hi {greetingName}!
+              </Text>
+              <Text
+                style={[
+                  styles.greetingSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Control your expenses here.
               </Text>
             </View>
 
             {/* Pending Request Status Notice */}
             {profile?.joinRequestStatus === "PENDING" && (
-              <View style={styles.noticeBannerPending}>
-                <Feather name="clock" size={20} color="#D97706" />
+              <View
+                style={[
+                  styles.noticeBannerPending,
+                  isDark && {
+                    backgroundColor: "rgba(245, 158, 11, 0.12)",
+                    borderColor: "rgba(245, 158, 11, 0.25)",
+                  },
+                ]}
+              >
+                <Feather name="clock" size={20} color="#F59E0B" />
                 <View style={styles.noticeBannerTextWrap}>
-                  <Text style={styles.noticeBannerTitle}>
+                  <Text
+                    style={[
+                      styles.noticeBannerTitle,
+                      isDark && { color: "#FBBF24" },
+                    ]}
+                  >
                     Join Request Pending Approval
                   </Text>
-                  <Text style={styles.noticeBannerSubtitle}>
+                  <Text
+                    style={[
+                      styles.noticeBannerSubtitle,
+                      isDark && { color: "#FCD34D" },
+                    ]}
+                  >
                     Waiting for the host of{" "}
                     {profile.pendingHouseholdName || "the household"} to approve
                     your request.
@@ -1150,13 +1316,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             )}
 
             {profile?.joinRequestStatus === "REJECTED" && (
-              <View style={styles.noticeBannerRejected}>
-                <Feather name="alert-circle" size={20} color="#E11D48" />
+              <View
+                style={[
+                  styles.noticeBannerRejected,
+                  isDark && {
+                    backgroundColor: "rgba(239, 68, 68, 0.12)",
+                    borderColor: "rgba(239, 68, 68, 0.25)",
+                  },
+                ]}
+              >
+                <Feather name="alert-circle" size={20} color="#EF4444" />
                 <View style={styles.noticeBannerTextWrap}>
-                  <Text style={styles.noticeBannerRejectedTitle}>
+                  <Text
+                    style={[
+                      styles.noticeBannerRejectedTitle,
+                      isDark && { color: "#F87171" },
+                    ]}
+                  >
                     Join Request Declined
                   </Text>
-                  <Text style={styles.noticeBannerRejectedSubtitle}>
+                  <Text
+                    style={[
+                      styles.noticeBannerRejectedSubtitle,
+                      isDark && { color: "#FCA5A5" },
+                    ]}
+                  >
                     Reason: {profile.joinRejectionReason || "Declined by host"}.
                   </Text>
                 </View>
@@ -1169,23 +1353,35 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     })
                   }
                 >
-                  <Feather name="x" size={16} color="#E11D48" />
+                  <Feather
+                    name="x"
+                    size={16}
+                    color={isDark ? "#F87171" : "#E11D48"}
+                  />
                 </TouchableOpacity>
               </View>
             )}
 
             {/* Search Bar Capsule */}
-            <View style={styles.searchBarContainer}>
+            <View
+              style={[
+                styles.searchBarContainer,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <Feather
                 name="search"
                 size={19}
-                color="#64748B"
+                color={isDark ? colors.textMuted : "#64748B"}
                 style={styles.searchIcon}
               />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, isDark && { color: colors.text }]}
                 placeholder="Search group or expenses"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 returnKeyType="search"
@@ -1196,17 +1392,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   onPress={() => setSearchQuery("")}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Feather name="x" size={16} color="#94A3B8" />
+                  <Feather
+                    name="x"
+                    size={16}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                  />
                 </TouchableOpacity>
               )}
             </View>
 
             {/* Recent Updates Section */}
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Updates</Text>
+              <Text
+                style={[styles.sectionTitle, isDark && { color: colors.text }]}
+              >
+                Recent Updates
+              </Text>
               <TouchableOpacity
                 onPress={() => {
-                  if (recentActivities.length > 0) {
+                  if (onOpenNotifications) {
+                    onOpenNotifications();
+                  } else if (recentActivities.length > 0) {
                     setShowActivitiesModal(true);
                   } else if (onOpenExpenseHistory) {
                     onOpenExpenseHistory();
@@ -1215,26 +1421,65 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   }
                 }}
               >
-                <Text style={styles.viewAllText}>View All</Text>
+                <Text
+                  style={[
+                    styles.viewAllText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  View All
+                </Text>
               </TouchableOpacity>
             </View>
 
             {/* Recent Updates Banner Card */}
-            <View style={styles.recentUpdateCard}>
+            <View
+              style={[
+                styles.recentUpdateCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <View style={styles.recentUpdateTextWrap}>
-                <Text style={styles.recentUpdateTitle} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.recentUpdateTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                  numberOfLines={1}
+                >
                   {bannerActivity.title}
                 </Text>
-                <Text style={styles.recentUpdateDesc} numberOfLines={2}>
+                <Text
+                  style={[
+                    styles.recentUpdateDesc,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                  numberOfLines={2}
+                >
                   {bannerActivity.desc}
                 </Text>
               </View>
               <TouchableOpacity
-                style={styles.settleNowButton}
+                style={[
+                  styles.settleNowButton,
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowOpacity: 0,
+                    elevation: 0,
+                  },
+                ]}
                 activeOpacity={0.85}
                 onPress={bannerActivity.onAction}
               >
-                <Text style={styles.settleNowButtonText}>
+                <Text
+                  style={[
+                    styles.settleNowButtonText,
+                    isDark && { color: "#FFFFFF" },
+                  ]}
+                >
                   {bannerActivity.actionText}
                 </Text>
               </TouchableOpacity>
@@ -1242,9 +1487,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* My Groups Section */}
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>My Groups</Text>
+              <Text
+                style={[styles.sectionTitle, isDark && { color: colors.text }]}
+              >
+                My Groups
+              </Text>
               <TouchableOpacity onPress={handleOpenGroupView}>
-                <Text style={styles.viewAllText}>View All</Text>
+                <Text
+                  style={[
+                    styles.viewAllText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  View All
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -1456,7 +1712,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
                 {/* Add Bills (Host) or View Group (Member) or Create/Join Button */}
                 <TouchableOpacity
-                  style={styles.groupCardBlueButton}
+                  style={[
+                    styles.groupCardBlueButton,
+                    isDark && {
+                      backgroundColor: "rgba(255, 255, 255, 0.16)",
+                      borderWidth: 1,
+                      borderColor: "rgba(255, 255, 255, 0.25)",
+                    },
+                  ]}
                   activeOpacity={0.85}
                   onPress={() => {
                     if (hasGroup) {
@@ -1473,7 +1736,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     }
                   }}
                 >
-                  <Text style={styles.groupCardBlueButtonText}>
+                  <Text
+                    style={[
+                      styles.groupCardBlueButtonText,
+                      isDark && { color: "#FFFFFF" },
+                    ]}
+                  >
                     {hasGroup
                       ? isHost
                         ? "Add Bills"
@@ -1487,33 +1755,86 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
               {/* Card 2: Clean Join Card */}
               <TouchableOpacity
-                style={styles.groupCardLight}
+                style={[
+                  styles.groupCardLight,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
                 activeOpacity={0.92}
                 onPress={() => setShowJoinModal(true)}
               >
                 <View style={styles.groupCardLightHeader}>
-                  <Text style={styles.groupCardLightTitle} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.groupCardLightTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
                     Join a Room
                   </Text>
-                  <View style={styles.groupCardLightIconWrap}>
-                    <Feather name="user-plus" size={16} color="#0F172A" />
+                  <View
+                    style={[
+                      styles.groupCardLightIconWrap,
+                      isDark && { backgroundColor: colors.surfaceInset },
+                    ]}
+                  >
+                    <Feather
+                      name="user-plus"
+                      size={16}
+                      color={isDark ? colors.text : "#0F172A"}
+                    />
                   </View>
                 </View>
-                <Text style={styles.groupCardLightSubtitle}>
+                <Text
+                  style={[
+                    styles.groupCardLightSubtitle,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Have an invite code from your host?
                 </Text>
 
-                <View style={styles.joinCodePillPreview}>
-                  <Feather name="hash" size={13} color="#0F172A" />
-                  <Text style={styles.joinCodePillText}>Invite Code</Text>
+                <View
+                  style={[
+                    styles.joinCodePillPreview,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="hash"
+                    size={13}
+                    color={isDark ? colors.textSecondary : "#0F172A"}
+                  />
+                  <Text
+                    style={[
+                      styles.joinCodePillText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Invite Code
+                  </Text>
                 </View>
 
                 <TouchableOpacity
-                  style={styles.groupCardLightButton}
+                  style={[
+                    styles.groupCardLightButton,
+                    isDark && { backgroundColor: colors.cardSecondary },
+                  ]}
                   activeOpacity={0.85}
                   onPress={() => setShowJoinModal(true)}
                 >
-                  <Text style={styles.groupCardLightButtonText}>
+                  <Text
+                    style={[
+                      styles.groupCardLightButtonText,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
                     Enter Code
                   </Text>
                 </TouchableOpacity>
@@ -1523,23 +1844,45 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <TouchableOpacity
                 style={[
                   styles.groupCardAdd,
-                  !isHost && {
-                    borderColor: "#E2E8F0",
-                    backgroundColor: "#F8FAFC",
-                  },
+                  isDark
+                    ? {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      }
+                    : !isHost && {
+                        borderColor: "#E2E8F0",
+                        backgroundColor: "#F8FAFC",
+                      },
                 ]}
                 activeOpacity={0.85}
                 onPress={handleCreateGroupPress}
               >
-                <View style={styles.groupCardAddIconWrap}>
+                <View
+                  style={[
+                    styles.groupCardAddIconWrap,
+                    isDark && { backgroundColor: colors.surfaceInset },
+                  ]}
+                >
                   <Feather
                     name={isHost ? "plus" : "shield"}
                     size={22}
-                    color="#0F172A"
+                    color={isDark ? colors.text : "#0F172A"}
                   />
                 </View>
-                <Text style={styles.groupCardAddTitle}>Create Group</Text>
-                <Text style={styles.groupCardAddSubtitle}>
+                <Text
+                  style={[
+                    styles.groupCardAddTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Create Group
+                </Text>
+                <Text
+                  style={[
+                    styles.groupCardAddSubtitle,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   {isHost ? "Start New Household" : "Host Access Only"}
                 </Text>
                 {!isHost && (
@@ -1548,21 +1891,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       flexDirection: "row",
                       alignItems: "center",
                       gap: 4,
-                      backgroundColor: "#EFF6FF",
+                      backgroundColor: isDark
+                        ? "rgba(37, 99, 235, 0.15)"
+                        : "#EFF6FF",
                       paddingHorizontal: 8,
                       paddingVertical: 3,
                       borderRadius: 12,
                       marginTop: 6,
                       borderWidth: 1,
-                      borderColor: "#BFDBFE",
+                      borderColor: isDark
+                        ? "rgba(37, 99, 235, 0.3)"
+                        : "#BFDBFE",
                     }}
                   >
-                    <Feather name="lock" size={10} color="#2563EB" />
+                    <Feather
+                      name="lock"
+                      size={10}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
                     <Text
                       style={{
                         fontSize: 10,
                         fontWeight: "700",
-                        color: "#2563EB",
+                        color: isDark ? colors.accent : "#2563EB",
                       }}
                     >
                       Host Guard
@@ -1577,37 +1928,87 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
               >
-                <Text style={styles.sectionTitle}>Upcoming Bills</Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Upcoming Bills
+                </Text>
                 {upcomingBills.length > 0 && (
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countBadgeText}>
+                  <View
+                    style={[
+                      styles.countBadge,
+                      isDark && {
+                        backgroundColor: colors.cardSecondary,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.countBadgeText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
                       {upcomingBills.length}
                     </Text>
                   </View>
                 )}
               </View>
               <TouchableOpacity onPress={() => onNavigate("bills")}>
-                <Text style={styles.viewAllText}>View All</Text>
+                <Text
+                  style={[
+                    styles.viewAllText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  View All
+                </Text>
               </TouchableOpacity>
             </View>
 
             {/* Upcoming Bills List */}
             <View style={styles.expenseList}>
               {upcomingBills.length === 0 ? (
-                <View style={styles.emptyCard}>
-                  <View style={styles.emptyIconWrap}>
+                <View
+                  style={[
+                    styles.emptyCard,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.emptyIconWrap,
+                      isDark && { backgroundColor: colors.surfaceInset },
+                    ]}
+                  >
                     <Ionicons
                       name="checkmark-done-circle-outline"
                       size={24}
                       color="#10B981"
                     />
                   </View>
-                  <Text style={styles.emptyTitle}>
+                  <Text
+                    style={[
+                      styles.emptyTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     {searchQuery.trim()
                       ? "No matching upcoming bills"
                       : "No upcoming bills right now"}
                   </Text>
-                  <Text style={styles.emptySub}>
+                  <Text
+                    style={[
+                      styles.emptySub,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {searchQuery.trim()
                       ? "Try searching another keyword or clear your query."
                       : hasGroup
@@ -1617,7 +2018,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </View>
               ) : (
                 upcomingBills.map((bill) => {
-                  const dueInfo = getBillDueStatus(bill, activeCycle, cycles);
+                  const dueInfo = getBillDueStatus(
+                    bill,
+                    activeCycle,
+                    cycles,
+                    isDark,
+                  );
                   const isWaterBill = (bill.category || "")
                     .toLowerCase()
                     .includes("water");
@@ -1642,17 +2048,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       key={`bill_${bill.id}`}
                       style={
                         isWaterBill
-                          ? styles.waterUpcomingCardWrapper
+                          ? [
+                              styles.waterUpcomingCardWrapper,
+                              isDark && {
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                              },
+                            ]
                           : undefined
                       }
                     >
                       <TouchableOpacity
                         style={[
                           styles.upcomingBillCard,
+                          isDark && {
+                            backgroundColor: colors.card,
+                            borderColor: colors.border,
+                          },
                           isWaterBill && {
                             borderWidth: 0,
                             borderRadius: 0,
-                            backgroundColor: "#FFFFFF",
+                            backgroundColor: isDark ? colors.card : "#FFFFFF",
                           },
                         ]}
                         activeOpacity={0.85}
@@ -1671,7 +2087,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         <View
                           style={[
                             styles.upcomingBillIconContainer,
-                            { backgroundColor: bill.categoryMeta.bgColor },
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.06)"
+                                : bill.categoryMeta.bgColor,
+                            },
                           ]}
                         >
                           <Feather
@@ -1684,7 +2104,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         {/* Middle Title & Details - aligned flex-start */}
                         <View style={styles.upcomingBillDetailsWrap}>
                           <Text
-                            style={styles.upcomingBillTitle}
+                            style={[
+                              styles.upcomingBillTitle,
+                              isDark && { color: colors.text },
+                            ]}
                             numberOfLines={2}
                           >
                             {cleanBillTitle(
@@ -1694,7 +2117,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             )}
                           </Text>
                           <Text
-                            style={styles.upcomingBillSubtitle}
+                            style={[
+                              styles.upcomingBillSubtitle,
+                              isDark && { color: colors.textSecondary },
+                            ]}
                             numberOfLines={1}
                           >
                             {isWaterBill
@@ -1702,14 +2128,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               : `${bill.date} · Added by ${bill.payerName}`}
                           </Text>
                           {isCurrentUserPayor && bill.myShareCents > 0 ? (
-                            <Text style={styles.upcomingBillShareText}>
+                            <Text
+                              style={[
+                                styles.upcomingBillShareText,
+                                isDark && { color: colors.accent },
+                              ]}
+                            >
                               Your share: {bill.myShareFormatted}
                             </Text>
                           ) : !isCurrentUserPayor ? (
                             <Text
                               style={[
                                 styles.upcomingBillShareText,
-                                { color: "#64748B" },
+                                {
+                                  color: isDark ? colors.textMuted : "#64748B",
+                                },
                               ]}
                             >
                               Exempt (Non-payor)
@@ -1749,7 +2182,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             </Text>
                           </TouchableOpacity>
                           <View style={styles.upcomingBillAmountWrap}>
-                            <Text style={styles.billTotalAmountText}>
+                            <Text
+                              style={[
+                                styles.billTotalAmountText,
+                                isDark && { color: colors.text },
+                              ]}
+                            >
                               {isWaterBill
                                 ? formatPesos(effectiveHouseholdTotal)
                                 : formatPesos(bill.amountCents)}
@@ -1762,7 +2200,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       {isWaterBill && (
                         <>
                           <TouchableOpacity
-                            style={styles.waterDropdownButton}
+                            style={[
+                              styles.waterDropdownButton,
+                              isDark && {
+                                backgroundColor: colors.cardSecondary,
+                                borderTopColor: colors.border,
+                              },
+                            ]}
                             activeOpacity={0.7}
                             onPress={() => toggleWaterBillDropdown(bill.id)}
                           >
@@ -1776,9 +2220,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               <Feather
                                 name="droplet"
                                 size={13}
-                                color="#0284C7"
+                                color={isDark ? colors.accent : "#0284C7"}
                               />
-                              <Text style={styles.waterDropdownButtonText}>
+                              <Text
+                                style={[
+                                  styles.waterDropdownButtonText,
+                                  isDark && { color: colors.accent },
+                                ]}
+                              >
                                 {isExpanded
                                   ? "Hide Water Breakdown"
                                   : "View Water Breakdown"}
@@ -1787,12 +2236,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             <Feather
                               name={isExpanded ? "chevron-up" : "chevron-down"}
                               size={16}
-                              color="#0284C7"
+                              color={isDark ? colors.accent : "#0284C7"}
                             />
                           </TouchableOpacity>
 
                           {isExpanded && (
-                            <View style={styles.waterBreakdownCard}>
+                            <View
+                              style={[
+                                styles.waterBreakdownCard,
+                                isDark && {
+                                  backgroundColor: colors.surfaceInset,
+                                  borderTopColor: colors.border,
+                                },
+                              ]}
+                            >
                               <View style={styles.waterBreakdownTopRow}>
                                 <View
                                   style={{
@@ -1804,14 +2261,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                   <Feather
                                     name="users"
                                     size={14}
-                                    color="#0369A1"
+                                    color={isDark ? colors.accent : "#0369A1"}
                                   />
-                                  <Text style={styles.waterBreakdownTitle}>
+                                  <Text
+                                    style={[
+                                      styles.waterBreakdownTitle,
+                                      isDark && { color: colors.text },
+                                    ]}
+                                  >
                                     Water Split Breakdown
                                   </Text>
                                 </View>
-                                <View style={styles.waterRateTag}>
-                                  <Text style={styles.waterRateTagText}>
+                                <View
+                                  style={[
+                                    styles.waterRateTag,
+                                    isDark && {
+                                      backgroundColor: colors.cardSecondary,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.waterRateTagText,
+                                      isDark && { color: colors.accent },
+                                    ]}
+                                  >
                                     ₱
                                     {(
                                       (waterConfig?.rateCentavosPerPersonPerDay ??
@@ -1821,7 +2295,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                   </Text>
                                 </View>
                               </View>
-                              <Text style={styles.waterBreakdownNote}>
+                              <Text
+                                style={[
+                                  styles.waterBreakdownNote,
+                                  isDark && { color: colors.textSecondary },
+                                ]}
+                              >
                                 Payors pay their own water + water from
                                 non-payors. Non-payors are exempt.
                               </Text>
@@ -1832,8 +2311,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                     key={item.userId}
                                     style={[
                                       styles.waterBreakdownRow,
+                                      isDark && {
+                                        backgroundColor: colors.card,
+                                        borderColor: colors.border,
+                                      },
                                       item.isCurrentUser &&
                                         styles.waterBreakdownRowCurrent,
+                                      item.isCurrentUser &&
+                                        isDark && {
+                                          backgroundColor:
+                                            "rgba(59, 130, 246, 0.12)",
+                                          borderColor: colors.borderHighlighted,
+                                        },
                                     ]}
                                   >
                                     <View style={{ flex: 1, marginRight: 8 }}>
@@ -1847,6 +2336,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                         <Text
                                           style={[
                                             styles.waterMemberName,
+                                            isDark && { color: colors.text },
                                             item.isCurrentUser &&
                                               styles.waterMemberNameCurrent,
                                           ]}
@@ -1863,13 +2353,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                           </View>
                                         )}
                                         <View
-                                          style={
+                                          style={[
                                             item.role === "NON_PAYOR"
                                               ? styles.waterNonPayorPill
                                               : item.role === "HOST"
                                                 ? styles.waterHostPill
-                                                : styles.waterPayorPill
-                                          }
+                                                : styles.waterPayorPill,
+                                            isDark &&
+                                              (item.role === "NON_PAYOR"
+                                                ? {
+                                                    backgroundColor:
+                                                      "rgba(168, 85, 247, 0.18)",
+                                                  }
+                                                : item.role === "HOST"
+                                                  ? {
+                                                      backgroundColor:
+                                                        "rgba(59, 130, 246, 0.18)",
+                                                    }
+                                                  : {
+                                                      backgroundColor:
+                                                        "rgba(245, 158, 11, 0.18)",
+                                                    }),
+                                          ]}
                                         >
                                           <Text
                                             style={
@@ -1888,7 +2393,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                           </Text>
                                         </View>
                                       </View>
-                                      <Text style={styles.waterMemberMeta}>
+                                      <Text
+                                        style={[
+                                          styles.waterMemberMeta,
+                                          isDark && {
+                                            color: colors.textSecondary,
+                                          },
+                                        ]}
+                                      >
                                         {item.daysPresent} days present ·{" "}
                                         {item.role === "NON_PAYOR"
                                           ? "Exempted"
@@ -1901,6 +2413,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                       <Text
                                         style={[
                                           styles.waterMemberAmount,
+                                          isDark && { color: colors.text },
                                           item.isCurrentUser &&
                                             styles.waterMemberAmountCurrent,
                                         ]}
@@ -1911,7 +2424,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                               item.totalShareCentavos,
                                             )}
                                       </Text>
-                                      <Text style={styles.waterMemberSub}>
+                                      <Text
+                                        style={[
+                                          styles.waterMemberSub,
+                                          isDark && {
+                                            color: colors.textMuted,
+                                          },
+                                        ]}
+                                      >
                                         {item.role === "NON_PAYOR"
                                           ? "Exempt"
                                           : "Water Share"}
@@ -1921,11 +2441,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                 ))}
                               </View>
 
-                              <View style={styles.waterBreakdownFooter}>
-                                <Text style={styles.waterBreakdownFooterText}>
+                              <View
+                                style={[
+                                  styles.waterBreakdownFooter,
+                                  isDark && {
+                                    borderTopColor: colors.border,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.waterBreakdownFooterText,
+                                    isDark && {
+                                      color: colors.textSecondary,
+                                    },
+                                  ]}
+                                >
                                   Water Total:
                                 </Text>
-                                <Text style={styles.waterBreakdownFooterAmount}>
+                                <Text
+                                  style={[
+                                    styles.waterBreakdownFooterAmount,
+                                    isDark && { color: colors.text },
+                                  ]}
+                                >
                                   {formatPesos(effectiveHouseholdTotal)}
                                 </Text>
                               </View>
@@ -1941,29 +2480,63 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* Recent Expenses Section (Settled & Paid items) */}
             <View style={[styles.sectionHeader, { marginTop: 24 }]}>
-              <Text style={styles.sectionTitle}>Recent Expenses</Text>
+              <Text
+                style={[styles.sectionTitle, isDark && { color: colors.text }]}
+              >
+                Recent Expenses
+              </Text>
               <TouchableOpacity onPress={onOpenExpenseHistory}>
-                <Text style={styles.viewAllText}>View All</Text>
+                <Text
+                  style={[
+                    styles.viewAllText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  View All
+                </Text>
               </TouchableOpacity>
             </View>
 
             {/* Settled Expense Items List */}
             <View style={styles.expenseList}>
               {settledExpenses.length === 0 ? (
-                <View style={styles.emptyCard}>
-                  <View style={styles.emptyIconWrap}>
+                <View
+                  style={[
+                    styles.emptyCard,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.emptyIconWrap,
+                      isDark && { backgroundColor: colors.surfaceInset },
+                    ]}
+                  >
                     <Ionicons
                       name="receipt-outline"
                       size={24}
                       color="#94A3B8"
                     />
                   </View>
-                  <Text style={styles.emptyTitle}>
+                  <Text
+                    style={[
+                      styles.emptyTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     {searchQuery.trim()
                       ? "No matching paid expenses"
                       : "No paid expenses recorded yet"}
                   </Text>
-                  <Text style={styles.emptySub}>
+                  <Text
+                    style={[
+                      styles.emptySub,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     {searchQuery.trim()
                       ? "Try searching another keyword or clear your search."
                       : "Once upcoming bills are settled, they will appear here as completed expenses."}
@@ -1974,7 +2547,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   return (
                     <TouchableOpacity
                       key={`exp_${expense.id}`}
-                      style={styles.expenseItemCard}
+                      style={[
+                        styles.expenseItemCard,
+                        isDark && {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ]}
                       activeOpacity={0.85}
                       onPress={onOpenExpenseHistory}
                     >
@@ -1982,7 +2561,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <View
                         style={[
                           styles.expenseIconContainer,
-                          { backgroundColor: expense.categoryMeta.bgColor },
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(255,255,255,0.06)"
+                              : expense.categoryMeta.bgColor,
+                          },
                         ]}
                       >
                         <Feather
@@ -1994,14 +2577,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
                       {/* Middle Title & Details */}
                       <View style={styles.expenseDetailsWrap}>
-                        <Text style={styles.expenseTitle}>{expense.title}</Text>
-                        <Text style={styles.expenseSubtitle}>
+                        <Text
+                          style={[
+                            styles.expenseTitle,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {expense.title}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.expenseSubtitle,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
                           {expense.date} · Paid by {expense.payerName}
                         </Text>
                       </View>
 
                       {/* Right Negative Amount in Pesos */}
-                      <Text style={styles.expenseAmountText}>
+                      <Text
+                        style={[
+                          styles.expenseAmountText,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
                         {expense.amountFormatted}
                       </Text>
                     </TouchableOpacity>
@@ -2021,35 +2621,72 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         showChipBar={true}
         title="Join Household Group"
         subtitle="Enter invite code or group ID"
-        icon={<Ionicons name="key" size={18} color="#0F172A" />}
+        icon={
+          <Ionicons
+            name="key"
+            size={18}
+            color={isDark ? colors.text : "#0F172A"}
+          />
+        }
       >
         <View style={{ paddingTop: 4 }}>
-          <Text style={styles.inputLabel}>Household Code (e.g. PF-402)</Text>
+          <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
+            Household Code (e.g. PF-402)
+          </Text>
           <TextInput
-            style={styles.textInput}
+            style={[
+              styles.textInput,
+              isDark && {
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
             placeholder="e.g. PF-402"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             value={joinCodeInput}
             onChangeText={setJoinCodeInput}
             autoCapitalize="characters"
             autoCorrect={false}
           />
-          <Text style={styles.inputHint}>
+          <Text
+            style={[
+              styles.inputHint,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
             Ask your host or roommate to check their Household settings or
             invite code.
           </Text>
 
           <View style={styles.modalBtnRow}>
             <TouchableOpacity
-              style={styles.modalCancelBtn}
+              style={[
+                styles.modalCancelBtn,
+                isDark && {
+                  backgroundColor: colors.cardSecondary,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setShowJoinModal(false)}
               disabled={joinLoading}
             >
-              <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              <Text
+                style={[
+                  styles.modalCancelBtnText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.modalSubmitBtn, joinLoading && { opacity: 0.7 }]}
+              style={[
+                styles.modalSubmitBtn,
+                isDark && { backgroundColor: colors.primary },
+                joinLoading && { opacity: 0.7 },
+              ]}
               onPress={handleJoinByCode}
               disabled={joinLoading}
             >
@@ -2071,7 +2708,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         showChipBar={true}
         title="Recent Updates"
         subtitle="Real-time activity feed for your room"
-        icon={<Feather name="activity" size={18} color="#0F172A" />}
+        icon={
+          <Feather
+            name="activity"
+            size={18}
+            color={isDark ? colors.text : "#0F172A"}
+          />
+        }
         maxHeight="86%"
       >
         <ScrollView
@@ -2080,7 +2723,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         >
           {recentActivities.length === 0 ? (
             <View style={{ paddingVertical: 28, alignItems: "center" }}>
-              <Text style={{ fontSize: 13, color: "#94A3B8" }}>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: isDark ? colors.textMuted : "#94A3B8",
+                }}
+              >
                 No recent activities yet.
               </Text>
             </View>
@@ -2088,7 +2736,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             recentActivities.map((act) => (
               <TouchableOpacity
                 key={act.id}
-                style={styles.activityRow}
+                style={[
+                  styles.activityRow,
+                  isDark && { borderBottomColor: colors.border },
+                ]}
                 activeOpacity={0.8}
                 onPress={() => {
                   setShowActivitiesModal(false);
@@ -2098,23 +2749,54 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <View
                   style={[
                     styles.activityIconCircle,
-                    { backgroundColor: "rgba(15, 23, 42, 0.05)" },
+                    {
+                      backgroundColor: isDark
+                        ? colors.surfaceInset
+                        : "rgba(15, 23, 42, 0.05)",
+                    },
                   ]}
                 >
-                  <Feather name={act.icon} size={16} color="#0F172A" />
+                  <Feather
+                    name={act.icon}
+                    size={16}
+                    color={isDark ? colors.text : "#0F172A"}
+                  />
                 </View>
                 <View style={{ flex: 1, marginLeft: 10, marginRight: 8 }}>
-                  <Text style={styles.activityTitle}>{act.title}</Text>
-                  <Text style={styles.activityDesc} numberOfLines={2}>
+                  <Text
+                    style={[
+                      styles.activityTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {act.title}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityDesc,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                    numberOfLines={2}
+                  >
                     {act.desc}
                   </Text>
-                  <Text style={styles.activityTime}>{act.dateFormatted}</Text>
-                </View>
-                <View style={styles.activityActionBtn}>
-                  <Text style={styles.activityActionText}>
-                    {act.actionText}
+                  <Text
+                    style={[
+                      styles.activityTime,
+                      isDark && { color: colors.textMuted },
+                    ]}
+                  >
+                    {(act as any).time ||
+                      (act as any).timestamp ||
+                      (act as any).dateFormatted ||
+                      ""}
                   </Text>
                 </View>
+                <Feather
+                  name="chevron-right"
+                  size={16}
+                  color={isDark ? colors.textMuted : "#94A3B8"}
+                />
               </TouchableOpacity>
             ))
           )}
@@ -2135,7 +2817,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             style={{
               fontSize: 18,
               fontWeight: "800",
-              color: "#0F172A",
+              color: isDark ? colors.text : "#0F172A",
               textAlign: "center",
               marginBottom: 6,
             }}
@@ -2145,7 +2827,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <Text
             style={{
               fontSize: 13,
-              color: "#64748B",
+              color: isDark ? colors.textSecondary : "#64748B",
               textAlign: "center",
               lineHeight: 19,
               paddingHorizontal: 8,
@@ -2159,10 +2841,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* Informational Guidance Box */}
           <View
             style={{
-              backgroundColor: "#F8FAFC",
+              backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
               borderRadius: 14,
               borderWidth: 1,
-              borderColor: "#E2E8F0",
+              borderColor: isDark ? colors.border : "#E2E8F0",
               padding: 12,
               width: "100%",
               marginBottom: 18,
@@ -2179,7 +2861,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <Feather
                 name="home"
                 size={16}
-                color="#2563EB"
+                color={isDark ? colors.accent : "#2563EB"}
                 style={{ marginTop: 2 }}
               />
               <View style={{ flex: 1 }}>
@@ -2187,7 +2869,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   style={{
                     fontSize: 12,
                     fontWeight: "700",
-                    color: "#1E293B",
+                    color: isDark ? colors.text : "#1E293B",
                   }}
                 >
                   Are you the Property Host?
@@ -2195,7 +2877,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <Text
                   style={{
                     fontSize: 11,
-                    color: "#64748B",
+                    color: isDark ? colors.textSecondary : "#64748B",
                     marginTop: 1,
                     lineHeight: 15,
                   }}
@@ -2206,7 +2888,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </View>
             </View>
 
-            <View style={{ height: 1, backgroundColor: "#E2E8F0" }} />
+            <View
+              style={{
+                height: 1,
+                backgroundColor: isDark ? colors.border : "#E2E8F0",
+              }}
+            />
 
             <View
               style={{
@@ -2218,7 +2905,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <Feather
                 name="users"
                 size={16}
-                color="#059669"
+                color="#10B981"
                 style={{ marginTop: 2 }}
               />
               <View style={{ flex: 1 }}>
@@ -2226,7 +2913,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   style={{
                     fontSize: 12,
                     fontWeight: "700",
-                    color: "#1E293B",
+                    color: isDark ? colors.text : "#1E293B",
                   }}
                 >
                   Are you a Roommate or Tenant?
@@ -2234,7 +2921,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <Text
                   style={{
                     fontSize: 11,
-                    color: "#64748B",
+                    color: isDark ? colors.textSecondary : "#64748B",
                     marginTop: 1,
                     lineHeight: 15,
                   }}
@@ -2250,7 +2937,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <TouchableOpacity
             style={{
               width: "100%",
-              backgroundColor: "#2563EB",
+              backgroundColor: colors.primary,
               paddingVertical: 13,
               borderRadius: 14,
               alignItems: "center",
@@ -2277,9 +2964,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <TouchableOpacity
             style={{
               width: "100%",
-              backgroundColor: "#EFF6FF",
+              backgroundColor: isDark ? colors.cardSecondary : "#EFF6FF",
               borderWidth: 1,
-              borderColor: "#BFDBFE",
+              borderColor: isDark ? colors.border : "#BFDBFE",
               paddingVertical: 13,
               borderRadius: 14,
               alignItems: "center",

@@ -14,6 +14,7 @@ import {
   StyleProp,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useTheme } from "../context/ThemeContext";
 
 export interface SmoothBottomSheetModalProps {
   visible: boolean;
@@ -46,6 +47,7 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
   sheetStyle,
   dismissible = true,
 }) => {
+  const { isDark, colors } = useTheme();
   const [isRendered, setIsRendered] = useState(visible);
   const animValue = useRef(new Animated.Value(0)).current;
 
@@ -154,6 +156,11 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
                 opacity: cardOpacity,
                 transform: [{ translateY }, { scale: cardScale }],
               },
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderTopColor: colors.border,
+              },
               sheetStyle,
             ]}
           >
@@ -165,7 +172,12 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
                 style={styles.chipBarContainer}
                 accessibilityLabel="Modal drag handle"
               >
-                <View style={styles.chipBar} />
+                <View
+                  style={[
+                    styles.chipBar,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.2)" },
+                  ]}
+                />
               </TouchableOpacity>
             )}
 
@@ -173,11 +185,38 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
             {hasHeader && (
               <View style={styles.headerRow}>
                 <View style={styles.headerLeft}>
-                  {icon && <View style={styles.iconWrap}>{icon}</View>}
+                  {icon && (
+                    <View
+                      style={[
+                        styles.iconWrap,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                        },
+                      ]}
+                    >
+                      {icon}
+                    </View>
+                  )}
                   <View style={{ flex: 1 }}>
-                    {title && <Text style={styles.titleText}>{title}</Text>}
+                    {title && (
+                      <Text
+                        style={[
+                          styles.titleText,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        {title}
+                      </Text>
+                    )}
                     {subtitle && (
-                      <Text style={styles.subtitleText}>{subtitle}</Text>
+                      <Text
+                        style={[
+                          styles.subtitleText,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        {subtitle}
+                      </Text>
                     )}
                   </View>
                 </View>
@@ -189,11 +228,22 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
                 {shouldShowCloseBtn && (
                   <TouchableOpacity
                     onPress={handleDismiss}
-                    style={styles.closeBtn}
+                    style={[
+                      styles.closeBtn,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityLabel="Close modal"
                   >
-                    <Feather name="x" size={19} color="#64748B" />
+                    <Feather
+                      name="x"
+                      size={19}
+                      color={isDark ? colors.text : "#64748B"}
+                    />
                   </TouchableOpacity>
                 )}
               </View>

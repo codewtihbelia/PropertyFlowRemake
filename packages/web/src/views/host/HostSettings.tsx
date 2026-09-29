@@ -3,6 +3,7 @@ import { useHousehold } from "../../contexts/HouseholdContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { uploadImageToCloudinary } from "../../services/cloudinaryService";
 import { firebaseDataService } from "../../services/firebaseDataService";
+import { useTheme } from "../../contexts/ThemeContext";
 import {
   Settings,
   Save,
@@ -11,6 +12,9 @@ import {
   User,
   CheckCircle2,
   AlertCircle,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { UniversalLoader } from "../../components/common/UniversalLoader";
 
@@ -21,6 +25,7 @@ export const HostSettings: React.FC = () => {
     loading: householdLoading,
   } = useHousehold();
   const { currentUser, updateProfile, loading: authLoading } = useAuth();
+  const { isDark, toggleTheme, themeMode, setThemeMode } = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (
@@ -108,27 +113,27 @@ export const HostSettings: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider">
+      <div className="bg-white dark:bg-[#0C0E14] rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-xs transition-colors">
+        <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
           <Settings className="w-3.5 h-3.5" />
           <span>Household Configuration</span>
         </div>
-        <h2 className="text-2xl font-extrabold text-slate-900 mt-1">
+        <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white mt-1">
           Host & Household Settings
         </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
           Manage your host profile, avatar and apartment details
         </p>
       </div>
 
       {/* Host Profile & Avatar Card */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider">
+      <div className="bg-white dark:bg-[#0C0E14] rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-xs space-y-4 transition-colors">
+        <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
           <User className="w-3.5 h-3.5" />
           <span>Host Profile</span>
         </div>
 
-        <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+        <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-neutral-900 border border-slate-100 dark:border-white/10">
           <div className="relative group">
             {currentUser.profilePicture || (currentUser as any)?.photoURL ? (
               <img
@@ -200,29 +205,111 @@ export const HostSettings: React.FC = () => {
         )}
 
         <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
             Host Display Name
           </label>
           <input
             type="text"
             value={hostDisplayName}
             onChange={(e) => setHostDisplayName(e.target.value)}
-            className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-blue-600 font-semibold"
+            className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-white/10 dark:bg-neutral-900 dark:text-white rounded-xl focus:outline-blue-600 font-semibold"
           />
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
+      {/* Display & Appearance / Theme Settings */}
+      <div className="bg-white dark:bg-[#0C0E14] rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-xs space-y-4 transition-colors">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+              {isDark ? (
+                <Moon className="w-3.5 h-3.5 text-blue-400" />
+              ) : (
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+              )}
+              <span>Display & Theme</span>
+            </div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-1">
+              Interface Appearance
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              True OLED pitch black mode saves battery and reduces eye strain in
+              low-light environments.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+              isDark ? "bg-blue-600" : "bg-slate-200"
+            }`}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label="Toggle dark mode theme"
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                isDark ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="pt-2 border-t border-slate-100 dark:border-white/10">
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+            Theme Mode Preference
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setThemeMode("light")}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                themeMode === "light"
+                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-600 text-blue-700 dark:text-blue-300 shadow-2xs"
+                  : "bg-white dark:bg-neutral-900 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-800"
+              }`}
+            >
+              <Sun className="w-4 h-4 text-amber-500" />
+              <span>Light</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setThemeMode("dark")}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                themeMode === "dark"
+                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-600 text-blue-700 dark:text-blue-300 shadow-2xs"
+                  : "bg-white dark:bg-neutral-900 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-800"
+              }`}
+            >
+              <Moon className="w-4 h-4 text-blue-400" />
+              <span>OLED Dark</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setThemeMode("system")}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                themeMode === "system"
+                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-600 text-blue-700 dark:text-blue-300 shadow-2xs"
+                  : "bg-white dark:bg-neutral-900 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-800"
+              }`}
+            >
+              <Monitor className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <span>System</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-[#0C0E14] rounded-3xl p-6 border border-slate-200 dark:border-white/10 shadow-xs">
         <form onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Household Title
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-blue-600 font-semibold"
+              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-white/10 dark:bg-neutral-900 dark:text-white rounded-xl focus:outline-blue-600 font-semibold"
             />
           </div>
 
@@ -234,37 +321,37 @@ export const HostSettings: React.FC = () => {
               type="text"
               value={apt}
               onChange={(e) => setApt(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-blue-600 font-semibold"
+              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-white/10 dark:bg-neutral-900 dark:text-white rounded-xl focus:outline-blue-600 font-semibold"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Property Address
             </label>
             <input
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-blue-600 font-semibold"
+              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-white/10 dark:bg-neutral-900 dark:text-white rounded-xl focus:outline-blue-600 font-semibold"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Description
             </label>
             <textarea
               rows={3}
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-blue-600"
+              className="w-full px-3.5 py-2.5 text-xs border border-slate-200 dark:border-white/10 dark:bg-neutral-900 dark:text-white rounded-xl focus:outline-blue-600"
             />
           </div>
 
           <button
             type="submit"
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
           >
             <Save className="w-4 h-4" /> Save Changes
           </button>

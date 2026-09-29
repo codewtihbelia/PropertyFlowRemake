@@ -15,6 +15,7 @@ import {
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { mobileDataService } from "../services/firebaseDataService";
 import { SmoothBottomSheetModal } from "./SmoothBottomSheetModal";
+import { useTheme } from "../context/ThemeContext";
 
 export type WaterPricingModel =
   | "PER_PERSON_DAY"
@@ -41,6 +42,7 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
   initialConfig,
   onSaved,
 }) => {
+  const { isDark, colors } = useTheme();
   const [selectedMode, setSelectedMode] =
     useState<WaterPricingModel>("PER_PERSON_DAY");
   const [dailyRateInput, setDailyRateInput] = useState("5.00");
@@ -167,13 +169,23 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
         contentContainerStyle={styles.scrollBody}
       >
         {/* Segmented Mode Selector */}
-        <Text style={styles.sectionLabel}>Select Pricing Model</Text>
-        <View style={styles.segmentContainer}>
+        <Text style={[styles.sectionLabel, isDark && { color: colors.text }]}>
+          Select Pricing Model
+        </Text>
+        <View
+          style={[
+            styles.segmentContainer,
+            isDark && { backgroundColor: colors.surfaceInset },
+          ]}
+        >
           {/* Mode 1 */}
           <TouchableOpacity
             style={[
               styles.segmentBtn,
-              selectedMode === "PER_PERSON_DAY" && styles.segmentBtnActive,
+              selectedMode === "PER_PERSON_DAY" && [
+                styles.segmentBtnActive,
+                isDark && { backgroundColor: colors.card, shadowColor: "#000" },
+              ],
             ]}
             onPress={() => setSelectedMode("PER_PERSON_DAY")}
             activeOpacity={0.8}
@@ -181,13 +193,24 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
             <Feather
               name="calendar"
               size={14}
-              color={selectedMode === "PER_PERSON_DAY" ? "#0284C7" : "#64748B"}
+              color={
+                selectedMode === "PER_PERSON_DAY"
+                  ? isDark
+                    ? colors.accent
+                    : "#0284C7"
+                  : isDark
+                    ? colors.textMuted
+                    : "#64748B"
+              }
             />
             <Text
               style={[
                 styles.segmentBtnText,
-                selectedMode === "PER_PERSON_DAY" &&
+                isDark && { color: colors.textMuted },
+                selectedMode === "PER_PERSON_DAY" && [
                   styles.segmentBtnTextActive,
+                  isDark && { color: colors.accent },
+                ],
               ]}
             >
               ₱/P/D
@@ -198,7 +221,10 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
           <TouchableOpacity
             style={[
               styles.segmentBtn,
-              selectedMode === "FIXED_MONTHLY" && styles.segmentBtnActive,
+              selectedMode === "FIXED_MONTHLY" && [
+                styles.segmentBtnActive,
+                isDark && { backgroundColor: colors.card, shadowColor: "#000" },
+              ],
             ]}
             onPress={() => setSelectedMode("FIXED_MONTHLY")}
             activeOpacity={0.8}
@@ -206,12 +232,24 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
             <Feather
               name="users"
               size={14}
-              color={selectedMode === "FIXED_MONTHLY" ? "#0284C7" : "#64748B"}
+              color={
+                selectedMode === "FIXED_MONTHLY"
+                  ? isDark
+                    ? colors.accent
+                    : "#0284C7"
+                  : isDark
+                    ? colors.textMuted
+                    : "#64748B"
+              }
             />
             <Text
               style={[
                 styles.segmentBtnText,
-                selectedMode === "FIXED_MONTHLY" && styles.segmentBtnTextActive,
+                isDark && { color: colors.textMuted },
+                selectedMode === "FIXED_MONTHLY" && [
+                  styles.segmentBtnTextActive,
+                  isDark && { color: colors.accent },
+                ],
               ]}
             >
               FMo
@@ -222,8 +260,10 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
           <TouchableOpacity
             style={[
               styles.segmentBtn,
-              selectedMode === "FIXED_PER_PERSON_MONTH" &&
+              selectedMode === "FIXED_PER_PERSON_MONTH" && [
                 styles.segmentBtnActive,
+                isDark && { backgroundColor: colors.card, shadowColor: "#000" },
+              ],
             ]}
             onPress={() => setSelectedMode("FIXED_PER_PERSON_MONTH")}
             activeOpacity={0.8}
@@ -233,15 +273,22 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
               size={14}
               color={
                 selectedMode === "FIXED_PER_PERSON_MONTH"
-                  ? "#0284C7"
-                  : "#64748B"
+                  ? isDark
+                    ? colors.accent
+                    : "#0284C7"
+                  : isDark
+                    ? colors.textMuted
+                    : "#64748B"
               }
             />
             <Text
               style={[
                 styles.segmentBtnText,
-                selectedMode === "FIXED_PER_PERSON_MONTH" &&
+                isDark && { color: colors.textMuted },
+                selectedMode === "FIXED_PER_PERSON_MONTH" && [
                   styles.segmentBtnTextActive,
+                  isDark && { color: colors.accent },
+                ],
               ]}
             >
               F/P/Mo
@@ -252,30 +299,72 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
         {/* Mode-Specific Input Field */}
         {selectedMode === "PER_PERSON_DAY" && (
           <View style={styles.inputSection}>
-            <Text style={styles.inputFieldLabel}>
+            <Text
+              style={[
+                styles.inputFieldLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Daily Water Rate (₱ per person / day present)
             </Text>
-            <View style={styles.currencyInputRow}>
-              <Text style={styles.currencyPrefix}>₱</Text>
+            <View
+              style={[
+                styles.currencyInputRow,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.currencyPrefix,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                ₱
+              </Text>
               <TextInput
-                style={styles.currencyTextInput}
+                style={[
+                  styles.currencyTextInput,
+                  isDark && { color: colors.text },
+                ]}
                 value={dailyRateInput}
                 onChangeText={setDailyRateInput}
                 keyboardType="decimal-pad"
                 placeholder="5.00"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
 
-            <View style={styles.infoCard}>
+            <View
+              style={[
+                styles.infoCard,
+                isDark && {
+                  backgroundColor: "rgba(59, 130, 246, 0.12)",
+                  borderColor: "rgba(59, 130, 246, 0.25)",
+                },
+              ]}
+            >
               <View style={styles.infoIconBox}>
-                <Ionicons name="information-circle" size={18} color="#0284C7" />
+                <Ionicons
+                  name="information-circle"
+                  size={18}
+                  color={isDark ? colors.accent : "#0284C7"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.infoTitle}>
+                <Text
+                  style={[styles.infoTitle, isDark && { color: colors.accent }]}
+                >
                   Daily Attendance Calendar Active
                 </Text>
-                <Text style={styles.infoDesc}>
+                <Text
+                  style={[
+                    styles.infoDesc,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Roommates mark their stay on the interactive calendar. Water
                   dues equal verified days present × ₱{dailyRateInput || "0.00"}
                   . Non-payor consumption is automatically absorbed fairly
@@ -288,30 +377,75 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
 
         {selectedMode === "FIXED_MONTHLY" && (
           <View style={styles.inputSection}>
-            <Text style={styles.inputFieldLabel}>
+            <Text
+              style={[
+                styles.inputFieldLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Total Household Monthly Water Bill (₱)
             </Text>
-            <View style={styles.currencyInputRow}>
-              <Text style={styles.currencyPrefix}>₱</Text>
+            <View
+              style={[
+                styles.currencyInputRow,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.currencyPrefix,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                ₱
+              </Text>
               <TextInput
-                style={styles.currencyTextInput}
+                style={[
+                  styles.currencyTextInput,
+                  isDark && { color: colors.text },
+                ]}
                 value={fixedMonthlyInput}
                 onChangeText={setFixedMonthlyInput}
                 keyboardType="decimal-pad"
                 placeholder="1200.00"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
 
-            <View style={styles.infoCard}>
+            <View
+              style={[
+                styles.infoCard,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.12)",
+                  borderColor: "rgba(16, 185, 129, 0.25)",
+                },
+              ]}
+            >
               <View style={styles.infoIconBox}>
-                <Ionicons name="checkmark-circle" size={18} color="#059669" />
+                <Ionicons
+                  name="checkmark-circle"
+                  size={18}
+                  color={isDark ? colors.success : "#059669"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.infoTitle, { color: "#065F46" }]}>
+                <Text
+                  style={[
+                    styles.infoTitle,
+                    isDark ? { color: colors.success } : { color: "#065F46" },
+                  ]}
+                >
                   No Daily Attendance Required
                 </Text>
-                <Text style={styles.infoDesc}>
+                <Text
+                  style={[
+                    styles.infoDesc,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   The total household bill of ₱{fixedMonthlyInput || "0.00"} is
                   split evenly across all active paying roommates. Roommates see
                   an informational notice instead of the attendance calendar.
@@ -323,30 +457,75 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
 
         {selectedMode === "FIXED_PER_PERSON_MONTH" && (
           <View style={styles.inputSection}>
-            <Text style={styles.inputFieldLabel}>
+            <Text
+              style={[
+                styles.inputFieldLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
               Fixed Rate Per Person (₱ / resident / month)
             </Text>
-            <View style={styles.currencyInputRow}>
-              <Text style={styles.currencyPrefix}>₱</Text>
+            <View
+              style={[
+                styles.currencyInputRow,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.currencyPrefix,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                ₱
+              </Text>
               <TextInput
-                style={styles.currencyTextInput}
+                style={[
+                  styles.currencyTextInput,
+                  isDark && { color: colors.text },
+                ]}
                 value={fixedPerPersonInput}
                 onChangeText={setFixedPerPersonInput}
                 keyboardType="decimal-pad"
                 placeholder="150.00"
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
             </View>
 
-            <View style={styles.infoCard}>
+            <View
+              style={[
+                styles.infoCard,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.12)",
+                  borderColor: "rgba(16, 185, 129, 0.25)",
+                },
+              ]}
+            >
               <View style={styles.infoIconBox}>
-                <Ionicons name="checkmark-circle" size={18} color="#059669" />
+                <Ionicons
+                  name="checkmark-circle"
+                  size={18}
+                  color={isDark ? colors.success : "#059669"}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.infoTitle, { color: "#065F46" }]}>
+                <Text
+                  style={[
+                    styles.infoTitle,
+                    isDark ? { color: colors.success } : { color: "#065F46" },
+                  ]}
+                >
                   Flat Rate Per Resident
                 </Text>
-                <Text style={styles.infoDesc}>
+                <Text
+                  style={[
+                    styles.infoDesc,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
                   Each paying roommate is charged a flat fee of ₱
                   {fixedPerPersonInput || "0.00"} every month. Attendance
                   logging is disabled for roommates.
@@ -358,16 +537,36 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
       </ScrollView>
 
       {/* Bottom Actions */}
-      <View style={styles.bottomBar}>
+      <View
+        style={[styles.bottomBar, isDark && { borderTopColor: colors.border }]}
+      >
         <TouchableOpacity
-          style={styles.cancelBtn}
+          style={[
+            styles.cancelBtn,
+            isDark && {
+              backgroundColor: colors.surfaceInset,
+              borderWidth: 1,
+              borderColor: colors.border,
+            },
+          ]}
           onPress={onClose}
           disabled={saving}
         >
-          <Text style={styles.cancelBtnText}>Cancel</Text>
+          <Text
+            style={[
+              styles.cancelBtnText,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
+            Cancel
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+          style={[
+            styles.saveBtn,
+            isDark && { backgroundColor: colors.primary },
+            saving && { opacity: 0.7 },
+          ]}
           onPress={handleSave}
           disabled={saving}
         >

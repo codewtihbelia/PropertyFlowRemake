@@ -21,6 +21,7 @@ import { mobileDataService } from "../services/firebaseDataService";
 import { uploadImageToCloudinaryMobile } from "../services/cloudinaryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { useTheme } from "../context/ThemeContext";
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -29,6 +30,8 @@ interface ProfileScreenProps {
   onOpenReports?: () => void;
   onOpenOnboarding?: () => void;
   onOpenHostApplication?: () => void;
+  onOpenTermsOfService?: () => void;
+  onOpenPrivacyPolicy?: () => void;
   onSignOut?: () => void;
   currentUser?: { name: string; role: string; email: string };
 }
@@ -40,6 +43,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenReports,
   onOpenOnboarding,
   onOpenHostApplication,
+  onOpenTermsOfService,
+  onOpenPrivacyPolicy,
   onSignOut,
   currentUser = {
     name: "Resident",
@@ -48,6 +53,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   },
 }) => {
   const { onScroll } = useNavVisibility();
+  const { isDark, toggleTheme, cycleTheme, themeMode, setThemeMode, colors } =
+    useTheme();
   const firebaseUser = auth.currentUser;
   const cachedProfile = mobileDataService.getCachedProfile(firebaseUser?.uid);
 
@@ -272,11 +279,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       {/* Top Header Bar */}
-      <View style={styles.headerBar}>
+      <View
+        style={[
+          styles.headerBar,
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
-          style={styles.headerCircleBtn}
+          style={[
+            styles.headerCircleBtn,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
           onPress={() => {
             if (onBack) {
               onBack();
@@ -286,23 +309,43 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           }}
           activeOpacity={0.7}
         >
-          <Feather name="chevron-left" size={22} color="#0F172A" />
+          <Feather
+            name="chevron-left"
+            size={22}
+            color={isDark ? "#FFFFFF" : "#0F172A"}
+          />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Settings
+        </Text>
 
-        <TouchableOpacity
-          style={styles.headerCircleBtn}
-          onPress={() =>
-            Alert.alert(
-              "Notifications",
-              "You have 0 unread alerts. Bill reminders are scheduled 2 days before cycle closure.",
-            )
-          }
-          activeOpacity={0.7}
-        >
-          <Feather name="bell" size={20} color="#0F172A" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity
+            style={[
+              styles.headerCircleBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={cycleTheme}
+            activeOpacity={0.7}
+            accessibilityLabel={`Theme mode ${themeMode}`}
+          >
+            {themeMode === "light" ? (
+              <Feather name="sun" size={18} color="#D97706" />
+            ) : themeMode === "dark" ? (
+              <Feather name="moon" size={18} color="#60A5FA" />
+            ) : (
+              <Ionicons
+                name="phone-portrait-outline"
+                size={17}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -313,15 +356,33 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       >
         {/* Join Request Pending Notice */}
         {profile?.joinRequestStatus === "PENDING" && (
-          <View style={styles.noticeCardPending}>
+          <View
+            style={[
+              styles.noticeCardPending,
+              isDark && {
+                backgroundColor: "rgba(245, 158, 11, 0.12)",
+                borderColor: "rgba(245, 158, 11, 0.25)",
+              },
+            ]}
+          >
             <View style={styles.noticeIconWrapPending}>
-              <Feather name="clock" size={20} color="#B45309" />
+              <Feather name="clock" size={20} color="#F59E0B" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.noticeTitlePending}>
+              <Text
+                style={[
+                  styles.noticeTitlePending,
+                  isDark && { color: "#FBBF24" },
+                ]}
+              >
                 Join Request Awaiting Host Approval
               </Text>
-              <Text style={styles.noticeSubtitlePending}>
+              <Text
+                style={[
+                  styles.noticeSubtitlePending,
+                  isDark && { color: "#FCD34D" },
+                ]}
+              >
                 You entered an invite code for{" "}
                 {profile.pendingHouseholdName || "the household"}. The host must
                 approve your request before you can join.
@@ -332,15 +393,33 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
         {/* Join Request Rejected Notice */}
         {profile?.joinRequestStatus === "REJECTED" && (
-          <View style={styles.noticeCardRejected}>
+          <View
+            style={[
+              styles.noticeCardRejected,
+              isDark && {
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                borderColor: "rgba(239, 68, 68, 0.25)",
+              },
+            ]}
+          >
             <View style={styles.noticeIconWrapRejected}>
-              <Feather name="alert-circle" size={20} color="#BE123C" />
+              <Feather name="alert-circle" size={20} color="#EF4444" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.noticeTitleRejected}>
+              <Text
+                style={[
+                  styles.noticeTitleRejected,
+                  isDark && { color: "#F87171" },
+                ]}
+              >
                 Join Request Declined
               </Text>
-              <Text style={styles.noticeSubtitleRejected}>
+              <Text
+                style={[
+                  styles.noticeSubtitleRejected,
+                  isDark && { color: "#FCA5A5" },
+                ]}
+              >
                 Reason: {profile.joinRejectionReason || "Declined by host"}. You
                 can contact the host or try a different invite code.
               </Text>
@@ -349,7 +428,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         )}
 
         {/* Profile Hero Card with Avatar & 3-Column Stats */}
-        <View style={styles.profileHero}>
+        <View
+          style={[
+            styles.profileHero,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           {/* Avatar with Online Active Indicator */}
           <TouchableOpacity
             style={styles.avatarWrap}
@@ -370,7 +457,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             )}
 
             {/* Emerald Active Status Dot */}
-            <View style={styles.activeStatusDot} />
+            <View
+              style={[
+                styles.activeStatusDot,
+                isDark && { borderColor: colors.card },
+              ]}
+            />
 
             {/* Uploading Spinner */}
             {uploadingPhoto && (
@@ -381,28 +473,57 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </TouchableOpacity>
 
           {/* User Full Name */}
-          <Text style={styles.profileName}>{displayName}</Text>
+          <Text style={[styles.profileName, isDark && { color: colors.text }]}>
+            {displayName}
+          </Text>
 
           {/* Handle and Email */}
-          <Text style={styles.profileHandleEmail}>
+          <Text
+            style={[
+              styles.profileHandleEmail,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
             @{usernameHandle} • {userEmail}
           </Text>
 
           {/* Edit Profile Pill Button */}
           <TouchableOpacity
-            style={styles.editProfilePill}
+            style={[
+              styles.editProfilePill,
+              isDark && {
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+              },
+            ]}
             activeOpacity={0.75}
             onPress={() => {
               setDisplayNameInput(displayName);
               setShowEditProfileModal(true);
             }}
           >
-            <Feather name="edit-3" size={13} color="#0F172A" />
-            <Text style={styles.editProfilePillText}>Edit Profile</Text>
+            <Feather
+              name="edit-3"
+              size={13}
+              color={isDark ? colors.text : "#0F172A"}
+            />
+            <Text
+              style={[
+                styles.editProfilePillText,
+                isDark && { color: colors.text },
+              ]}
+            >
+              Edit Profile
+            </Text>
           </TouchableOpacity>
 
           {/* Thin Divider */}
-          <View style={styles.heroDivider} />
+          <View
+            style={[
+              styles.heroDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           {/* 3 Column Statistics */}
           <View style={styles.heroStatsRow}>
@@ -420,35 +541,83 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               }}
               activeOpacity={0.7}
             >
-              <Text style={styles.statLabel}>Groups</Text>
-              <Text style={styles.statValueDark}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Groups
+              </Text>
+              <Text
+                style={[styles.statValueDark, isDark && { color: colors.text }]}
+              >
                 {profile?.householdId ? "1 Active" : "3 Active"}
               </Text>
             </TouchableOpacity>
 
             {/* Vertical Separator */}
-            <View style={styles.statVerticalDivider} />
+            <View
+              style={[
+                styles.statVerticalDivider,
+                isDark && { backgroundColor: colors.borderSubtle },
+              ]}
+            />
 
             {/* Column 2: Total Paid */}
             <View style={styles.statCol}>
-              <Text style={styles.statLabel}>Total Paid</Text>
+              <Text
+                style={[
+                  styles.statLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Total Paid
+              </Text>
               <Text style={styles.statValueGreen}>$1,405</Text>
             </View>
 
             {/* Vertical Separator */}
-            <View style={styles.statVerticalDivider} />
+            <View
+              style={[
+                styles.statVerticalDivider,
+                isDark && { backgroundColor: colors.borderSubtle },
+              ]}
+            />
 
             {/* Column 3: Settled */}
             <View style={styles.statCol}>
-              <Text style={styles.statLabel}>Settled</Text>
+              <Text
+                style={[
+                  styles.statLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Settled
+              </Text>
               <Text style={styles.statValueBlue}>98%</Text>
             </View>
           </View>
         </View>
 
         {/* SECTION: ACCOUNT & MONEY */}
-        <Text style={styles.sectionHeader}>Account & Money</Text>
-        <View style={styles.groupedCard}>
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Account & Money
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           {/* Personal Information */}
           <TouchableOpacity
             style={styles.cardItemRow}
@@ -458,19 +627,50 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             }}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#EFF6FF" }]}>
-              <Feather name="user" size={18} color="#2563EB" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#EFF6FF",
+                },
+              ]}
+            >
+              <Feather
+                name="user"
+                size={18}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Personal Information</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Personal Information
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Name, phone number & email
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           {/* Payment Methods */}
           <TouchableOpacity
@@ -478,20 +678,64 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onPress={() => setShowPaymentMethodsModal(true)}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#EEF2FF" }]}>
-              <Feather name="credit-card" size={18} color="#4F46E5" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(99, 102, 241, 0.15)"
+                    : "#EEF2FF",
+                },
+              ]}
+            >
+              <Feather
+                name="credit-card"
+                size={18}
+                color={isDark ? "#818CF8" : "#4F46E5"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Payment Methods</Text>
-              <Text style={styles.itemSubtitle}>Visa ending in 4092</Text>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Payment Methods
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Visa ending in 4092
+              </Text>
             </View>
-            <View style={styles.activeBadge}>
-              <Text style={styles.activeBadgeText}>Active</Text>
+            <View
+              style={[
+                styles.activeBadge,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.14)",
+                },
+              ]}
+            >
+              <Text
+                style={[styles.activeBadgeText, isDark && { color: "#34D399" }]}
+              >
+                Active
+              </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           {/* Default Currency */}
           <TouchableOpacity
@@ -499,87 +743,521 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onPress={() => setShowCurrencyModal(true)}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#FEF3C7" }]}>
-              <Feather name="dollar-sign" size={18} color="#D97706" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(245, 158, 11, 0.15)"
+                    : "#FEF3C7",
+                },
+              ]}
+            >
+              <Feather
+                name="dollar-sign"
+                size={18}
+                color={isDark ? "#FBBF24" : "#D97706"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Default Currency</Text>
-              <Text style={styles.itemSubtitle}>{defaultCurrencyFull}</Text>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Default Currency
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                {defaultCurrencyFull}
+              </Text>
             </View>
-            <Text style={styles.currencyTag}>{defaultCurrency}</Text>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Text
+              style={[
+                styles.currencyTag,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              {defaultCurrency}
+            </Text>
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
         </View>
 
         {/* SECTION: SPLIT & PREFERENCES */}
-        <Text style={styles.sectionHeader}>Split & Preferences</Text>
-        <View style={styles.groupedCard}>
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Split & Preferences
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           {/* Default Split Rule */}
           <TouchableOpacity
             style={styles.cardItemRow}
             onPress={() => setShowSplitRuleModal(true)}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#E0F2FE" }]}>
-              <Feather name="layout" size={18} color="#0284C7" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(14, 165, 233, 0.15)"
+                    : "#E0F2FE",
+                },
+              ]}
+            >
+              <Feather
+                name="layout"
+                size={18}
+                color={isDark ? "#38BDF8" : "#0284C7"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Default Split Rule</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Default Split Rule
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Auto-apply to new expenses
               </Text>
             </View>
-            <View style={styles.splitRulePill}>
-              <Text style={styles.splitRulePillText}>{defaultSplitRule}</Text>
+            <View
+              style={[
+                styles.splitRulePill,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.splitRulePillText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                {defaultSplitRule}
+              </Text>
             </View>
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           {/* Bill Reminders */}
           <View style={styles.cardItemRow}>
-            <View style={[styles.itemIconBox, { backgroundColor: "#F3E8FF" }]}>
-              <Feather name="bell" size={18} color="#9333EA" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(168, 85, 247, 0.15)"
+                    : "#F3E8FF",
+                },
+              ]}
+            >
+              <Feather
+                name="bell"
+                size={18}
+                color={isDark ? "#C084FC" : "#9333EA"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Bill Reminders</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Bill Reminders
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Notify 2 days before rent is due
               </Text>
             </View>
             <Switch
               value={billReminders}
               onValueChange={handleToggleBillReminders}
-              trackColor={{ false: "#E2E8F0", true: "#2563EB" }}
+              trackColor={{
+                false: isDark ? "#2A2D35" : "#E2E8F0",
+                true: colors.primary,
+              }}
               thumbColor="#FFFFFF"
             />
           </View>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           {/* Face ID / Security */}
           <View style={styles.cardItemRow}>
-            <View style={[styles.itemIconBox, { backgroundColor: "#D1FAE5" }]}>
-              <Feather name="shield" size={18} color="#059669" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.15)"
+                    : "#D1FAE5",
+                },
+              ]}
+            >
+              <Feather
+                name="shield"
+                size={18}
+                color={isDark ? "#34D399" : "#059669"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Face ID / Security</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Face ID / Security
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Require for approving payments
               </Text>
             </View>
             <Switch
               value={biometricSecurity}
               onValueChange={handleToggleBiometric}
-              trackColor={{ false: "#E2E8F0", true: "#2563EB" }}
+              trackColor={{
+                false: isDark ? "#2A2D35" : "#E2E8F0",
+                true: colors.primary,
+              }}
               thumbColor="#FFFFFF"
             />
           </View>
         </View>
 
+        {/* SECTION: DISPLAY & APPEARANCE */}
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Display & Appearance
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {/* Quick Dark Mode Toggle Row */}
+          <View style={styles.cardItemRow}>
+            <View
+              style={[
+                styles.itemIconBox,
+                { backgroundColor: isDark ? "#1E293B" : "#FEF3C7" },
+              ]}
+            >
+              {isDark ? (
+                <Feather name="moon" size={18} color="#60A5FA" />
+              ) : (
+                <Feather name="sun" size={18} color="#D97706" />
+              )}
+            </View>
+            <View style={styles.itemContent}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Dark Mode
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textMuted },
+                ]}
+              >
+                {isDark
+                  ? "Warm charcoal obsidian theme enabled"
+                  : "Standard light theme"}
+              </Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              trackColor={{
+                false: isDark ? "#2A2D35" : "#E2E8F0",
+                true: colors.primary,
+              }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
+
+          {/* 3-Mode Segmented Control: Light, Dark, System */}
+          <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 10,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  color: isDark ? "#94A3B8" : "#64748B",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+              >
+                Theme Mode
+              </Text>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: "700",
+                  color: colors.primary,
+                }}
+              >
+                {themeMode === "dark"
+                  ? "Dark"
+                  : themeMode === "light"
+                    ? "Light"
+                    : "System Default"}
+              </Text>
+            </View>
+
+            <View
+              style={{
+                flexDirection: "row",
+                backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
+                borderRadius: 14,
+                padding: 4,
+                gap: 4,
+                borderWidth: isDark ? 1 : 0,
+                borderColor: colors.border,
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => setThemeMode("light")}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor:
+                    themeMode === "light"
+                      ? isDark
+                        ? colors.cardElevated
+                        : "#FFFFFF"
+                      : "transparent",
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: themeMode === "light" ? 0.08 : 0,
+                  shadowRadius: 2,
+                  elevation: themeMode === "light" ? 1 : 0,
+                  gap: 6,
+                }}
+              >
+                <Feather
+                  name="sun"
+                  size={14}
+                  color={
+                    themeMode === "light"
+                      ? "#D97706"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B"
+                  }
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color:
+                      themeMode === "light"
+                        ? isDark
+                          ? "#FFFFFF"
+                          : "#0F172A"
+                        : isDark
+                          ? "#94A3B8"
+                          : "#64748B",
+                  }}
+                >
+                  Light
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setThemeMode("dark")}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor:
+                    themeMode === "dark" ? colors.primary : "transparent",
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: themeMode === "dark" ? 0.15 : 0,
+                  shadowRadius: 2,
+                  elevation: themeMode === "dark" ? 1 : 0,
+                  gap: 6,
+                }}
+              >
+                <Feather
+                  name="moon"
+                  size={14}
+                  color={
+                    themeMode === "dark"
+                      ? "#FFFFFF"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B"
+                  }
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color:
+                      themeMode === "dark"
+                        ? "#FFFFFF"
+                        : isDark
+                          ? "#94A3B8"
+                          : "#64748B",
+                  }}
+                >
+                  Dark
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setThemeMode("system")}
+                activeOpacity={0.8}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 9,
+                  borderRadius: 10,
+                  backgroundColor:
+                    themeMode === "system"
+                      ? isDark
+                        ? colors.cardElevated
+                        : "#FFFFFF"
+                      : "transparent",
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: themeMode === "system" ? 0.08 : 0,
+                  shadowRadius: 2,
+                  elevation: themeMode === "system" ? 1 : 0,
+                  gap: 6,
+                }}
+              >
+                <Ionicons
+                  name="phone-portrait-outline"
+                  size={14}
+                  color={
+                    themeMode === "system"
+                      ? isDark
+                        ? "#FFFFFF"
+                        : "#0F172A"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B"
+                  }
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    color:
+                      themeMode === "system"
+                        ? isDark
+                          ? "#FFFFFF"
+                          : "#0F172A"
+                        : isDark
+                          ? "#94A3B8"
+                          : "#64748B",
+                  }}
+                >
+                  System
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
         {/* SECTION: HOUSEHOLD & MANAGEMENT */}
-        <Text style={styles.sectionHeader}>Household & Management</Text>
-        <View style={styles.groupedCard}>
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Household & Management
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity
             style={styles.cardItemRow}
             onPress={() => {
@@ -593,108 +1271,263 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             }}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="users" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
+                },
+              ]}
+            >
+              <Feather
+                name="users"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
                 {isHostUser
                   ? "Manage Household & Members"
                   : "View Household & Members"}
               </Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 {isHostUser
                   ? "View roommates, host details & join requests"
                   : "View group overview, billing cycle & roommates"}
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           <TouchableOpacity
             style={styles.cardItemRow}
             onPress={() => onOpenManageGroup && onOpenManageGroup("join")}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="user-plus" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
+                },
+              ]}
+            >
+              <Feather
+                name="user-plus"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Join Household with Code</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Join Household with Code
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Submit invite code to host for approval
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           <TouchableOpacity
             style={styles.cardItemRow}
             onPress={onOpenReports}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#F1F5F9" }]}>
-              <Feather name="bar-chart-2" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#F1F5F9",
+                },
+              ]}
+            >
+              <Feather
+                name="bar-chart-2"
+                size={18}
+                color={isDark ? colors.accent : "#0F172A"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Monthly Summary & Reports</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Monthly Summary & Reports
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Financial analytics & audit history
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
           {!isHostUser && (
             <>
-              <View style={styles.itemDivider} />
+              <View
+                style={[
+                  styles.itemDivider,
+                  isDark && { backgroundColor: colors.borderSubtle },
+                ]}
+              />
               <TouchableOpacity
                 style={styles.cardItemRow}
                 onPress={onOpenHostApplication}
                 activeOpacity={0.7}
               >
                 <View
-                  style={[styles.itemIconBox, { backgroundColor: "#FEF2F2" }]}
+                  style={[
+                    styles.itemIconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(239, 68, 68, 0.15)"
+                        : "#FEF2F2",
+                    },
+                  ]}
                 >
-                  <Feather name="award" size={18} color="#DC2626" />
+                  <Feather
+                    name="award"
+                    size={18}
+                    color={isDark ? "#F87171" : "#DC2626"}
+                  />
                 </View>
                 <View style={styles.itemContent}>
-                  <Text style={styles.itemTitle}>Apply for Host Status</Text>
-                  <Text style={styles.itemSubtitle}>
+                  <Text
+                    style={[styles.itemTitle, isDark && { color: colors.text }]}
+                  >
+                    Apply for Host Status
+                  </Text>
+                  <Text
+                    style={[
+                      styles.itemSubtitle,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
                     Request Super Admin approval to create spaces
                   </Text>
                 </View>
-                <Feather name="chevron-right" size={18} color="#CBD5E1" />
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? colors.textMuted : "#CBD5E1"}
+                />
               </TouchableOpacity>
             </>
           )}
         </View>
 
         {/* SECTION: SYSTEM & GUIDE */}
-        <Text style={styles.sectionHeader}>System & Guide</Text>
-        <View style={styles.groupedCard}>
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          System & Guide
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity
             style={styles.cardItemRow}
             onPress={onOpenOnboarding}
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#F8FAFC" }]}>
-              <Feather name="book-open" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                },
+              ]}
+            >
+              <Feather
+                name="book-open"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Welcome & Onboarding Guide</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Welcome & Onboarding Guide
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 How billing cycles and split calculation work
               </Text>
             </View>
-            <Feather name="chevron-right" size={18} color="#CBD5E1" />
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
 
-          <View style={styles.itemDivider} />
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
 
           <TouchableOpacity
             style={styles.cardItemRow}
@@ -706,34 +1539,191 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             }
             activeOpacity={0.7}
           >
-            <View style={[styles.itemIconBox, { backgroundColor: "#F8FAFC" }]}>
-              <Feather name="cloud" size={18} color="#0F172A" />
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                },
+              ]}
+            >
+              <Feather
+                name="cloud"
+                size={18}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle}>Cloud & Realtime Sync</Text>
-              <Text style={styles.itemSubtitle}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Cloud & Realtime Sync
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
                 Cloudinary + Firebase Active
               </Text>
             </View>
-            <View style={styles.connectedTag}>
-              <Text style={styles.connectedTagText}>Active</Text>
+            <View
+              style={[
+                styles.connectedTag,
+                isDark && {
+                  backgroundColor: "rgba(59, 130, 246, 0.15)",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.connectedTagText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
+                Active
+              </Text>
             </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* SECTION: LEGAL & COMPLIANCE */}
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Legal & Compliance
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {/* Terms of Service */}
+          <TouchableOpacity
+            style={styles.cardItemRow}
+            onPress={onOpenTermsOfService}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#EFF6FF",
+                },
+              ]}
+            >
+              <Feather
+                name="file-text"
+                size={18}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
+            </View>
+            <View style={styles.itemContent}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Terms of Service
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Rules, centavo math, and host duties
+              </Text>
+            </View>
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
+          </TouchableOpacity>
+
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
+
+          {/* Privacy Policy */}
+          <TouchableOpacity
+            style={styles.cardItemRow}
+            onPress={onOpenPrivacyPolicy}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.15)"
+                    : "#ECFDF5",
+                },
+              ]}
+            >
+              <Feather
+                name="shield"
+                size={18}
+                color={isDark ? "#34D399" : "#059669"}
+              />
+            </View>
+            <View style={styles.itemContent}>
+              <Text
+                style={[styles.itemTitle, isDark && { color: colors.text }]}
+              >
+                Privacy Policy
+              </Text>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Data protection, GDPR & CCPA rights
+              </Text>
+            </View>
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
           </TouchableOpacity>
         </View>
 
         {/* Sign Out Button */}
         <TouchableOpacity
-          style={styles.signOutBtn}
+          style={[
+            styles.signOutBtn,
+            isDark && {
+              backgroundColor: "rgba(239, 68, 68, 0.14)",
+              borderWidth: 1,
+              borderColor: "rgba(239, 68, 68, 0.28)",
+            },
+          ]}
           onPress={onSignOut}
           activeOpacity={0.8}
         >
           <Feather
             name="log-out"
             size={16}
-            color="#DC2626"
+            color={isDark ? "#F87171" : "#DC2626"}
             style={{ marginRight: 8 }}
           />
-          <Text style={styles.signOutBtnText}>Sign Out</Text>
+          <Text style={[styles.signOutBtnText, isDark && { color: "#F87171" }]}>
+            Sign Out
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -745,7 +1735,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         showChipBar={true}
         title="Personal Information"
         subtitle="Update your profile photo, name, and phone"
-        icon={<Feather name="user" size={18} color="#2563EB" />}
+        icon={<Feather name="user" size={18} color={colors.accent} />}
         maxHeight="90%"
       >
         <ScrollView
@@ -754,7 +1744,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           contentContainerStyle={{ paddingTop: 4, paddingBottom: 16 }}
         >
           {/* Photo Avatar In Modal */}
-          <View style={styles.modalAvatarRow}>
+          <View
+            style={[
+              styles.modalAvatarRow,
+              isDark && { borderColor: colors.border },
+            ]}
+          >
             {photoUrl ? (
               <Image
                 source={{ uri: photoUrl }}
@@ -768,12 +1763,28 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </View>
             )}
             <TouchableOpacity
-              style={styles.modalPhotoChangeBtn}
+              style={[
+                styles.modalPhotoChangeBtn,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                },
+              ]}
               onPress={handlePickAndUploadPhoto}
               disabled={uploadingPhoto}
             >
-              <Feather name="camera" size={14} color="#2563EB" />
-              <Text style={styles.modalPhotoChangeText}>
+              <Feather
+                name="camera"
+                size={14}
+                color={isDark ? colors.accent : "#2563EB"}
+              />
+              <Text
+                style={[
+                  styles.modalPhotoChangeText,
+                  isDark && { color: colors.accent },
+                ]}
+              >
                 {uploadingPhoto ? "Uploading..." : "Change Photo"}
               </Text>
             </TouchableOpacity>
@@ -781,34 +1792,82 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           {/* Full Name Input */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Full Name</Text>
+            <Text
+              style={[
+                styles.inputLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Full Name
+            </Text>
             <TextInput
-              style={styles.modalInput}
+              style={[
+                styles.modalInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={displayNameInput}
               onChangeText={setDisplayNameInput}
               placeholder="Enter full name"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.textMuted}
             />
           </View>
 
           {/* Phone Number Input */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Phone Number</Text>
+            <Text
+              style={[
+                styles.inputLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Phone Number
+            </Text>
             <TextInput
-              style={styles.modalInput}
+              style={[
+                styles.modalInput,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
               value={phoneInput}
               onChangeText={setPhoneInput}
               placeholder="e.g. 0917-123-4567"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.textMuted}
               keyboardType="phone-pad"
             />
           </View>
 
           {/* Email (Readonly) */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email Address</Text>
-            <View style={[styles.modalInput, { backgroundColor: "#F8FAFC" }]}>
-              <Text style={{ color: "#64748B", fontSize: 14 }}>
+            <Text
+              style={[
+                styles.inputLabel,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Email Address
+            </Text>
+            <View
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                  borderColor: isDark ? colors.border : "#E2E8F0",
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  color: isDark ? colors.textSecondary : "#64748B",
+                  fontSize: 14,
+                }}
+              >
                 {userEmail}
               </Text>
             </View>
@@ -817,13 +1876,32 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           {/* Save Buttons */}
           <View style={[styles.modalButtonsRow, { marginTop: 22 }]}>
             <TouchableOpacity
-              style={styles.modalCancelBtn}
+              style={[
+                styles.modalCancelBtn,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setShowEditProfileModal(false)}
             >
-              <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              <Text
+                style={[
+                  styles.modalCancelBtnText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.modalSaveBtn}
+              style={[
+                styles.modalSaveBtn,
+                {
+                  backgroundColor: colors.primary,
+                },
+              ]}
               onPress={handleSaveProfileDetails}
               disabled={savingProfile}
             >
@@ -845,38 +1923,91 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         showChipBar={true}
         title="Payment Methods"
         subtitle="Configured cards and digital wallets"
-        icon={<Feather name="credit-card" size={18} color="#2563EB" />}
+        icon={<Feather name="credit-card" size={18} color={colors.accent} />}
       >
         <View style={{ paddingTop: 6, paddingBottom: 8 }}>
           <View style={{ gap: 12 }}>
-            <View style={styles.paymentMethodItem}>
+            <View
+              style={[
+                styles.paymentMethodItem,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <View
-                style={[styles.itemIconBox, { backgroundColor: "#EFF6FF" }]}
+                style={[
+                  styles.itemIconBox,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(59, 130, 246, 0.15)"
+                      : "#EFF6FF",
+                  },
+                ]}
               >
-                <Feather name="credit-card" size={18} color="#2563EB" />
+                <Feather
+                  name="credit-card"
+                  size={18}
+                  color={isDark ? colors.accent : "#2563EB"}
+                />
               </View>
               <View style={{ flex: 1 }}>
                 <Text
                   style={{
                     fontSize: 14,
                     fontWeight: "700",
-                    color: "#0F172A",
+                    color: isDark ? colors.text : "#0F172A",
                   }}
                 >
                   Visa ending in 4092
                 </Text>
-                <Text style={{ fontSize: 12, color: "#64748B" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                  }}
+                >
                   Expires 09/28 • Default
                 </Text>
               </View>
-              <View style={styles.activeBadge}>
-                <Text style={styles.activeBadgeText}>Active</Text>
+              <View
+                style={[
+                  styles.activeBadge,
+                  isDark && {
+                    backgroundColor: "rgba(16, 185, 129, 0.14)",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.activeBadgeText,
+                    isDark && { color: "#34D399" },
+                  ]}
+                >
+                  Active
+                </Text>
               </View>
             </View>
 
-            <View style={styles.paymentMethodItem}>
+            <View
+              style={[
+                styles.paymentMethodItem,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <View
-                style={[styles.itemIconBox, { backgroundColor: "#F0FDF4" }]}
+                style={[
+                  styles.itemIconBox,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(16, 185, 129, 0.15)"
+                      : "#F0FDF4",
+                  },
+                ]}
               >
                 <Feather name="smartphone" size={18} color="#16A34A" />
               </View>
@@ -885,12 +2016,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   style={{
                     fontSize: 14,
                     fontWeight: "700",
-                    color: "#0F172A",
+                    color: isDark ? colors.text : "#0F172A",
                   }}
                 >
                   GCash / Maya Digital Wallet
                 </Text>
-                <Text style={{ fontSize: 12, color: "#64748B" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textSecondary : "#64748B",
+                  }}
+                >
                   Connected to {phoneInput || "Mobile"}
                 </Text>
               </View>
@@ -899,7 +2035,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </View>
 
           <TouchableOpacity
-            style={[styles.modalSaveBtn, { marginTop: 24 }]}
+            style={[
+              styles.modalSaveBtn,
+              {
+                backgroundColor: colors.primary,
+                marginTop: 24,
+              },
+            ]}
             onPress={() => {
               setShowPaymentMethodsModal(false);
               Alert.alert(
@@ -921,7 +2063,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         showChipBar={true}
         title="Select Currency"
         subtitle="Choose your preferred currency symbol"
-        icon={<Feather name="dollar-sign" size={18} color="#2563EB" />}
+        icon={<Feather name="dollar-sign" size={18} color={colors.accent} />}
       >
         <View style={{ paddingTop: 6, paddingBottom: 8 }}>
           <View style={{ gap: 10 }}>
@@ -929,43 +2071,57 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               { code: "USD ($)", full: "United States Dollar (USD)" },
               { code: "PHP (₱)", full: "Philippine Peso (PHP)" },
               { code: "EUR (€)", full: "Euro (EUR)" },
-            ].map((c) => (
-              <TouchableOpacity
-                key={c.code}
-                style={[
-                  styles.selectionRow,
-                  defaultCurrency === c.code && styles.selectionRowActive,
-                ]}
-                onPress={() => {
-                  setDefaultCurrency(c.code);
-                  setDefaultCurrencyFull(c.full);
-                  if (firebaseUser?.uid) {
-                    mobileDataService
-                      .saveUserProfile({
-                        uid: firebaseUser.uid,
-                        preferredCurrency: c.code,
-                      })
-                      .catch(() => {});
-                  }
-                  setShowCurrencyModal(false);
-                }}
-              >
-                <Text
+            ].map((c) => {
+              const isActive = defaultCurrency === c.code;
+              return (
+                <TouchableOpacity
+                  key={c.code}
                   style={[
-                    styles.selectionRowText,
-                    defaultCurrency === c.code && {
-                      color: "#2563EB",
-                      fontWeight: "800",
+                    styles.selectionRow,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
                     },
+                    isActive &&
+                      (isDark
+                        ? {
+                            backgroundColor: "rgba(59, 130, 246, 0.14)",
+                            borderColor: colors.primary,
+                          }
+                        : styles.selectionRowActive),
                   ]}
+                  onPress={() => {
+                    setDefaultCurrency(c.code);
+                    setDefaultCurrencyFull(c.full);
+                    if (firebaseUser?.uid) {
+                      mobileDataService
+                        .saveUserProfile({
+                          uid: firebaseUser.uid,
+                          preferredCurrency: c.code,
+                        })
+                        .catch(() => {});
+                    }
+                    setShowCurrencyModal(false);
+                  }}
                 >
-                  {c.full}
-                </Text>
-                {defaultCurrency === c.code && (
-                  <Feather name="check" size={18} color="#2563EB" />
-                )}
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.selectionRowText,
+                      isDark && { color: colors.text },
+                      isActive && {
+                        color: colors.primary,
+                        fontWeight: "800",
+                      },
+                    ]}
+                  >
+                    {c.full}
+                  </Text>
+                  {isActive && (
+                    <Feather name="check" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       </SmoothBottomSheetModal>
@@ -978,7 +2134,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         showChipBar={true}
         title="Default Split Rule"
         subtitle="Choose how expenses are divided among roommates"
-        icon={<Feather name="pie-chart" size={18} color="#2563EB" />}
+        icon={<Feather name="pie-chart" size={18} color={colors.accent} />}
       >
         <View style={{ paddingTop: 6, paddingBottom: 8 }}>
           <View style={{ gap: 10 }}>
@@ -995,49 +2151,67 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 title: "Percentage / Custom",
                 desc: "Configured individual ratios for bills",
               },
-            ].map((r) => (
-              <TouchableOpacity
-                key={r.title}
-                style={[
-                  styles.selectionRow,
-                  defaultSplitRule === r.title && styles.selectionRowActive,
-                ]}
-                onPress={() => {
-                  setDefaultSplitRule(r.title);
-                  if (firebaseUser?.uid) {
-                    mobileDataService
-                      .saveUserProfile({
-                        uid: firebaseUser.uid,
-                        defaultSplitRule: r.title,
-                      })
-                      .catch(() => {});
-                  }
-                  setShowSplitRuleModal(false);
-                }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.selectionRowText,
-                      defaultSplitRule === r.title && {
-                        color: "#2563EB",
-                        fontWeight: "800",
-                      },
-                    ]}
-                  >
-                    {r.title}
-                  </Text>
-                  <Text
-                    style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}
-                  >
-                    {r.desc}
-                  </Text>
-                </View>
-                {defaultSplitRule === r.title && (
-                  <Feather name="check" size={18} color="#2563EB" />
-                )}
-              </TouchableOpacity>
-            ))}
+            ].map((r) => {
+              const isActive = defaultSplitRule === r.title;
+              return (
+                <TouchableOpacity
+                  key={r.title}
+                  style={[
+                    styles.selectionRow,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                    isActive &&
+                      (isDark
+                        ? {
+                            backgroundColor: "rgba(59, 130, 246, 0.14)",
+                            borderColor: colors.primary,
+                          }
+                        : styles.selectionRowActive),
+                  ]}
+                  onPress={() => {
+                    setDefaultSplitRule(r.title);
+                    if (firebaseUser?.uid) {
+                      mobileDataService
+                        .saveUserProfile({
+                          uid: firebaseUser.uid,
+                          defaultSplitRule: r.title,
+                        })
+                        .catch(() => {});
+                    }
+                    setShowSplitRuleModal(false);
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.selectionRowText,
+                        isDark && { color: colors.text },
+                        isActive && {
+                          color: colors.primary,
+                          fontWeight: "800",
+                        },
+                      ]}
+                    >
+                      {r.title}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: isDark ? colors.textSecondary : "#64748B",
+                        marginTop: 2,
+                      }}
+                    >
+                      {r.desc}
+                    </Text>
+                  </View>
+                  {isActive && (
+                    <Feather name="check" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       </SmoothBottomSheetModal>
