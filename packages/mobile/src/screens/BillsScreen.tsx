@@ -19,6 +19,7 @@ import {
   MobileExpense,
   isPayorMember,
   cleanBillTitle,
+  isCyclePaymentsLocked,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -65,6 +66,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   const [attendanceSubmissions, setAttendanceSubmissions] = useState<
     Record<string, any>
   >({});
+  const [household, setHousehold] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -174,6 +176,10 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       resolvedHouseholdId,
       (data) => setPayments(data),
     );
+    const unsubHousehold = mobileDataService.listenToHousehold(
+      resolvedHouseholdId,
+      (data) => setHousehold(data),
+    );
     return () => {
       clearTimeout(safetyTimer);
       unsubExpenses();
@@ -181,6 +187,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       unsubMembers();
       unsubWater();
       unsubPayments();
+      unsubHousehold();
     };
   }, [resolvedHouseholdId, isProfileLoaded]);
 
@@ -255,10 +262,31 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     return isPayorMember(me);
   }, [activeMembers, currentUser?.uid]);
 
+  const oldestCycleId =
+    cycles.length > 0 ? cycles[cycles.length - 1]?.billingCycleId : undefined;
+  const knownCycleIds = useMemo(
+    () => new Set(cycles.map((c) => c.billingCycleId).filter(Boolean)),
+    [cycles],
+  );
+
+  const currentCycleExpenses = useMemo(() => {
+    return activeCycle
+      ? expenses.filter(
+          (e) =>
+            e.billingCycleId === activeCycle.billingCycleId ||
+            ((!e.billingCycleId || !knownCycleIds.has(e.billingCycleId)) &&
+              (cycles.length <= 1 ||
+                activeCycle.billingCycleId === oldestCycleId)),
+        )
+      : expenses;
+  }, [expenses, activeCycle, cycles.length, oldestCycleId, knownCycleIds]);
+
   const liveUnpaidShareCents = useMemo(() => {
     if (!isCurrentUserPayor) return 0;
     const payorCount = Math.max(1, activePayors.length);
-    const unpaidExpenses = expenses.filter((e) => e.status !== "PAID");
+    const unpaidExpenses = currentCycleExpenses.filter(
+      (e) => e.status !== "PAID" && !e.isPaid,
+    );
     return unpaidExpenses.reduce((sum, e) => {
       const isWater = (e.category || "").toLowerCase().includes("water");
       const mySplit = e.splitDetails?.find(
@@ -291,17 +319,27 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       }
       return sum + Math.round(e.amountCents / payorCount);
     }, 0);
-  }, [expenses, activePayors, currentUser?.uid, isCurrentUserPayor]);
+  }, [
+    currentCycleExpenses,
+    activePayors,
+    currentUser?.uid,
+    isCurrentUserPayor,
+  ]);
 
   const userPayments = useMemo(() => {
-    return payments.filter((p) => p.userId === currentUser?.uid);
-  }, [payments, currentUser?.uid]);
+    return payments.filter(
+      (p) =>
+        p.userId === currentUser?.uid &&
+        (!activeCycle?.billingCycleId ||
+          p.billingCycleId === activeCycle.billingCycleId),
+    );
+  }, [payments, currentUser?.uid, activeCycle?.billingCycleId]);
 
   const totalUserPaymentsCentavos = useMemo(() => {
     return userPayments.reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
   }, [userPayments]);
 
-  const totalHouseholdCents = expenses.reduce(
+  const totalHouseholdCents = currentCycleExpenses.reduce(
     (acc, cur) => acc + cur.amountCents,
     0,
   );
@@ -316,17 +354,138 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   const myShareCents = isCurrentUserPayor
     ? Math.max(0, liveUnpaidShareCents - effectivePaidCentavos)
     : 0;
+  const isMyCycleSettled =
+    isCurrentUserPayor &&
+    currentCycleExpenses.length > 0 &&
+    myShareCents === 0 &&
+    (effectivePaidCentavos > 0 ||
+      currentCycleExpenses.every((e) => e.status === "PAID" || e.isPaid));
+
+  const isPaymentsLocked = isCyclePaymentsLocked(activeCycle, household);
+  const isHostUser =
+    profile?.role === "HOST" || profile?.role === "SUPER_ADMIN";
+
+  const settledPayorUids = useMemo(() => {
+    const settled = new Set<string>();
+    if (currentCycleExpenses.length === 0 || activePayors.length === 0) {
+      return settled;
+    }
+    const payorCount = Math.max(1, activePayors.length);
+    const cycleId = activeCycle?.billingCycleId;
+    const isSingleCycle = cycles.length <= 1;
+
+    activePayors.forEach((p) => {
+      const uid = p.userId || p.memberId || p.id;
+      if (!uid) return;
+      const b = memberBills.find((mb) => mb.userId === uid);
+      const userPaidFromPmts = payments
+        .filter((pmt) => {
+          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+          if (!cycleId) return true;
+          return (
+            pmt.billingCycleId === cycleId ||
+            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+              isSingleCycle)
+          );
+        })
+        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
+
+      let payorShareTotal = 0;
+      let allUserSplitsMarkedPaid = true;
+      currentCycleExpenses.forEach((exp) => {
+        const mySplit = Array.isArray(exp.splitDetails)
+          ? exp.splitDetails.find((s: any) => s.userId === uid)
+          : null;
+        if (mySplit?.isExempt) return;
+        const share =
+          mySplit && typeof mySplit.shareCentavos === "number"
+            ? mySplit.shareCentavos
+            : Math.round((exp.amountCents || 0) / payorCount);
+        payorShareTotal += share;
+        if (
+          !exp.isPaid &&
+          exp.status !== "PAID" &&
+          !mySplit?.isPaid &&
+          share > 0
+        ) {
+          allUserSplitsMarkedPaid = false;
+        }
+      });
+
+      if (payorShareTotal <= 0) return;
+      const effectivePaid = Math.max(
+        b?.totalPaidCentavos || 0,
+        userPaidFromPmts,
+      );
+      const isMemberBillSettled =
+        b &&
+        typeof b.outstandingCentavos === "number" &&
+        b.outstandingCentavos === 0 &&
+        (b.totalPaidCentavos || 0) > 0;
+      if (
+        effectivePaid >= payorShareTotal ||
+        allUserSplitsMarkedPaid ||
+        isMemberBillSettled
+      ) {
+        settled.add(uid);
+      }
+    });
+
+    if (isMyCycleSettled && currentUser?.uid) {
+      settled.add(currentUser.uid);
+    }
+
+    return settled;
+  }, [
+    currentCycleExpenses,
+    activePayors,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    memberBills,
+    payments,
+    isMyCycleSettled,
+    currentUser?.uid,
+  ]);
+
+  const allPayorsSettled =
+    currentCycleExpenses.length > 0 &&
+    activePayors.length > 0 &&
+    activePayors.every((p) => {
+      const uid = p.userId || p.memberId || p.id;
+      return Boolean(uid && settledPayorUids.has(uid));
+    });
+
+  useEffect(() => {
+    if (allPayorsSettled && resolvedHouseholdId) {
+      const hasUnpaid = currentCycleExpenses.some(
+        (e) => e.status !== "PAID" || !e.isPaid,
+      );
+      if (hasUnpaid) {
+        mobileDataService
+          .markExpensesPaidIfAllSettled(
+            resolvedHouseholdId,
+            activeCycle?.billingCycleId,
+          )
+          .catch(() => {});
+      }
+    }
+  }, [
+    allPayorsSettled,
+    resolvedHouseholdId,
+    activeCycle?.billingCycleId,
+    currentCycleExpenses,
+  ]);
 
   // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
   useEffect(() => {
     if (
       !resolvedHouseholdId ||
       activePayors.length === 0 ||
-      expenses.length === 0
+      currentCycleExpenses.length === 0
     )
       return;
     const payorCount = Math.max(1, activePayors.length);
-    const hasStaleSplit = expenses.some((e) => {
+    const hasStaleSplit = currentCycleExpenses.some((e) => {
       if (e.status === "PAID" || e.isPaid) return false;
       const isWater = (e.category || "").toLowerCase().includes("water");
       if (isWater) return false; // Water attendance is managed dynamically
@@ -343,20 +502,23 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       Math.abs(myBill.outstandingCentavos - liveUnpaidShareCents) > 100;
 
     if (hasStaleSplit || isMemberBillStale) {
-      mobileDataService
-        .recalculateUnpaidExpensesForHousehold(resolvedHouseholdId)
-        .catch(() => {});
+      const timer = setTimeout(() => {
+        mobileDataService
+          .recalculateUnpaidExpensesForHousehold(resolvedHouseholdId)
+          .catch(() => {});
+      }, 800);
+      return () => clearTimeout(timer);
     }
   }, [
     resolvedHouseholdId,
     activePayors.length,
-    expenses,
+    currentCycleExpenses,
     myBill,
     liveUnpaidShareCents,
   ]);
   const { onScroll } = useNavVisibility();
 
-  if (subView === "pay") {
+  if (subView === "pay" && (!isPaymentsLocked || isHostUser)) {
     return (
       <PaymentsScreen
         householdId={resolvedHouseholdId}
@@ -516,14 +678,12 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 style={[
                   styles.heroAmount,
                   isDark && { color: colors.text },
-                  myShareCents === 0 && {
-                    color: isDark ? "#34D399" : "#16A34A",
-                  },
+                  isMyCycleSettled && { color: isDark ? "#34D399" : "#16A34A" },
                 ]}
               >
                 {formatPesos(myShareCents)}
               </Text>
-              {myShareCents === 0 && isCurrentUserPayor && (
+              {isMyCycleSettled && (
                 <View
                   style={{
                     flexDirection: "row",
@@ -552,56 +712,149 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 ]}
               >
                 {isCurrentUserPayor
-                  ? myShareCents === 0 && totalUserPaymentsCentavos > 0
+                  ? isMyCycleSettled && totalUserPaymentsCentavos > 0
                     ? `You paid ${formatPesos(totalUserPaymentsCentavos)} towards this cycle. You're completely up to date.`
                     : `Household bills: ${formatPesos(totalHouseholdCents)} · Split fairly across ${activePayors.length} ${activePayors.length === 1 ? "payor" : "payors"}`
                   : `Household bills (${formatPesos(totalHouseholdCents)}) are split fairly among paying roommates only.`}
               </Text>
 
-              {isCurrentUserPayor && (
-                <TouchableOpacity
-                  style={[
-                    styles.payNowBtn,
-                    isDark && { backgroundColor: colors.primary },
-                    myShareCents === 0 && {
-                      backgroundColor: isDark
-                        ? "rgba(16, 185, 129, 0.2)"
-                        : "#DCFCE7",
-                      borderWidth: 1,
-                      borderColor: isDark
-                        ? "rgba(16, 185, 129, 0.4)"
-                        : "#86EFAC",
-                    },
-                  ]}
-                  onPress={() => {
-                    if (onPayPress) onPayPress();
-                    setSubView("pay");
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Text
+              {isCurrentUserPayor &&
+                (isMyCycleSettled ? (
+                  <View
                     style={[
-                      styles.payNowText,
-                      isDark && { color: "#FFFFFF" },
-                      myShareCents === 0 && {
-                        color: isDark ? "#34D399" : "#15803D",
+                      styles.payNowBtn,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(16, 185, 129, 0.15)"
+                          : "#DCFCE7",
+                        borderWidth: 1,
+                        borderColor: isDark
+                          ? "rgba(16, 185, 129, 0.35)"
+                          : "#86EFAC",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
                       },
                     ]}
                   >
-                    {myShareCents === 0
-                      ? "Pay Extra / Upload Receipt →"
-                      : "Pay with GCash / Bank →"}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                    <Feather
+                      name="check-circle"
+                      size={16}
+                      color={isDark ? "#34D399" : "#16A34A"}
+                    />
+                    <Text
+                      style={[
+                        styles.payNowText,
+                        {
+                          color: isDark ? "#34D399" : "#15803D",
+                          fontWeight: "800",
+                        },
+                      ]}
+                    >
+                      All Settled — Zero Remaining Dues
+                    </Text>
+                  </View>
+                ) : myShareCents === 0 ? (
+                  <View
+                    style={[
+                      styles.payNowBtn,
+                      {
+                        backgroundColor: isDark
+                          ? colors.cardSecondary
+                          : "#F1F5F9",
+                        borderWidth: 1,
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="clock"
+                      size={15}
+                      color={isDark ? colors.textSecondary : "#64748B"}
+                    />
+                    <Text
+                      style={[
+                        styles.payNowText,
+                        {
+                          color: isDark ? colors.textSecondary : "#475569",
+                          fontWeight: "700",
+                        },
+                      ]}
+                    >
+                      No Bills Due Yet for This Cycle
+                    </Text>
+                  </View>
+                ) : isPaymentsLocked && !isHostUser ? (
+                  <View
+                    style={[
+                      styles.payNowBtn,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(245, 158, 11, 0.15)"
+                          : "#FEF3C7",
+                        borderWidth: 1,
+                        borderColor: isDark
+                          ? "rgba(245, 158, 11, 0.35)"
+                          : "#FCD34D",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="lock"
+                      size={15}
+                      color={isDark ? "#FBBF24" : "#B45309"}
+                    />
+                    <Text
+                      style={[
+                        styles.payNowText,
+                        {
+                          color: isDark ? "#FBBF24" : "#92400E",
+                          fontWeight: "800",
+                        },
+                      ]}
+                    >
+                      Bills Under Review · Payments Locked
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.payNowBtn,
+                      isDark && { backgroundColor: colors.primary },
+                    ]}
+                    onPress={() => {
+                      if (onPayPress) onPayPress();
+                      setSubView("pay");
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.payNowText,
+                        isDark && { color: "#FFFFFF" },
+                      ]}
+                    >
+                      Pay with GCash / Bank →
+                    </Text>
+                  </TouchableOpacity>
+                ))}
             </View>
 
             <Text
               style={[styles.sectionTitle, isDark && { color: colors.text }]}
             >
               Itemized Charges (
-              {expenses.length > 0
-                ? `${expenses.length} recorded`
+              {currentCycleExpenses.length > 0
+                ? `${currentCycleExpenses.length} recorded`
                 : "No bills yet"}
               )
             </Text>
@@ -621,7 +874,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   household.
                 </Text>
               </View>
-            ) : expenses.length === 0 ? (
+            ) : currentCycleExpenses.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>
                   No household bills logged yet.
@@ -632,8 +885,9 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 </Text>
               </View>
             ) : (
-              expenses.map((e) => {
-                const isExpensePaid = e.status === "PAID" || e.isPaid === true;
+              currentCycleExpenses.map((e) => {
+                const isExpensePaid =
+                  e.status === "PAID" || e.isPaid === true || allPayorsSettled;
                 const catMeta = getCategoryMeta(e.category);
                 const isWater = (e.category || "")
                   .toLowerCase()
@@ -739,6 +993,51 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   isDark,
                 );
 
+                const mySharePaid =
+                  isCurrentUserPayor &&
+                  Boolean(
+                    isExpensePaid ||
+                    mySplit?.isPaid ||
+                    isMyCycleSettled ||
+                    (currentUser?.uid && settledPayorUids.has(currentUser.uid)),
+                  );
+
+                let paidPayorsCount = 0;
+                const waitingPayorNames: string[] = [];
+                activePayors.forEach((p) => {
+                  const pUid = p.userId || p.memberId || p.id;
+                  const pSplit = Array.isArray(e.splitDetails)
+                    ? e.splitDetails.find(
+                        (s: any) =>
+                          s.userId === pUid ||
+                          s.memberId === pUid ||
+                          s.id === pUid,
+                      )
+                    : null;
+                  const isPayorPaid = Boolean(
+                    isExpensePaid ||
+                    pSplit?.isPaid ||
+                    (pUid && settledPayorUids.has(pUid)),
+                  );
+                  if (isPayorPaid) {
+                    paidPayorsCount += 1;
+                  } else {
+                    const firstName = (
+                      p.displayName ||
+                      p.name ||
+                      "Roommate"
+                    ).split(" ")[0];
+                    waitingPayorNames.push(firstName);
+                  }
+                });
+
+                const waitingSummary =
+                  waitingPayorNames.length === 0
+                    ? ""
+                    : waitingPayorNames.length <= 2
+                      ? `Waiting on ${waitingPayorNames.join(", ")}`
+                      : `Waiting on ${waitingPayorNames.slice(0, 2).join(", ")} +${waitingPayorNames.length - 2}`;
+
                 return (
                   <View
                     key={e.id}
@@ -796,7 +1095,26 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                                 isDark && { color: "#34D399" },
                               ]}
                             >
-                              PAID
+                              ALL PAID
+                            </Text>
+                          </View>
+                        ) : mySharePaid ? (
+                          <View
+                            style={[
+                              styles.statusBadgePaid,
+                              isDark && {
+                                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                borderColor: "rgba(16, 185, 129, 0.35)",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusBadgeTextPaid,
+                                isDark && { color: "#34D399" },
+                              ]}
+                            >
+                              YOUR SHARE PAID ✓
                             </Text>
                           </View>
                         ) : (
@@ -827,8 +1145,10 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                         ]}
                       >
                         {isExpensePaid
-                          ? `${e.date} · Paid by ${e.payerName}`
-                          : `${e.date} · Added by ${e.payerName || "Host"}`}
+                          ? `${e.date} · Settled by all ${payorCount} group ${payorCount === 1 ? "payor" : "payors"}`
+                          : paidPayorsCount > 0
+                            ? `${e.date} · ${paidPayorsCount}/${payorCount} payors settled${waitingSummary ? ` · ${waitingSummary}` : ""}`
+                            : `${e.date} · Added by ${e.payerName || "Host"} · 0/${payorCount} payors settled`}
                       </Text>
                     </View>
                     <View style={{ alignItems: "flex-end", marginTop: 2 }}>
@@ -847,20 +1167,26 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       <Text
                         style={{
                           fontSize: 11,
-                          color: isCurrentUserPayor
+                          color: !isCurrentUserPayor
                             ? isDark
-                              ? colors.accent
-                              : "#2563EB"
-                            : isDark
                               ? colors.textMuted
-                              : "#94A3B8",
+                              : "#94A3B8"
+                            : isExpensePaid || mySharePaid
+                              ? isDark
+                                ? "#34D399"
+                                : "#16A34A"
+                              : isDark
+                                ? colors.accent
+                                : "#2563EB",
                           fontWeight: "700",
                           marginTop: 2,
                         }}
                       >
-                        {isCurrentUserPayor
-                          ? `Your share: ${formatPesos(myShareForExpense)}`
-                          : "Exempt"}
+                        {!isCurrentUserPayor
+                          ? "Exempt"
+                          : isExpensePaid || mySharePaid
+                            ? `Your share: ${formatPesos(myShareForExpense)} (Paid ✓)`
+                            : `Your share: ${formatPesos(myShareForExpense)}`}
                       </Text>
                     </View>
                   </View>

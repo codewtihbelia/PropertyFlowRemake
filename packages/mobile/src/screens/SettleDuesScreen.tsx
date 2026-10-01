@@ -16,6 +16,7 @@ import {
   MobileExpense,
   isPayorMember,
   cleanBillTitle,
+  isCyclePaymentsLocked,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { getCategoryMeta } from "../services/categoryService";
@@ -35,6 +36,10 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   const householdId = cachedProfile?.householdId || "";
 
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
+  const [cycles, setCycles] = useState<any[]>([]);
+  const [household, setHousehold] = useState<any | null>(() =>
+    mobileDataService.getCachedHousehold(),
+  );
   const [members, setMembers] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +55,16 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
       setLoading(false);
     });
 
+    const unsubCyc = mobileDataService.listenToBillingCycles(
+      householdId,
+      setCycles,
+    );
+
+    const unsubHh = mobileDataService.listenToHousehold(
+      householdId,
+      setHousehold,
+    );
+
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
       setMembers,
@@ -62,10 +77,33 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
 
     return () => {
       unsubExp();
+      unsubCyc();
+      unsubHh();
       unsubMem();
       unsubPmt();
     };
   }, [householdId]);
+
+  const activeCycle = useMemo(
+    () =>
+      cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
+      cycles[0],
+    [cycles],
+  );
+  const isHostUser =
+    cachedProfile?.role === "HOST" || cachedProfile?.role === "SUPER_ADMIN";
+  const isPaymentsLocked =
+    isCyclePaymentsLocked(activeCycle, household) && !isHostUser;
+
+  const currentCycleExpenses = useMemo(() => {
+    return activeCycle
+      ? expenses.filter((e) =>
+          e.billingCycleId
+            ? e.billingCycleId === activeCycle.billingCycleId
+            : cycles.length <= 1,
+        )
+      : expenses;
+  }, [expenses, activeCycle, cycles.length]);
 
   const activeMembers = useMemo(() => {
     return members.filter((m) => m.status === "ACTIVE" || !m.status);
@@ -84,7 +122,7 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   const dues = useMemo(() => {
     const payorCount = Math.max(1, activePayors.length);
 
-    return expenses.map((exp) => {
+    return currentCycleExpenses.map((exp) => {
       const catMeta = getCategoryMeta(exp.category);
       const isPaid = exp.status === "PAID" || exp.isPaid === true;
       const mySplit = exp.splitDetails?.find(
@@ -112,7 +150,13 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
         bg: isDark ? "rgba(255, 255, 255, 0.06)" : catMeta.bgColor,
       };
     });
-  }, [expenses, activePayors, currentUser?.uid, isCurrentUserPayor, isDark]);
+  }, [
+    currentCycleExpenses,
+    activePayors,
+    currentUser?.uid,
+    isCurrentUserPayor,
+    isDark,
+  ]);
 
   const totalDuesCentavos = useMemo(() => {
     return dues
@@ -121,8 +165,8 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   }, [dues]);
 
   const totalExpenseCentavos = useMemo(() => {
-    return expenses.reduce((sum, e) => sum + e.amountCents, 0);
-  }, [expenses]);
+    return currentCycleExpenses.reduce((sum, e) => sum + e.amountCents, 0);
+  }, [currentCycleExpenses]);
 
   return (
     <SafeAreaView
@@ -218,36 +262,71 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
           </View>
         </View>
 
-        {/* Pay All Button if dues > 0 */}
-        {totalDuesCentavos > 0 && isCurrentUserPayor && (
-          <TouchableOpacity
-            style={[
-              styles.payBtn,
-              {
-                backgroundColor: colors.primary,
+        {/* Pay All Button or Locked Banner if dues > 0 */}
+        {totalDuesCentavos > 0 &&
+          isCurrentUserPayor &&
+          (isPaymentsLocked ? (
+            <View
+              style={{
+                backgroundColor: isDark
+                  ? "rgba(245, 158, 11, 0.15)"
+                  : "#FEF3C7",
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FCD34D",
                 paddingVertical: 14,
+                paddingHorizontal: 16,
                 borderRadius: 16,
                 marginBottom: 20,
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-              },
-            ]}
-            onPress={() =>
-              onPayPress({
-                name: "All Outstanding Dues",
-                amount: totalDuesCentavos / 100,
-              })
-            }
-            activeOpacity={0.85}
-          >
-            <Feather name="credit-card" size={18} color="#FFFFFF" />
-            <Text style={[styles.payBtnText, { fontSize: 15 }]}>
-              Pay All Remaining Dues ({formatPesos(totalDuesCentavos)})
-            </Text>
-          </TouchableOpacity>
-        )}
+              }}
+            >
+              <Feather
+                name="lock"
+                size={16}
+                color={isDark ? "#FBBF24" : "#B45309"}
+              />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "800",
+                  color: isDark ? "#FBBF24" : "#92400E",
+                }}
+              >
+                Bills Under Review · Payments Locked by Host
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[
+                styles.payBtn,
+                {
+                  backgroundColor: colors.primary,
+                  paddingVertical: 14,
+                  borderRadius: 16,
+                  marginBottom: 20,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                },
+              ]}
+              onPress={() =>
+                onPayPress({
+                  name: "All Outstanding Dues",
+                  amount: totalDuesCentavos / 100,
+                })
+              }
+              activeOpacity={0.85}
+            >
+              <Feather name="credit-card" size={18} color="#FFFFFF" />
+              <Text style={[styles.payBtnText, { fontSize: 15 }]}>
+                Pay All Remaining Dues ({formatPesos(totalDuesCentavos)})
+              </Text>
+            </TouchableOpacity>
+          ))}
 
         {/* Section Header */}
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -349,21 +428,54 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
                 </View>
 
                 {item.status === "UNPAID" ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.payBtn,
-                      {
-                        backgroundColor: colors.primary,
-                        shadowColor: colors.primary,
-                      },
-                    ]}
-                    onPress={() =>
-                      onPayPress({ name: item.name, amount: item.amount })
-                    }
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.payBtnText}>Pay</Text>
-                  </TouchableOpacity>
+                  isPaymentsLocked ? (
+                    <View
+                      style={[
+                        styles.paidBadge,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(245, 158, 11, 0.14)"
+                            : "#FEF3C7",
+                          borderColor: isDark
+                            ? "rgba(245, 158, 11, 0.28)"
+                            : "#FDE68A",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="lock"
+                        size={11}
+                        color={isDark ? "#FBBF24" : "#B45309"}
+                      />
+                      <Text
+                        style={[
+                          styles.paidBadgeText,
+                          { color: isDark ? "#FBBF24" : "#B45309" },
+                        ]}
+                      >
+                        Locked
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.payBtn,
+                        {
+                          backgroundColor: colors.primary,
+                          shadowColor: colors.primary,
+                        },
+                      ]}
+                      onPress={() =>
+                        onPayPress({ name: item.name, amount: item.amount })
+                      }
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.payBtnText}>Pay</Text>
+                    </TouchableOpacity>
+                  )
                 ) : (
                   <View
                     style={[

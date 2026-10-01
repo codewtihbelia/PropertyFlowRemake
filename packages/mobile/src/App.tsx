@@ -627,19 +627,21 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         {renderTabContent()}
       </View>
 
-      <FloatingNavBar
-        currentTab={currentTab}
-        onSelectTab={(tab) => {
-          showNav();
-          if (tab === "bills") {
-            setBillsInitialSubView("overview");
-          }
-          if (tab === "groups") {
-            setManageGroupInitialView("details");
-          }
-          setCurrentTab(tab);
-        }}
-      />
+      {currentTab !== "groups" && (
+        <FloatingNavBar
+          currentTab={currentTab}
+          onSelectTab={(tab) => {
+            showNav();
+            if (tab === "bills") {
+              setBillsInitialSubView("overview");
+            }
+            if (tab === "groups") {
+              setManageGroupInitialView("details");
+            }
+            setCurrentTab(tab);
+          }}
+        />
+      )}
     </View>
   );
 }

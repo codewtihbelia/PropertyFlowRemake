@@ -12,17 +12,39 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { formatPesos } from "@propertyflow/shared";
 import { auth } from "../firebase/config";
 import {
   mobileDataService,
   MobileExpense,
+  MobilePayment,
   cleanBillTitle,
+  isPayorMember,
 } from "../services/firebaseDataService";
 import { getCategoryMeta } from "../services/categoryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
+import { useTheme } from "../context/ThemeContext";
+
+export interface ExpensePayorBreakdownItem {
+  userId: string;
+  displayName: string;
+  role: "HOST" | "PAYOR" | "NON_PAYOR";
+  roleLabel: string;
+  isPayor: boolean;
+  isExempt: boolean;
+  shareCentavos: number;
+  percentage: number;
+  isPaid: boolean;
+  paidDate?: string;
+  paymentMethod?: string;
+  referenceNumber?: string;
+  note?: string;
+  isCurrentUser?: boolean;
+}
 
 export interface ExpenseItem {
   id: string;
+  householdId?: string;
   title: string;
   category: string;
   categoryLabel: string;
@@ -33,13 +55,21 @@ export interface ExpenseItem {
   amountCents: number;
   date: string;
   payer: string;
+  recordedBy: string;
+  groupPayorsSummary: string;
+  payorCount: number;
+  myShareCents: number;
+  myShareFormatted: string;
+  isCurrentUserPayor: boolean;
   splitMethod: string;
   cycle: string;
+  billingCycleId?: string;
   status?: "UNPAID" | "PAID";
   isPaid?: boolean;
   receiptUrl?: string;
   notes?: string;
   splitDetails?: any[];
+  payorBreakdown?: ExpensePayorBreakdownItem[];
 }
 
 interface ExpenseHistoryScreenProps {
@@ -53,15 +83,24 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   onSelectExpense,
   onAddExpensePress,
 }) => {
+  const { isDark, colors } = useTheme();
   const [activeTab, setActiveTab] = useState<"chronological" | "by_category">(
     "chronological",
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const [liveExpenses, setLiveExpenses] = useState<ExpenseItem[]>([]);
+  const [rawExpenses, setRawExpenses] = useState<MobileExpense[]>([]);
+  const [cycles, setCycles] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [payments, setPayments] = useState<MobilePayment[]>([]);
+  const [memberBills, setMemberBills] = useState<any[]>([]);
+  const [waterConfig, setWaterConfig] = useState<any>(null);
+  const [household, setHousehold] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [householdId, setHouseholdId] = useState<string | null>(null);
+  const [householdId, setHouseholdId] = useState<string | null>(
+    () => mobileDataService.getCachedProfile()?.householdId || null,
+  );
 
   const insets = useSafeAreaInsets();
   const topInset = Math.max(
@@ -78,19 +117,21 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       return;
     }
     if (isManualRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (!householdId) setLoading(true);
 
     try {
       const profile = await mobileDataService.getUserProfile(currentUser.uid);
       const hid = profile?.householdId;
       if (hid) {
         setHouseholdId(hid);
+      } else {
+        setLoading(false);
       }
     } catch (err) {
       console.warn("[ExpenseHistoryScreen] load profile error:", err);
+      setLoading(false);
     } finally {
       if (isManualRefresh) setRefreshing(false);
-      else setLoading(false);
     }
   };
 
@@ -105,70 +146,446 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     }
 
     setLoading(true);
-    const unsub = mobileDataService.listenToExpenses(
+    const ready = {
+      expenses: false,
+      members: false,
+      cycles: false,
+    };
+    const checkReady = () => {
+      if (ready.expenses && ready.members && ready.cycles) {
+        setLoading(false);
+      }
+    };
+    const safetyTimer = setTimeout(() => setLoading(false), 2000);
+
+    const unsubHousehold = mobileDataService.listenToHousehold(
+      householdId,
+      (hh) => setHousehold(hh),
+    );
+    const unsubExpenses = mobileDataService.listenToExpenses(
       householdId,
       (data: MobileExpense[]) => {
-        if (!data) {
-          setLiveExpenses([]);
-          setLoading(false);
-          return;
-        }
-
-        const mapped: ExpenseItem[] = data.map((exp) => {
-          const meta = getCategoryMeta(exp.category);
-          const isPaid = exp.status === "PAID" || exp.isPaid === true;
-
-          return {
-            id: exp.id,
-            title: cleanBillTitle(exp.title, exp.category),
-            category: meta.id.toLowerCase(),
-            categoryLabel: exp.category || meta.name,
-            icon: meta.featherIcon,
-            emoji: meta.emoji,
-            categoryColor: meta.color,
-            categoryBgColor: meta.bgColor,
-            amountCents: exp.amountCents,
-            date: exp.date,
-            payer: exp.payerName || "Host",
-            splitMethod: exp.splitMethod || "Equal Split",
-            cycle: exp.billingCycleId || "Current Cycle",
-            status: isPaid ? "PAID" : "UNPAID",
-            isPaid,
-            receiptUrl: exp.receiptUrl,
-            notes: exp.notes,
-            splitDetails: exp.splitDetails,
-          };
-        });
-
-        // Sort by newest date first
-        mapped.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-        );
-
-        setLiveExpenses(mapped);
-        setLoading(false);
+        setRawExpenses(data || []);
+        ready.expenses = true;
+        checkReady();
+      },
+    );
+    const unsubMembers = mobileDataService.listenToHouseholdMembers(
+      householdId,
+      (data: any[]) => {
+        setMembers(data || []);
+        ready.members = true;
+        checkReady();
+      },
+    );
+    const unsubCycles = mobileDataService.listenToBillingCycles(
+      householdId,
+      (data: any[]) => {
+        setCycles(data || []);
+        ready.cycles = true;
+        checkReady();
+      },
+    );
+    const unsubPayments = mobileDataService.listenToPayments(
+      householdId,
+      (data: MobilePayment[]) => {
+        setPayments(data || []);
+      },
+    );
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      householdId,
+      (cfg: any) => {
+        setWaterConfig(cfg);
       },
     );
 
     return () => {
-      unsub();
+      clearTimeout(safetyTimer);
+      unsubHousehold();
+      unsubExpenses();
+      unsubMembers();
+      unsubCycles();
+      unsubPayments();
+      unsubWater();
     };
   }, [householdId]);
+
+  const activeCycle = useMemo(() => {
+    return cycles.find((c) => c.status === "ACTIVE") || cycles[0] || null;
+  }, [cycles]);
+
+  const oldestCycleId = useMemo(() => {
+    return cycles.length > 0
+      ? cycles[cycles.length - 1]?.billingCycleId
+      : undefined;
+  }, [cycles]);
+
+  useEffect(() => {
+    if (!householdId || !activeCycle?.billingCycleId) {
+      setMemberBills([]);
+      return;
+    }
+    return mobileDataService.listenToMemberBills(
+      householdId,
+      activeCycle.billingCycleId,
+      setMemberBills,
+    );
+  }, [householdId, activeCycle?.billingCycleId]);
+
+  const activeMembersList = useMemo(() => {
+    return members.filter(
+      (m) => !m.status || m.status === "ACTIVE" || m.status === "SETTLED",
+    );
+  }, [members]);
+
+  const activePayorsList = useMemo(() => {
+    return activeMembersList.filter((m) => isPayorMember(m));
+  }, [activeMembersList]);
+
+  const isCurrentUserPayor = useMemo(() => {
+    const me = activeMembersList.find((m) => m.userId === currentUser?.uid);
+    return me ? isPayorMember(me) : true;
+  }, [activeMembersList, currentUser?.uid]);
+
+  const payorCount = useMemo(() => {
+    return Math.max(
+      1,
+      activePayorsList.length > 0
+        ? activePayorsList.length
+        : activeMembersList.length,
+    );
+  }, [activePayorsList.length, activeMembersList.length]);
+
+  const activeCycleExpenses = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return rawExpenses;
+    return rawExpenses.filter(
+      (e) =>
+        e.billingCycleId === activeCycle.billingCycleId ||
+        (!e.billingCycleId &&
+          (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId)),
+    );
+  }, [rawExpenses, activeCycle?.billingCycleId, cycles.length, oldestCycleId]);
+
+  // Check if all active payors have settled their shares for the active cycle
+  const allPayorsSettledForActiveCycle = useMemo(() => {
+    if (activePayorsList.length === 0 || activeCycleExpenses.length === 0) {
+      return false;
+    }
+    const cycleId = activeCycle?.billingCycleId;
+    const isSingleCycle = cycles.length <= 1;
+
+    return activePayorsList.every((p) => {
+      const uid = p.userId || p.memberId || (p as any).id;
+      const b = memberBills.find((mb) => mb.userId === uid);
+      const userPaidFromPmts = payments
+        .filter((pmt) => {
+          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+          if (!cycleId) return true;
+          return (
+            pmt.billingCycleId === cycleId ||
+            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+              isSingleCycle)
+          );
+        })
+        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
+
+      let payorShareTotal = 0;
+      let allUserSplitsMarkedPaid = true;
+      activeCycleExpenses.forEach((exp) => {
+        const mySplit = Array.isArray(exp.splitDetails)
+          ? exp.splitDetails.find((s: any) => s.userId === uid)
+          : null;
+        if (mySplit?.isExempt) return;
+        const share =
+          mySplit && typeof mySplit.shareCentavos === "number"
+            ? mySplit.shareCentavos
+            : Math.round((exp.amountCents || 0) / payorCount);
+        payorShareTotal += share;
+        if (
+          !exp.isPaid &&
+          exp.status !== "PAID" &&
+          !mySplit?.isPaid &&
+          share > 0
+        ) {
+          allUserSplitsMarkedPaid = false;
+        }
+      });
+
+      if (payorShareTotal <= 0) return false;
+      const effectivePaid = Math.max(
+        b?.totalPaidCentavos || 0,
+        userPaidFromPmts,
+      );
+      return effectivePaid >= payorShareTotal || allUserSplitsMarkedPaid;
+    });
+  }, [
+    activePayorsList,
+    activeCycleExpenses,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    memberBills,
+    payments,
+    payorCount,
+  ]);
+
+  // Build strictly PAID / SETTLED expenses with full group payor attribution & breakdown
+  const paidExpenses: ExpenseItem[] = useMemo(() => {
+    const hhTitle =
+      household?.householdName || household?.name || "My Household";
+    const isSingleCycle = cycles.length <= 1;
+
+    const settledList: ExpenseItem[] = [];
+
+    rawExpenses.forEach((exp) => {
+      const belongsToActiveCycle =
+        !activeCycle?.billingCycleId ||
+        exp.billingCycleId === activeCycle.billingCycleId ||
+        (!exp.billingCycleId &&
+          (isSingleCycle || activeCycle.billingCycleId === oldestCycleId));
+
+      const allSplitsPaid =
+        Array.isArray(exp.splitDetails) &&
+        exp.splitDetails.length > 0 &&
+        exp.splitDetails.every((s: any) => s.isExempt || s.isPaid);
+
+      const isPaid =
+        exp.status === "PAID" ||
+        exp.isPaid === true ||
+        allSplitsPaid ||
+        (belongsToActiveCycle && allPayorsSettledForActiveCycle);
+
+      // Strictly include PAID bills only in Bill History
+      if (!isPaid) return;
+
+      const meta = getCategoryMeta(exp.category);
+      const rawSplits = Array.isArray(exp.splitDetails) ? exp.splitDetails : [];
+
+      // Resolve cycle display label
+      const matchedCycle = cycles.find(
+        (c) => c.billingCycleId === exp.billingCycleId,
+      );
+      const cycleLabel =
+        matchedCycle?.name ||
+        activeCycle?.name ||
+        (exp.billingCycleId && !exp.billingCycleId.startsWith("bc_")
+          ? exp.billingCycleId
+          : "Settled Cycle");
+
+      // Build complete per-member breakdown using real household members + splitDetails + payments
+      const breakdown: ExpensePayorBreakdownItem[] = [];
+      const sourceMembers =
+        activeMembersList.length > 0
+          ? activeMembersList
+          : rawSplits.map((s: any) => ({
+              userId: s.userId,
+              memberId: s.userId,
+              displayName: s.displayName || "Roommate",
+              role: s.role || (s.isExempt ? "NON_PAYOR" : "PAYOR"),
+              isExempt: s.isExempt,
+            }));
+
+      const effPayors = sourceMembers.filter((m: any) => isPayorMember(m));
+      const effPayorCount = Math.max(
+        1,
+        effPayors.length > 0 ? effPayors.length : sourceMembers.length,
+      );
+
+      sourceMembers.forEach((m: any) => {
+        const uid = m.userId || m.memberId || m.id;
+        const isPayor = isPayorMember(m);
+        const splitEntry: any = rawSplits.find(
+          (s: any) => s.userId === uid || s.memberId === uid || s.id === uid,
+        );
+        const isExempt = !isPayor || Boolean(splitEntry?.isExempt);
+
+        const shareCentavos = isExempt
+          ? 0
+          : splitEntry &&
+              typeof splitEntry.shareCentavos === "number" &&
+              splitEntry.shareCentavos > 0
+            ? splitEntry.shareCentavos
+            : Math.round((exp.amountCents || 0) / effPayorCount);
+
+        const percentage = isExempt
+          ? 0
+          : exp.amountCents > 0
+            ? Math.round((shareCentavos / exp.amountCents) * 1000) / 10
+            : Math.round((100 / effPayorCount) * 10) / 10;
+
+        // Match verified payment from this payor for this cycle
+        const matchedPayment = payments.find((pmt) => {
+          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+          if (splitEntry?.paymentId && pmt.paymentId === splitEntry.paymentId) {
+            return true;
+          }
+          if (!exp.billingCycleId) return true;
+          return (
+            pmt.billingCycleId === exp.billingCycleId ||
+            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+              isSingleCycle)
+          );
+        });
+
+        const memberName =
+          m.displayName ||
+          m.name ||
+          splitEntry?.displayName ||
+          (m.role === "HOST" ? "Host" : "Roommate");
+
+        const roleType: "HOST" | "PAYOR" | "NON_PAYOR" =
+          m.role === "HOST" ? "HOST" : isExempt ? "NON_PAYOR" : "PAYOR";
+
+        const roleLabel =
+          m.role === "HOST"
+            ? isExempt
+              ? "HOST · EXEMPT"
+              : "HOST · PAYOR"
+            : isExempt
+              ? "NON-PAYOR (EXEMPT)"
+              : "GROUP PAYOR";
+
+        const defaultNote = isExempt
+          ? "Exempted (Non-payor)"
+          : `Fair share across ${effPayorCount} ${effPayorCount === 1 ? "payor" : "payors"} (${percentage}%)`;
+
+        breakdown.push({
+          userId: uid,
+          displayName: memberName,
+          role: roleType,
+          roleLabel,
+          isPayor: !isExempt,
+          isExempt,
+          shareCentavos,
+          percentage,
+          isPaid: true,
+          paidDate:
+            matchedPayment?.paymentDate ||
+            (splitEntry?.paidDate
+              ? String(splitEntry.paidDate).slice(0, 10)
+              : exp.date),
+          paymentMethod: matchedPayment?.paymentMethod || undefined,
+          referenceNumber: matchedPayment?.referenceNumber || undefined,
+          note: splitEntry?.note || defaultNote,
+          isCurrentUser: Boolean(currentUser?.uid && uid === currentUser.uid),
+        });
+      });
+
+      // Sort breakdown: current user first, then payors, then non-payors
+      breakdown.sort((a, b) => {
+        if (a.isCurrentUser && !b.isCurrentUser) return -1;
+        if (!a.isCurrentUser && b.isCurrentUser) return 1;
+        if (a.isPayor && !b.isPayor) return -1;
+        if (!a.isPayor && b.isPayor) return 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+      const contributingPayors = breakdown.filter((b) => b.isPayor);
+      const payorFirstNames = contributingPayors.map(
+        (p) => p.displayName.split(" ")[0] || p.displayName,
+      );
+
+      let groupPayorsSummary = "Group Payors";
+      if (payorFirstNames.length === 1) {
+        groupPayorsSummary = `${payorFirstNames[0]} (Group Payor)`;
+      } else if (payorFirstNames.length === 2) {
+        groupPayorsSummary = `${payorFirstNames[0]} & ${payorFirstNames[1]}`;
+      } else if (payorFirstNames.length > 2) {
+        groupPayorsSummary = `${payorFirstNames.slice(0, 2).join(", ")} +${payorFirstNames.length - 2} more`;
+      }
+
+      const myEntry = breakdown.find((b) => b.isCurrentUser);
+      const myShareCents = myEntry
+        ? myEntry.shareCentavos
+        : isCurrentUserPayor
+          ? Math.round((exp.amountCents || 0) / effPayorCount)
+          : 0;
+
+      const recordedBy =
+        exp.payerName &&
+        exp.payerName !== "system" &&
+        exp.payerName !== "Household"
+          ? exp.payerName
+          : household?.hostName || "Host";
+
+      settledList.push({
+        id: exp.id,
+        householdId: exp.householdId || householdId || undefined,
+        title: cleanBillTitle(exp.title, exp.category, hhTitle),
+        category: meta.id.toLowerCase(),
+        categoryLabel: exp.category || meta.name,
+        icon: meta.featherIcon,
+        emoji: meta.emoji,
+        categoryColor: meta.color,
+        categoryBgColor: meta.bgColor,
+        amountCents: exp.amountCents,
+        date: exp.date,
+        payer: groupPayorsSummary,
+        recordedBy,
+        groupPayorsSummary,
+        payorCount: contributingPayors.length || effPayorCount,
+        myShareCents,
+        myShareFormatted: formatPesos(myShareCents),
+        isCurrentUserPayor: myEntry ? myEntry.isPayor : isCurrentUserPayor,
+        splitMethod: exp.splitMethod || "Equal Split",
+        cycle: cycleLabel,
+        billingCycleId: exp.billingCycleId,
+        status: "PAID",
+        isPaid: true,
+        receiptUrl: exp.receiptUrl,
+        notes: exp.notes,
+        splitDetails: exp.splitDetails,
+        payorBreakdown: breakdown,
+      });
+    });
+
+    settledList.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+
+    return settledList;
+  }, [
+    rawExpenses,
+    cycles,
+    activeCycle,
+    oldestCycleId,
+    allPayorsSettledForActiveCycle,
+    activeMembersList,
+    payments,
+    household,
+    householdId,
+    currentUser?.uid,
+    isCurrentUserPayor,
+    waterConfig,
+  ]);
 
   const handleRefresh = () => {
     loadData(true);
   };
 
   const filteredExpenses = useMemo(() => {
-    if (!searchQuery.trim()) return liveExpenses;
+    if (!searchQuery.trim()) return paidExpenses;
     const q = searchQuery.toLowerCase().trim();
-    return liveExpenses.filter(
-      (item) =>
+    return paidExpenses.filter((item) => {
+      const matchesPayorName = item.payorBreakdown?.some((p) =>
+        p.displayName.toLowerCase().includes(q),
+      );
+      return (
         item.title.toLowerCase().includes(q) ||
-        item.payer.toLowerCase().includes(q) ||
-        item.categoryLabel.toLowerCase().includes(q),
-    );
-  }, [liveExpenses, searchQuery]);
+        item.groupPayorsSummary.toLowerCase().includes(q) ||
+        item.categoryLabel.toLowerCase().includes(q) ||
+        item.cycle.toLowerCase().includes(q) ||
+        Boolean(matchesPayorName)
+      );
+    });
+  }, [paidExpenses, searchQuery]);
+
+  const totalSettledCents = useMemo(() => {
+    return filteredExpenses.reduce((sum, item) => sum + item.amountCents, 0);
+  }, [filteredExpenses]);
+
+  const myTotalPaidShareCents = useMemo(() => {
+    return filteredExpenses.reduce((sum, item) => sum + item.myShareCents, 0);
+  }, [filteredExpenses]);
 
   const formatExpenseDate = (dateStr: string) => {
     if (!dateStr) return "";
@@ -189,15 +606,10 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         "Nov",
         "Dec",
       ];
-      return `${d.getDate()} ${monthNames[d.getMonth()]}`;
+      return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
     } catch {
       return dateStr;
     }
-  };
-
-  const formatAmount = (cents: number) => {
-    const val = (Math.abs(cents) / 100).toFixed(2);
-    return `-₱${val}`;
   };
 
   const renderCategoryIcon = (iconName: string, item?: ExpenseItem) => {
@@ -205,7 +617,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     return (
       <Feather
         name={meta.featherIcon as any}
-        size={18}
+        size={20}
         color={meta.color || "#475569"}
       />
     );
@@ -222,45 +634,243 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     return groups;
   }, [filteredExpenses]);
 
+  const renderPaidBillCard = (item: ExpenseItem, keyPrefix = "") => {
+    const contributingPayors =
+      item.payorBreakdown?.filter((b) => b.isPayor) || [];
+
+    return (
+      <TouchableOpacity
+        key={`${keyPrefix}${item.id}`}
+        style={[
+          styles.expenseItemCard,
+          isDark && {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+          },
+        ]}
+        onPress={() =>
+          onSelectExpense({ ...item, icon: item.emoji || item.icon })
+        }
+        activeOpacity={0.85}
+      >
+        {/* Left Icon Container aligned flex-start with middle contents */}
+        <View
+          style={[
+            styles.iconCircle,
+            {
+              backgroundColor: isDark
+                ? "rgba(255,255,255,0.06)"
+                : item.categoryBgColor || "#F1F5F9",
+            },
+          ]}
+        >
+          {renderCategoryIcon(item.icon, item)}
+        </View>
+
+        {/* Middle Title, True Group Payors & Per-Payor Share Breakdown */}
+        <View style={styles.itemInfo}>
+          <View style={styles.titleRow}>
+            <Text
+              style={[styles.itemTitle, isDark && { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            <View
+              style={[
+                styles.paidBadge,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.16)",
+                  borderColor: "rgba(16, 185, 129, 0.35)",
+                },
+              ]}
+            >
+              <Text
+                style={[styles.paidBadgeText, isDark && { color: "#34D399" }]}
+              >
+                PAID
+              </Text>
+            </View>
+          </View>
+
+          <Text
+            style={[
+              styles.itemSubtitle,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
+            {formatExpenseDate(item.date)} · Paid by {item.groupPayorsSummary}
+          </Text>
+
+          <Text
+            style={[
+              styles.shareHighlightText,
+              isDark && { color: colors.accent },
+            ]}
+          >
+            {item.isCurrentUserPayor
+              ? `Split across ${item.payorCount} ${item.payorCount === 1 ? "payor" : "payors"} · Your share: ${item.myShareFormatted}`
+              : `Exempt (Non-payor) · Paid by ${item.payorCount} group ${item.payorCount === 1 ? "payor" : "payors"}`}
+          </Text>
+
+          {/* Compact Per-Payor Breakdown Chips */}
+          {contributingPayors.length > 0 && (
+            <View style={styles.payorChipsWrap}>
+              {contributingPayors.map((payor) => (
+                <View
+                  key={`${item.id}_${payor.userId}`}
+                  style={[
+                    styles.payorChip,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                    payor.isCurrentUser &&
+                      (isDark
+                        ? {
+                            backgroundColor: "rgba(59, 130, 246, 0.14)",
+                            borderColor: "rgba(59, 130, 246, 0.35)",
+                          }
+                        : {
+                            backgroundColor: "#EFF6FF",
+                            borderColor: "#BFDBFE",
+                          }),
+                  ]}
+                >
+                  <Feather
+                    name="check-circle"
+                    size={10}
+                    color={isDark ? "#34D399" : "#16A34A"}
+                  />
+                  <Text
+                    style={[
+                      styles.payorChipText,
+                      isDark && { color: colors.textSecondary },
+                      payor.isCurrentUser && {
+                        color: isDark ? "#60A5FA" : "#1D4ED8",
+                        fontWeight: "700",
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {payor.displayName.split(" ")[0]}:{" "}
+                    {formatPesos(payor.shareCentavos)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Right Amount & Breakdown Hint centered with middle contents */}
+        <View style={styles.rightAmountWrap}>
+          <Text style={[styles.itemAmount, isDark && { color: colors.text }]}>
+            {formatPesos(item.amountCents)}
+          </Text>
+          <View style={styles.breakdownHintRow}>
+            <Text
+              style={[styles.breakdownHintText, isDark && { color: "#34D399" }]}
+            >
+              Breakdown
+            </Text>
+            <Feather
+              name="chevron-right"
+              size={12}
+              color={isDark ? "#34D399" : "#16A34A"}
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        isDark && { backgroundColor: colors.background },
+      ]}
+    >
       <StatusBar
-        barStyle="dark-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent={true}
         backgroundColor="transparent"
       />
 
       {/* Top Header */}
-      <View style={[styles.navBarContainer, { paddingTop: topInset }]}>
+      <View
+        style={[
+          styles.navBarContainer,
+          { paddingTop: topInset },
+          isDark && { backgroundColor: colors.background },
+        ]}
+      >
         <View style={styles.navBar}>
           <TouchableOpacity
-            style={styles.circleBackBtn}
+            style={[
+              styles.circleBackBtn,
+              isDark && {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={() => (onBack ? onBack() : null)}
             activeOpacity={0.7}
           >
-            <Feather name="chevron-left" size={24} color="#0F172A" />
+            <Feather
+              name="chevron-left"
+              size={24}
+              color={isDark ? colors.text : "#0F172A"}
+            />
           </TouchableOpacity>
 
-          <Text style={styles.navTitle}>Bill History</Text>
+          <View style={{ alignItems: "center" }}>
+            <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
+              Paid Bill History
+            </Text>
+          </View>
 
           <View style={styles.headerRight}>
             <TouchableOpacity
-              style={styles.iconNavBtn}
+              style={[
+                styles.iconNavBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={() => setShowSearch(!showSearch)}
               activeOpacity={0.7}
             >
-              <Feather name="search" size={20} color="#0F172A" />
+              <Feather
+                name="search"
+                size={20}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.iconNavBtn}
+              style={[
+                styles.iconNavBtn,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
               onPress={handleRefresh}
               activeOpacity={0.7}
             >
               {refreshing ? (
                 <ActivityIndicator size="small" color="#2563EB" />
               ) : (
-                <Feather name="rotate-cw" size={20} color="#0F172A" />
+                <Feather
+                  name="rotate-cw"
+                  size={20}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
               )}
             </TouchableOpacity>
           </View>
@@ -269,31 +879,52 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
 
       {/* Expandable Search Input */}
       {showSearch && (
-        <View style={styles.searchBarContainer}>
+        <View
+          style={[
+            styles.searchBarContainer,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <Feather
             name="search"
             size={16}
-            color="#64748B"
+            color={isDark ? colors.textSecondary : "#64748B"}
             style={{ marginRight: 8 }}
           />
           <TextInput
-            style={styles.searchInput}
-            placeholder="Search by title, payer or category..."
-            placeholderTextColor="#94A3B8"
+            style={[styles.searchInput, isDark && { color: colors.text }]}
+            placeholder="Search paid bills, group payors, or category..."
+            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoFocus
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <Feather name="x" size={16} color="#64748B" />
+              <Feather
+                name="x"
+                size={16}
+                color={isDark ? colors.textSecondary : "#64748B"}
+              />
             </TouchableOpacity>
           )}
         </View>
       )}
 
-      {/* Segmented Tab Switcher matching screen.png */}
-      <View style={styles.tabContainer}>
+      {/* Segmented Tab Switcher */}
+      <View
+        style={[
+          styles.tabContainer,
+          isDark && {
+            backgroundColor: colors.card,
+            borderWidth: 1,
+            borderColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[
             styles.tabBtn,
@@ -305,10 +936,11 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           <Text
             style={[
               styles.tabBtnText,
+              isDark && { color: colors.textSecondary },
               activeTab === "chronological" && styles.tabBtnTextActive,
             ]}
           >
-            Chronological
+            Chronological ({filteredExpenses.length})
           </Text>
         </TouchableOpacity>
 
@@ -323,10 +955,11 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           <Text
             style={[
               styles.tabBtnText,
+              isDark && { color: colors.textSecondary },
               activeTab === "by_category" && styles.tabBtnTextActive,
             ]}
           >
-            By Category
+            By Category ({Object.keys(categorizedExpenses).length})
           </Text>
         </TouchableOpacity>
       </View>
@@ -334,39 +967,62 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       {/* Content Area */}
       {loading ? (
         <UniversalSkeleton type="history" />
-      ) : liveExpenses.length === 0 ? (
-        /* Clean Empty State as requested (no hardcoded data) */
+      ) : paidExpenses.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyScrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <Ionicons name="receipt-outline" size={32} color="#0F172A" />
+          <View
+            style={[
+              styles.emptyCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.emptyIconCircle,
+                isDark && { backgroundColor: colors.surfaceInset },
+              ]}
+            >
+              <Ionicons
+                name="checkmark-done-circle-outline"
+                size={34}
+                color={isDark ? colors.text : "#0F172A"}
+              />
             </View>
-            <Text style={styles.emptyTitle}>No Bills Yet</Text>
-            <Text style={styles.emptySubtitle}>
-              No household bills have been recorded for this household yet. Once
-              your host records a bill or payments are settled, they will appear
-              here.
+            <Text style={[styles.emptyTitle, isDark && { color: colors.text }]}>
+              No Paid Bills Yet
             </Text>
-
-            {onAddExpensePress && (
-              <TouchableOpacity
-                style={styles.emptyActionBtn}
-                onPress={onAddExpensePress}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.emptyActionBtnText}>+ Record A Bill</Text>
-              </TouchableOpacity>
-            )}
+            <Text
+              style={[
+                styles.emptySubtitle,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Only completed, settled household bills appear in Bill History.
+              Once your group payors settle the active cycle's upcoming bills,
+              they will be archived here with full per-payor breakdowns.
+            </Text>
           </View>
         </ScrollView>
       ) : filteredExpenses.length === 0 ? (
         <View style={styles.centerContainer}>
-          <Text style={styles.emptySearchTitle}>No results found</Text>
-          <Text style={styles.emptySubtitle}>
-            No expenses matched "{searchQuery}". Try a different keyword.
+          <Text
+            style={[styles.emptySearchTitle, isDark && { color: colors.text }]}
+          >
+            No matching paid bills
+          </Text>
+          <Text
+            style={[
+              styles.emptySubtitle,
+              isDark && { color: colors.textSecondary },
+            ]}
+          >
+            No settled bills matched "{searchQuery}". Try searching another bill
+            name or roommate.
           </Text>
         </View>
       ) : (
@@ -374,77 +1030,74 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          {/* Settled Summary Card */}
+          <View
+            style={[
+              styles.summaryBanner,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={styles.summaryTitleRow}>
+                <Feather
+                  name="check-circle"
+                  size={14}
+                  color={isDark ? "#34D399" : "#15803D"}
+                />
+                <Text
+                  style={[styles.summaryLabel, isDark && { color: "#34D399" }]}
+                >
+                  SETTLED BILLS ARCHIVE ({filteredExpenses.length})
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.summaryTotalAmount,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                {formatPesos(totalSettledCents)}
+              </Text>
+              <Text
+                style={[
+                  styles.summarySubtext,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                {isCurrentUserPayor
+                  ? `Paid collectively by ${payorCount} group ${payorCount === 1 ? "payor" : "payors"} · Your total paid share: ${formatPesos(myTotalPaidShareCents)}`
+                  : `Paid collectively by ${payorCount} group ${payorCount === 1 ? "payor" : "payors"} · You are exempt (Non-payor)`}
+              </Text>
+            </View>
+          </View>
+
           {activeTab === "chronological" ? (
             <View>
-              {/* Recent Expenses Section matching screen.png */}
-              <Text style={styles.sectionHeader}>Recent Expenses</Text>
-
-              {filteredExpenses.slice(0, 3).map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.itemRow}
-                  onPress={() =>
-                    onSelectExpense({ ...item, icon: item.emoji || item.icon })
-                  }
-                  activeOpacity={0.7}
+              <View style={styles.sectionHeaderRow}>
+                <Text
+                  style={[
+                    styles.sectionHeader,
+                    isDark && { color: colors.text },
+                  ]}
                 >
-                  <View
-                    style={[
-                      styles.iconCircle,
-                      { backgroundColor: item.categoryBgColor || "#F1F5F9" },
-                    ]}
-                  >
-                    {renderCategoryIcon(item.icon, item)}
-                  </View>
-
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle}>{item.title}</Text>
-                    <Text style={styles.itemSubtitle}>
-                      {formatExpenseDate(item.date)} • Paid by {item.payer}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.itemAmount}>
-                    {formatAmount(item.amountCents)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* By Categories Section matching screen.png */}
-              <Text style={[styles.sectionHeader, { marginTop: 24 }]}>
-                By Categories
-              </Text>
-
-              {filteredExpenses.map((item) => (
-                <TouchableOpacity
-                  key={`bycat_${item.id}`}
-                  style={styles.itemRow}
-                  onPress={() =>
-                    onSelectExpense({ ...item, icon: item.emoji || item.icon })
-                  }
-                  activeOpacity={0.7}
+                  Settled Bills History
+                </Text>
+                <Text
+                  style={[
+                    styles.sectionSubCount,
+                    isDark && { color: colors.textSecondary },
+                  ]}
                 >
-                  <View
-                    style={[
-                      styles.iconCircle,
-                      { backgroundColor: item.categoryBgColor || "#F1F5F9" },
-                    ]}
-                  >
-                    {renderCategoryIcon(item.icon, item)}
-                  </View>
+                  Tap any bill for payor breakdown
+                </Text>
+              </View>
 
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle}>{item.title}</Text>
-                    <Text style={styles.itemSubtitle}>
-                      {formatExpenseDate(item.date)} • Paid by {item.payer}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.itemAmount}>
-                    {formatAmount(item.amountCents)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {filteredExpenses.map((item) =>
+                renderPaidBillCard(item, "chrono_"),
+              )}
             </View>
           ) : (
             /* By Category Tab View */
@@ -455,53 +1108,48 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
                   (sum, e) => sum + e.amountCents,
                   0,
                 );
+                const groupMyShareCents = groupItems.reduce(
+                  (sum, e) => sum + e.myShareCents,
+                  0,
+                );
 
                 return (
                   <View key={categoryName} style={styles.categoryBlock}>
                     <View style={styles.categoryHeaderRow}>
-                      <Text style={styles.sectionHeader}>{categoryName}</Text>
-                      <Text style={styles.categoryTotalAmount}>
-                        {formatAmount(groupTotalCents)}
+                      <View>
+                        <Text
+                          style={[
+                            styles.sectionHeader,
+                            { marginBottom: 2 },
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {categoryName} ({groupItems.length})
+                        </Text>
+                        {isCurrentUserPayor && (
+                          <Text
+                            style={[
+                              styles.categoryShareSub,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                          >
+                            Your total share: {formatPesos(groupMyShareCents)}
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.categoryTotalAmount,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        {formatPesos(groupTotalCents)}
                       </Text>
                     </View>
 
-                    {groupItems.map((item) => (
-                      <TouchableOpacity
-                        key={item.id}
-                        style={styles.itemRow}
-                        onPress={() =>
-                          onSelectExpense({
-                            ...item,
-                            icon: item.emoji || item.icon,
-                          })
-                        }
-                        activeOpacity={0.7}
-                      >
-                        <View
-                          style={[
-                            styles.iconCircle,
-                            {
-                              backgroundColor:
-                                item.categoryBgColor || "#F1F5F9",
-                            },
-                          ]}
-                        >
-                          {renderCategoryIcon(item.icon, item)}
-                        </View>
-
-                        <View style={styles.itemInfo}>
-                          <Text style={styles.itemTitle}>{item.title}</Text>
-                          <Text style={styles.itemSubtitle}>
-                            {formatExpenseDate(item.date)} • Paid by{" "}
-                            {item.payer}
-                          </Text>
-                        </View>
-
-                        <Text style={styles.itemAmount}>
-                          {formatAmount(item.amountCents)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                    {groupItems.map((item) =>
+                      renderPaidBillCard(item, `cat_${categoryName}_`),
+                    )}
                   </View>
                 );
               })}
@@ -523,7 +1171,7 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   navBar: {
-    height: 56,
+    height: 58,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -550,6 +1198,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#0F172A",
   },
+  navSubtitle: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 1,
+  },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
@@ -573,7 +1227,6 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     paddingVertical: 0,
   },
-  // Tab Switcher matching screen.png
   tabContainer: {
     flexDirection: "row",
     backgroundColor: "#F1F5F9",
@@ -593,7 +1246,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
   },
   tabBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: "#475569",
   },
@@ -601,18 +1254,60 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
   },
-  // Sections and Lists matching screen.png
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 6,
     paddingBottom: 40,
+  },
+  summaryBanner: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  summaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#15803D",
+    letterSpacing: 0.4,
+  },
+  summaryTotalAmount: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  summarySubtext: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+    marginTop: 4,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
   sectionHeader: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 12,
-    marginTop: 4,
+  },
+  sectionSubCount: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748B",
   },
   categoryBlock: {
     marginBottom: 20,
@@ -621,17 +1316,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginBottom: 10,
+  },
+  categoryShareSub: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748B",
   },
   categoryTotalAmount: {
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "800",
     color: "#2563EB",
   },
-  itemRow: {
+  expenseItemCard: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
+    alignItems: "flex-start",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
   },
   iconCircle: {
     width: 44,
@@ -640,40 +1350,99 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 14,
+    marginRight: 12,
+    alignSelf: "flex-start",
+    marginTop: 2,
   },
   itemInfo: {
     flex: 1,
+    paddingRight: 8,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    marginBottom: 2,
   },
   itemTitle: {
     fontSize: 15,
     fontWeight: "700",
     color: "#0F172A",
-    marginBottom: 2,
+  },
+  paidBadge: {
+    backgroundColor: "#DCFCE7",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  paidBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#15803D",
   },
   itemSubtitle: {
     fontSize: 12,
     color: "#64748B",
-    fontWeight: "400",
+    fontWeight: "500",
+  },
+  shareHighlightText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#2563EB",
+    marginTop: 3,
+  },
+  payorChipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginTop: 7,
+  },
+  payorChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 7,
+  },
+  payorChipText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  rightAmountWrap: {
+    alignItems: "flex-end",
+    alignSelf: "center",
+    justifyContent: "center",
   },
   itemAmount: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#0F172A",
   },
-  // Center / Loading / Empty States
+  breakdownHintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    marginTop: 3,
+  },
+  breakdownHintText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#16A34A",
+  },
   centerContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
     paddingTop: 60,
-  },
-  loadingText: {
-    fontSize: 13,
-    color: "#64748B",
-    marginTop: 10,
-    fontWeight: "500",
   },
   emptyScrollContent: {
     flexGrow: 1,
@@ -684,8 +1453,8 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     alignItems: "center",
-    maxWidth: 320,
-    backgroundColor: "#F8FAFC",
+    maxWidth: 330,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
     borderRadius: 20,
@@ -712,18 +1481,6 @@ const styles = StyleSheet.create({
     color: "#64748B",
     textAlign: "center",
     lineHeight: 19,
-  },
-  emptyActionBtn: {
-    marginTop: 18,
-    backgroundColor: "#2563EB",
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  emptyActionBtnText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
   },
   emptySearchTitle: {
     fontSize: 16,

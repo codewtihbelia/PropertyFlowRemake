@@ -53,7 +53,24 @@ export interface MobileNotificationItem {
 }
 
 export const READ_NOTIFICATIONS_STORAGE_KEY =
-  "@splitzy_read_notification_ids_v1";
+  "@splitzy_read_notification_ids_v2";
+
+export function getReadNotificationsStorageKey(uid?: string): string {
+  const safeUid = (uid || auth.currentUser?.uid || "").trim();
+  return safeUid
+    ? `${READ_NOTIFICATIONS_STORAGE_KEY}_${safeUid}`
+    : READ_NOTIFICATIONS_STORAGE_KEY;
+}
+
+export function getScopedNotificationReadKey(
+  uid: string | undefined,
+  id: string | undefined,
+): string {
+  const safeUid = (uid || auth.currentUser?.uid || "").trim();
+  const safeId = (id || "").trim();
+  if (!safeUid || !safeId) return safeId;
+  return `v2_${safeUid}_${safeId}`;
+}
 
 export function formatNotificationRelativeTime(dateInput?: any): {
   label: string;
@@ -138,8 +155,23 @@ export function formatNotificationRelativeTime(dateInput?: any): {
 export function isNotificationItemUnread(
   item: MobileNotificationItem,
   readIds: Record<string, boolean>,
+  uid?: string,
 ): boolean {
   if (!item) return false;
+  const effectiveUid = (uid || auth.currentUser?.uid || "").trim();
+  if (effectiveUid) {
+    const scopedItemKey = getScopedNotificationReadKey(effectiveUid, item.id);
+    const scopedCloudKey = item.cloudDocId
+      ? getScopedNotificationReadKey(effectiveUid, item.cloudDocId)
+      : "";
+    if (
+      (scopedItemKey && readIds[scopedItemKey]) ||
+      (scopedCloudKey && readIds[scopedCloudKey])
+    ) {
+      return false;
+    }
+    return Boolean(item.defaultUnread);
+  }
   if (readIds[item.id] || (item.cloudDocId && readIds[item.cloudDocId])) {
     return false;
   }
@@ -158,7 +190,7 @@ export function buildRealNotificationsList(params: {
   cloudNotifications?: any[];
 }): MobileNotificationItem[] {
   const {
-    uid = "user",
+    uid,
     groupName,
     expenses = [],
     payments = [],
@@ -168,11 +200,22 @@ export function buildRealNotificationsList(params: {
     cloudNotifications = [],
   } = params;
 
+  const effectiveUid = (uid || auth.currentUser?.uid || "").trim();
+  const uidPrefix = effectiveUid || "user";
+
+  const isCloudDocReadByCurrentUser = (cloudDoc: any): boolean => {
+    if (!cloudDoc || cloudDoc.readStatus !== true) return false;
+    if (!effectiveUid) return false;
+    return cloudDoc.readByRecipientId === effectiveUid;
+  };
+
   const cloudByItemId = new Map<string, any>();
-  const cloudByEntityId = new Map<string, any>();
   const matchedCloudDocIds = new Set<string>();
 
   cloudNotifications.forEach((cn) => {
+    if (effectiveUid && cn.recipientId && cn.recipientId !== effectiveUid) {
+      return;
+    }
     const docId = cn.id || cn.notificationId;
     if (docId) {
       cloudByItemId.set(docId, cn);
@@ -180,20 +223,22 @@ export function buildRealNotificationsList(params: {
     if (cn.relatedItemId) {
       cloudByItemId.set(cn.relatedItemId, cn);
     }
-    if (cn.relatedEntityId) {
-      cloudByEntityId.set(cn.relatedEntityId, cn);
-    }
   });
 
-  const activeCycle =
-    cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
-    cycles[0];
+  const sortedCycles = sortBillingCyclesNewest(cycles);
+  const activeCycle = sortedCycles[0];
+  const isSingleCycle = sortedCycles.length <= 1;
 
   const items: MobileNotificationItem[] = [];
 
-  // 1. Real Unpaid Bill / Rent Due Reminder from Firestore expenses
+  // 1. Real Unpaid Bill / Rent Due Reminder from Firestore expenses in active cycle
   const unpaidExpenses = expenses.filter(
-    (e) => e.status !== "PAID" && !e.isPaid,
+    (e) =>
+      e.status !== "PAID" &&
+      !e.isPaid &&
+      (!activeCycle?.billingCycleId ||
+        e.billingCycleId === activeCycle.billingCycleId ||
+        (!e.billingCycleId && isSingleCycle)),
   );
   if (unpaidExpenses.length > 0) {
     const topBill =
@@ -205,8 +250,8 @@ export function buildRealNotificationsList(params: {
       topBill.category ||
       "Bill";
     const itemId = `reminder_${topBill.id}`;
-    const cloudDocId = `notif_${uid}_${itemId}`;
-    const cloudDoc = cloudByItemId.get(itemId) || cloudByItemId.get(cloudDocId);
+    const cloudDocId = `notif_${uidPrefix}_${itemId}`;
+    const cloudDoc = cloudByItemId.get(cloudDocId) || cloudByItemId.get(itemId);
     if (cloudDoc)
       matchedCloudDocIds.add(cloudDoc.id || cloudDoc.notificationId);
 
@@ -259,7 +304,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs + 1, // Keep reminder slightly above same-timestamp expense
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: cloudDoc ? !cloudDoc.readStatus : true,
+      defaultUnread: cloudDoc ? !isCloudDocReadByCurrentUser(cloudDoc) : true,
       relatedEntityId: topBill.id,
       actionTarget: "settle_dues",
     });
@@ -274,11 +319,8 @@ export function buildRealNotificationsList(params: {
     const amtStr = formatPesos(exp.amountCents);
     const payer = exp.payerName || "Host";
     const itemId = `exp_${exp.id}`;
-    const cloudDocId = `notif_${uid}_${itemId}`;
-    const cloudDoc =
-      cloudByItemId.get(itemId) ||
-      cloudByItemId.get(cloudDocId) ||
-      cloudByEntityId.get(exp.id);
+    const cloudDocId = `notif_${uidPrefix}_${itemId}`;
+    const cloudDoc = cloudByItemId.get(cloudDocId) || cloudByItemId.get(itemId);
     if (cloudDoc)
       matchedCloudDocIds.add(cloudDoc.id || cloudDoc.notificationId);
 
@@ -289,7 +331,7 @@ export function buildRealNotificationsList(params: {
 
     items.push({
       id: itemId,
-      cloudDocId: cloudDoc?.id || cloudDoc?.notificationId || cloudDocId,
+      cloudDocId,
       category: "expense_added",
       title: "New Expense Added!",
       message,
@@ -306,7 +348,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs,
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: cloudDoc ? !cloudDoc.readStatus : true,
+      defaultUnread: cloudDoc ? !isCloudDocReadByCurrentUser(cloudDoc) : true,
       relatedEntityId: exp.id,
       actionTarget: "bills",
     });
@@ -328,11 +370,8 @@ export function buildRealNotificationsList(params: {
             .replace(/\b\w/g, (l: string) => l.toUpperCase());
     const payKey = pay.paymentId || `${pay.userId || "u"}_${idx}`;
     const itemId = `pay_${payKey}`;
-    const cloudDocId = `notif_${uid}_${itemId}`;
-    const cloudDoc =
-      cloudByItemId.get(itemId) ||
-      cloudByItemId.get(cloudDocId) ||
-      (pay.paymentId ? cloudByEntityId.get(pay.paymentId) : undefined);
+    const cloudDocId = `notif_${uidPrefix}_${itemId}`;
+    const cloudDoc = cloudByItemId.get(cloudDocId) || cloudByItemId.get(itemId);
     if (cloudDoc)
       matchedCloudDocIds.add(cloudDoc.id || cloudDoc.notificationId);
 
@@ -347,7 +386,7 @@ export function buildRealNotificationsList(params: {
 
     items.push({
       id: itemId,
-      cloudDocId: cloudDoc?.id || cloudDoc?.notificationId || cloudDocId,
+      cloudDocId,
       category: "payment_received",
       title:
         pay.status === "PENDING" ? "Payment Submitted" : "Payment Received",
@@ -361,7 +400,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs,
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: cloudDoc ? !cloudDoc.readStatus : true,
+      defaultUnread: cloudDoc ? !isCloudDocReadByCurrentUser(cloudDoc) : true,
       relatedEntityId: pay.paymentId || payKey,
       actionTarget: "payments",
     });
@@ -390,8 +429,8 @@ export function buildRealNotificationsList(params: {
     const cycleKey =
       activeCycle?.billingCycleId || waterExpense?.id || "current";
     const itemId = `water_${cycleKey}`;
-    const cloudDocId = `notif_${uid}_${itemId}`;
-    const cloudDoc = cloudByItemId.get(itemId) || cloudByItemId.get(cloudDocId);
+    const cloudDocId = `notif_${uidPrefix}_${itemId}`;
+    const cloudDoc = cloudByItemId.get(cloudDocId) || cloudByItemId.get(itemId);
     if (cloudDoc)
       matchedCloudDocIds.add(cloudDoc.id || cloudDoc.notificationId);
 
@@ -420,7 +459,7 @@ export function buildRealNotificationsList(params: {
 
     items.push({
       id: itemId,
-      cloudDocId: cloudDoc?.id || cloudDoc?.notificationId || cloudDocId,
+      cloudDocId,
       category: "water_calculated",
       title: "Water Bill Calculated",
       message,
@@ -429,7 +468,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs,
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: cloudDoc ? !cloudDoc.readStatus : true,
+      defaultUnread: cloudDoc ? !isCloudDocReadByCurrentUser(cloudDoc) : true,
       relatedEntityId: cycleKey,
       actionTarget: "attendance",
     });
@@ -445,11 +484,8 @@ export function buildRealNotificationsList(params: {
     const memKey = m.memberId || m.userId || memberName;
     const statusKey = m.status || "ACTIVE";
     const itemId = `member_${memKey}_${statusKey}`;
-    const cloudDocId = `notif_${uid}_${itemId}`;
-    const cloudDoc =
-      cloudByItemId.get(itemId) ||
-      cloudByItemId.get(cloudDocId) ||
-      cloudByEntityId.get(memKey);
+    const cloudDocId = `notif_${uidPrefix}_${itemId}`;
+    const cloudDoc = cloudByItemId.get(cloudDocId) || cloudByItemId.get(itemId);
     if (cloudDoc)
       matchedCloudDocIds.add(cloudDoc.id || cloudDoc.notificationId);
 
@@ -464,7 +500,7 @@ export function buildRealNotificationsList(params: {
 
     items.push({
       id: itemId,
-      cloudDocId: cloudDoc?.id || cloudDoc?.notificationId || cloudDocId,
+      cloudDocId,
       category: "group_invite",
       title,
       message,
@@ -477,7 +513,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs,
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: cloudDoc ? !cloudDoc.readStatus : true,
+      defaultUnread: cloudDoc ? !isCloudDocReadByCurrentUser(cloudDoc) : true,
       relatedEntityId: memKey,
       actionTarget: "groups",
     });
@@ -485,6 +521,9 @@ export function buildRealNotificationsList(params: {
 
   // 6. Direct Standalone Cloud Notifications from Firestore `notifications` collection
   cloudNotifications.forEach((cn) => {
+    if (effectiveUid && cn.recipientId && cn.recipientId !== effectiveUid) {
+      return;
+    }
     const docId = cn.id || cn.notificationId;
     if (!docId || matchedCloudDocIds.has(docId)) return;
     if (cn.relatedItemId && items.some((it) => it.id === cn.relatedItemId)) {
@@ -534,7 +573,7 @@ export function buildRealNotificationsList(params: {
       timestampMs: rel.timestampMs,
       createdTimestamp: rel.isoString,
       section: rel.isRecent ? "recent" : "earlier",
-      defaultUnread: !cn.readStatus,
+      defaultUnread: !isCloudDocReadByCurrentUser(cn),
       relatedEntityId: cn.relatedEntityId,
       actionTarget,
     });
@@ -644,6 +683,10 @@ export interface MobileExpense {
     rateCentavosPerDay?: number;
   }>;
   splits?: Record<string, number>;
+  previousReadingKwh?: number;
+  currentReadingKwh?: number;
+  consumedKwh?: number;
+  rateCentavosPerKwh?: number;
 }
 
 export interface HostPaymentMethod {
@@ -653,6 +696,7 @@ export interface HostPaymentMethod {
   accountName: string;
   accountNumber: string;
   qrCodeUrl?: string;
+  customIconUrl?: string;
   notes?: string;
   isEnabled: boolean;
   updatedAt?: string;
@@ -746,6 +790,35 @@ export interface MobileHousehold {
   }[];
 }
 
+export function sortBillingCyclesNewest(cycles: any[]): any[] {
+  return [...cycles].sort((a, b) => {
+    const aActive = a?.status === "ACTIVE" || a?.status === "FINALIZED" ? 1 : 0;
+    const bActive = b?.status === "ACTIVE" || b?.status === "FINALIZED" ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const aCreated = a?.createdDate ? new Date(a.createdDate).getTime() : 0;
+    const bCreated = b?.createdDate ? new Date(b.createdDate).getTime() : 0;
+    if (aCreated !== bCreated && !isNaN(aCreated) && !isNaN(bCreated)) {
+      return bCreated - aCreated;
+    }
+    return String(b?.startDate || "").localeCompare(String(a?.startDate || ""));
+  });
+}
+
+export function isCyclePaymentsLocked(cycle?: any, household?: any): boolean {
+  if (cycle) {
+    if (cycle.paymentsLocked === true) return true;
+    if (cycle.isFinalized === true || cycle.paymentsOpenedByHost === true) {
+      return false;
+    }
+    return true;
+  }
+  if (household) {
+    if (household.paymentsLocked === true) return true;
+    if (household.paymentsOpenedByHost === true) return false;
+  }
+  return true;
+}
+
 function sanitizeData<T>(val: T): T {
   if (val === null || val === undefined) {
     return val;
@@ -764,6 +837,9 @@ function sanitizeData<T>(val: T): T {
   }
   return val;
 }
+
+const _recalcInFlight = new Map<string, Promise<number>>();
+const _recalcPending = new Set<string>();
 
 function normalizeHostApplication(docId: string, raw: any): any {
   const appId = raw?.applicationId || raw?.id || docId;
@@ -848,17 +924,53 @@ function normalizeHostApplication(docId: string, raw: any): any {
 
 let _cachedUserProfile: any = null;
 let _cachedHousehold: any = null;
-let _cachedReadNotificationIds: Record<string, boolean> = {};
-const _readNotificationSubscribers = new Set<
-  (readIds: Record<string, boolean>) => void
+let _cachedReadNotificationIdsByUser: Record<
+  string,
+  Record<string, boolean>
+> = {};
+const _readNotificationSubscribers = new Map<
+  (readIds: Record<string, boolean>) => void,
+  string | undefined
 >();
 const _syncedCloudNotifIds = new Set<string>();
 
-function notifyReadSubscribers() {
-  const snapshot = { ..._cachedReadNotificationIds };
-  _readNotificationSubscribers.forEach((cb) => {
+function getUserReadMap(uid?: string): Record<string, boolean> {
+  const effectiveUid = (uid || auth.currentUser?.uid || "").trim();
+  if (!effectiveUid) return {};
+  if (!_cachedReadNotificationIdsByUser[effectiveUid]) {
+    _cachedReadNotificationIdsByUser[effectiveUid] = {};
+  }
+  return _cachedReadNotificationIdsByUser[effectiveUid];
+}
+
+function mergeUserReadMap(
+  uid: string | undefined,
+  incoming: Record<string, boolean> | undefined | null,
+): boolean {
+  const effectiveUid = (uid || auth.currentUser?.uid || "").trim();
+  if (!effectiveUid || !incoming || typeof incoming !== "object") {
+    return false;
+  }
+  const prefix = `v2_${effectiveUid}_`;
+  const current = getUserReadMap(effectiveUid);
+  let changed = false;
+  Object.entries(incoming).forEach(([k, val]) => {
+    if (val === true && k.startsWith(prefix) && !current[k]) {
+      current[k] = true;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function notifyReadSubscribers(targetUid?: string) {
+  _readNotificationSubscribers.forEach((subUid, cb) => {
+    const effectiveSubUid = (subUid || auth.currentUser?.uid || "").trim();
+    if (targetUid && effectiveSubUid && effectiveSubUid !== targetUid) {
+      return;
+    }
     try {
-      cb(snapshot);
+      cb({ ...getUserReadMap(effectiveSubUid) });
     } catch {}
   });
 }
@@ -872,12 +984,15 @@ export const mobileDataService = {
   },
   setCachedProfile(p: any) {
     _cachedUserProfile = p;
-    if (p?.readNotificationIds && typeof p.readNotificationIds === "object") {
-      _cachedReadNotificationIds = {
-        ..._cachedReadNotificationIds,
-        ...p.readNotificationIds,
-      };
-      notifyReadSubscribers();
+    const pUid = p?.uid || auth.currentUser?.uid;
+    if (
+      pUid &&
+      p?.readNotificationIdsV2 &&
+      typeof p.readNotificationIdsV2 === "object"
+    ) {
+      if (mergeUserReadMap(pUid, p.readNotificationIdsV2)) {
+        notifyReadSubscribers(pUid);
+      }
     }
   },
   getCachedHousehold(): any {
@@ -886,22 +1001,23 @@ export const mobileDataService = {
   setCachedHousehold(h: any) {
     _cachedHousehold = h;
   },
-  getCachedReadNotifications(): Record<string, boolean> {
+  getCachedReadNotifications(uid?: string): Record<string, boolean> {
+    const effectiveUid = (uid || auth.currentUser?.uid || "").trim();
+    if (!effectiveUid) return {};
     if (
-      _cachedUserProfile?.readNotificationIds &&
-      typeof _cachedUserProfile.readNotificationIds === "object"
+      _cachedUserProfile &&
+      _cachedUserProfile.uid === effectiveUid &&
+      _cachedUserProfile.readNotificationIdsV2 &&
+      typeof _cachedUserProfile.readNotificationIdsV2 === "object"
     ) {
-      return {
-        ..._cachedUserProfile.readNotificationIds,
-        ..._cachedReadNotificationIds,
-      };
+      mergeUserReadMap(effectiveUid, _cachedUserProfile.readNotificationIdsV2);
     }
-    return { ..._cachedReadNotificationIds };
+    return { ...getUserReadMap(effectiveUid) };
   },
   clearCache() {
     _cachedUserProfile = null;
     _cachedHousehold = null;
-    _cachedReadNotificationIds = {};
+    _cachedReadNotificationIdsByUser = {};
     _syncedCloudNotifIds.clear();
   },
   async submitHostApplication(data: {
@@ -1205,14 +1321,12 @@ export const mobileDataService = {
       if (data) {
         _cachedUserProfile = data;
         if (
-          data.readNotificationIds &&
-          typeof data.readNotificationIds === "object"
+          data.readNotificationIdsV2 &&
+          typeof data.readNotificationIdsV2 === "object"
         ) {
-          _cachedReadNotificationIds = {
-            ..._cachedReadNotificationIds,
-            ...data.readNotificationIds,
-          };
-          notifyReadSubscribers();
+          if (mergeUserReadMap(uid, data.readNotificationIdsV2)) {
+            notifyReadSubscribers(uid);
+          }
         }
       }
       return data;
@@ -1291,14 +1405,12 @@ export const mobileDataService = {
         }
         _cachedUserProfile = data;
         if (
-          data.readNotificationIds &&
-          typeof data.readNotificationIds === "object"
+          data.readNotificationIdsV2 &&
+          typeof data.readNotificationIdsV2 === "object"
         ) {
-          _cachedReadNotificationIds = {
-            ..._cachedReadNotificationIds,
-            ...data.readNotificationIds,
-          };
-          notifyReadSubscribers();
+          if (mergeUserReadMap(uid, data.readNotificationIdsV2)) {
+            notifyReadSubscribers(uid);
+          }
         }
         callback(data);
       },
@@ -1312,6 +1424,26 @@ export const mobileDataService = {
   },
 
   // --- HOUSEHOLD & MEMBERS ---
+  async getHousehold(householdId: string): Promise<any | null> {
+    if (!householdId) return null;
+    try {
+      const snap = await getDoc(doc(db, "households", householdId));
+      if (snap.exists()) {
+        const hh = {
+          ...snap.data(),
+          id: snap.id,
+          householdId: snap.data().householdId || snap.id,
+        };
+        _cachedHousehold = hh;
+        return hh;
+      }
+      return null;
+    } catch (err) {
+      console.warn("[Firestore Mobile] getHousehold err:", err);
+      return _cachedHousehold || null;
+    }
+  },
+
   listenToHousehold(householdId: string, callback: (data: any) => void) {
     const docRef = doc(db, "households", householdId);
     return onSnapshot(
@@ -1481,6 +1613,8 @@ export const mobileDataService = {
       address: data.address || "",
       hostId: data.hostId,
       status: "ACTIVE",
+      paymentsLocked: true,
+      paymentsOpenedByHost: false,
       inviteCode,
       createdDate: new Date().toISOString(),
       updatedDate: new Date().toISOString(),
@@ -1925,6 +2059,34 @@ export const mobileDataService = {
   async recalculateUnpaidExpensesForHousehold(
     householdId: string,
   ): Promise<number> {
+    if (!householdId) return 0;
+    const existingRun = _recalcInFlight.get(householdId);
+    if (existingRun) {
+      _recalcPending.add(householdId);
+      return existingRun;
+    }
+
+    const runPromise = (async (): Promise<number> => {
+      try {
+        return await this._executeRecalculateUnpaidExpenses(householdId);
+      } finally {
+        _recalcInFlight.delete(householdId);
+        if (_recalcPending.has(householdId)) {
+          _recalcPending.delete(householdId);
+          this.recalculateUnpaidExpensesForHousehold(householdId).catch(
+            () => {},
+          );
+        }
+      }
+    })();
+
+    _recalcInFlight.set(householdId, runPromise);
+    return runPromise;
+  },
+
+  async _executeRecalculateUnpaidExpenses(
+    householdId: string,
+  ): Promise<number> {
     try {
       if (!householdId) return 0;
       const membersSnap = await getDocs(
@@ -1948,19 +2110,24 @@ export const mobileDataService = {
 
       // Function-level map of member attendance days for water billing calculations
       const memberDaysMap = new Map<string, number>();
+      let preActiveCycleId: string | undefined;
+      let preIsSingleCycle = true;
       try {
         const preCyclesSnap = await getDocs(
           collection(db, `households/${householdId}/billingCycles`),
         );
-        const preCycles = preCyclesSnap.docs.map((cd) => cd.data());
-        const preActiveCycle =
-          preCycles.find((c: any) => c.status === "ACTIVE") || preCycles[0];
-        if (preActiveCycle?.billingCycleId) {
+        const preCycles = sortBillingCyclesNewest(
+          preCyclesSnap.docs.map((cd) => cd.data()),
+        );
+        preIsSingleCycle = preCycles.length <= 1;
+        const preActiveCycle = preCycles[0];
+        preActiveCycleId = preActiveCycle?.billingCycleId;
+        if (preActiveCycleId) {
           const [attSnap, subSnap] = await Promise.all([
             getDocs(
               query(
                 collection(db, `households/${householdId}/waterAttendance`),
-                where("billingCycleId", "==", preActiveCycle.billingCycleId),
+                where("billingCycleId", "==", preActiveCycleId),
               ),
             ).catch(() => null),
             getDocs(
@@ -1969,7 +2136,7 @@ export const mobileDataService = {
                   db,
                   `households/${householdId}/attendanceSubmissions`,
                 ),
-                where("billingCycleId", "==", preActiveCycle.billingCycleId),
+                where("billingCycleId", "==", preActiveCycleId),
               ),
             ).catch(() => null),
           ]);
@@ -2013,6 +2180,13 @@ export const mobileDataService = {
       for (const d of expSnap.docs) {
         const expData = d.data();
         if (expData.isPaid === true || expData.status === "PAID") continue;
+        if (
+          preActiveCycleId &&
+          expData.billingCycleId !== preActiveCycleId &&
+          !(!expData.billingCycleId && preIsSingleCycle)
+        ) {
+          continue;
+        }
 
         const isWater = (expData.category || "")
           .toLowerCase()
@@ -2249,10 +2423,11 @@ export const mobileDataService = {
           const shareCentavos = Math.round(expData.amountCents / payorCount);
 
           newSplitDetails = activeMembers.map((m: any) => {
+            const uid = m.userId || m.memberId || m.id || "";
             const isPayor = isPayorMember(m);
             if (isPayor) {
               return {
-                userId: m.userId || m.memberId,
+                userId: uid,
                 displayName: m.displayName || "Roommate",
                 shareCentavos,
                 percentage: Math.round((100 / payorCount) * 10) / 10,
@@ -2263,7 +2438,7 @@ export const mobileDataService = {
               };
             } else {
               return {
-                userId: m.userId || m.memberId,
+                userId: uid,
                 displayName: m.displayName || "Roommate",
                 shareCentavos: 0,
                 percentage: 0,
@@ -2276,34 +2451,99 @@ export const mobileDataService = {
           });
         }
 
-        await updateDoc(d.ref, {
-          splitDetails: newSplitDetails,
-          participantUserIds: newSplitDetails
-            .filter((s) => !s.isExempt)
-            .map((s) => s.userId),
-          updatedDate: new Date().toISOString(),
-        });
+        // Preserve existing paid status per user on splitDetails so partial/prior settlements are never lost
+        if (
+          Array.isArray(expData.splitDetails) &&
+          expData.splitDetails.length > 0
+        ) {
+          const prevSplitMap = new Map<string, any>();
+          expData.splitDetails.forEach((s: any) => {
+            if (s.userId) prevSplitMap.set(s.userId, s);
+          });
+          newSplitDetails = newSplitDetails.map((s: any) => {
+            if (s.isExempt) return sanitizeData(s);
+            const prev = prevSplitMap.get(s.userId);
+            if (prev && prev.isPaid) {
+              return sanitizeData({
+                ...s,
+                isPaid: true,
+                paidAmountCentavos: prev.paidAmountCentavos ?? s.shareCentavos,
+                ...(prev.paidDate !== undefined
+                  ? { paidDate: prev.paidDate }
+                  : {}),
+                ...(prev.paymentId !== undefined
+                  ? { paymentId: prev.paymentId }
+                  : {}),
+              });
+            }
+            return sanitizeData(s);
+          });
+        } else {
+          newSplitDetails = newSplitDetails.map((s: any) => sanitizeData(s));
+        }
+
+        const allSplitsNowPaid =
+          newSplitDetails.length > 0 &&
+          newSplitDetails.every((s: any) => s.isExempt || s.isPaid);
+
+        await updateDoc(
+          d.ref,
+          sanitizeData({
+            splitDetails: newSplitDetails,
+            ...(allSplitsNowPaid ? { status: "PAID", isPaid: true } : {}),
+            participantUserIds: newSplitDetails
+              .filter((s) => !s.isExempt && Boolean(s.userId))
+              .map((s) => s.userId),
+            updatedDate: new Date().toISOString(),
+          }),
+        );
         updatedCount++;
       }
 
       // Synchronize and update all memberBills in Firestore for all active members
       try {
-        const cyclesSnap = await getDocs(
-          collection(db, `households/${householdId}/billingCycles`),
+        const [cyclesSnap, paymentsSnap] = await Promise.all([
+          getDocs(collection(db, `households/${householdId}/billingCycles`)),
+          getDocs(collection(db, `households/${householdId}/payments`)),
+        ]);
+        const cycles = sortBillingCyclesNewest(
+          cyclesSnap.docs.map((cd) => cd.data()),
         );
-        const cycles = cyclesSnap.docs.map((cd) => cd.data());
-        const activeCycle =
-          cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
+        const isSingleCycle = cycles.length <= 1;
+        const activeCycle = cycles[0];
         const activeCycleId = activeCycle?.billingCycleId || `bc_${Date.now()}`;
 
-        // Re-read all updated expenses for the household
+        const paymentsByUser = new Map<string, number>();
+        paymentsSnap.docs.forEach((pd) => {
+          const pData = pd.data();
+          if (pData.status === "REJECTED") return;
+          const matchesCycle =
+            pData.billingCycleId === activeCycleId ||
+            ((!pData.billingCycleId || pData.billingCycleId === "general") &&
+              isSingleCycle);
+          if (matchesCycle && pData.userId) {
+            paymentsByUser.set(
+              pData.userId,
+              (paymentsByUser.get(pData.userId) || 0) +
+                (Number(pData.amountCentavos) || 0),
+            );
+          }
+        });
+
+        // Re-read updated expenses scoped strictly to the active billing cycle
         const updatedExpSnap = await getDocs(
           collection(db, `households/${householdId}/expenses`),
         );
-        const allExpenses = updatedExpSnap.docs.map((ed) => ({
-          id: ed.id,
-          ...(ed.data() as any),
-        }));
+        const allExpenses = updatedExpSnap.docs
+          .map((ed) => ({
+            id: ed.id,
+            ...(ed.data() as any),
+          }))
+          .filter(
+            (exp: any) =>
+              exp.billingCycleId === activeCycleId ||
+              (!exp.billingCycleId && isSingleCycle),
+          );
 
         for (const member of activeMembers) {
           const uid = member.userId || member.memberId;
@@ -2315,9 +2555,12 @@ export const mobileDataService = {
           );
           const existingSnap = await getDoc(billRef);
           const existing = existingSnap.exists() ? existingSnap.data() : null;
-          const prevPaid = existing?.totalPaidCentavos || 0;
+          const prevPaid = Math.max(
+            existing?.totalPaidCentavos || 0,
+            paymentsByUser.get(uid) || 0,
+          );
 
-          // Build line items for this member from all current expenses
+          // Build line items for this member from active cycle expenses only
           const lineItems = allExpenses.map((exp: any) => {
             const isWater = (exp.category || "")
               .toLowerCase()
@@ -2385,11 +2628,15 @@ export const mobileDataService = {
             outstandingCentavos: newOutstanding,
             totalPaidCentavos: prevPaid,
             lineItems,
-            status: newOutstanding === 0 ? "PAID" : "UNPAID",
+            status: newTotalDue > 0 && newOutstanding === 0 ? "PAID" : "UNPAID",
             updatedDate: new Date().toISOString(),
           });
 
           await setDoc(billRef, billData, { merge: true });
+        }
+        // Check if all payors settled for this cycle when expenses exist
+        if (allExpenses.length > 0) {
+          await this.markExpensesPaidIfAllSettled(householdId, activeCycleId);
         }
       } catch (syncErr) {
         console.warn(
@@ -2513,6 +2760,66 @@ export const mobileDataService = {
     const status = expense.status || (expense.isPaid ? "PAID" : "UNPAID");
     const isPaid = status === "PAID";
 
+    // 0. Resolve active billingCycleId immediately so the expense document and memberBills are always scoped to the active cycle
+    let resolvedCycleId = expense.billingCycleId;
+    if (!resolvedCycleId) {
+      try {
+        const cyclesSnap = await getDocs(
+          collection(db, `households/${expense.householdId}/billingCycles`),
+        );
+        const cycles = sortBillingCyclesNewest(
+          cyclesSnap.docs.map((d) => d.data()),
+        );
+        const active = cycles[0];
+        if (active?.billingCycleId) {
+          resolvedCycleId = active.billingCycleId;
+        } else {
+          resolvedCycleId = `bc_${Date.now()}`;
+          const now = new Date();
+          const monthNames = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+          ];
+          const cycleName = `${monthNames[now.getMonth()]} ${now.getFullYear()} Billing`;
+          await setDoc(
+            doc(
+              db,
+              `households/${expense.householdId}/billingCycles`,
+              resolvedCycleId,
+            ),
+            sanitizeData({
+              billingCycleId: resolvedCycleId,
+              householdId: expense.householdId,
+              name: cycleName,
+              startDate: new Date(now.getFullYear(), now.getMonth(), 1)
+                .toISOString()
+                .slice(0, 10),
+              endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                .toISOString()
+                .slice(0, 10),
+              status: "ACTIVE",
+              paymentsLocked: true,
+              isFinalized: false,
+              paymentsOpenedByHost: false,
+              createdDate: new Date().toISOString(),
+              updatedDate: new Date().toISOString(),
+            }),
+            { merge: true },
+          );
+        }
+      } catch {}
+    }
+
     // 1. Fetch active household members to calculate automatic splits
     let activeMembers: any[] = [];
     try {
@@ -2569,7 +2876,7 @@ export const mobileDataService = {
       const pricingModel = waterConfig?.pricingModel || "PER_PERSON_DAY";
       if (pricingModel === "PER_PERSON_DAY") {
         const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
-        let cycleId = expense.billingCycleId;
+        const cycleId = resolvedCycleId || expense.billingCycleId;
         let attRecords: any[] = [];
         let subRecords: any[] = [];
         if (cycleId) {
@@ -2732,68 +3039,21 @@ export const mobileDataService = {
       if (s.userId) splitsMap[s.userId] = s.shareCentavos;
     });
 
+    const createdAtIso = new Date().toISOString();
     const payload: MobileExpense = {
       ...expense,
+      billingCycleId: resolvedCycleId || expense.billingCycleId,
       status,
       isPaid,
       id,
       splitDetails,
       splits: splitsMap,
-      createdAt: new Date().toISOString(),
+      createdAt: createdAtIso,
     };
-    await setDoc(ref, sanitizeData(payload));
 
-    // 3. Resolve active billing cycle & update memberBills in Firestore
+    // 3. Update memberBills in Firestore BEFORE writing expense doc so real-time listeners never see a 0-outstanding bill for a newly added expense
     try {
-      let cycleId = expense.billingCycleId;
-      if (!cycleId) {
-        const cyclesSnap = await getDocs(
-          collection(db, `households/${expense.householdId}/billingCycles`),
-        );
-        const cycles = cyclesSnap.docs.map((d) => d.data());
-        const active =
-          cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
-        if (active) {
-          cycleId = active.billingCycleId;
-        } else {
-          cycleId = `bc_${Date.now()}`;
-          const now = new Date();
-          const monthNames = [
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-          ];
-          const cycleName = `${monthNames[now.getMonth()]} ${now.getFullYear()} Billing`;
-          await setDoc(
-            doc(db, `households/${expense.householdId}/billingCycles`, cycleId),
-            sanitizeData({
-              billingCycleId: cycleId,
-              householdId: expense.householdId,
-              name: cycleName,
-              startDate: new Date(now.getFullYear(), now.getMonth(), 1)
-                .toISOString()
-                .slice(0, 10),
-              endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
-                .toISOString()
-                .slice(0, 10),
-              status: "ACTIVE",
-              createdDate: new Date().toISOString(),
-              updatedDate: new Date().toISOString(),
-            }),
-            { merge: true },
-          );
-        }
-      }
-
+      const cycleId = resolvedCycleId || expense.billingCycleId;
       if (cycleId) {
         for (const item of splitDetails) {
           const billId = `bill_${cycleId}_${item.userId}`;
@@ -2824,7 +3084,7 @@ export const mobileDataService = {
           const prevPaid = existing?.totalPaidCentavos || 0;
           // Calculate new total due accurately from unpaid line items
           const newTotalDue = updatedLineItems
-            .filter((li: any) => li.status === "UNPAID")
+            .filter((li: any) => li.status === "UNPAID" && !li.isExempt)
             .reduce(
               (sum: number, li: any) => sum + (li.amountCentavos || 0),
               0,
@@ -2841,7 +3101,7 @@ export const mobileDataService = {
             outstandingCentavos: newOutstanding,
             totalPaidCentavos: prevPaid,
             lineItems: updatedLineItems,
-            status: newOutstanding === 0 ? "PAID" : "UNPAID",
+            status: newTotalDue > 0 && newOutstanding === 0 ? "PAID" : "UNPAID",
             updatedDate: new Date().toISOString(),
           });
 
@@ -2854,6 +3114,8 @@ export const mobileDataService = {
         billErr,
       );
     }
+
+    await setDoc(ref, sanitizeData(payload));
 
     // 4. Mirror to charges collection for instantaneous cross-platform Web sync
     try {
@@ -2879,7 +3141,7 @@ export const mobileDataService = {
         sanitizeData({
           chargeId: id,
           householdId: expense.householdId,
-          billingCycleId: expense.billingCycleId || "",
+          billingCycleId: resolvedCycleId || expense.billingCycleId || "",
           chargeType,
           name: expense.title,
           description: expense.notes || "",
@@ -3030,6 +3292,10 @@ export const mobileDataService = {
       splitDetails?: any[];
       splitMethod?: "Equal" | "% Custom";
       billingCycleId?: string;
+      previousReadingKwh?: number;
+      currentReadingKwh?: number;
+      consumedKwh?: number;
+      rateCentavosPerKwh?: number;
     },
   ): Promise<boolean> {
     try {
@@ -3127,7 +3393,128 @@ export const mobileDataService = {
       status?: string;
     },
   ): Promise<string> {
+    const nowIso = new Date().toISOString();
     const billingCycleId = `bc_${Date.now()}`;
+
+    // 1. Close any previously ACTIVE billing cycles and backfill any unscoped expenses to the closing cycle so previous cycle bills (e.g., Rent) never disappear
+    let priorCycleId: string | undefined;
+    try {
+      const existingCyclesSnap = await getDocs(
+        collection(db, `households/${householdId}/billingCycles`),
+      );
+      const existingCycles = sortBillingCyclesNewest(
+        existingCyclesSnap.docs.map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        })),
+      );
+      const knownIds = new Set(
+        existingCycles.map((c: any) => c.billingCycleId).filter(Boolean),
+      );
+      priorCycleId = existingCycles[0]?.billingCycleId;
+
+      if (priorCycleId) {
+        try {
+          const expSnap = await getDocs(
+            collection(db, `households/${householdId}/expenses`),
+          );
+          await Promise.all(
+            expSnap.docs.map(async (ed) => {
+              const eData = ed.data();
+              if (
+                !eData.billingCycleId ||
+                !knownIds.has(eData.billingCycleId)
+              ) {
+                await updateDoc(ed.ref, {
+                  billingCycleId: priorCycleId,
+                  updatedDate: nowIso,
+                }).catch(() => {});
+              }
+            }),
+          );
+        } catch {}
+      }
+
+      await Promise.all(
+        existingCyclesSnap.docs.map(async (cd) => {
+          const data = cd.data();
+          if (
+            (data.status === "ACTIVE" || data.status === "FINALIZED") &&
+            cd.id !== billingCycleId
+          ) {
+            await updateDoc(
+              doc(db, `households/${householdId}/billingCycles`, cd.id),
+              {
+                status: "CLOSED",
+                closedDate: nowIso,
+                updatedDate: nowIso,
+              },
+            ).catch(() => {});
+          }
+        }),
+      );
+    } catch (closeErr) {
+      console.warn(
+        "[createBillingCycle] warning closing prior cycles:",
+        closeErr,
+      );
+    }
+
+    // 1b. Preserve closing cycle's electricity snapshot and store lastCurrentReadingKwh for rollover without stamping the new cycle
+    try {
+      const elecRef = doc(
+        db,
+        `households/${householdId}/systemSettings`,
+        "electricity",
+      );
+      const elecSnap = await getDoc(elecRef);
+      if (elecSnap.exists()) {
+        const elecData = elecSnap.data();
+        const rolledReading = Number(
+          elecData.lastCurrentReadingKwh ??
+            elecData.currentReadingKwh ??
+            elecData.previousReadingKwh ??
+            0,
+        );
+        const existingCyclesMap =
+          elecData.cycles && typeof elecData.cycles === "object"
+            ? { ...elecData.cycles }
+            : {};
+        if (
+          elecData.billingCycleId &&
+          !existingCyclesMap[elecData.billingCycleId] &&
+          (Number(elecData.consumedKwh ?? 0) > 0 ||
+            Number(elecData.totalAmountCentavos ?? 0) > 0)
+        ) {
+          existingCyclesMap[elecData.billingCycleId] = {
+            previousReadingKwh: Number(elecData.previousReadingKwh ?? 0),
+            currentReadingKwh: Number(elecData.currentReadingKwh ?? 0),
+            rateCentavosPerKwh: Number(elecData.rateCentavosPerKwh ?? 1200),
+            consumedKwh: Number(elecData.consumedKwh ?? 0),
+            totalAmountCentavos: Number(elecData.totalAmountCentavos ?? 0),
+            billingCycleId: elecData.billingCycleId,
+            updatedAt: elecData.updatedAt || nowIso,
+          };
+        }
+        await setDoc(
+          elecRef,
+          sanitizeData({
+            lastCurrentReadingKwh: rolledReading,
+            previousReadingKwh: rolledReading,
+            currentReadingKwh: rolledReading,
+            consumedKwh: 0,
+            totalAmountCentavos: 0,
+            rateCentavosPerKwh: Number(elecData.rateCentavosPerKwh ?? 1200),
+            billingCycleId: "",
+            cycles: existingCyclesMap,
+            updatedAt: nowIso,
+          }),
+          { merge: true },
+        ).catch(() => {});
+      }
+    } catch {}
+
+    // 2. Create the new ACTIVE billing cycle starting with 0 bills and payments locked until host opens them
     const ref = doc(
       db,
       `households/${householdId}/billingCycles`,
@@ -3140,12 +3527,91 @@ export const mobileDataService = {
       startDate: cycleData.startDate,
       endDate: cycleData.endDate,
       status: cycleData.status || "ACTIVE",
+      paymentsLocked: true,
+      isFinalized: false,
+      paymentsOpenedByHost: false,
       totalBilledCentavos: 0,
       totalCollectedCentavos: 0,
-      createdDate: new Date().toISOString(),
-      updatedDate: new Date().toISOString(),
+      createdDate: nowIso,
+      updatedDate: nowIso,
     };
-    await setDoc(ref, sanitizeData(newCycle), { merge: true });
+    await Promise.all([
+      setDoc(ref, sanitizeData(newCycle), { merge: true }),
+      updateDoc(doc(db, "households", householdId), {
+        paymentsLocked: true,
+        paymentsOpenedByHost: false,
+        updatedAt: nowIso,
+      }).catch(() => {}),
+    ]);
+
+    // 3. Reset all active payors' settlement status and initialize fresh UNPAID memberBills for the new cycle
+    try {
+      const membersSnap = await getDocs(
+        collection(db, `households/${householdId}/members`),
+      );
+      await Promise.all(
+        membersSnap.docs.map(async (md) => {
+          const mData = md.data();
+          const uid = mData.userId || mData.memberId || md.id;
+          const isActiveOrSettled =
+            !mData.status ||
+            mData.status === "ACTIVE" ||
+            mData.status === "SETTLED";
+          if (!isActiveOrSettled) return;
+
+          if (
+            mData.status === "SETTLED" ||
+            mData.paymentStatus === "PAID" ||
+            mData.paymentStatus === "SETTLED" ||
+            mData.isPaid === true
+          ) {
+            await updateDoc(
+              doc(db, `households/${householdId}/members`, md.id),
+              {
+                status: "ACTIVE",
+                paymentStatus: "UNPAID",
+                isPaid: false,
+                updatedDate: nowIso,
+              },
+            ).catch(() => {});
+          }
+
+          if (uid) {
+            const billId = `bill_${billingCycleId}_${uid}`;
+            const billRef = doc(
+              db,
+              `households/${householdId}/memberBills`,
+              billId,
+            );
+            await setDoc(
+              billRef,
+              sanitizeData({
+                billId,
+                householdId,
+                billingCycleId,
+                userId: uid,
+                displayName: mData.displayName || "Roommate",
+                totalDueCentavos: 0,
+                outstandingCentavos: 0,
+                totalPaidCentavos: 0,
+                paidCentavos: 0,
+                lineItems: [],
+                status: "UNPAID",
+                createdDate: nowIso,
+                updatedDate: nowIso,
+              }),
+              { merge: true },
+            ).catch(() => {});
+          }
+        }),
+      );
+    } catch (memResetErr) {
+      console.warn(
+        "[createBillingCycle] warning resetting member bill state:",
+        memResetErr,
+      );
+    }
+
     return billingCycleId;
   },
 
@@ -3196,10 +3662,7 @@ export const mobileDataService = {
       (snap) => {
         const items: any[] = [];
         snap.forEach((d) => items.push(d.data()));
-        items.sort((a, b) =>
-          String(b.startDate || "").localeCompare(String(a.startDate || "")),
-        );
-        callback(items);
+        callback(sortBillingCyclesNewest(items));
       },
       (err) => console.warn("[Firestore Mobile] listenToBillingCycles:", err),
     );
@@ -3312,12 +3775,23 @@ export const mobileDataService = {
     try {
       if (!householdId) return null;
 
-      // 1. Resolve target billing cycle
-      let targetCycle: any = null;
-      const cyclesSnap = await getDocs(
-        collection(db, `households/${householdId}/billingCycles`),
+      // 1. Fetch cycles, members, water settings, and existing expenses in parallel
+      const waterRef = doc(
+        db,
+        `households/${householdId}/systemSettings`,
+        "water",
       );
-      const cycles = cyclesSnap.docs.map((cd) => cd.data());
+      const [cyclesSnap, memSnap, waterSnap, expSnap] = await Promise.all([
+        getDocs(collection(db, `households/${householdId}/billingCycles`)),
+        getDocs(collection(db, `households/${householdId}/members`)),
+        getDoc(waterRef),
+        getDocs(collection(db, `households/${householdId}/expenses`)),
+      ]);
+
+      let targetCycle: any = null;
+      const cycles = sortBillingCyclesNewest(
+        cyclesSnap.docs.map((cd) => cd.data()),
+      );
       if (billingCycleId) {
         targetCycle = cycles.find(
           (c: any) => c.billingCycleId === billingCycleId,
@@ -3333,9 +3807,6 @@ export const mobileDataService = {
       const cycleId = targetCycle.billingCycleId;
 
       // 2. Resolve members
-      const memSnap = await getDocs(
-        collection(db, `households/${householdId}/members`),
-      );
       const activeMembers = memSnap.docs
         .map((d) => d.data())
         .filter((m: any) => m.status === "ACTIVE" || !m.status);
@@ -3351,12 +3822,6 @@ export const mobileDataService = {
         pricingModel: "PER_PERSON_DAY",
         rateCentavosPerPersonPerDay: 500,
       };
-      const waterRef = doc(
-        db,
-        `households/${householdId}/systemSettings`,
-        "water",
-      );
-      const waterSnap = await getDoc(waterRef);
       if (waterSnap.exists()) {
         waterConfig = waterSnap.data();
       }
@@ -3530,10 +3995,6 @@ export const mobileDataService = {
         });
       }
 
-      // Check if water expense already exists for this cycle
-      const expSnap = await getDocs(
-        collection(db, `households/${householdId}/expenses`),
-      );
       const existingWaterExp = expSnap.docs.find((ed) => {
         const data = ed.data();
         const cat = (data.category || "").toLowerCase();
@@ -3546,10 +4007,38 @@ export const mobileDataService = {
       const expenseId = existingWaterExp
         ? existingWaterExp.id
         : `water_bill_${cycleId}`;
+      const existingWaterData = existingWaterExp
+        ? existingWaterExp.data()
+        : null;
       const splitsMap: Record<string, number> = {};
       splitDetails.forEach((s) => {
         if (s.userId) splitsMap[s.userId] = s.shareCentavos;
       });
+
+      const wasAlreadyPaid =
+        existingWaterData?.status === "PAID" ||
+        existingWaterData?.isPaid === true;
+
+      // Preserve isPaid on existing splitDetails if previously settled
+      if (
+        existingWaterData?.splitDetails &&
+        Array.isArray(existingWaterData.splitDetails)
+      ) {
+        const paidUserMap = new Map<string, boolean>();
+        existingWaterData.splitDetails.forEach((s: any) => {
+          if (s.userId && s.isPaid) paidUserMap.set(s.userId, true);
+        });
+        splitDetails = splitDetails.map((s: any) => ({
+          ...s,
+          isPaid:
+            s.isExempt || Boolean(paidUserMap.get(s.userId)) || wasAlreadyPaid,
+        }));
+      }
+
+      const allWaterPaid =
+        wasAlreadyPaid ||
+        (splitDetails.length > 0 &&
+          splitDetails.every((s) => s.isExempt || s.isPaid));
 
       const expensePayload = sanitizeData({
         id: expenseId,
@@ -3567,39 +4056,39 @@ export const mobileDataService = {
               ? "Equal Split"
               : "Daily Attendance",
         billingCycleId: cycleId,
-        status: "UNPAID",
-        isPaid: false,
+        status: allWaterPaid ? "PAID" : "UNPAID",
+        isPaid: allWaterPaid,
         splitDetails,
         splits: splitsMap,
         updatedAt: new Date().toISOString(),
       });
 
-      await setDoc(
-        doc(db, `households/${householdId}/expenses`, expenseId),
-        expensePayload,
-        { merge: true },
-      );
-
-      // Mirror to charges
-      await setDoc(
-        doc(db, `households/${householdId}/charges`, expenseId),
-        sanitizeData({
-          chargeId: expenseId,
-          householdId,
-          billingCycleId: cycleId,
-          chargeType: "WATER",
-          name: billTitle,
-          amountCentavos: totalAmountCentavos,
-          distributionMethod: "PAYORS_ONLY",
-          participantUserIds: splitDetails
-            .filter((s) => !s.isExempt)
-            .map((s) => s.userId),
-          splitDetails,
-          createdDate: new Date().toISOString(),
-          createdBy: "system",
-        }),
-        { merge: true },
-      );
+      await Promise.all([
+        setDoc(
+          doc(db, `households/${householdId}/expenses`, expenseId),
+          expensePayload,
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, `households/${householdId}/charges`, expenseId),
+          sanitizeData({
+            chargeId: expenseId,
+            householdId,
+            billingCycleId: cycleId,
+            chargeType: "WATER",
+            name: billTitle,
+            amountCentavos: totalAmountCentavos,
+            distributionMethod: "PAYORS_ONLY",
+            participantUserIds: splitDetails
+              .filter((s) => !s.isExempt)
+              .map((s) => s.userId),
+            splitDetails,
+            createdDate: new Date().toISOString(),
+            createdBy: "system",
+          }),
+          { merge: true },
+        ),
+      ]);
 
       // Immediately refresh all member bills in Firestore
       this.recalculateUnpaidExpensesForHousehold(householdId).catch(() => {});
@@ -3608,6 +4097,517 @@ export const mobileDataService = {
     } catch (err) {
       console.warn("[syncCycleWaterBill] error:", err);
       return null;
+    }
+  },
+
+  listenToElectricityConfig(
+    householdId: string,
+    callback: (config: any | null) => void,
+  ) {
+    const defaultConfig = {
+      previousReadingKwh: 0,
+      currentReadingKwh: 0,
+      rateCentavosPerKwh: 1200,
+      consumedKwh: 0,
+      totalAmountCentavos: 0,
+    };
+    if (!householdId) {
+      callback(defaultConfig);
+      return () => {};
+    }
+    const ref = doc(
+      db,
+      `households/${householdId}/systemSettings`,
+      "electricity",
+    );
+    return onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const prev = Number(data.previousReadingKwh ?? 0);
+          const curr = Number(data.currentReadingKwh ?? prev);
+          const rate = Number(data.rateCentavosPerKwh ?? 1200);
+          const consumed = Math.max(0, Math.round((curr - prev) * 100) / 100);
+          const total = Math.round(consumed * rate);
+          callback({
+            ...defaultConfig,
+            ...data,
+            previousReadingKwh: prev,
+            currentReadingKwh: curr,
+            rateCentavosPerKwh: rate,
+            consumedKwh: consumed,
+            totalAmountCentavos: total,
+          });
+        } else {
+          callback(defaultConfig);
+        }
+      },
+      (_err) => {
+        callback(defaultConfig);
+      },
+    );
+  },
+
+  async saveElectricityConfig(
+    householdId: string,
+    config: {
+      previousReadingKwh?: number;
+      currentReadingKwh?: number;
+      rateCentavosPerKwh?: number;
+      consumedKwh?: number;
+      totalAmountCentavos?: number;
+      billingCycleId?: string;
+    },
+    options?: { billingCycleId?: string; skipExpenseSync?: boolean },
+  ): Promise<void> {
+    if (!householdId) return;
+    try {
+      const ref = doc(
+        db,
+        `households/${householdId}/systemSettings`,
+        "electricity",
+      );
+      const prev = Math.max(0, Number(config.previousReadingKwh ?? 0));
+      const curr = Math.max(prev, Number(config.currentReadingKwh ?? prev));
+      const rate = Math.max(0, Number(config.rateCentavosPerKwh ?? 1200));
+      const consumedKwh = Math.max(0, Math.round((curr - prev) * 100) / 100);
+      const totalAmountCentavos = Math.round(consumedKwh * rate);
+      const targetCycleId =
+        options?.billingCycleId || config.billingCycleId || "";
+      const nowIso = new Date().toISOString();
+
+      const cycleSnapshot = {
+        previousReadingKwh: prev,
+        currentReadingKwh: curr,
+        rateCentavosPerKwh: rate,
+        consumedKwh,
+        totalAmountCentavos,
+        billingCycleId: targetCycleId,
+        updatedAt: nowIso,
+      };
+
+      const cleanConfig = sanitizeData({
+        previousReadingKwh: prev,
+        currentReadingKwh: curr,
+        lastCurrentReadingKwh: curr,
+        rateCentavosPerKwh: rate,
+        consumedKwh,
+        totalAmountCentavos,
+        ...(targetCycleId
+          ? {
+              billingCycleId: targetCycleId,
+              cycles: {
+                [targetCycleId]: cycleSnapshot,
+              },
+            }
+          : {}),
+        updatedAt: nowIso,
+      });
+      await setDoc(ref, cleanConfig, { merge: true });
+
+      if (!options?.skipExpenseSync && totalAmountCentavos > 0) {
+        await this.syncCycleElectricityBill(householdId, targetCycleId);
+        await this.recalculateUnpaidExpensesForHousehold(householdId);
+      }
+    } catch (err) {
+      console.error("[saveElectricityConfig Mobile] Error:", err);
+      throw err;
+    }
+  },
+
+  async syncCycleElectricityBill(
+    householdId: string,
+    billingCycleId?: string,
+  ): Promise<string | null> {
+    try {
+      if (!householdId) return null;
+
+      const elecRef = doc(
+        db,
+        `households/${householdId}/systemSettings`,
+        "electricity",
+      );
+      const [cyclesSnap, memSnap, elecSnap, expSnap] = await Promise.all([
+        getDocs(collection(db, `households/${householdId}/billingCycles`)),
+        getDocs(collection(db, `households/${householdId}/members`)),
+        getDoc(elecRef),
+        getDocs(collection(db, `households/${householdId}/expenses`)),
+      ]);
+
+      let targetCycle: any = null;
+      const cycles = sortBillingCyclesNewest(
+        cyclesSnap.docs.map((cd) => cd.data()),
+      );
+      if (billingCycleId) {
+        targetCycle = cycles.find(
+          (c: any) => c.billingCycleId === billingCycleId,
+        );
+      }
+      if (!targetCycle) {
+        targetCycle =
+          cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
+      }
+      if (!targetCycle) return null;
+      const cycleId = targetCycle.billingCycleId;
+
+      const activeMembers = memSnap.docs
+        .map((d) => d.data())
+        .filter((m: any) => m.status === "ACTIVE" || !m.status);
+      if (activeMembers.length === 0) return null;
+
+      const activePayors = activeMembers.filter((m) => isPayorMember(m));
+      const effectivePayors =
+        activePayors.length > 0 ? activePayors : activeMembers;
+
+      if (!elecSnap.exists()) return null;
+      const elecDoc = elecSnap.data();
+      const elecConfig =
+        (cycleId && elecDoc.cycles && elecDoc.cycles[cycleId]) || elecDoc;
+      const prev = Math.max(0, Number(elecConfig.previousReadingKwh ?? 0));
+      const curr = Math.max(prev, Number(elecConfig.currentReadingKwh ?? prev));
+      const rateCentavos = Math.max(
+        0,
+        Number(
+          elecConfig.rateCentavosPerKwh ?? elecDoc.rateCentavosPerKwh ?? 1200,
+        ),
+      );
+      const consumedKwh = Math.max(0, Math.round((curr - prev) * 100) / 100);
+      const totalAmountCentavos = Math.round(consumedKwh * rateCentavos);
+
+      if (totalAmountCentavos <= 0) return null;
+
+      const payorCount = Math.max(1, effectivePayors.length);
+      const shareCentavos = Math.round(totalAmountCentavos / payorCount);
+      const ratePesosStr = (rateCentavos / 100).toFixed(2);
+      const meterSummaryNote = `Prev: ${prev} kWh → Curr: ${curr} kWh (${consumedKwh} kWh × ₱${ratePesosStr}/kWh)`;
+
+      let splitDetails = activeMembers.map((m: any) => {
+        const isPayor = isPayorMember(m);
+        if (isPayor) {
+          return {
+            userId: m.userId || m.memberId,
+            displayName: m.displayName || "Roommate",
+            shareCentavos,
+            percentage: Math.round((100 / payorCount) * 10) / 10,
+            isPaid: false,
+            isExempt: false,
+            role: m.role || "PAYOR",
+            note: `${meterSummaryNote} · Split among ${payorCount} payors`,
+          };
+        } else {
+          return {
+            userId: m.userId || m.memberId,
+            displayName: m.displayName || "Roommate",
+            shareCentavos: 0,
+            percentage: 0,
+            isPaid: true,
+            isExempt: true,
+            role: "NON_PAYOR",
+            note: "Exempted (Non-payor)",
+          };
+        }
+      });
+
+      const existingElecExp = expSnap.docs.find((ed) => {
+        const data = ed.data();
+        const cat = (data.category || "").toLowerCase();
+        return (
+          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
+          (cat.includes("electric") || ed.id.startsWith("elec_"))
+        );
+      });
+
+      const expenseId = existingElecExp
+        ? existingElecExp.id
+        : `elec_bill_${cycleId}`;
+      const existingElecData = existingElecExp ? existingElecExp.data() : null;
+
+      const wasAlreadyPaid =
+        existingElecData?.status === "PAID" ||
+        existingElecData?.isPaid === true;
+
+      if (
+        existingElecData?.splitDetails &&
+        Array.isArray(existingElecData.splitDetails)
+      ) {
+        const paidUserMap = new Map<string, boolean>();
+        existingElecData.splitDetails.forEach((s: any) => {
+          if (s.userId && s.isPaid) paidUserMap.set(s.userId, true);
+        });
+        splitDetails = splitDetails.map((s: any) => ({
+          ...s,
+          isPaid:
+            s.isExempt || Boolean(paidUserMap.get(s.userId)) || wasAlreadyPaid,
+        }));
+      }
+
+      const allElecPaid =
+        wasAlreadyPaid ||
+        (splitDetails.length > 0 &&
+          splitDetails.every((s) => s.isExempt || s.isPaid));
+
+      const splitsMap: Record<string, number> = {};
+      splitDetails.forEach((s) => {
+        if (s.userId) splitsMap[s.userId] = s.shareCentavos;
+      });
+
+      const nowIso = new Date().toISOString();
+      const expensePayload = sanitizeData({
+        id: expenseId,
+        householdId,
+        title: "Electricity",
+        category: "Electricity",
+        amountCents: totalAmountCentavos,
+        date: nowIso.slice(0, 10),
+        payerName: "Host",
+        payerId: auth.currentUser?.uid || "system",
+        splitMethod: "Equal",
+        billingCycleId: cycleId,
+        status: allElecPaid ? "PAID" : "UNPAID",
+        isPaid: allElecPaid,
+        previousReadingKwh: prev,
+        currentReadingKwh: curr,
+        consumedKwh,
+        rateCentavosPerKwh: rateCentavos,
+        notes: meterSummaryNote,
+        splitDetails,
+        splits: splitsMap,
+        createdAt: existingElecData?.createdAt || nowIso,
+        updatedAt: nowIso,
+      });
+
+      await Promise.all([
+        setDoc(
+          doc(db, `households/${householdId}/expenses`, expenseId),
+          expensePayload,
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, `households/${householdId}/charges`, expenseId),
+          sanitizeData({
+            chargeId: expenseId,
+            householdId,
+            billingCycleId: cycleId,
+            chargeType: "ELECTRICITY",
+            name: "Electricity",
+            description: meterSummaryNote,
+            amountCentavos: totalAmountCentavos,
+            distributionMethod: "PAYORS_ONLY",
+            participantUserIds: splitDetails
+              .filter((s) => !s.isExempt)
+              .map((s) => s.userId),
+            splitDetails,
+            createdDate: existingElecData?.createdAt || nowIso,
+            createdBy: auth.currentUser?.uid || "system",
+          }),
+          { merge: true },
+        ),
+      ]);
+
+      this.recalculateUnpaidExpensesForHousehold(householdId).catch(() => {});
+      return expenseId;
+    } catch (err) {
+      console.warn("[syncCycleElectricityBill] error:", err);
+      return null;
+    }
+  },
+
+  async toggleCyclePaymentsLock(
+    householdId: string,
+    billingCycleId: string,
+    isLocked: boolean,
+  ): Promise<boolean> {
+    try {
+      if (!householdId) return false;
+      if (billingCycleId) {
+        const cycleRef = doc(
+          db,
+          `households/${householdId}/billingCycles`,
+          billingCycleId,
+        );
+        await updateDoc(cycleRef, {
+          paymentsLocked: isLocked,
+          isFinalized: !isLocked,
+          paymentsOpenedByHost: !isLocked,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      await updateDoc(doc(db, "households", householdId), {
+        paymentsLocked: isLocked,
+        paymentsOpenedByHost: !isLocked,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    } catch (err) {
+      console.warn("[toggleCyclePaymentsLock] error:", err);
+      return false;
+    }
+  },
+
+  async markExpensesPaidIfAllSettled(
+    householdId: string,
+    billingCycleId?: string,
+  ): Promise<boolean> {
+    if (!householdId) return false;
+    try {
+      const membersSnap = await getDocs(
+        collection(db, `households/${householdId}/members`),
+      );
+      const allMembers = membersSnap.docs.map((d) => d.data());
+      const activeMembers = allMembers.filter(
+        (m: any) => m.status === "ACTIVE" || !m.status,
+      );
+      const activePayors = activeMembers.filter((m) => isPayorMember(m));
+      if (activePayors.length === 0) return false;
+
+      const cyclesSnap = await getDocs(
+        collection(db, `households/${householdId}/billingCycles`),
+      );
+      const cycles = sortBillingCyclesNewest(
+        cyclesSnap.docs.map((cd) => cd.data()),
+      );
+      const isSingleCycle = cycles.length <= 1;
+      let cycleId = billingCycleId;
+      if (!cycleId) {
+        const activeCycle = cycles[0];
+        cycleId = activeCycle?.billingCycleId;
+      }
+      if (!cycleId) return false;
+
+      // Fetch expenses and payments for this cycle to verify settlement accurately
+      const [expSnap, pmtSnap] = await Promise.all([
+        getDocs(collection(db, `households/${householdId}/expenses`)),
+        getDocs(collection(db, `households/${householdId}/payments`)),
+      ]);
+
+      const cycleExpenses = expSnap.docs.filter((ed) => {
+        const data = ed.data();
+        return (
+          data.billingCycleId === cycleId ||
+          (!data.billingCycleId && isSingleCycle)
+        );
+      });
+
+      if (cycleExpenses.length === 0) return false;
+
+      const hasPositiveExpense = cycleExpenses.some(
+        (ed) => (Number(ed.data().amountCents) || 0) > 0,
+      );
+      if (!hasPositiveExpense) return false;
+
+      const paymentsByUser = new Map<string, number>();
+      pmtSnap.docs.forEach((pd) => {
+        const pData = pd.data();
+        if (pData.status === "REJECTED") return;
+        const matchesCycle =
+          pData.billingCycleId === cycleId ||
+          ((!pData.billingCycleId || pData.billingCycleId === "general") &&
+            isSingleCycle);
+        if (matchesCycle && pData.userId) {
+          paymentsByUser.set(
+            pData.userId,
+            (paymentsByUser.get(pData.userId) || 0) +
+              (Number(pData.amountCentavos) || 0),
+          );
+        }
+      });
+
+      const payorCount = Math.max(1, activePayors.length);
+
+      // Check each payor's member bill and payment coverage strictly within this cycle
+      let allPayorsSettled = true;
+      for (const p of activePayors) {
+        const uid = p.userId || p.memberId || p.id;
+        const userPaidTotal = paymentsByUser.get(uid) || 0;
+
+        // Calculate this payor's total share across cycle expenses
+        let payorShareTotal = 0;
+        let allUserSplitsMarkedPaid = true;
+        cycleExpenses.forEach((ed) => {
+          const exp = ed.data();
+          const mySplit = Array.isArray(exp.splitDetails)
+            ? exp.splitDetails.find((s: any) => s.userId === uid)
+            : null;
+          if (mySplit?.isExempt) return;
+          const share =
+            mySplit && typeof mySplit.shareCentavos === "number"
+              ? mySplit.shareCentavos
+              : Math.round((exp.amountCents || 0) / payorCount);
+          payorShareTotal += share;
+          if (
+            !exp.isPaid &&
+            exp.status !== "PAID" &&
+            !mySplit?.isPaid &&
+            share > 0
+          ) {
+            allUserSplitsMarkedPaid = false;
+          }
+        });
+
+        if (payorShareTotal <= 0) continue;
+
+        const billSnap = await getDoc(
+          doc(
+            db,
+            `households/${householdId}/memberBills`,
+            `bill_${cycleId}_${uid}`,
+          ),
+        );
+        if (billSnap.exists()) {
+          const bData = billSnap.data();
+          const billPaid = Math.max(
+            bData.totalPaidCentavos || 0,
+            userPaidTotal,
+          );
+          const isSettledByPayments =
+            payorShareTotal > 0 && billPaid >= payorShareTotal;
+          if (!isSettledByPayments && !allUserSplitsMarkedPaid) {
+            allPayorsSettled = false;
+            break;
+          }
+        } else {
+          const isSettledByPayments =
+            payorShareTotal > 0 && userPaidTotal >= payorShareTotal;
+          if (!isSettledByPayments && !allUserSplitsMarkedPaid) {
+            allPayorsSettled = false;
+            break;
+          }
+        }
+      }
+
+      if (allPayorsSettled) {
+        const nowIso = new Date().toISOString();
+        for (const expDoc of cycleExpenses) {
+          const data = expDoc.data();
+          if (data.status !== "PAID" || !data.isPaid) {
+            let splits = data.splitDetails;
+            if (Array.isArray(splits)) {
+              splits = splits.map((s: any) =>
+                sanitizeData({
+                  ...s,
+                  isPaid: true,
+                  paidDate: s.paidDate || nowIso,
+                }),
+              );
+            }
+            await updateDoc(
+              doc(db, `households/${householdId}/expenses`, expDoc.id),
+              sanitizeData({
+                status: "PAID",
+                isPaid: true,
+                ...(splits ? { splitDetails: splits } : {}),
+                updatedAt: nowIso,
+              }),
+            );
+          }
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn("[markExpensesPaidIfAllSettled] error:", err);
+      return false;
     }
   },
 
@@ -3666,6 +4666,7 @@ export const mobileDataService = {
     userId: string,
     amountCentavos: number,
     paymentId?: string,
+    billingCycleId?: string,
   ): Promise<void> {
     try {
       const expSnap = await getDocs(
@@ -3677,25 +4678,35 @@ export const mobileDataService = {
         if (remainingPayment <= 0) break;
         const exp = d.data();
         if (exp.status === "PAID" && exp.isPaid) continue;
+        if (
+          billingCycleId &&
+          billingCycleId !== "general" &&
+          exp.billingCycleId &&
+          exp.billingCycleId !== billingCycleId
+        ) {
+          continue;
+        }
 
         let modified = false;
         let splits = exp.splitDetails || [];
         if (Array.isArray(splits)) {
           splits = splits.map((s: any) => {
-            const isUser = s.userId === userId || s.memberId === userId;
+            const isUser =
+              s.userId === userId || s.memberId === userId || s.id === userId;
             if (isUser && !s.isPaid && s.shareCentavos > 0) {
               const toPay = Math.min(remainingPayment, s.shareCentavos);
               remainingPayment -= toPay;
               modified = true;
-              return {
+              const resolvedPmtId = paymentId || s.paymentId;
+              return sanitizeData({
                 ...s,
                 isPaid: true,
                 paidAmountCentavos: (s.paidAmountCentavos || 0) + toPay,
                 paidDate: new Date().toISOString(),
-                paymentId: paymentId || s.paymentId,
-              };
+                ...(resolvedPmtId ? { paymentId: resolvedPmtId } : {}),
+              });
             }
-            return s;
+            return sanitizeData(s);
           });
         }
 
@@ -3705,13 +4716,19 @@ export const mobileDataService = {
           splits.every((s: any) => s.isExempt || s.isPaid);
 
         if (modified) {
-          await updateDoc(doc(db, `households/${householdId}/expenses`, d.id), {
-            splitDetails: splits,
-            ...(allPaid ? { status: "PAID", isPaid: true } : {}),
-            updatedAt: new Date().toISOString(),
-          });
+          await updateDoc(
+            doc(db, `households/${householdId}/expenses`, d.id),
+            sanitizeData({
+              splitDetails: splits,
+              ...(allPaid ? { status: "PAID", isPaid: true } : {}),
+              updatedAt: new Date().toISOString(),
+            }),
+          );
         }
       }
+
+      // Check and update any expenses if all payors settled for this cycle
+      await this.markExpensesPaidIfAllSettled(householdId, billingCycleId);
     } catch (err) {
       console.warn("[applyPaymentToExpenses] warning:", err);
     }
@@ -3756,17 +4773,51 @@ export const mobileDataService = {
       // Status is VERIFIED immediately if host, or VERIFIED for auto-credit with record for roommate peace of mind
       const status: "PENDING" | "VERIFIED" = isHost ? "VERIFIED" : "VERIFIED";
 
+      let resolvedCycleId = payment.billingCycleId;
+      let resolvedCycleDoc: any = null;
+      if (payment.householdId) {
+        try {
+          const cycSnap = await getDocs(
+            collection(db, `households/${payment.householdId}/billingCycles`),
+          );
+          const allCycles = sortBillingCyclesNewest(
+            cycSnap.docs.map((d) => d.data()),
+          );
+          if (resolvedCycleId && resolvedCycleId !== "general") {
+            resolvedCycleDoc =
+              allCycles.find((c) => c.billingCycleId === resolvedCycleId) ||
+              allCycles[0];
+          } else {
+            resolvedCycleDoc = allCycles[0];
+            if (resolvedCycleDoc?.billingCycleId) {
+              resolvedCycleId = resolvedCycleDoc.billingCycleId;
+            }
+          }
+        } catch {}
+      }
+      const effectiveCycleId = resolvedCycleId || "general";
+
+      // Block payment submission for non-host payors when the host has not opened payments for the cycle
+      if (
+        !isHost &&
+        isCyclePaymentsLocked(resolvedCycleDoc, _cachedHousehold)
+      ) {
+        throw new Error(
+          "Payments are currently locked by your host. Please wait until the host opens payments for this billing cycle.",
+        );
+      }
+
       const paymentRecord: MobilePayment = sanitizeData({
         paymentId,
         householdId: payment.householdId,
-        billingCycleId: payment.billingCycleId || "general",
+        billingCycleId: effectiveCycleId,
         userId: uid,
         userName,
         amountCentavos: payment.amountCentavos,
         paymentMethod: payment.paymentMethod,
         referenceNumber:
           payment.referenceNumber || `REF-${Date.now().toString().slice(-6)}`,
-        proofOfPaymentUrl: payment.proofOfPaymentUrl || null,
+        proofOfPaymentUrl: payment.proofOfPaymentUrl || undefined,
         notes: payment.notes || "",
         status,
         paymentDate: todayDate,
@@ -3785,7 +4836,7 @@ export const mobileDataService = {
       // Apply directly to member bills and itemized expenses so dues drop immediately
       await this.applyPaymentToMemberBills(
         payment.householdId,
-        payment.billingCycleId || "general",
+        effectiveCycleId,
         uid,
         payment.amountCentavos,
       );
@@ -3794,6 +4845,7 @@ export const mobileDataService = {
         uid,
         payment.amountCentavos,
         paymentId,
+        effectiveCycleId,
       );
 
       // Notify host or self
@@ -4205,29 +5257,35 @@ export const mobileDataService = {
       (snap) => {
         const list: any[] = [];
         let readUpdated = false;
+        const userMap = getUserReadMap(userId);
         snap.forEach((d) => {
           const data = d.data();
+          if (data.recipientId && data.recipientId !== userId) return;
           const docId = d.id || data.notificationId;
           list.push({ id: docId, ...data });
-          if (data.readStatus === true) {
-            if (docId && !_cachedReadNotificationIds[docId]) {
-              _cachedReadNotificationIds[docId] = true;
+          if (data.readStatus === true && data.readByRecipientId === userId) {
+            const scopedDocKey = getScopedNotificationReadKey(userId, docId);
+            if (scopedDocKey && !userMap[scopedDocKey]) {
+              userMap[scopedDocKey] = true;
               readUpdated = true;
             }
-            if (
-              data.relatedItemId &&
-              !_cachedReadNotificationIds[data.relatedItemId]
-            ) {
-              _cachedReadNotificationIds[data.relatedItemId] = true;
-              readUpdated = true;
+            if (data.relatedItemId) {
+              const scopedItemKey = getScopedNotificationReadKey(
+                userId,
+                data.relatedItemId,
+              );
+              if (scopedItemKey && !userMap[scopedItemKey]) {
+                userMap[scopedItemKey] = true;
+                readUpdated = true;
+              }
             }
           }
         });
         if (readUpdated) {
-          notifyReadSubscribers();
+          notifyReadSubscribers(userId);
           AsyncStorage.setItem(
-            READ_NOTIFICATIONS_STORAGE_KEY,
-            JSON.stringify(_cachedReadNotificationIds),
+            getReadNotificationsStorageKey(userId),
+            JSON.stringify(userMap),
           ).catch(() => {});
         }
         list.sort((a, b) =>
@@ -4248,41 +5306,39 @@ export const mobileDataService = {
     userId: string | undefined,
     callback: (readIds: Record<string, boolean>) => void,
   ) {
-    _readNotificationSubscribers.add(callback);
+    _readNotificationSubscribers.set(callback, userId);
 
-    // Emit current cached state immediately
-    callback(this.getCachedReadNotifications());
-
-    // Load from AsyncStorage and merge with cloud user profile
-    AsyncStorage.getItem(READ_NOTIFICATIONS_STORAGE_KEY)
-      .then((raw) => {
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object") {
-            _cachedReadNotificationIds = {
-              ...parsed,
-              ..._cachedReadNotificationIds,
-            };
-            notifyReadSubscribers();
-          }
-        }
-      })
-      .catch(() => {});
+    // Emit current cached state for this user immediately
+    callback(this.getCachedReadNotifications(userId));
 
     if (userId) {
+      // Load from per-user AsyncStorage key and merge with cloud user profile
+      AsyncStorage.getItem(getReadNotificationsStorageKey(userId))
+        .then((raw) => {
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (mergeUserReadMap(userId, parsed)) {
+              notifyReadSubscribers(userId);
+            }
+          }
+        })
+        .catch(() => {});
+
       getDoc(doc(db, "users", userId))
         .then((snap) => {
           if (snap.exists()) {
             const uData = snap.data();
             if (
-              uData?.readNotificationIds &&
-              typeof uData.readNotificationIds === "object"
+              uData?.readNotificationIdsV2 &&
+              typeof uData.readNotificationIdsV2 === "object"
             ) {
-              _cachedReadNotificationIds = {
-                ..._cachedReadNotificationIds,
-                ...uData.readNotificationIds,
-              };
-              notifyReadSubscribers();
+              if (mergeUserReadMap(userId, uData.readNotificationIdsV2)) {
+                notifyReadSubscribers(userId);
+                AsyncStorage.setItem(
+                  getReadNotificationsStorageKey(userId),
+                  JSON.stringify(getUserReadMap(userId)),
+                ).catch(() => {});
+              }
             }
           }
         })
@@ -4299,12 +5355,13 @@ export const mobileDataService = {
     householdId: string | undefined,
     items: MobileNotificationItem[],
     existingCloudDocs: any[],
-    readIds: Record<string, boolean>,
+    _readIds: Record<string, boolean>,
   ): Promise<void> {
     if (!userId || items.length === 0) return;
 
     const existingMap = new Map<string, any>();
     existingCloudDocs.forEach((docItem) => {
+      if (docItem.recipientId && docItem.recipientId !== userId) return;
       const id = docItem.id || docItem.notificationId;
       if (id) existingMap.set(id, docItem);
       if (docItem.relatedItemId)
@@ -4312,12 +5369,14 @@ export const mobileDataService = {
     });
 
     for (const item of items) {
+      const perUserDocId = `notif_${userId}_${item.id}`;
       const existing =
-        existingMap.get(item.cloudDocId) || existingMap.get(item.id);
-      const isRead = !isNotificationItemUnread(item, readIds);
+        existingMap.get(perUserDocId) ||
+        existingMap.get(item.cloudDocId) ||
+        existingMap.get(item.id);
 
-      if (!existing && !_syncedCloudNotifIds.has(item.cloudDocId)) {
-        _syncedCloudNotifIds.add(item.cloudDocId);
+      if (!existing && !_syncedCloudNotifIds.has(perUserDocId)) {
+        _syncedCloudNotifIds.add(perUserDocId);
         const typeMap: Record<NotificationCategory, string> = {
           reminder: "BILL_FINALIZED",
           expense_added: "BILL_UPDATED",
@@ -4326,9 +5385,9 @@ export const mobileDataService = {
           group_invite: "INVITATION_RECEIVED",
         };
         setDoc(
-          doc(db, "notifications", item.cloudDocId),
+          doc(db, "notifications", perUserDocId),
           sanitizeData({
-            notificationId: item.cloudDocId,
+            notificationId: perUserDocId,
             recipientId: userId,
             householdId: householdId || "",
             type: typeMap[item.category] || "BILL_UPDATED",
@@ -4338,21 +5397,10 @@ export const mobileDataService = {
             spans: item.spans,
             relatedItemId: item.id,
             relatedEntityId: item.relatedEntityId || item.id,
-            readStatus: isRead,
+            readStatus: false,
             createdTimestamp: item.createdTimestamp,
             updatedTimestamp: new Date().toISOString(),
           }),
-          { merge: true },
-        ).catch(() => {});
-      } else if (existing && isRead && existing.readStatus === false) {
-        const docId = existing.id || existing.notificationId || item.cloudDocId;
-        setDoc(
-          doc(db, "notifications", docId),
-          {
-            recipientId: userId,
-            readStatus: true,
-            readAt: new Date().toISOString(),
-          },
           { merge: true },
         ).catch(() => {});
       }
@@ -4363,78 +5411,92 @@ export const mobileDataService = {
     userId: string | undefined,
     items: Array<{ id: string; cloudDocId?: string }>,
   ): Promise<void> {
-    if (!items || items.length === 0) return;
+    const effectiveUid = (userId || auth.currentUser?.uid || "").trim();
+    if (!effectiveUid || !items || items.length === 0) return;
 
     const nowIso = new Date().toISOString();
     const updatedReadMap: Record<string, boolean> = {
-      ...this.getCachedReadNotifications(),
+      ...this.getCachedReadNotifications(effectiveUid),
     };
 
     items.forEach((item) => {
-      if (item.id) updatedReadMap[item.id] = true;
-      if (item.cloudDocId) updatedReadMap[item.cloudDocId] = true;
+      const perUserDocId =
+        item.cloudDocId && item.cloudDocId.startsWith(`notif_${effectiveUid}_`)
+          ? item.cloudDocId
+          : `notif_${effectiveUid}_${item.id}`;
+      if (item.id) {
+        updatedReadMap[getScopedNotificationReadKey(effectiveUid, item.id)] =
+          true;
+      }
+      if (perUserDocId) {
+        updatedReadMap[
+          getScopedNotificationReadKey(effectiveUid, perUserDocId)
+        ] = true;
+      }
+      if (item.cloudDocId) {
+        updatedReadMap[
+          getScopedNotificationReadKey(effectiveUid, item.cloudDocId)
+        ] = true;
+      }
     });
 
-    _cachedReadNotificationIds = updatedReadMap;
-    if (_cachedUserProfile) {
+    _cachedReadNotificationIdsByUser[effectiveUid] = updatedReadMap;
+    if (_cachedUserProfile && _cachedUserProfile.uid === effectiveUid) {
       _cachedUserProfile = {
         ..._cachedUserProfile,
-        readNotificationIds: updatedReadMap,
+        readNotificationIdsV2: updatedReadMap,
       };
     }
 
-    // Notify all active screens (HomeScreen + NotificationsScreen) immediately
-    notifyReadSubscribers();
+    // Notify all active screens for this user immediately
+    notifyReadSubscribers(effectiveUid);
 
-    // Persist locally for instant offline/startup cache
+    // Persist locally under per-user storage key
     try {
       await AsyncStorage.setItem(
-        READ_NOTIFICATIONS_STORAGE_KEY,
+        getReadNotificationsStorageKey(effectiveUid),
         JSON.stringify(updatedReadMap),
       );
     } catch {}
 
-    // Persist to Firestore cloud (`users/{uid}` and `notifications/{cloudDocId}`)
-    if (userId) {
-      try {
-        await setDoc(
-          doc(db, "users", userId),
-          sanitizeData({
-            readNotificationIds: updatedReadMap,
-            updatedDate: nowIso,
-          }),
-          { merge: true },
-        );
-      } catch (err) {
-        console.warn(
-          "[Firestore Mobile] markNotificationsRead user sync:",
-          err,
-        );
-      }
+    // Persist to Firestore cloud (`users/{uid}` and `notifications/{perUserDocId}`)
+    try {
+      await setDoc(
+        doc(db, "users", effectiveUid),
+        sanitizeData({
+          readNotificationIdsV2: updatedReadMap,
+          updatedDate: nowIso,
+        }),
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn("[Firestore Mobile] markNotificationsRead user sync:", err);
+    }
 
-      try {
-        await Promise.all(
-          items.map((item) => {
-            const docId = item.cloudDocId || `notif_${userId}_${item.id}`;
-            return setDoc(
-              doc(db, "notifications", docId),
-              sanitizeData({
-                notificationId: docId,
-                recipientId: userId,
-                relatedItemId: item.id,
-                readStatus: true,
-                readAt: nowIso,
-              }),
-              { merge: true },
-            ).catch(() => {});
-          }),
-        );
-      } catch (err) {
-        console.warn(
-          "[Firestore Mobile] markNotificationsRead docs sync:",
-          err,
-        );
-      }
+    try {
+      await Promise.all(
+        items.map((item) => {
+          const docId =
+            item.cloudDocId &&
+            item.cloudDocId.startsWith(`notif_${effectiveUid}_`)
+              ? item.cloudDocId
+              : `notif_${effectiveUid}_${item.id}`;
+          return setDoc(
+            doc(db, "notifications", docId),
+            sanitizeData({
+              notificationId: docId,
+              recipientId: effectiveUid,
+              relatedItemId: item.id,
+              readStatus: true,
+              readByRecipientId: effectiveUid,
+              readAt: nowIso,
+            }),
+            { merge: true },
+          ).catch(() => {});
+        }),
+      );
+    } catch (err) {
+      console.warn("[Firestore Mobile] markNotificationsRead docs sync:", err);
     }
   },
 };

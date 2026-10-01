@@ -27,9 +27,15 @@ import {
   DEFAULT_HOST_PAYMENT_METHODS,
 } from "../services/firebaseDataService";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
+import {
+  POPULAR_BANK_PRESETS,
+  BankPreset,
+  findBankPresetByNameOrType,
+} from "../utils/bankIcons";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { UniversalSkeleton } from "../components/UniversalLoader";
 import { useTheme } from "../context/ThemeContext";
+import { assets } from "../../assets/assets";
 
 export interface PaymentMethodConfigurationScreenProps {
   onBack: () => void;
@@ -67,9 +73,13 @@ export const PaymentMethodConfigurationScreen: React.FC<
   const [formQrCodeUrl, setFormQrCodeUrl] = useState<string | undefined>(
     undefined,
   );
+  const [formCustomIconUrl, setFormCustomIconUrl] = useState<
+    string | undefined
+  >(undefined);
   const [formNotes, setFormNotes] = useState("");
   const [formIsEnabled, setFormIsEnabled] = useState(true);
   const [uploadingQr, setUploadingQr] = useState(false);
+  const [uploadingIcon, setUploadingIcon] = useState(false);
 
   // QR Lightbox preview
   const [previewQrUrl, setPreviewQrUrl] = useState<string | null>(null);
@@ -143,6 +153,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
     setFormAccountName(profile?.displayName || profile?.name || "");
     setFormAccountNumber("");
     setFormQrCodeUrl(undefined);
+    setFormCustomIconUrl(undefined);
     setFormNotes(
       defaultType === "CASH"
         ? "Please pay directly to the property host and request confirmation."
@@ -159,6 +170,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
     setFormAccountName(method.accountName);
     setFormAccountNumber(method.accountNumber);
     setFormQrCodeUrl(method.qrCodeUrl);
+    setFormCustomIconUrl(method.customIconUrl);
     setFormNotes(method.notes || "");
     setFormIsEnabled(method.isEnabled);
     setShowEditModal(true);
@@ -177,18 +189,21 @@ export const PaymentMethodConfigurationScreen: React.FC<
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         quality: 0.85,
+        base64: true,
       });
 
       if (!result.canceled && result.assets?.[0]?.uri) {
         const localUri = result.assets[0].uri;
+        const base64 = result.assets[0].base64;
         setUploadingQr(true);
         try {
           const downloadUrl = await uploadToFirebaseStorageMobile(
             localUri,
             `payment_qr_codes/${resolvedHouseholdId || "general"}`,
+            base64 || undefined,
           );
           setFormQrCodeUrl(downloadUrl);
           setUploadingQr(false);
@@ -196,13 +211,62 @@ export const PaymentMethodConfigurationScreen: React.FC<
         } catch (uploadErr: any) {
           setUploadingQr(false);
           Alert.alert(
-            "Upload Failed",
-            uploadErr?.message || "Could not upload QR code. Please try again.",
+            "Upload Notice",
+            uploadErr?.message || "Using photo representation for QR code.",
           );
+          if (localUri) setFormQrCodeUrl(localUri);
         }
       }
     } catch {
       setUploadingQr(false);
+      Alert.alert("Error", "Could not pick image. Please try again.");
+    }
+  };
+
+  const handlePickCustomIconImage = async () => {
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Permission Required",
+          "Please grant photo library access to upload a custom bank/channel icon.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.85,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const localUri = result.assets[0].uri;
+        const base64 = result.assets[0].base64;
+        setUploadingIcon(true);
+        try {
+          const downloadUrl = await uploadToFirebaseStorageMobile(
+            localUri,
+            `payment_bank_icons/${resolvedHouseholdId || "general"}`,
+            base64 || undefined,
+          );
+          setFormCustomIconUrl(downloadUrl);
+          setUploadingIcon(false);
+          Alert.alert("Bank Icon Set", "Custom icon attached successfully.");
+        } catch (uploadErr: any) {
+          setUploadingIcon(false);
+          Alert.alert(
+            "Upload Notice",
+            uploadErr?.message ||
+              "Using local image representation for bank icon.",
+          );
+          if (localUri) setFormCustomIconUrl(localUri);
+        }
+      }
+    } catch {
+      setUploadingIcon(false);
       Alert.alert("Error", "Could not pick image. Please try again.");
     }
   };
@@ -284,6 +348,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
               accountName: formAccountName.trim(),
               accountNumber: formAccountNumber.trim(),
               qrCodeUrl: formQrCodeUrl,
+              customIconUrl: formCustomIconUrl || undefined,
               notes: formNotes.trim(),
               isEnabled: formIsEnabled,
               updatedAt: new Date().toISOString(),
@@ -300,6 +365,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
           accountName: formAccountName.trim(),
           accountNumber: formAccountNumber.trim(),
           qrCodeUrl: formQrCodeUrl,
+          customIconUrl: formCustomIconUrl || undefined,
           notes: formNotes.trim(),
           isEnabled: formIsEnabled,
           updatedAt: new Date().toISOString(),
@@ -588,14 +654,18 @@ export const PaymentMethodConfigurationScreen: React.FC<
               ]}
               onPress={() => handleOpenAddModal("GCASH")}
             >
-              <Text style={{ fontSize: 13, marginRight: 4 }}>💙</Text>
+              <Image
+                source={assets.gcashLogo}
+                style={styles.quickAddLogo}
+                resizeMode="contain"
+              />
               <Text
                 style={[
                   styles.quickAddChipText,
                   isDark && { color: colors.text },
                 ]}
               >
-                + GCash
+                GCash
               </Text>
             </TouchableOpacity>
 
@@ -609,14 +679,18 @@ export const PaymentMethodConfigurationScreen: React.FC<
               ]}
               onPress={() => handleOpenAddModal("MAYA")}
             >
-              <Text style={{ fontSize: 13, marginRight: 4 }}>💚</Text>
+              <Image
+                source={assets.mayaLogo}
+                style={styles.quickAddLogo}
+                resizeMode="contain"
+              />
               <Text
                 style={[
                   styles.quickAddChipText,
                   isDark && { color: colors.text },
                 ]}
               >
-                + Maya
+                Maya
               </Text>
             </TouchableOpacity>
 
@@ -630,14 +704,18 @@ export const PaymentMethodConfigurationScreen: React.FC<
               ]}
               onPress={() => handleOpenAddModal("BANK_TRANSFER")}
             >
-              <Text style={{ fontSize: 13, marginRight: 4 }}>🏦</Text>
+              <Image
+                source={assets.bankLogo}
+                style={styles.quickAddLogo}
+                resizeMode="contain"
+              />
               <Text
                 style={[
                   styles.quickAddChipText,
                   isDark && { color: colors.text },
                 ]}
               >
-                + Bank
+                Bank
               </Text>
             </TouchableOpacity>
 
@@ -651,14 +729,18 @@ export const PaymentMethodConfigurationScreen: React.FC<
               ]}
               onPress={() => handleOpenAddModal("CASH")}
             >
-              <Text style={{ fontSize: 13, marginRight: 4 }}>💵</Text>
+              <Image
+                source={assets.cashLogo}
+                style={styles.quickAddLogo}
+                resizeMode="contain"
+              />
               <Text
                 style={[
                   styles.quickAddChipText,
                   isDark && { color: colors.text },
                 ]}
               >
-                + Cash
+                Cash
               </Text>
             </TouchableOpacity>
           </View>
@@ -747,21 +829,39 @@ export const PaymentMethodConfigurationScreen: React.FC<
                   ]}
                 >
                   <View style={styles.methodHeaderRow}>
-                    <View
-                      style={[
-                        styles.methodIconBadge,
-                        {
-                          backgroundColor: visual.bgColor,
-                          borderColor: visual.borderColor,
-                        },
-                      ]}
-                    >
-                      <Feather
-                        name={visual.icon as any}
-                        size={18}
-                        color={visual.color}
-                      />
-                    </View>
+                    {method.customIconUrl ? (
+                      <View
+                        style={[
+                          styles.methodCustomIconWrap,
+                          isDark && {
+                            backgroundColor: colors.surfaceInset,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Image
+                          source={{ uri: method.customIconUrl }}
+                          style={styles.methodCustomIcon}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.methodIconBadge,
+                          {
+                            backgroundColor: visual.bgColor,
+                            borderColor: visual.borderColor,
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name={visual.icon as any}
+                          size={18}
+                          color={visual.color}
+                        />
+                      </View>
+                    )}
 
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <View
@@ -843,7 +943,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
                           isDark && { color: colors.textSecondary },
                         ]}
                       >
-                        Account / Phone Number
+                        Account Number
                       </Text>
                       <Text
                         style={[
@@ -938,14 +1038,6 @@ export const PaymentMethodConfigurationScreen: React.FC<
                         size={13}
                         color={isDark ? colors.accent : "#2563EB"}
                       />
-                      {/* <Text
-                        style={[
-                          styles.cardActionBtnText,
-                          isDark && { color: colors.accent },
-                        ]}
-                      >
-                        Edit Details & QR
-                      </Text> */}
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -964,15 +1056,6 @@ export const PaymentMethodConfigurationScreen: React.FC<
                         size={13}
                         color={isDark ? colors.danger : "#EF4444"}
                       />
-                      {/* <Text
-                        style={[
-                          styles.cardActionBtnText,
-                          styles.cardActionBtnTextDelete,
-                          isDark && { color: colors.danger },
-                        ]}
-                      >
-                        Remove
-                      </Text> */}
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1162,6 +1245,270 @@ export const PaymentMethodConfigurationScreen: React.FC<
                 placeholder="e.g. GCash, Maya, BDO Unibank, BPI"
                 placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
               />
+            </View>
+
+            {/* Custom Bank / E-Wallet Logo / Icon */}
+            <View style={[styles.inputGroup, { marginTop: 14 }]}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text
+                  style={[styles.inputLabel, isDark && { color: colors.text }]}
+                >
+                  Bank / Channel Logo (Optional)
+                </Text>
+                {formCustomIconUrl ? (
+                  <TouchableOpacity
+                    onPress={() => setFormCustomIconUrl(undefined)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "700",
+                        color: isDark ? colors.danger : "#EF4444",
+                      }}
+                    >
+                      Remove
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <Text
+                style={[
+                  styles.inputHelperText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Upload your bank's logo or select a quick preset so roommates
+                recognize the channel easily.
+              </Text>
+
+              {/* Active Icon Display or Upload Trigger */}
+              {formCustomIconUrl ? (
+                <View
+                  style={[
+                    styles.bankIconActiveBox,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.bankIconThumbWrap}>
+                    <Image
+                      source={{ uri: formCustomIconUrl }}
+                      style={styles.bankIconThumbImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text
+                      style={[
+                        styles.bankIconActiveTitle,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      Custom Bank Icon Set
+                    </Text>
+                    <Text
+                      style={[
+                        styles.bankIconActiveSub,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Roommates will see this when selecting payment method
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.bankIconChangeBtn,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.15)",
+                        borderColor: "rgba(59, 130, 246, 0.3)",
+                      },
+                    ]}
+                    onPress={handlePickCustomIconImage}
+                    disabled={uploadingIcon}
+                  >
+                    {uploadingIcon ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={isDark ? colors.accent : "#2563EB"}
+                      />
+                    ) : (
+                      <>
+                        <Feather
+                          name="upload"
+                          size={12}
+                          color={isDark ? colors.accent : "#2563EB"}
+                        />
+                        <Text
+                          style={[
+                            styles.bankIconChangeBtnText,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
+                          Replace
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={{ gap: 8 }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.uploadBankIconBtn,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={handlePickCustomIconImage}
+                    disabled={uploadingIcon}
+                    activeOpacity={0.8}
+                  >
+                    {uploadingIcon ? (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          paddingVertical: 4,
+                          gap: 8,
+                        }}
+                      >
+                        <ActivityIndicator
+                          size="small"
+                          color={isDark ? colors.accent : "#2563EB"}
+                        />
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: "600",
+                            color: isDark ? colors.textSecondary : "#64748B",
+                          }}
+                        >
+                          Uploading custom bank icon...
+                        </Text>
+                      </View>
+                    ) : (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.uploadIconBadge,
+                            isDark && {
+                              backgroundColor: "rgba(59, 130, 246, 0.2)",
+                            },
+                          ]}
+                        >
+                          <Feather
+                            name="image"
+                            size={16}
+                            color={isDark ? colors.accent : "#2563EB"}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.uploadBankIconTitle,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
+                            Upload Custom Bank / E-Wallet Logo
+                          </Text>
+                          <Text
+                            style={[
+                              styles.uploadBankIconSub,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                          >
+                            PNG, JPG, or WebP from your photo library
+                          </Text>
+                        </View>
+                        <Feather
+                          name="plus"
+                          size={16}
+                          color={isDark ? colors.accent : "#2563EB"}
+                        />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Preset Quick Chips */}
+                  <View style={{ marginTop: 4 }}>
+                    <Text
+                      style={[
+                        styles.presetSectionLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Popular bank presets:
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{
+                        gap: 6,
+                        paddingTop: 6,
+                        paddingBottom: 4,
+                      }}
+                    >
+                      {POPULAR_BANK_PRESETS.map((p) => (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={[
+                            styles.presetBankChip,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                          onPress={() => {
+                            if (
+                              !formName ||
+                              formName === "Payment Method" ||
+                              formName === "Bank Transfer"
+                            ) {
+                              setFormName(p.name);
+                            }
+                            setFormType(p.type);
+                            if (p.defaultNotes && !formNotes) {
+                              setFormNotes(p.defaultNotes);
+                            }
+                          }}
+                        >
+                          <View
+                            style={[
+                              styles.presetDot,
+                              { backgroundColor: p.color },
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.presetChipText,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
+                            {p.shortCode}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Account Holder Name */}
@@ -1496,9 +1843,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(15, 23, 42, 0.05)",
   },
   addHeaderBtn: {
     width: 44,
@@ -1563,10 +1910,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 14,
+    marginTop: 8,
     paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(148, 163, 184, 0.15)",
   },
   quickAddChip: {
     flexDirection: "row",
@@ -1577,6 +1922,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: "#E2E8F0",
+  },
+  quickAddLogo: {
+    width: 20,
+    height: 20,
+    marginRight: 8,
+    borderRadius: 4,
   },
   quickAddChipText: {
     fontSize: 12,
@@ -1640,7 +1991,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   typeBadgeText: {
-    fontSize: 9,
+    fontSize: 5,
     fontWeight: "800",
   },
   accountHolder: {
@@ -2000,5 +2351,124 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     lineHeight: 20,
+  },
+  // Custom Bank Icon Styles
+  methodCustomIconWrap: {
+    width: 44,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 3,
+  },
+  methodCustomIcon: {
+    width: "100%",
+    height: "100%",
+  },
+  bankIconActiveBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+  },
+  bankIconThumbWrap: {
+    width: 56,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 4,
+  },
+  bankIconThumbImage: {
+    width: "100%",
+    height: "100%",
+  },
+  bankIconActiveTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  bankIconActiveSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  bankIconChangeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  bankIconChangeBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  uploadBankIconBtn: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+  },
+  uploadIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadBankIconTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  uploadBankIconSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  presetSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  presetBankChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  presetDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  presetChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#334155",
   },
 });

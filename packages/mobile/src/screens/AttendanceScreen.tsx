@@ -183,14 +183,25 @@ export const AttendanceScreen: React.FC<{
   const [presentDates, setPresentDates] = useState<string[]>([]);
   const [allCycleAttendance, setAllCycleAttendance] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, any>>({});
-  const inFlightRef = useRef<Set<string>>(new Set());
-  const isBatchingRef = useRef<boolean>(false);
-  const [isBatching, setIsBatching] = useState<boolean>(false);
+  const optimisticPresentRef = useRef<Set<string>>(new Set());
+  const pendingMutationsRef = useRef<Map<string, "PRESENT" | "ABSENT">>(
+    new Map(),
+  );
+  const inFlightMutationsRef = useRef<Map<string, "PRESENT" | "ABSENT">>(
+    new Map(),
+  );
+  const isFlushingBatchRef = useRef<boolean>(false);
+  const isSyncingBillsRef = useRef<boolean>(false);
+  const needsFollowUpBillSyncRef = useRef<boolean>(false);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const billSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showWaterSettingsModal, setShowWaterSettingsModal] =
     useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
+
+  const presentSet = useMemo(() => new Set(presentDates), [presentDates]);
 
   const activeUserId = userId || currentUser?.uid || "";
 
@@ -333,30 +344,218 @@ export const AttendanceScreen: React.FC<{
     };
   }, [resolvedHouseholdId, isProfileLoaded]);
 
+  const latestSyncContextRef = useRef({
+    resolvedHouseholdId,
+    resolvedBillingCycleId,
+    activeUserId,
+    cycleDatesLength: cycleDates.length,
+    isFixedMode,
+    myFixedSharePesos,
+    ratePerDayPesos,
+    isMyAttendanceSubmitted,
+  });
+  latestSyncContextRef.current = {
+    resolvedHouseholdId,
+    resolvedBillingCycleId,
+    activeUserId,
+    cycleDatesLength: cycleDates.length,
+    isFixedMode,
+    myFixedSharePesos,
+    ratePerDayPesos,
+    isMyAttendanceSubmitted,
+  };
+
+  const runCoalescedBillSync = async () => {
+    const ctx = latestSyncContextRef.current;
+    if (
+      !ctx.resolvedHouseholdId ||
+      !ctx.resolvedBillingCycleId ||
+      !ctx.activeUserId
+    ) {
+      return;
+    }
+    if (isSyncingBillsRef.current) {
+      needsFollowUpBillSyncRef.current = true;
+      return;
+    }
+    isSyncingBillsRef.current = true;
+    try {
+      do {
+        needsFollowUpBillSyncRef.current = false;
+        const latestCtx = latestSyncContextRef.current;
+        const currentPresentCount = optimisticPresentRef.current.size;
+        const currentAbsentCount = Math.max(
+          0,
+          latestCtx.cycleDatesLength - currentPresentCount,
+        );
+        const currentWaterFee = latestCtx.isFixedMode
+          ? latestCtx.myFixedSharePesos
+          : currentPresentCount * latestCtx.ratePerDayPesos;
+
+        if (latestCtx.isMyAttendanceSubmitted) {
+          await mobileDataService
+            .submitAttendance(
+              latestCtx.resolvedHouseholdId,
+              latestCtx.resolvedBillingCycleId,
+              latestCtx.activeUserId,
+              currentPresentCount,
+              currentAbsentCount,
+              Math.round(currentWaterFee * 100),
+            )
+            .catch(() => {});
+        }
+
+        await mobileDataService.syncCycleWaterBill(
+          latestCtx.resolvedHouseholdId,
+          latestCtx.resolvedBillingCycleId,
+        );
+      } while (needsFollowUpBillSyncRef.current);
+    } catch (err) {
+      console.warn("[AttendanceScreen] background bill sync warning:", err);
+    } finally {
+      isSyncingBillsRef.current = false;
+    }
+  };
+
+  const flushPendingMutations = async () => {
+    const ctx = latestSyncContextRef.current;
+    if (
+      !ctx.resolvedHouseholdId ||
+      !ctx.resolvedBillingCycleId ||
+      !ctx.activeUserId
+    ) {
+      return;
+    }
+    if (isFlushingBatchRef.current || pendingMutationsRef.current.size === 0) {
+      return;
+    }
+
+    isFlushingBatchRef.current = true;
+    const entriesToFlush: Array<{
+      date: string;
+      status: "PRESENT" | "ABSENT";
+    }> = [];
+
+    pendingMutationsRef.current.forEach((status, date) => {
+      entriesToFlush.push({ date, status });
+      inFlightMutationsRef.current.set(date, status);
+    });
+    pendingMutationsRef.current.clear();
+
+    try {
+      if (entriesToFlush.length === 1) {
+        const single = entriesToFlush[0];
+        await mobileDataService.toggleAttendance(
+          ctx.resolvedHouseholdId,
+          ctx.resolvedBillingCycleId,
+          ctx.activeUserId,
+          single.date,
+          single.status,
+        );
+      } else if (entriesToFlush.length > 1) {
+        await mobileDataService.bulkToggleAttendance(
+          ctx.resolvedHouseholdId,
+          ctx.resolvedBillingCycleId,
+          ctx.activeUserId,
+          entriesToFlush,
+        );
+      }
+    } catch (err) {
+      console.warn("[AttendanceScreen] flushPendingMutations error:", err);
+      // Remove failed entries from inFlight if not superseded by newer taps
+      for (const item of entriesToFlush) {
+        if (!pendingMutationsRef.current.has(item.date)) {
+          inFlightMutationsRef.current.delete(item.date);
+        }
+      }
+    } finally {
+      isFlushingBatchRef.current = false;
+      // Clear in-flight guard after a brief grace window if snapshot hasn't already cleared it
+      setTimeout(() => {
+        for (const item of entriesToFlush) {
+          if (
+            inFlightMutationsRef.current.get(item.date) === item.status &&
+            !pendingMutationsRef.current.has(item.date)
+          ) {
+            inFlightMutationsRef.current.delete(item.date);
+          }
+        }
+      }, 1200);
+
+      if (pendingMutationsRef.current.size > 0) {
+        flushPendingMutations();
+      }
+    }
+  };
+
+  const scheduleAttendanceSync = (immediateBatch = false) => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    if (immediateBatch) {
+      flushPendingMutations();
+    } else {
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        flushPendingMutations();
+      }, 140);
+    }
+
+    if (billSyncTimerRef.current) {
+      clearTimeout(billSyncTimerRef.current);
+    }
+    billSyncTimerRef.current = setTimeout(() => {
+      billSyncTimerRef.current = null;
+      runCoalescedBillSync();
+    }, 380);
+  };
+
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
+
+    // Reset optimistic caches when switching cycles or users
+    optimisticPresentRef.current = new Set();
+    pendingMutationsRef.current.clear();
+    inFlightMutationsRef.current.clear();
+
     const unsubAtt = mobileDataService.listenToAttendance(
       resolvedHouseholdId,
       resolvedBillingCycleId,
       activeUserId,
       (markedDates) => {
-        if (isBatchingRef.current) return;
-        const serverPresent = Object.entries(markedDates)
-          .filter(([, status]) => status === "PRESENT")
-          .map(([date]) => date);
-
-        setPresentDates((prev) => {
-          const merged = new Set(serverPresent);
-          for (const pendingIso of inFlightRef.current) {
-            if (prev.includes(pendingIso)) {
-              merged.add(pendingIso);
-            } else {
-              merged.delete(pendingIso);
-            }
+        const merged = new Set<string>();
+        Object.entries(markedDates).forEach(([date, status]) => {
+          if (status === "PRESENT") {
+            merged.add(date);
           }
-          return Array.from(merged);
+          // If server snapshot now matches our in-flight mutation, clear in-flight entry
+          if (inFlightMutationsRef.current.get(date) === status) {
+            inFlightMutationsRef.current.delete(date);
+          }
         });
+
+        // Overlay any still-in-flight mutations not yet reflected in snapshot
+        inFlightMutationsRef.current.forEach((status, date) => {
+          if (status === "PRESENT") {
+            merged.add(date);
+          } else {
+            merged.delete(date);
+          }
+        });
+
+        // Overlay any newer pending local taps
+        pendingMutationsRef.current.forEach((status, date) => {
+          if (status === "PRESENT") {
+            merged.add(date);
+          } else {
+            merged.delete(date);
+          }
+        });
+
+        optimisticPresentRef.current = merged;
+        setPresentDates(Array.from(merged));
       },
     );
 
@@ -373,185 +572,69 @@ export const AttendanceScreen: React.FC<{
     );
 
     return () => {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      if (billSyncTimerRef.current) {
+        clearTimeout(billSyncTimerRef.current);
+        billSyncTimerRef.current = null;
+      }
+      if (pendingMutationsRef.current.size > 0) {
+        flushPendingMutations();
+        runCoalescedBillSync();
+      }
       unsubAtt();
       unsubCycleAll();
       unsubSubs();
     };
   }, [activeUserId, resolvedBillingCycleId, resolvedHouseholdId]);
 
-  // Zero-latency toggle with real-time sync across household and bills
-  const toggleDay = async (iso: string) => {
+  // Zero-latency synchronous toggle with coalesced background sync
+  const toggleDay = (iso: string) => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
-    if (inFlightRef.current.has(iso) || isBatchingRef.current) return;
 
-    const isCurrentlyPresent = presentDates.includes(iso);
-    const nextStatus = isCurrentlyPresent ? "ABSENT" : "PRESENT";
+    const isCurrentlyPresent = optimisticPresentRef.current.has(iso);
+    const nextStatus: "PRESENT" | "ABSENT" = isCurrentlyPresent
+      ? "ABSENT"
+      : "PRESENT";
 
-    inFlightRef.current.add(iso);
-
-    const nextPresent =
-      nextStatus === "PRESENT"
-        ? presentDates.includes(iso)
-          ? presentDates
-          : [...presentDates, iso]
-        : presentDates.filter((date) => date !== iso);
-
-    setPresentDates(nextPresent);
-
-    try {
-      await mobileDataService.toggleAttendance(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-        activeUserId,
-        iso,
-        nextStatus,
-      );
-
-      // If user already submitted before, keep submission record updated in background
-      if (isMyAttendanceSubmitted) {
-        const nextPresentCount = nextPresent.length;
-        const nextAbsentCount = Math.max(
-          0,
-          cycleDates.length - nextPresentCount,
-        );
-        const nextWaterFee = isFixedMode
-          ? myFixedSharePesos
-          : nextPresentCount * ratePerDayPesos;
-        mobileDataService
-          .submitAttendance(
-            resolvedHouseholdId,
-            resolvedBillingCycleId,
-            activeUserId,
-            nextPresentCount,
-            nextAbsentCount,
-            Math.round(nextWaterFee * 100),
-          )
-          .catch(() => {});
-      }
-
-      // Synchronously recalculate and update water bills across screens
-      await mobileDataService.syncCycleWaterBill(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-      );
-      await mobileDataService.recalculateUnpaidExpensesForHousehold(
-        resolvedHouseholdId,
-      );
-    } catch (err) {
-      console.warn("[AttendanceScreen] toggleDay failed, rolling back:", err);
-      setPresentDates((prev) =>
-        isCurrentlyPresent
-          ? prev.includes(iso)
-            ? prev
-            : [...prev, iso]
-          : prev.filter((d) => d !== iso),
-      );
-    } finally {
-      inFlightRef.current.delete(iso);
+    if (nextStatus === "PRESENT") {
+      optimisticPresentRef.current.add(iso);
+    } else {
+      optimisticPresentRef.current.delete(iso);
     }
+
+    pendingMutationsRef.current.set(iso, nextStatus);
+    setPresentDates(Array.from(optimisticPresentRef.current));
+    scheduleAttendanceSync(false);
   };
 
-  const markAll = async () => {
-    if (
-      !resolvedHouseholdId ||
-      !resolvedBillingCycleId ||
-      !activeUserId ||
-      isBatchingRef.current
-    )
+  const markAll = () => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
-    setIsBatching(true);
-    isBatchingRef.current = true;
-    const prevDates = [...presentDates];
-    const allIsos = cycleDates.map((d) => d.iso);
-    setPresentDates(allIsos);
 
-    try {
-      await mobileDataService.bulkToggleAttendance(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-        activeUserId,
-        cycleDates.map((d) => ({ date: d.iso, status: "PRESENT" as const })),
-      );
-
-      if (isMyAttendanceSubmitted) {
-        const nextPresentCount = allIsos.length;
-        const nextWaterFee = isFixedMode
-          ? myFixedSharePesos
-          : nextPresentCount * ratePerDayPesos;
-        await mobileDataService.submitAttendance(
-          resolvedHouseholdId,
-          resolvedBillingCycleId,
-          activeUserId,
-          nextPresentCount,
-          0,
-          Math.round(nextWaterFee * 100),
-        );
-      }
-
-      await mobileDataService.syncCycleWaterBill(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-      );
-      await mobileDataService.recalculateUnpaidExpensesForHousehold(
-        resolvedHouseholdId,
-      );
-    } catch (err) {
-      console.warn("[AttendanceScreen] markAll error:", err);
-      setPresentDates(prevDates);
-    } finally {
-      setIsBatching(false);
-      isBatchingRef.current = false;
+    const nextSet = new Set<string>();
+    for (const d of cycleDates) {
+      nextSet.add(d.iso);
+      pendingMutationsRef.current.set(d.iso, "PRESENT");
     }
+    optimisticPresentRef.current = nextSet;
+    setPresentDates(Array.from(nextSet));
+    scheduleAttendanceSync(true);
   };
 
-  const clearAll = async () => {
-    if (
-      !resolvedHouseholdId ||
-      !resolvedBillingCycleId ||
-      !activeUserId ||
-      isBatchingRef.current
-    )
+  const clearAll = () => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
-    setIsBatching(true);
-    isBatchingRef.current = true;
-    const prevDates = [...presentDates];
+
+    optimisticPresentRef.current = new Set<string>();
+    for (const d of cycleDates) {
+      pendingMutationsRef.current.set(d.iso, "ABSENT");
+    }
     setPresentDates([]);
-
-    try {
-      await mobileDataService.bulkToggleAttendance(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-        activeUserId,
-        cycleDates.map((d) => ({ date: d.iso, status: "ABSENT" as const })),
-      );
-
-      if (isMyAttendanceSubmitted) {
-        const nextWaterFee = isFixedMode ? myFixedSharePesos : 0;
-        await mobileDataService.submitAttendance(
-          resolvedHouseholdId,
-          resolvedBillingCycleId,
-          activeUserId,
-          0,
-          cycleDates.length,
-          Math.round(nextWaterFee * 100),
-        );
-      }
-
-      await mobileDataService.syncCycleWaterBill(
-        resolvedHouseholdId,
-        resolvedBillingCycleId,
-      );
-      await mobileDataService.recalculateUnpaidExpensesForHousehold(
-        resolvedHouseholdId,
-      );
-    } catch (err) {
-      console.warn("[AttendanceScreen] clearAll error:", err);
-      setPresentDates(prevDates);
-    } finally {
-      setIsBatching(false);
-      isBatchingRef.current = false;
-    }
+    scheduleAttendanceSync(true);
   };
 
   const totalDays = cycleDates.length;
@@ -574,13 +657,27 @@ export const AttendanceScreen: React.FC<{
 
     setIsSubmitting(true);
     try {
-      const centavos = Math.round(waterFee * 100);
+      // Flush any pending rapid date taps before recording submission
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      if (pendingMutationsRef.current.size > 0) {
+        await flushPendingMutations();
+      }
+
+      const finalPresentCount = optimisticPresentRef.current.size;
+      const finalAbsentCount = Math.max(0, totalDays - finalPresentCount);
+      const finalWaterFee = isFixedMode
+        ? myFixedSharePesos
+        : finalPresentCount * ratePerDayPesos;
+      const centavos = Math.round(finalWaterFee * 100);
       await mobileDataService.submitAttendance(
         resolvedHouseholdId,
         resolvedBillingCycleId,
         activeUserId,
-        presentCount,
-        absentCount,
+        finalPresentCount,
+        finalAbsentCount,
         centavos,
       );
       // Ensure water bill expense & all memberBills are immediately updated
@@ -588,14 +685,11 @@ export const AttendanceScreen: React.FC<{
         resolvedHouseholdId,
         resolvedBillingCycleId,
       );
-      await mobileDataService.recalculateUnpaidExpensesForHousehold(
-        resolvedHouseholdId,
-      );
 
       setIsSubmitting(false);
       Alert.alert(
         "Attendance Synced",
-        `Your water presence (${presentCount} days present, ₱${waterFee.toFixed(
+        `Your water presence (${finalPresentCount} days present, ₱${finalWaterFee.toFixed(
           2,
         )}) has been submitted and updated synchronously across all household bills. You can still edit your dates anytime.`,
       );
@@ -1019,8 +1113,7 @@ export const AttendanceScreen: React.FC<{
                         isDark && { backgroundColor: colors.primaryLight },
                       ]}
                       onPress={markAll}
-                      disabled={isBatching}
-                      activeOpacity={0.7}
+                      activeOpacity={0.65}
                     >
                       <Text
                         style={[
@@ -1042,8 +1135,7 @@ export const AttendanceScreen: React.FC<{
                         },
                       ]}
                       onPress={clearAll}
-                      disabled={isBatching}
-                      activeOpacity={0.7}
+                      activeOpacity={0.65}
                     >
                       <Text
                         style={[
@@ -1131,9 +1223,10 @@ export const AttendanceScreen: React.FC<{
                 </View>
               ) : (
                 monthSections.map((sec) => {
-                  const sectionPresentCount = sec.dates.filter((d) =>
-                    presentDates.includes(d.iso),
-                  ).length;
+                  const sectionPresentCount = sec.dates.reduce(
+                    (acc, d) => (presentSet.has(d.iso) ? acc + 1 : acc),
+                    0,
+                  );
                   const totalInSec = sec.dates.length;
                   const rangeLabel = `${sec.dates[0].monthShort} ${sec.startDayNum} – ${
                     sec.dates[sec.dates.length - 1].monthShort
@@ -1238,7 +1331,7 @@ export const AttendanceScreen: React.FC<{
 
                         {/* Actual Cycle Dates - Clean date numbers only */}
                         {sec.dates.map((d) => {
-                          const isPresent = presentDates.includes(d.iso);
+                          const isPresent = presentSet.has(d.iso);
                           return (
                             <TouchableOpacity
                               key={d.iso}
@@ -1263,7 +1356,8 @@ export const AttendanceScreen: React.FC<{
                                     ],
                               ]}
                               onPress={() => toggleDay(d.iso)}
-                              activeOpacity={0.7}
+                              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                              activeOpacity={0.6}
                             >
                               <Text
                                 style={[

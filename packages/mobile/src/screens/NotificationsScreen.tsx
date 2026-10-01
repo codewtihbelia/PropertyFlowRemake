@@ -139,10 +139,15 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
   const [cloudNotifications, setCloudNotifications] = useState<any[]>([]);
   const [readIds, setReadIds] = useState<Record<string, boolean>>(() =>
-    mobileDataService.getCachedReadNotifications(),
+    mobileDataService.getCachedReadNotifications(firebaseUser?.uid),
   );
   const [selectedNotification, setSelectedNotification] =
     useState<MobileNotificationItem | null>(null);
+  const [showFilterBar, setShowFilterBar] = useState<boolean>(true);
+  const [activeFilter, setActiveFilter] = useState<
+    "all" | "unread" | "read" | "recent" | "date" | "earlier"
+  >("all");
+  const [selectedDateKey, setSelectedDateKey] = useState<string>("all");
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(10)).current;
@@ -399,14 +404,14 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   ]);
 
   const isItemUnread = (item: MobileNotificationItem): boolean => {
-    return isNotificationItemUnread(item, readIds);
+    return isNotificationItemUnread(item, readIds, firebaseUser?.uid);
   };
 
   const unreadCount = useMemo(() => {
     return notifications.filter((item) =>
-      isNotificationItemUnread(item, readIds),
+      isNotificationItemUnread(item, readIds, firebaseUser?.uid),
     ).length;
-  }, [notifications, readIds]);
+  }, [notifications, readIds, firebaseUser?.uid]);
 
   const handleMarkAllRead = async () => {
     if (notifications.length === 0) return;
@@ -510,6 +515,133 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
 
   const recentList = notifications.filter((n) => n.section === "recent");
   const earlierList = notifications.filter((n) => n.section === "earlier");
+  const readCount = Math.max(0, notifications.length - unreadCount);
+
+  const getNotificationDateKey = (item: MobileNotificationItem): string => {
+    const d = new Date(item.createdTimestamp || item.timestampMs || Date.now());
+    if (isNaN(d.getTime())) return "unknown";
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDateKeyLabel = (dateKey: string): string => {
+    if (!dateKey || dateKey === "unknown") return "Recent Date";
+    const parts = dateKey.split("-");
+    if (parts.length !== 3) return dateKey;
+    const d = new Date(
+      Number(parts[0]),
+      Number(parts[1]) - 1,
+      Number(parts[2]),
+    );
+    if (isNaN(d.getTime())) return dateKey;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round(
+      (today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    const formatted = d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    });
+    if (diffDays === 0) return `Today · ${formatted}`;
+    if (diffDays === 1) return `Yesterday · ${formatted}`;
+    return formatted;
+  };
+
+  const availableDates = buildAvailableDates();
+  function buildAvailableDates() {
+    const map = new Map<
+      string,
+      { key: string; label: string; count: number }
+    >();
+    notifications.forEach((n) => {
+      const key = getNotificationDateKey(n);
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(key, {
+          key,
+          label: formatDateKeyLabel(key),
+          count: 1,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  const filteredNotifications = notifications.filter((item) => {
+    if (activeFilter === "unread") return isItemUnread(item);
+    if (activeFilter === "read") return !isItemUnread(item);
+    if (activeFilter === "recent") return item.section === "recent";
+    if (activeFilter === "earlier") return item.section === "earlier";
+    if (activeFilter === "date") {
+      if (selectedDateKey === "all") return true;
+      return getNotificationDateKey(item) === selectedDateKey;
+    }
+    return true;
+  });
+
+  const renderMarkAllReadControl = () => (
+    <View style={styles.markAllReadGroup}>
+      <View
+        style={[
+          styles.unreadCountBadge,
+          unreadCount === 0 && styles.unreadCountBadgeZero,
+          isDark && {
+            backgroundColor:
+              unreadCount > 0
+                ? "rgba(59, 130, 246, 0.18)"
+                : colors.surfaceInset,
+            borderColor:
+              unreadCount > 0 ? "rgba(96, 165, 250, 0.35)" : colors.border,
+          },
+        ]}
+      >
+        {unreadCount > 0 && (
+          <View
+            style={[
+              styles.unreadCountDot,
+              isDark && { backgroundColor: colors.accent },
+            ]}
+          />
+        )}
+        <Text
+          style={[
+            styles.unreadCountBadgeText,
+            unreadCount === 0 && styles.unreadCountBadgeTextZero,
+            isDark && {
+              color: unreadCount > 0 ? colors.accent : colors.textMuted,
+            },
+          ]}
+        >
+          {unreadCount} unread
+        </Text>
+      </View>
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={handleMarkAllRead}
+        disabled={unreadCount === 0}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text
+          style={[
+            styles.markAllReadText,
+            isDark && { color: colors.accent },
+            unreadCount === 0 &&
+              (isDark
+                ? { color: colors.textMuted }
+                : styles.markAllReadDisabledText),
+          ]}
+        >
+          {unreadCount === 0 ? "All read" : "Mark all read"}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
@@ -647,8 +779,246 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
           Notification
         </Text>
 
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={[
+            styles.filterToggleButton,
+            showFilterBar && styles.filterToggleButtonActive,
+            isDark && {
+              backgroundColor: showFilterBar
+                ? "rgba(59, 130, 246, 0.2)"
+                : colors.card,
+              borderWidth: 1,
+              borderColor: showFilterBar ? colors.accent : colors.border,
+            },
+          ]}
+          activeOpacity={0.75}
+          onPress={() => setShowFilterBar((prev) => !prev)}
+          accessibilityLabel="Filter notifications"
+        >
+          <Feather
+            name="sliders"
+            size={18}
+            color={
+              showFilterBar || activeFilter !== "all"
+                ? isDark
+                  ? colors.accent
+                  : "#2563EB"
+                : isDark
+                  ? colors.text
+                  : "#0F172A"
+            }
+          />
+          {activeFilter !== "all" && (
+            <View
+              style={[
+                styles.filterActiveDot,
+                isDark && { borderColor: colors.background },
+              ]}
+            />
+          )}
+        </TouchableOpacity>
       </View>
+
+      {/* Filter Tab Bar (Unread, Read, Recent, Date, Earlier) */}
+      {showFilterBar && (
+        <View
+          style={[
+            styles.filterBarWrapper,
+            isDark && {
+              backgroundColor: colors.background,
+              borderBottomColor: colors.border,
+            },
+          ]}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterTabsScroll}
+          >
+            {(
+              [
+                {
+                  key: "all",
+                  label: "All",
+                  icon: "layers",
+                  count: notifications.length,
+                },
+                {
+                  key: "unread",
+                  label: "Unread",
+                  icon: "mail",
+                  count: unreadCount,
+                },
+                {
+                  key: "read",
+                  label: "Read",
+                  icon: "check-circle",
+                  count: readCount,
+                },
+                {
+                  key: "recent",
+                  label: "Recent",
+                  icon: "zap",
+                  count: recentList.length,
+                },
+                {
+                  key: "date",
+                  label: "Date",
+                  icon: "calendar",
+                  count: availableDates.length,
+                },
+                {
+                  key: "earlier",
+                  label: "Earlier",
+                  icon: "clock",
+                  count: earlierList.length,
+                },
+              ] as const
+            ).map((tab) => {
+              const isSelected = activeFilter === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[
+                    styles.filterTabChip,
+                    isSelected && styles.filterTabChipActive,
+                    isDark && {
+                      backgroundColor: isSelected ? colors.accent : colors.card,
+                      borderColor: isSelected ? colors.accent : colors.border,
+                    },
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setActiveFilter(tab.key);
+                    if (tab.key !== "date") {
+                      setSelectedDateKey("all");
+                    }
+                  }}
+                >
+                  <Feather
+                    name={tab.icon as any}
+                    size={13}
+                    color={
+                      isSelected
+                        ? "#FFFFFF"
+                        : isDark
+                          ? colors.textSecondary
+                          : "#475569"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.filterTabChipText,
+                      isSelected && styles.filterTabChipTextActive,
+                      isDark && !isSelected && { color: colors.textSecondary },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  <View
+                    style={[
+                      styles.filterTabCountPill,
+                      isSelected && styles.filterTabCountPillActive,
+                      isDark &&
+                        !isSelected && {
+                          backgroundColor: colors.surfaceInset,
+                        },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterTabCountText,
+                        isSelected && styles.filterTabCountTextActive,
+                        isDark &&
+                          !isSelected && { color: colors.textSecondary },
+                      ]}
+                    >
+                      {tab.count}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Secondary Date Picker Sub-Bar when "Date" filter tab is selected */}
+          {activeFilter === "date" && availableDates.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.dateSubBarScroll}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.dateChip,
+                  selectedDateKey === "all" && styles.dateChipActive,
+                  isDark && {
+                    backgroundColor:
+                      selectedDateKey === "all"
+                        ? "rgba(59, 130, 246, 0.2)"
+                        : colors.surfaceInset,
+                    borderColor:
+                      selectedDateKey === "all" ? colors.accent : colors.border,
+                  },
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setSelectedDateKey("all")}
+              >
+                <Text
+                  style={[
+                    styles.dateChipText,
+                    selectedDateKey === "all" && styles.dateChipTextActive,
+                    isDark && {
+                      color:
+                        selectedDateKey === "all"
+                          ? colors.accent
+                          : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  All Dates ({notifications.length})
+                </Text>
+              </TouchableOpacity>
+              {availableDates.map((dItem) => {
+                const isDateSelected = selectedDateKey === dItem.key;
+                return (
+                  <TouchableOpacity
+                    key={dItem.key}
+                    style={[
+                      styles.dateChip,
+                      isDateSelected && styles.dateChipActive,
+                      isDark && {
+                        backgroundColor: isDateSelected
+                          ? "rgba(59, 130, 246, 0.2)"
+                          : colors.surfaceInset,
+                        borderColor: isDateSelected
+                          ? colors.accent
+                          : colors.border,
+                      },
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedDateKey(dItem.key)}
+                  >
+                    <Text
+                      style={[
+                        styles.dateChipText,
+                        isDateSelected && styles.dateChipTextActive,
+                        isDark && {
+                          color: isDateSelected
+                            ? colors.accent
+                            : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {dItem.label} ({dItem.count})
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      )}
 
       {loading ? (
         <View style={{ flex: 1 }}>
@@ -709,7 +1079,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
                   will appear here.
                 </Text>
               </View>
-            ) : (
+            ) : activeFilter === "all" ? (
               <>
                 {/* Recent Section */}
                 {recentList.length > 0 && (
@@ -723,25 +1093,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
                       >
                         Recent
                       </Text>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={handleMarkAllRead}
-                        disabled={unreadCount === 0}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Text
-                          style={[
-                            styles.markAllReadText,
-                            isDark && { color: colors.accent },
-                            unreadCount === 0 &&
-                              (isDark
-                                ? { color: colors.textMuted }
-                                : styles.markAllReadDisabledText),
-                          ]}
-                        >
-                          {unreadCount === 0 ? "All read" : "Mark all read"}
-                        </Text>
-                      </TouchableOpacity>
+                      {renderMarkAllReadControl()}
                     </View>
 
                     {recentList.map(renderNotificationCard)}
@@ -768,32 +1120,168 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
                       >
                         Earlier
                       </Text>
-                      {recentList.length === 0 && (
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={handleMarkAllRead}
-                          disabled={unreadCount === 0}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Text
-                            style={[
-                              styles.markAllReadText,
-                              isDark && { color: colors.accent },
-                              unreadCount === 0 &&
-                                (isDark
-                                  ? { color: colors.textMuted }
-                                  : styles.markAllReadDisabledText),
-                            ]}
-                          >
-                            {unreadCount === 0 ? "All read" : "Mark all read"}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
+                      {recentList.length === 0 && renderMarkAllReadControl()}
                     </View>
 
                     {earlierList.map(renderNotificationCard)}
                   </>
                 )}
+              </>
+            ) : filteredNotifications.length === 0 ? (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text
+                    style={[
+                      styles.sectionHeaderTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {activeFilter === "unread"
+                      ? "Unread"
+                      : activeFilter === "read"
+                        ? "Read"
+                        : activeFilter === "recent"
+                          ? "Recent"
+                          : activeFilter === "earlier"
+                            ? "Earlier"
+                            : "By Date"}
+                  </Text>
+                  {renderMarkAllReadControl()}
+                </View>
+
+                <View
+                  style={[
+                    styles.emptyContainer,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.emptyIconCircle,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.16)",
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="inbox"
+                      size={24}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.emptyTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    No matching notifications
+                  </Text>
+                  <Text
+                    style={[
+                      styles.emptySubtitle,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    {activeFilter === "unread"
+                      ? "You have no unread notifications right now."
+                      : activeFilter === "read"
+                        ? "No notifications have been marked as read yet."
+                        : activeFilter === "recent"
+                          ? "No notifications in the recent window."
+                          : activeFilter === "earlier"
+                            ? "No earlier notifications found."
+                            : "No notifications found for the selected date."}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.resetFilterBtn}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setActiveFilter("all");
+                      setSelectedDateKey("all");
+                    }}
+                  >
+                    <Text style={styles.resetFilterBtnText}>
+                      Show All Notifications
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : activeFilter === "date" ? (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text
+                    style={[
+                      styles.sectionHeaderTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {selectedDateKey === "all"
+                      ? "Grouped by Date"
+                      : formatDateKeyLabel(selectedDateKey)}
+                  </Text>
+                  {renderMarkAllReadControl()}
+                </View>
+
+                {availableDates
+                  .filter(
+                    (dGroup) =>
+                      selectedDateKey === "all" ||
+                      dGroup.key === selectedDateKey,
+                  )
+                  .map((dGroup) => {
+                    const itemsForDate = filteredNotifications.filter(
+                      (n) => getNotificationDateKey(n) === dGroup.key,
+                    );
+                    if (itemsForDate.length === 0) return null;
+                    return (
+                      <View key={dGroup.key} style={styles.dateGroupSection}>
+                        {selectedDateKey === "all" && (
+                          <View style={styles.dateGroupHeader}>
+                            <Feather
+                              name="calendar"
+                              size={13}
+                              color={isDark ? colors.accent : "#2563EB"}
+                            />
+                            <Text
+                              style={[
+                                styles.dateGroupHeaderText,
+                                isDark && { color: colors.textSecondary },
+                              ]}
+                            >
+                              {dGroup.label}
+                            </Text>
+                          </View>
+                        )}
+                        {itemsForDate.map(renderNotificationCard)}
+                      </View>
+                    );
+                  })}
+              </>
+            ) : (
+              <>
+                <View style={styles.sectionHeaderRow}>
+                  <Text
+                    style={[
+                      styles.sectionHeaderTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {activeFilter === "unread"
+                      ? `Unread (${filteredNotifications.length})`
+                      : activeFilter === "read"
+                        ? `Read (${filteredNotifications.length})`
+                        : activeFilter === "recent"
+                          ? `Recent (${filteredNotifications.length})`
+                          : `Earlier (${filteredNotifications.length})`}
+                  </Text>
+                  {renderMarkAllReadControl()}
+                </View>
+
+                {filteredNotifications.map(renderNotificationCard)}
               </>
             )}
           </ScrollView>
@@ -834,6 +1322,138 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
   },
+  filterToggleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  filterToggleButtonActive: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  filterActiveDot: {
+    position: "absolute",
+    top: 9,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563EB",
+    borderWidth: 1.5,
+    borderColor: "#F8FAFC",
+  },
+  filterBarWrapper: {
+    backgroundColor: "#F8FAFC",
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  filterTabsScroll: {
+    paddingHorizontal: 20,
+    gap: 8,
+    alignItems: "center",
+  },
+  filterTabChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  filterTabChipActive: {
+    backgroundColor: "#2563EB",
+    borderColor: "#2563EB",
+  },
+  filterTabChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  filterTabChipTextActive: {
+    color: "#FFFFFF",
+  },
+  filterTabCountPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 999,
+    backgroundColor: "#F1F5F9",
+    minWidth: 20,
+    alignItems: "center",
+  },
+  filterTabCountPillActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
+  filterTabCountText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#64748B",
+  },
+  filterTabCountTextActive: {
+    color: "#FFFFFF",
+  },
+  dateSubBarScroll: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    gap: 8,
+    alignItems: "center",
+  },
+  dateChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  dateChipActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  dateChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  dateChipTextActive: {
+    color: "#2563EB",
+  },
+  dateGroupSection: {
+    marginBottom: 8,
+  },
+  dateGroupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  dateGroupHeaderText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+    letterSpacing: -0.1,
+  },
+  resetFilterBtn: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#2563EB",
+  },
+  resetFilterBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 10,
@@ -849,6 +1469,40 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.2,
+  },
+  markAllReadGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  unreadCountBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    gap: 5,
+  },
+  unreadCountBadgeZero: {
+    backgroundColor: "#F1F5F9",
+    borderColor: "#E2E8F0",
+  },
+  unreadCountDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#2563EB",
+  },
+  unreadCountBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  unreadCountBadgeTextZero: {
+    color: "#94A3B8",
   },
   markAllReadText: {
     fontSize: 13,

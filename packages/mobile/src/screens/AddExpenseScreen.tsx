@@ -74,6 +74,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   const [description, setDescription] = useState("");
   const [splitMethod, setSplitMethod] = useState<"Equal" | "% Custom">("Equal");
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
   const [profile, setProfile] = useState<any | null>(null);
@@ -84,6 +85,11 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     undefined,
   );
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [electricityConfig, setElectricityConfig] = useState<any | null>(null);
+  const [elecPrevReading, setElecPrevReading] = useState<string>("0");
+  const [elecCurrReading, setElecCurrReading] = useState<string>("0");
+  const [elecRatePerKwh, setElecRatePerKwh] = useState<string>("12.00");
+  const [hasLoadedElecDefaults, setHasLoadedElecDefaults] = useState(false);
   const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
   const [attendanceSubmissions, setAttendanceSubmissions] = useState<
     Record<string, any>
@@ -112,6 +118,57 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       finalCategory.toLowerCase().includes("water")
     );
   }, [selectedCategoryId, finalCategory]);
+
+  const isElectricityCategory = useMemo(() => {
+    return (
+      selectedCategoryId === "Electricity" ||
+      finalCategory.toLowerCase() === "electricity"
+    );
+  }, [selectedCategoryId, finalCategory]);
+
+  const parsedElecPrev = useMemo(() => {
+    const n = parseFloat(elecPrevReading.replace(/[^0-9.]/g, ""));
+    return isNaN(n) || n < 0 ? 0 : n;
+  }, [elecPrevReading]);
+
+  const parsedElecCurr = useMemo(() => {
+    const n = parseFloat(elecCurrReading.replace(/[^0-9.]/g, ""));
+    return isNaN(n) || n < 0 ? 0 : n;
+  }, [elecCurrReading]);
+
+  const parsedElecRate = useMemo(() => {
+    const n = parseFloat(elecRatePerKwh.replace(/[^0-9.]/g, ""));
+    return isNaN(n) || n < 0 ? 0 : n;
+  }, [elecRatePerKwh]);
+
+  const isElecReadingInvalid =
+    elecCurrReading.trim().length > 0 &&
+    elecPrevReading.trim().length > 0 &&
+    parsedElecCurr < parsedElecPrev;
+
+  const consumedKwh = useMemo(() => {
+    if (parsedElecCurr < parsedElecPrev) return 0;
+    return Math.round((parsedElecCurr - parsedElecPrev) * 100) / 100;
+  }, [parsedElecPrev, parsedElecCurr]);
+
+  const computedElecPesos = useMemo(() => {
+    return Math.round(consumedKwh * parsedElecRate * 100) / 100;
+  }, [consumedKwh, parsedElecRate]);
+
+  const updateAmountFromElectricity = (
+    nextPrevStr: string,
+    nextCurrStr: string,
+    nextRateStr: string,
+  ) => {
+    const p = Math.max(0, parseFloat(nextPrevStr.replace(/[^0-9.]/g, "")) || 0);
+    const c = Math.max(0, parseFloat(nextCurrStr.replace(/[^0-9.]/g, "")) || 0);
+    const r = Math.max(0, parseFloat(nextRateStr.replace(/[^0-9.]/g, "")) || 0);
+    if (c >= p && r > 0) {
+      const kwh = Math.round((c - p) * 100) / 100;
+      const total = Math.round(kwh * r * 100) / 100;
+      setAmount(total > 0 ? `₱${total.toFixed(2)}` : "");
+    }
+  };
 
   const currentUser = auth.currentUser;
 
@@ -142,6 +199,27 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
           });
           mobileDataService.listenToWaterConfig(hhId, (cfg) => {
             if (mounted) setWaterConfig(cfg);
+          });
+          mobileDataService.listenToElectricityConfig(hhId, (cfg) => {
+            if (mounted && cfg) {
+              setElectricityConfig(cfg);
+              setHasLoadedElecDefaults((already) => {
+                if (!already) {
+                  const prev = Number(
+                    cfg.lastCurrentReadingKwh ??
+                      cfg.currentReadingKwh ??
+                      cfg.previousReadingKwh ??
+                      0,
+                  );
+                  const curr = prev;
+                  const rate = Number(cfg.rateCentavosPerKwh ?? 1200) / 100;
+                  setElecPrevReading(String(prev));
+                  setElecCurrReading(String(curr));
+                  setElecRatePerKwh(rate.toFixed(2));
+                }
+                return true;
+              });
+            }
           });
         }
       }
@@ -288,13 +366,15 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ["images"],
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.7,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
         setImageUri(result.assets[0].uri);
+        setImageBase64(result.assets[0].base64 || null);
       }
     } catch (err) {
       console.warn("Image picker error:", err);
@@ -322,6 +402,14 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       Alert.alert(
         "Specify Category",
         "Please specify what this 'Others' bill is for (e.g., Parking Fee, Pest Control, Aircon Cleaning).",
+      );
+      return;
+    }
+
+    if (isElectricityCategory && isElecReadingInvalid) {
+      Alert.alert(
+        "Invalid Meter Reading",
+        "Current Reading (kWh) must be greater than or equal to Previous Reading (kWh).",
       );
       return;
     }
@@ -354,6 +442,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       documentUrl = await uploadToFirebaseStorageMobile(
         imageUri,
         `households/${householdId}/mobile_expenses`,
+        imageBase64 || undefined,
       );
     }
 
@@ -434,6 +523,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
       } else {
         // Standard bills: split strictly across payors only!
         const shareCentavos = Math.round(amountCents / payorCount);
+        const elecMeterSummary = isElectricityCategory
+          ? `${consumedKwh} kWh (${parsedElecPrev} → ${parsedElecCurr} kWh) @ ₱${parsedElecRate.toFixed(2)}/kWh`
+          : "";
         splitDetails = activeMembers.map((m) => {
           const isPayor = isPayorMember(m);
           if (isPayor) {
@@ -443,7 +535,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               shareCentavos,
               percentage: Math.round((100 / payorCount) * 10) / 10,
               isExempt: false,
-              note: `Fair share among ${payorCount} payors (Non-payors exempt)`,
+              note: isElectricityCategory
+                ? `${elecMeterSummary} · Split among ${payorCount} payors`
+                : `Fair share among ${payorCount} payors (Non-payors exempt)`,
             };
           } else {
             return {
@@ -507,7 +601,33 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
     if (documentUrl && documentUrl.trim().length > 0) {
       expensePayload.receiptUrl = documentUrl.trim();
     }
-    if (description && description.trim().length > 0) {
+    if (isElectricityCategory) {
+      const rateCentavosPerKwh = Math.round(parsedElecRate * 100);
+      const meterNote = `Prev: ${parsedElecPrev} kWh → Curr: ${parsedElecCurr} kWh (${consumedKwh} kWh × ₱${parsedElecRate.toFixed(2)}/kWh)`;
+      expensePayload.previousReadingKwh = parsedElecPrev;
+      expensePayload.currentReadingKwh = parsedElecCurr;
+      expensePayload.consumedKwh = consumedKwh;
+      expensePayload.rateCentavosPerKwh = rateCentavosPerKwh;
+      expensePayload.notes =
+        description && description.trim().length > 0
+          ? `${meterNote} • ${description.trim()}`
+          : meterNote;
+      await mobileDataService.saveElectricityConfig(
+        householdId,
+        {
+          previousReadingKwh: parsedElecPrev,
+          currentReadingKwh: parsedElecCurr,
+          rateCentavosPerKwh,
+          consumedKwh,
+          totalAmountCentavos: amountCents,
+          billingCycleId: activeCycleId || "",
+        },
+        {
+          billingCycleId: activeCycleId || "",
+          skipExpenseSync: true,
+        },
+      );
+    } else if (description && description.trim().length > 0) {
       expensePayload.notes = description.trim();
     }
 
@@ -931,6 +1051,13 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                   onPress={() => {
                     setSelectedCategoryId(cat.id);
                     setIsCategoryDropdownOpen(false);
+                    if (cat.id === "Electricity") {
+                      updateAmountFromElectricity(
+                        elecPrevReading,
+                        elecCurrReading,
+                        elecRatePerKwh,
+                      );
+                    }
                   }}
                   activeOpacity={0.7}
                 >
@@ -1139,6 +1266,229 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               non-payor members is split fairly and reallocated across paying
               roommates with an explanatory breakdown note.
             </Text>
+          </View>
+        )}
+
+        {/* Electricity Meter Calculator if Category is Electricity */}
+        {selectedCategoryId === "Electricity" && (
+          <View
+            style={[
+              styles.specifyCategoryCard,
+              {
+                borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FDE68A",
+                backgroundColor: isDark ? colors.card : "#FFFBEB",
+              },
+            ]}
+          >
+            <View style={styles.specifyCategoryHeader}>
+              <View
+                style={[
+                  styles.specifyIconWrap,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(245, 158, 11, 0.16)"
+                      : "#FEF3C7",
+                  },
+                ]}
+              >
+                <Feather
+                  name="zap"
+                  size={15}
+                  color={isDark ? "#FBBF24" : "#D97706"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.specifyCategoryTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Electricity Meter Calculator (kWh)
+                </Text>
+                <Text
+                  style={[
+                    styles.specifyCategorySub,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  (Current Reading - Previous Reading) × Rate per kWh = Total
+                  Electricity Bill
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: isDark ? colors.textSecondary : "#475569",
+                    marginBottom: 4,
+                  }}
+                >
+                  Previous Reading (kWh)
+                </Text>
+                <TextInput
+                  style={[
+                    styles.specifyCategoryInput,
+                    { marginTop: 0 },
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
+                  ]}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  value={elecPrevReading}
+                  onChangeText={(val) => {
+                    setElecPrevReading(val);
+                    updateAmountFromElectricity(
+                      val,
+                      elecCurrReading,
+                      elecRatePerKwh,
+                    );
+                  }}
+                />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: isDark ? colors.textSecondary : "#475569",
+                    marginBottom: 4,
+                  }}
+                >
+                  Current Reading (kWh)
+                </Text>
+                <TextInput
+                  style={[
+                    styles.specifyCategoryInput,
+                    { marginTop: 0 },
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
+                    isElecReadingInvalid && {
+                      borderColor: "#EF4444",
+                    },
+                  ]}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  value={elecCurrReading}
+                  onChangeText={(val) => {
+                    setElecCurrReading(val);
+                    updateAmountFromElectricity(
+                      elecPrevReading,
+                      val,
+                      elecRatePerKwh,
+                    );
+                  }}
+                />
+              </View>
+            </View>
+
+            <View style={{ marginTop: 10 }}>
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: "700",
+                  color: isDark ? colors.textSecondary : "#475569",
+                  marginBottom: 4,
+                }}
+              >
+                Configurable Amount per Kilowatt-Hour (₱ / kWh)
+              </Text>
+              <TextInput
+                style={[
+                  styles.specifyCategoryInput,
+                  { marginTop: 0 },
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                keyboardType="decimal-pad"
+                placeholder="12.00"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={elecRatePerKwh}
+                onChangeText={(val) => {
+                  setElecRatePerKwh(val);
+                  updateAmountFromElectricity(
+                    elecPrevReading,
+                    elecCurrReading,
+                    val,
+                  );
+                }}
+              />
+            </View>
+
+            {isElecReadingInvalid ? (
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: "700",
+                  color: "#EF4444",
+                  marginTop: 8,
+                }}
+              >
+                Current reading must be greater than or equal to previous
+                reading ({parsedElecPrev} kWh).
+              </Text>
+            ) : (
+              <View
+                style={{
+                  marginTop: 10,
+                  padding: 10,
+                  borderRadius: 10,
+                  backgroundColor: isDark
+                    ? "rgba(245, 158, 11, 0.14)"
+                    : "#FEF3C7",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "700",
+                      color: isDark ? "#FBBF24" : "#92400E",
+                    }}
+                  >
+                    ({parsedElecCurr} - {parsedElecPrev} kWh) × ₱
+                    {parsedElecRate.toFixed(2)}/kWh
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: isDark ? "#FDE68A" : "#B45309",
+                      marginTop: 2,
+                    }}
+                  >
+                    Consumption: {consumedKwh} kWh
+                  </Text>
+                </View>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontWeight: "800",
+                    color: isDark ? "#FBBF24" : "#B45309",
+                  }}
+                >
+                  ₱{computedElecPesos.toFixed(2)}
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -2042,7 +2392,7 @@ const styles = StyleSheet.create({
   },
   specifyCategoryInput: {
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#93C5FD",
     borderRadius: 10,
     paddingHorizontal: 12,

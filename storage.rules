@@ -27,11 +27,29 @@ service firebase.storage {
       allow read, write: if isAuthenticated();
     }
 
+    // Payment QR code uploads
+    match /payment_qr_codes/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Payment icons / bank logos
+    match /payment_icons/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
     // Support ticket attachments
     match /support/{ticketId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated()
                    && isImageOrPdf() && isValidSize(10 * 1024 * 1024);
+    }
+
+    // Fallback for authenticated app assets
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
   }
 }

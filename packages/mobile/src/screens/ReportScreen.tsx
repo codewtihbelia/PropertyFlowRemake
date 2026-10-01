@@ -153,6 +153,15 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   const [members, setMembers] = useState<any[]>([]);
   const [billingCycles, setBillingCycles] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
+  const [userPhotosMap, setUserPhotosMap] = useState<Record<string, string>>(
+    {},
+  );
   const [loadingCloud, setLoadingCloud] = useState<boolean>(true);
 
   // Selected Period / Cycle Filter
@@ -162,8 +171,33 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   const [showDetailsModal, setShowDetailsModal] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  // Spin animation for reload button
+  // Track initial auto-selection of the ACTIVE billing cycle
+  const hasSelectedRealCycleRef = useRef<boolean>(false);
+
+  // Animations for reload button and Current Summary flash highlight
   const spinAnim = useRef(new Animated.Value(0)).current;
+  const flashAnim = useRef(new Animated.Value(0)).current;
+
+  const triggerSummaryFlash = () => {
+    flashAnim.setValue(1);
+    Animated.sequence([
+      Animated.timing(flashAnim, {
+        toValue: 0.25,
+        duration: 260,
+        useNativeDriver: false,
+      }),
+      Animated.timing(flashAnim, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: false,
+      }),
+      Animated.timing(flashAnim, {
+        toValue: 0,
+        duration: 900,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
 
   // 1. Fetch current user profile from Firestore
   useEffect(() => {
@@ -189,7 +223,6 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
 
   useEffect(() => {
     if (!resolvedHouseholdId) {
-      // If user has no household after profile loads
       const timer = setTimeout(() => {
         setLoadingCloud(false);
       }, 1200);
@@ -246,6 +279,11 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
       (pays) => setPayments(pays || []),
     );
 
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      resolvedHouseholdId,
+      (cfg) => setWaterConfig(cfg),
+    );
+
     return () => {
       clearTimeout(safetyTimer);
       unsubHh();
@@ -253,38 +291,130 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
       unsubExps();
       unsubCycles();
       unsubPays();
+      unsubWater();
     };
   }, [resolvedHouseholdId]);
 
-  // 3. Dynamic Month / Billing Cycles list derived from Cloud Firestore
+  // Listen to cycle-specific memberBills and attendance for the selected cycle
+  useEffect(() => {
+    if (
+      !resolvedHouseholdId ||
+      !selectedCycleId ||
+      selectedCycleId.startsWith("month_")
+    ) {
+      setBills([]);
+      setCycleAttendance([]);
+      setAttendanceSubmissions({});
+      return;
+    }
+
+    const unsubBills = mobileDataService.listenToMemberBills(
+      resolvedHouseholdId,
+      selectedCycleId,
+      (nextBills: any[]) => setBills(nextBills || []),
+    );
+
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      resolvedHouseholdId,
+      selectedCycleId,
+      (att: any[]) => setCycleAttendance(att || []),
+    );
+
+    const unsubSub = mobileDataService.listenToAttendanceSubmissions(
+      resolvedHouseholdId,
+      selectedCycleId,
+      (subs: Record<string, any>) => setAttendanceSubmissions(subs || {}),
+    );
+
+    return () => {
+      unsubBills();
+      unsubAtt();
+      unsubSub();
+    };
+  }, [resolvedHouseholdId, selectedCycleId]);
+
+  // Fetch missing profile photos for members
+  useEffect(() => {
+    const missingUids = members
+      .map((m) => m.userId || m.memberId)
+      .filter((uid) => uid && !uid.startsWith("mem_") && !userPhotosMap[uid]);
+
+    if (missingUids.length === 0) return;
+
+    let active = true;
+    Promise.all(
+      missingUids.map(async (uid) => {
+        try {
+          const uDoc = await mobileDataService.getUserProfile(uid);
+          if (uDoc && (uDoc.profilePicture || uDoc.photoURL)) {
+            return { uid, photo: uDoc.profilePicture || uDoc.photoURL };
+          }
+        } catch {}
+        return null;
+      }),
+    ).then((results) => {
+      if (!active) return;
+      const map: Record<string, string> = {};
+      results.forEach((r) => {
+        if (r) map[r.uid] = r.photo;
+      });
+      if (Object.keys(map).length > 0) {
+        setUserPhotosMap((prev) => ({ ...prev, ...map }));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [members]);
+
+  // 3. Dynamic Billing Cycles list derived strictly from household billingCycles when present
   interface PeriodOption {
     id: string;
     label: string;
+    subLabel?: string;
     isCycle: boolean;
     status?: string;
+    isCurrent?: boolean;
   }
 
   const periodOptions: PeriodOption[] = useMemo(() => {
-    const options: PeriodOption[] = [];
-
-    // Add cycles from Firestore
+    // When household billingCycles exist, ONLY list real billing cycles (never duplicate with synthetic calendar months)
     if (billingCycles.length > 0) {
-      billingCycles.forEach((c) => {
-        const cycleName =
+      // Ensure ACTIVE cycle appears first (Current Cycle), followed by previous cycles
+      const sorted = [...billingCycles].sort((a, b) => {
+        if (a.status === "ACTIVE" && b.status !== "ACTIVE") return -1;
+        if (b.status === "ACTIVE" && a.status !== "ACTIVE") return 1;
+        const aTime = new Date(a.createdDate || a.startDate || 0).getTime();
+        const bTime = new Date(b.createdDate || b.startDate || 0).getTime();
+        return bTime - aTime;
+      });
+
+      return sorted.map((c, idx) => {
+        const isCurrent = c.status === "ACTIVE" || idx === 0;
+        const rawName =
           c.name ||
           (c.startDate
             ? formatMonthYear(c.startDate)
-            : `Cycle ${c.billingCycleId.slice(0, 6)}`);
-        options.push({
+            : `Cycle ${sorted.length - idx}`);
+        const subLabel = isCurrent
+          ? "Current Cycle"
+          : c.status === "CLOSED" || c.status === "COMPLETED"
+            ? "Previous Cycle • Closed & Paid"
+            : "Previous Cycle";
+        return {
           id: c.billingCycleId,
-          label: cycleName,
+          label: rawName,
+          subLabel,
           isCycle: true,
           status: c.status,
-        });
+          isCurrent,
+        };
       });
     }
 
-    // Also extract months from expenses if any are outside formal cycles
+    // Fallback ONLY when household has zero billingCycles documents
+    const options: PeriodOption[] = [];
     const expenseMonths = new Set<string>();
     expenses.forEach((e) => {
       if (e.date) {
@@ -292,51 +422,79 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
       }
     });
 
-    expenseMonths.forEach((mLabel) => {
+    Array.from(expenseMonths).forEach((mLabel, idx) => {
       if (!options.some((o) => o.label === mLabel)) {
         options.push({
           id: `month_${mLabel}`,
           label: mLabel,
+          subLabel: idx === 0 ? "Current Summary" : "Previous Summary",
           isCycle: false,
+          isCurrent: idx === 0,
         });
       }
     });
 
-    // If still empty, add current and recent months
     if (options.length === 0) {
       const now = new Date();
-      for (let i = 0; i < 3; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const label = formatMonthYear(d);
-        options.push({
-          id: `month_${label}`,
-          label,
-          isCycle: false,
-        });
-      }
+      const label = formatMonthYear(now);
+      options.push({
+        id: `month_${label}`,
+        label,
+        subLabel: "Current Summary",
+        isCycle: false,
+        isCurrent: true,
+      });
     }
 
     return options;
   }, [billingCycles, expenses]);
 
-  // Set default selected period once options are ready
+  // Always default to the Current (ACTIVE) Billing Cycle when billingCycles load and flash the summary
   useEffect(() => {
-    if (periodOptions.length > 0) {
-      // Prefer active billing cycle if present
-      const active =
-        periodOptions.find((p) => p.status === "ACTIVE") || periodOptions[0];
+    if (periodOptions.length === 0) return;
 
-      if (
-        !selectedCycleId ||
-        !periodOptions.some((p) => p.id === selectedCycleId)
-      ) {
-        setSelectedCycleId(active.id);
-        setSelectedMonthLabel(active.label);
-      }
+    const active =
+      periodOptions.find((p) => p.status === "ACTIVE") || periodOptions[0];
+
+    if (billingCycles.length > 0 && !hasSelectedRealCycleRef.current) {
+      hasSelectedRealCycleRef.current = true;
+      setSelectedCycleId(active.id);
+      setSelectedMonthLabel(active.label);
+      triggerSummaryFlash();
+      return;
     }
+
+    if (
+      !selectedCycleId ||
+      !periodOptions.some((p) => p.id === selectedCycleId)
+    ) {
+      setSelectedCycleId(active.id);
+      setSelectedMonthLabel(active.label);
+      triggerSummaryFlash();
+    }
+  }, [periodOptions, billingCycles.length, selectedCycleId]);
+
+  const selectedPeriodOption = useMemo(() => {
+    return (
+      periodOptions.find((p) => p.id === selectedCycleId) || periodOptions[0]
+    );
   }, [periodOptions, selectedCycleId]);
 
-  // 4. Filter expenses matching the selected cycle / month
+  const selectedCycleObj = useMemo(() => {
+    return billingCycles.find((c) => c.billingCycleId === selectedCycleId);
+  }, [billingCycles, selectedCycleId]);
+
+  const oldestCycleId =
+    billingCycles.length > 0
+      ? billingCycles[billingCycles.length - 1]?.billingCycleId
+      : undefined;
+
+  const knownCycleIds = useMemo(
+    () => new Set(billingCycles.map((c) => c.billingCycleId).filter(Boolean)),
+    [billingCycles],
+  );
+
+  // 4. Filter expenses matching the selected cycle (aligned with ManageGroupScreen & ViewGroupScreen)
   const filteredExpenses = useMemo(() => {
     if (!selectedCycleId && periodOptions.length === 0) return expenses;
 
@@ -345,17 +503,23 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
 
     return expenses.filter((e) => {
       if (currentOption.isCycle) {
-        if (e.billingCycleId === currentOption.id) return true;
-        // Fallback: match month label if billing cycle id wasn't set
-        if (e.date && formatMonthYear(e.date) === currentOption.label)
-          return true;
-        return false;
+        return (
+          e.billingCycleId === currentOption.id ||
+          ((!e.billingCycleId || !knownCycleIds.has(e.billingCycleId)) &&
+            (billingCycles.length <= 1 || currentOption.id === oldestCycleId))
+        );
       } else {
-        // Month string match
         return e.date ? formatMonthYear(e.date) === currentOption.label : false;
       }
     });
-  }, [expenses, selectedCycleId, periodOptions]);
+  }, [
+    expenses,
+    selectedCycleId,
+    periodOptions,
+    knownCycleIds,
+    billingCycles.length,
+    oldestCycleId,
+  ]);
 
   // 5. Active roommates
   const activeMembers = useMemo(() => {
@@ -381,6 +545,25 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     return list.length > 0 ? list : activeMembers;
   }, [activeMembers]);
 
+  const getMemberAttendanceDays = (targetUid: string): number => {
+    const fromAtt = cycleAttendance.filter(
+      (a) => a.userId === targetUid && a.status === "PRESENT",
+    ).length;
+    const fromSub = attendanceSubmissions[targetUid]?.daysPresent || 0;
+    return fromAtt > 0 ? fromAtt : fromSub;
+  };
+
+  const uniqueBills = useMemo(() => {
+    const map = new Map<string, any>();
+    bills.forEach((b) => {
+      const uid = b.userId || b.billId;
+      if (!map.has(uid) || b.billId?.startsWith("bill_")) {
+        map.set(uid, b);
+      }
+    });
+    return Array.from(map.values());
+  }, [bills]);
+
   // 6. Aggregate calculations for total expenses & average
   const totalExpenseCents = useMemo(() => {
     return filteredExpenses.reduce((sum, e) => sum + (e.amountCents || 0), 0);
@@ -405,16 +588,103 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     })}`;
   }, [avgPerPayorCents]);
 
+  const isSelectedCycleClosed = useMemo(() => {
+    if (selectedCycleObj) {
+      const st = (selectedCycleObj.status || "").toUpperCase();
+      if (
+        st === "CLOSED" ||
+        st === "COMPLETED" ||
+        st === "ARCHIVED" ||
+        selectedCycleObj.isPaid === true
+      ) {
+        return true;
+      }
+    }
+    if (
+      filteredExpenses.length > 0 &&
+      filteredExpenses.every((e) => e.status === "PAID" || e.isPaid === true)
+    ) {
+      return true;
+    }
+    return false;
+  }, [selectedCycleObj, filteredExpenses]);
+
   // 7. Calculate real Roommate Breakdown and Chart data
   const roommatesBreakdown: RoommateBreakdownItem[] = useMemo(() => {
     const payorCount = Math.max(1, activePayors.length);
+
+    const computeMemberExpenseShare = (
+      exp: MobileExpense,
+      uid: string,
+      isPayor: boolean,
+    ): number => {
+      if (!isPayor) return 0;
+
+      const isWater = (exp.category || "").toLowerCase().includes("water");
+      if (isWater) {
+        if (
+          exp.splitDetails &&
+          Array.isArray(exp.splitDetails) &&
+          exp.splitDetails.length > 0
+        ) {
+          const split = exp.splitDetails.find((s: any) => s.userId === uid);
+          if (split && typeof split.shareCentavos === "number") {
+            return split.shareCentavos;
+          }
+        }
+
+        const isPersonDayMode =
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel;
+        if (isPersonDayMode) {
+          const memberDays = getMemberAttendanceDays(uid);
+          if (
+            cycleAttendance.length > 0 ||
+            Object.keys(attendanceSubmissions).length > 0
+          ) {
+            const rate = Number(
+              waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+            );
+            const ownCost = memberDays * rate;
+            const totalNonPayorWater = activeMembers
+              .filter((np) => !isPayorMember(np))
+              .reduce((npSum, np) => {
+                const npUid = np.userId || np.memberId;
+                return npSum + getMemberAttendanceDays(npUid) * rate;
+              }, 0);
+            const extraPerPayor =
+              payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
+            return ownCost + extraPerPayor;
+          }
+        } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+          return Number(waterConfig?.fixedPerPersonAmountCentavos || 0);
+        }
+        return Math.round((exp.amountCents || 0) / payorCount);
+      }
+
+      if (
+        exp.splitDetails &&
+        Array.isArray(exp.splitDetails) &&
+        exp.splitDetails.length > 0
+      ) {
+        const split = exp.splitDetails.find((s: any) => s.userId === uid);
+        if (split && typeof split.shareCentavos === "number") {
+          return split.shareCentavos;
+        }
+      }
+
+      return Math.round((exp.amountCents || 0) / payorCount);
+    };
+
+    const myPhoto =
+      profile?.profilePicture || profile?.photoURL || currentUser?.photoURL;
 
     // First pass: compute shares and payments for each active member
     const computed = activeMembers.map((m, idx) => {
       const uid = m.userId || m.memberId || "";
       const isMe = uid === currentUser?.uid;
       const isPayor = isPayorMember(m);
-      const rawName = m.displayName || (isMe ? "You" : "Roommate");
+      const rawName = m.displayName || m.name || (isMe ? "You" : "Roommate");
       const shortName = isMe ? "You" : rawName.split(" ")[0];
       const displayName = isMe ? `${rawName} (You)` : rawName;
       const initials = rawName
@@ -424,55 +694,84 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         .slice(0, 2)
         .toUpperCase();
 
-      // Palette for this member
       const palette = AVATAR_PALETTES[idx % AVATAR_PALETTES.length];
+      const userBill = uniqueBills.find((b) => b.userId === uid);
 
-      // Sum member's share from filteredExpenses
       let shareCentavos = 0;
+      let unpaidExpensesShareCentavos = 0;
+
       filteredExpenses.forEach((exp) => {
-        if (
-          exp.splitDetails &&
-          Array.isArray(exp.splitDetails) &&
-          exp.splitDetails.length > 0
-        ) {
-          const split = exp.splitDetails.find((s) => s.userId === uid);
-          if (split && typeof split.shareCentavos === "number") {
-            shareCentavos += split.shareCentavos;
-          } else if (
-            isPayor &&
-            !exp.splitDetails.some((s) => s.userId === uid)
-          ) {
-            // If split details exist but doesn't include this payor, fallback to fair share
-            shareCentavos += Math.round((exp.amountCents || 0) / payorCount);
-          }
-        } else if (isPayor) {
-          // Equal split across payors
-          shareCentavos += Math.round((exp.amountCents || 0) / payorCount);
+        const expShare = computeMemberExpenseShare(exp, uid, isPayor);
+        shareCentavos += expShare;
+
+        const isExpPaid = exp.status === "PAID" || exp.isPaid === true;
+        const mySplit =
+          exp.splitDetails && Array.isArray(exp.splitDetails)
+            ? exp.splitDetails.find((s: any) => s.userId === uid)
+            : null;
+        const isSplitPaid = mySplit?.isPaid === true;
+
+        if (!isExpPaid && !isSplitPaid) {
+          unpaidExpensesShareCentavos += expShare;
         }
       });
 
-      // Sum confirmed payments made by this member
+      // Sum confirmed payments made by this member for this cycle
       const memberPayments = payments.filter((p) => {
         if (p.userId !== uid) return false;
         const isConfirmed =
           p.status === "CONFIRMED" ||
           p.status === "COMPLETED" ||
-          p.status === "APPROVED";
+          p.status === "APPROVED" ||
+          p.status === "VERIFIED" ||
+          p.status === "PAID";
         if (!isConfirmed) return false;
 
-        // Match cycle or month if applicable
         if (selectedCycleId && p.billingCycleId) {
-          return p.billingCycleId === selectedCycleId;
+          return (
+            p.billingCycleId === selectedCycleId ||
+            (!knownCycleIds.has(p.billingCycleId) &&
+              selectedCycleId === oldestCycleId)
+          );
         }
-        return true;
+        return selectedCycleId === oldestCycleId || billingCycles.length <= 1;
       });
 
-      const paidCentavos = memberPayments.reduce(
+      const paidFromPayments = memberPayments.reduce(
         (sum, p) => sum + (p.amountCents || Math.round((p.amount || 0) * 100)),
         0,
       );
 
-      const balanceCentavos = Math.max(0, shareCentavos - paidCentavos);
+      const paidFromBill =
+        userBill && typeof userBill.totalPaidCentavos === "number"
+          ? userBill.totalPaidCentavos
+          : 0;
+
+      const isBillMarkedPaid =
+        userBill?.status === "PAID" ||
+        (userBill &&
+          typeof userBill.outstandingCentavos === "number" &&
+          userBill.outstandingCentavos <= 0 &&
+          (userBill.totalPaidCentavos > 0 || userBill.totalAmountCentavos > 0));
+
+      let balanceCentavos = 0;
+      let paidCentavos = 0;
+
+      if (!isPayor || shareCentavos === 0) {
+        balanceCentavos = 0;
+        paidCentavos = 0;
+      } else if (
+        isSelectedCycleClosed ||
+        isBillMarkedPaid ||
+        unpaidExpensesShareCentavos <= 0
+      ) {
+        balanceCentavos = 0;
+        paidCentavos = shareCentavos;
+      } else {
+        const extraPaid = Math.max(paidFromBill, paidFromPayments);
+        balanceCentavos = Math.max(0, unpaidExpensesShareCentavos - extraPaid);
+        paidCentavos = Math.max(0, shareCentavos - balanceCentavos);
+      }
 
       // Status tags & dots
       let statusText = "Paid full share";
@@ -496,16 +795,38 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         settlementTag = "Settled";
         settlementTagColor = "#059669";
       } else if (paidCentavos > 0) {
-        statusText = `Paid ₱${(paidCentavos / 100).toFixed(2)} partial`;
+        statusText = `Paid ₱${(paidCentavos / 100).toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} partial`;
         statusDotColor = "#F59E0B";
-        settlementTag = `Owes ₱${(balanceCentavos / 100).toFixed(2)}`;
+        settlementTag = `Owes ₱${(balanceCentavos / 100).toLocaleString(
+          undefined,
+          {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          },
+        )}`;
         settlementTagColor = "#D97706";
       } else {
         statusText = "Pending payment";
         statusDotColor = "#F59E0B";
-        settlementTag = `Owes ₱${(balanceCentavos / 100).toFixed(2)}`;
+        settlementTag = `Owes ₱${(balanceCentavos / 100).toLocaleString(
+          undefined,
+          {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          },
+        )}`;
         settlementTagColor = "#D97706";
       }
+
+      const resolvedPhoto =
+        (isMe && myPhoto) ||
+        m.photoURL ||
+        m.profilePicture ||
+        userPhotosMap[uid] ||
+        undefined;
 
       return {
         id: uid || `member_${idx}`,
@@ -513,7 +834,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         name: displayName,
         shortName,
         initials,
-        photoURL: m.photoURL || m.profilePicture,
+        photoURL: resolvedPhoto,
         avatarBg: isDark ? palette.darkBg : palette.bg,
         avatarTextColor: palette.text,
         statusText,
@@ -530,7 +851,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         chartValue: `₱${Math.round(shareCentavos / 100).toLocaleString()}`,
         chartValueColor: isDark ? palette.darkValColor : palette.valColor,
         chartBarColor: isDark ? palette.darkBar : palette.bar,
-        chartHeight: 25, // Computed in next pass
+        chartHeight: 25,
       };
     });
 
@@ -561,9 +882,19 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     activePayors,
     filteredExpenses,
     payments,
+    uniqueBills,
+    waterConfig,
+    cycleAttendance,
+    attendanceSubmissions,
+    userPhotosMap,
+    profile,
     currentUser?.uid,
     isDark,
     selectedCycleId,
+    isSelectedCycleClosed,
+    knownCycleIds,
+    oldestCycleId,
+    billingCycles.length,
   ]);
 
   // 8. Categories breakdown for the details modal
@@ -594,6 +925,14 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     return (diff / 100).toFixed(2);
   }, [roommatesBreakdown, totalExpenseCents]);
 
+  // Select cycle helper
+  const handleSelectPeriod = (opt: PeriodOption) => {
+    setSelectedCycleId(opt.id);
+    setSelectedMonthLabel(opt.label);
+    setShowMonthModal(false);
+    triggerSummaryFlash();
+  };
+
   // Refresh handler
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -610,6 +949,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         if (nextProfile) setProfile(nextProfile);
       }
       setIsRefreshing(false);
+      triggerSummaryFlash();
       alertService.show({
         title: "Report Synchronized",
         message: `Cloud calculations and settlement ledgers for ${selectedMonthLabel} are live.`,
@@ -623,13 +963,21 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     outputRange: ["0deg", "360deg"],
   });
 
+  const summaryHighlightBorderColor = flashAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [isDark ? "rgba(59, 130, 246, 0.2)" : "#E2E8F0", "#2563EB"],
+  });
+
+  const summaryHighlightBgColor = flashAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [
+      isDark ? "rgba(30, 41, 59, 0.65)" : "#FFFFFF",
+      isDark ? "rgba(37, 99, 235, 0.22)" : "#EFF6FF",
+    ],
+  });
+
   // Settle All handler
   const handleSettleAll = () => {
-    if (onOpenSettleDues) {
-      onOpenSettleDues();
-      return;
-    }
-
     const membersWithDues = roommatesBreakdown.filter(
       (r) => r.balanceCentavos > 0,
     );
@@ -639,6 +987,11 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         message: `All roommate accounts for ${selectedMonthLabel} are fully paid and verified.`,
         type: "success",
       });
+      return;
+    }
+
+    if (onOpenSettleDues) {
+      onOpenSettleDues();
       return;
     }
 
@@ -680,6 +1033,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   }, [roommatesBreakdown]);
 
   const hasOutstanding = roommatesBreakdown.some((r) => r.balanceCentavos > 0);
+  const isCurrentSelected = Boolean(selectedPeriodOption?.isCurrent);
   const isLoading = externalLoading || loadingCloud;
 
   return (
@@ -764,9 +1118,48 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         >
           {/* TITLE & SUBTITLE AREA */}
           <View style={styles.titleSection}>
-            <Text style={[styles.mainTitle, isDark && { color: colors.text }]}>
-              Monthly Summary
-            </Text>
+            <View style={styles.titleBadgeRow}>
+              <Text
+                style={[styles.mainTitle, isDark && { color: colors.text }]}
+              >
+                {isCurrentSelected
+                  ? "Current Cycle Summary"
+                  : "Previous Cycle Summary"}
+              </Text>
+              <View
+                style={[
+                  styles.cycleStatusBadge,
+                  isCurrentSelected
+                    ? styles.cycleStatusBadgeActive
+                    : styles.cycleStatusBadgeClosed,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.cycleStatusDot,
+                    {
+                      backgroundColor: isCurrentSelected
+                        ? "#2563EB"
+                        : "#10B981",
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cycleStatusBadgeText,
+                    {
+                      color: isCurrentSelected ? "#2563EB" : "#059669",
+                    },
+                  ]}
+                >
+                  {isCurrentSelected
+                    ? "CURRENT"
+                    : isSelectedCycleClosed
+                      ? "CLOSED & PAID"
+                      : "PREVIOUS"}
+                </Text>
+              </View>
+            </View>
             <Text
               style={[
                 styles.subTitle,
@@ -776,20 +1169,104 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               {household?.householdName || household?.apartmentName
                 ? `${household?.householdName || household?.apartmentName} • `
                 : ""}
-              Here's how expenses are split this period
+              {isCurrentSelected
+                ? "Showing live summary for the active cycle. Tap below to browse previous summaries."
+                : "Viewing archived summary for a previous billing cycle."}
             </Text>
           </View>
 
-          {/* TOTAL EXPENSE & MONTH PICKER ROW */}
-          <View style={styles.expenseSummaryRow}>
-            <View>
+          {/* QUICK CYCLE SWITCHER (CURRENT SUMMARY FIRST + BROWSE PREVIOUS SUMMARIES) */}
+          {periodOptions.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.cycleChipsScrollContent}
+              style={styles.cycleChipsScroll}
+            >
+              {periodOptions.map((opt, index) => {
+                const isSelected = opt.id === selectedCycleId;
+                const chipTag = opt.isCurrent
+                  ? "Current"
+                  : `Previous${periodOptions.length > 2 ? ` #${periodOptions.length - index}` : ""}`;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={[
+                      styles.cycleSwitchChip,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                      isSelected &&
+                        (isDark
+                          ? {
+                              backgroundColor: "rgba(37, 99, 235, 0.22)",
+                              borderColor: "#3B82F6",
+                            }
+                          : styles.cycleSwitchChipSelected),
+                    ]}
+                    onPress={() => handleSelectPeriod(opt)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons
+                      name={
+                        opt.isCurrent
+                          ? "flash"
+                          : opt.status === "CLOSED"
+                            ? "checkmark-done-circle"
+                            : "time-outline"
+                      }
+                      size={14}
+                      color={
+                        isSelected
+                          ? isDark
+                            ? "#60A5FA"
+                            : "#2563EB"
+                          : opt.status === "CLOSED"
+                            ? "#10B981"
+                            : isDark
+                              ? colors.textSecondary
+                              : "#64748B"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.cycleSwitchChipText,
+                        isDark && { color: colors.textSecondary },
+                        isSelected &&
+                          (isDark
+                            ? { color: "#60A5FA", fontWeight: "800" }
+                            : styles.cycleSwitchChipTextSelected),
+                      ]}
+                    >
+                      {chipTag}: {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* TOTAL EXPENSE & CYCLE PICKER CARD (FLASHED ON LOAD / SWITCH) */}
+          <Animated.View
+            style={[
+              styles.expenseSummaryCard,
+              {
+                backgroundColor: summaryHighlightBgColor,
+                borderColor: summaryHighlightBorderColor,
+              },
+            ]}
+          >
+            <View style={{ flex: 1, paddingRight: 10 }}>
               <Text
                 style={[
                   styles.totalExpenseLabel,
                   isDark && { color: colors.textSecondary },
                 ]}
               >
-                Total Expense
+                {isCurrentSelected
+                  ? "Current Cycle Total"
+                  : "Cycle Total Amount"}
               </Text>
               <Text
                 style={[
@@ -805,11 +1282,12 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                   isDark && { color: colors.textSecondary },
                 ]}
               >
-                {avgFormatted}
+                {avgFormatted} • {filteredExpenses.length}{" "}
+                {filteredExpenses.length === 1 ? "bill" : "bills"}
               </Text>
             </View>
 
-            {/* Month Selector Pill */}
+            {/* Billing Cycle Selector Pill */}
             <TouchableOpacity
               style={[
                 styles.monthPickerPill,
@@ -826,8 +1304,9 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                   styles.monthPickerText,
                   isDark && { color: colors.primary },
                 ]}
+                numberOfLines={1}
               >
-                {selectedMonthLabel || "Current Month"}
+                {selectedMonthLabel || "Current Cycle"}
               </Text>
               <Feather
                 name="chevron-down"
@@ -835,7 +1314,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                 color={isDark ? colors.primary : "#2563EB"}
               />
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           {/* BAR CHART CARD */}
           <View
@@ -928,8 +1407,10 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                   ]}
                 >
                   {hasOutstanding
-                    ? "Pending roommate dues for this period"
-                    : "All roommate shares verified & on track"}
+                    ? "Pending roommate dues for this cycle"
+                    : isSelectedCycleClosed
+                      ? "Cycle closed & all roommate shares paid"
+                      : "All roommate shares verified & settled"}
                 </Text>
               </View>
 
@@ -963,10 +1444,11 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               <Text
                 style={[
                   styles.settleAllLink,
-                  isDark && { color: colors.primary },
+                  !hasOutstanding && { color: "#059669" },
+                  isDark && hasOutstanding && { color: colors.primary },
                 ]}
               >
-                Settle All
+                {hasOutstanding ? "Settle All" : "All Settled ✓"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1088,13 +1570,13 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         </ScrollView>
       )}
 
-      {/* MONTH / BILLING CYCLE PICKER MODAL */}
+      {/* BILLING CYCLE PICKER MODAL */}
       <SmoothBottomSheetModal
         visible={showMonthModal}
         onClose={() => setShowMonthModal(false)}
         variant="bottom-sheet"
         title="Select Billing Cycle"
-        subtitle="Review real cloud expense ledger records"
+        subtitle={`Showing ${periodOptions.length} household billing ${periodOptions.length === 1 ? "cycle" : "cycles"}`}
         icon={<Feather name="calendar" size={18} color="#2563EB" />}
       >
         <ScrollView
@@ -1118,33 +1600,52 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                         }
                       : styles.modalMonthRowSelected),
                 ]}
-                onPress={() => {
-                  setSelectedCycleId(opt.id);
-                  setSelectedMonthLabel(opt.label);
-                  setShowMonthModal(false);
-                }}
+                onPress={() => handleSelectPeriod(opt)}
                 activeOpacity={0.7}
               >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                >
-                  <Text
-                    style={[
-                      styles.modalMonthText,
-                      isDark && { color: colors.text },
-                      isSelected &&
-                        (isDark
-                          ? { color: colors.primary }
-                          : styles.modalMonthTextSelected),
-                    ]}
+                <View style={{ flex: 1 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
                   >
-                    {opt.label}
-                  </Text>
-                  {opt.status === "ACTIVE" && (
-                    <View style={styles.activePillTag}>
-                      <Text style={styles.activePillTagText}>ACTIVE</Text>
-                    </View>
-                  )}
+                    <Text
+                      style={[
+                        styles.modalMonthText,
+                        isDark && { color: colors.text },
+                        isSelected &&
+                          (isDark
+                            ? { color: colors.primary }
+                            : styles.modalMonthTextSelected),
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    {opt.status === "ACTIVE" ? (
+                      <View style={styles.activePillTag}>
+                        <Text style={styles.activePillTagText}>CURRENT</Text>
+                      </View>
+                    ) : opt.status === "CLOSED" ||
+                      opt.status === "COMPLETED" ? (
+                      <View style={styles.closedPillTag}>
+                        <Text style={styles.closedPillTagText}>
+                          CLOSED & PAID
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {opt.subLabel ? (
+                    <Text
+                      style={[
+                        styles.modalSubText,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      {opt.subLabel}
+                    </Text>
+                  ) : null}
                 </View>
                 {isSelected && (
                   <Ionicons
@@ -1285,7 +1786,7 @@ export const MonthlySummaryReportScreen = ReportScreen;
 const styles = StyleSheet.create({
   rootContainer: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#F8FAFC",
   },
   header: {
     flexDirection: "row",
@@ -1319,32 +1820,102 @@ const styles = StyleSheet.create({
 
   /* Title Section */
   titleSection: {
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+  titleBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 8,
   },
   mainTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.4,
   },
+  cycleStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 5,
+  },
+  cycleStatusBadgeActive: {
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+  },
+  cycleStatusBadgeClosed: {
+    backgroundColor: "rgba(16, 185, 129, 0.14)",
+  },
+  cycleStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  cycleStatusBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
   subTitle: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: "500",
-    color: "#94A3B8",
+    color: "#64748B",
     marginTop: 4,
+    lineHeight: 18,
   },
 
-  /* Expense Summary Row */
-  expenseSummaryRow: {
+  /* Cycle Switcher Chips */
+  cycleChipsScroll: {
+    marginBottom: 14,
+  },
+  cycleChipsScrollContent: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  cycleSwitchChip: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E2E8F0",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  cycleSwitchChipSelected: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#2563EB",
+  },
+  cycleSwitchChipText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  cycleSwitchChipTextSelected: {
+    color: "#2563EB",
+    fontWeight: "800",
+  },
+
+  /* Expense Summary Card */
+  expenseSummaryCard: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 18,
   },
   totalExpenseLabel: {
     fontSize: 12.5,
     fontWeight: "600",
-    color: "#94A3B8",
+    color: "#64748B",
     marginBottom: 2,
   },
   totalExpenseAmount: {
@@ -1354,10 +1925,10 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   avgLabel: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "600",
     color: "#64748B",
-    marginTop: 2,
+    marginTop: 3,
   },
   monthPickerPill: {
     flexDirection: "row",
@@ -1366,15 +1937,16 @@ const styles = StyleSheet.create({
     borderColor: "#DBEAFE",
     borderWidth: 1,
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
     gap: 6,
-    marginTop: 6,
+    maxWidth: 155,
   },
   monthPickerText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "700",
     color: "#2563EB",
+    flexShrink: 1,
   },
 
   /* Chart Card */
@@ -1588,13 +2160,30 @@ const styles = StyleSheet.create({
     color: "#2563EB",
     fontWeight: "700",
   },
+  modalSubText: {
+    fontSize: 11.5,
+    color: "#64748B",
+    fontWeight: "500",
+    marginTop: 2,
+  },
   activePillTag: {
-    backgroundColor: "rgba(16, 185, 129, 0.15)",
-    paddingHorizontal: 6,
+    backgroundColor: "rgba(37, 99, 235, 0.14)",
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 6,
   },
   activePillTagText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  closedPillTag: {
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  closedPillTagText: {
     fontSize: 9,
     fontWeight: "800",
     color: "#059669",

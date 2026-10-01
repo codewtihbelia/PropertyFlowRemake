@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   Text,
@@ -6,25 +6,41 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
-import { cleanBillTitle } from "../services/firebaseDataService";
+import {
+  cleanBillTitle,
+  mobileDataService,
+  MobilePayment,
+  isPayorMember,
+} from "../services/firebaseDataService";
+import { auth } from "../firebase/config";
 import { useTheme } from "../context/ThemeContext";
+import { ExpensePayorBreakdownItem } from "./ExpenseHistoryScreen";
 
 interface ExpenseDetailsScreenProps {
   expense: {
     id: string;
+    householdId?: string;
     title: string;
     categoryLabel: string;
     icon: string;
     amountCents: number;
     date: string;
     payer: string;
+    recordedBy?: string;
+    groupPayorsSummary?: string;
+    payorCount?: number;
+    myShareCents?: number;
+    myShareFormatted?: string;
+    isCurrentUserPayor?: boolean;
     splitMethod: string;
     cycle: string;
+    billingCycleId?: string;
     status?: string;
     isPaid?: boolean;
     receiptUrl?: string;
@@ -35,8 +51,13 @@ interface ExpenseDetailsScreenProps {
       shareCentavos: number;
       percentage?: number;
       isExempt?: boolean;
+      isPaid?: boolean;
+      paidDate?: string;
+      paymentId?: string;
+      role?: string;
       note?: string;
     }>;
+    payorBreakdown?: ExpensePayorBreakdownItem[];
   };
   onBack: () => void;
 }
@@ -46,65 +67,193 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
   onBack,
 }) => {
   const { isDark, colors } = useTheme();
+  const currentUser = auth.currentUser;
+  const [members, setMembers] = useState<any[]>([]);
+  const [payments, setPayments] = useState<MobilePayment[]>([]);
+
+  const effectiveHouseholdId =
+    expense.householdId ||
+    mobileDataService.getCachedProfile()?.householdId ||
+    "";
+
+  useEffect(() => {
+    if (!effectiveHouseholdId) return;
+    const unsubMembers = mobileDataService.listenToHouseholdMembers(
+      effectiveHouseholdId,
+      (data) => setMembers(data || []),
+    );
+    const unsubPayments = mobileDataService.listenToPayments(
+      effectiveHouseholdId,
+      (data) => setPayments(data || []),
+    );
+    return () => {
+      unsubMembers();
+      unsubPayments();
+    };
+  }, [effectiveHouseholdId]);
 
   const isExpensePaid =
     expense.status === "PAID" ||
     expense.status === "Paid" ||
-    expense.isPaid === true;
+    expense.isPaid === true ||
+    Boolean(expense.payorBreakdown && expense.payorBreakdown.length > 0);
 
   const catMeta = getCategoryMeta(expense.categoryLabel || expense.title);
 
-  // Real split participants from bill or fallback
-  const participants =
-    expense.splitDetails && expense.splitDetails.length > 0
-      ? expense.splitDetails.map((s) => ({
-          name: s.displayName || "Roommate",
-          role: s.isExempt ? "Non-Payor (Exempt)" : "Payor",
-          shareCents: s.shareCentavos,
-          status: isExpensePaid ? "Paid" : s.isExempt ? "Exempt" : "Pending",
-          isExempt: s.isExempt,
-          note: s.note,
-        }))
-      : [
-          {
-            name: "Alice Santos",
-            role: "Host / Payor",
-            shareCents: Math.round(expense.amountCents / 4),
-            status: isExpensePaid ? "Paid" : "Pending",
-            isExempt: false,
-            note: undefined,
-          },
-          {
-            name: "Bea Alonzo",
-            role: "Payor",
-            shareCents: Math.round(expense.amountCents / 4),
-            status: isExpensePaid ? "Paid" : "Pending",
-            isExempt: false,
-            note: undefined,
-          },
-          {
-            name: "Charlie Cruz",
-            role: "Payor",
-            shareCents: Math.round(expense.amountCents / 4),
-            status: isExpensePaid ? "Paid" : "Pending",
-            isExempt: false,
-            note: undefined,
-          },
-          {
-            name: "Dennis Tan",
-            role: "Payor",
-            shareCents:
-              expense.amountCents - Math.round(expense.amountCents / 4) * 3,
-            status: isExpensePaid ? "Paid" : "Pending",
-            isExempt: false,
-            note: undefined,
-          },
-        ];
+  // Build real breakdown from passed payorBreakdown or live household members + splitDetails + payments
+  const participants: ExpensePayorBreakdownItem[] = useMemo(() => {
+    if (expense.payorBreakdown && expense.payorBreakdown.length > 0) {
+      return expense.payorBreakdown;
+    }
+
+    const activeMembers = members.filter(
+      (m) => !m.status || m.status === "ACTIVE" || m.status === "SETTLED",
+    );
+    const rawSplits = Array.isArray(expense.splitDetails)
+      ? expense.splitDetails
+      : [];
+
+    const sourceMembers =
+      activeMembers.length > 0
+        ? activeMembers
+        : rawSplits.map((s) => ({
+            userId: s.userId,
+            memberId: s.userId,
+            displayName: s.displayName || "Roommate",
+            role: (s.role as any) || (s.isExempt ? "NON_PAYOR" : "PAYOR"),
+            isExempt: s.isExempt,
+          }));
+
+    const effPayors = sourceMembers.filter((m: any) => isPayorMember(m));
+    const effPayorCount = Math.max(
+      1,
+      effPayors.length > 0 ? effPayors.length : sourceMembers.length,
+    );
+
+    const list: ExpensePayorBreakdownItem[] = sourceMembers.map((m: any) => {
+      const uid = m.userId || m.memberId || m.id;
+      const isPayor = isPayorMember(m);
+      const splitEntry = rawSplits.find(
+        (s: any) => s.userId === uid || s.memberId === uid || s.id === uid,
+      );
+      const isExempt = !isPayor || Boolean(splitEntry?.isExempt);
+      const shareCentavos = isExempt
+        ? 0
+        : splitEntry &&
+            typeof splitEntry.shareCentavos === "number" &&
+            splitEntry.shareCentavos > 0
+          ? splitEntry.shareCentavos
+          : Math.round((expense.amountCents || 0) / effPayorCount);
+
+      const percentage = isExempt
+        ? 0
+        : expense.amountCents > 0
+          ? Math.round((shareCentavos / expense.amountCents) * 1000) / 10
+          : Math.round((100 / effPayorCount) * 10) / 10;
+
+      const matchedPayment = payments.find((pmt) => {
+        if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+        if (splitEntry?.paymentId && pmt.paymentId === splitEntry.paymentId) {
+          return true;
+        }
+        if (!expense.billingCycleId) return true;
+        return (
+          pmt.billingCycleId === expense.billingCycleId ||
+          !pmt.billingCycleId ||
+          pmt.billingCycleId === "general"
+        );
+      });
+
+      const memberName =
+        m.displayName ||
+        m.name ||
+        splitEntry?.displayName ||
+        (m.role === "HOST" ? "Host" : "Roommate");
+
+      const roleType: "HOST" | "PAYOR" | "NON_PAYOR" =
+        m.role === "HOST" ? "HOST" : isExempt ? "NON_PAYOR" : "PAYOR";
+
+      const roleLabel =
+        m.role === "HOST"
+          ? isExempt
+            ? "HOST · EXEMPT"
+            : "HOST · PAYOR"
+          : isExempt
+            ? "NON-PAYOR (EXEMPT)"
+            : "GROUP PAYOR";
+
+      return {
+        userId: uid,
+        displayName: memberName,
+        role: roleType,
+        roleLabel,
+        isPayor: !isExempt,
+        isExempt,
+        shareCentavos,
+        percentage,
+        isPaid: isExpensePaid || Boolean(splitEntry?.isPaid),
+        paidDate:
+          matchedPayment?.paymentDate ||
+          (splitEntry?.paidDate
+            ? String(splitEntry.paidDate).slice(0, 10)
+            : expense.date),
+        paymentMethod: matchedPayment?.paymentMethod || undefined,
+        referenceNumber: matchedPayment?.referenceNumber || undefined,
+        note:
+          splitEntry?.note ||
+          (isExempt
+            ? "Exempted (Non-payor)"
+            : `Fair share across ${effPayorCount} ${effPayorCount === 1 ? "payor" : "payors"} (${percentage}%)`),
+        isCurrentUser: Boolean(currentUser?.uid && uid === currentUser.uid),
+      };
+    });
+
+    list.sort((a, b) => {
+      if (a.isCurrentUser && !b.isCurrentUser) return -1;
+      if (!a.isCurrentUser && b.isCurrentUser) return 1;
+      if (a.isPayor && !b.isPayor) return -1;
+      if (!a.isPayor && b.isPayor) return 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+
+    return list;
+  }, [
+    expense.payorBreakdown,
+    expense.splitDetails,
+    expense.amountCents,
+    expense.billingCycleId,
+    expense.date,
+    members,
+    payments,
+    isExpensePaid,
+    currentUser?.uid,
+  ]);
+
+  const contributingPayors = useMemo(
+    () => participants.filter((p) => p.isPayor),
+    [participants],
+  );
+
+  const exemptMembers = useMemo(
+    () => participants.filter((p) => !p.isPayor || p.isExempt),
+    [participants],
+  );
+
+  const recordedByName =
+    expense.recordedBy ||
+    (expense.payer && !expense.payer.includes("Group Payor")
+      ? expense.payer
+      : "Host");
 
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        translucent={true}
+        backgroundColor="transparent"
+      />
       <View
         style={[
           styles.header,
@@ -127,13 +276,13 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           activeOpacity={0.7}
         >
           <Feather
-            name="arrow-left"
+            name="chevron-left"
             size={20}
             color={isDark ? colors.text : "#0F172A"}
           />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>
-          Bill Details
+          Paid Bill Breakdown
         </Text>
         <View style={{ width: 36 }} />
       </View>
@@ -157,15 +306,21 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
               styles.heroIconWrap,
               {
                 backgroundColor: isDark
-                  ? "rgba(255, 255, 255, 0.06)"
+                  ? catMeta.darkBgColor || "rgba(255, 255, 255, 0.08)"
                   : catMeta.bgColor,
+                borderWidth: 1,
+                borderColor: isDark
+                  ? "rgba(255, 255, 255, 0.08)"
+                  : "rgba(0, 0, 0, 0.04)",
               },
             ]}
           >
             <Ionicons
               name={catMeta.ionicon as any}
               size={32}
-              color={catMeta.color}
+              color={
+                isDark ? catMeta.darkColor || catMeta.color : catMeta.color
+              }
             />
           </View>
           <Text style={[styles.heroTitle, { color: colors.text }]}>
@@ -179,19 +334,35 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           >
             {formatPesos(expense.amountCents)}
           </Text>
+
+          <Text style={[styles.heroSubtext, { color: colors.textSecondary }]}>
+            Settled on {expense.date} · Added by {recordedByName}
+          </Text>
+
           <View style={styles.tagWrap}>
             <View
               style={[
                 styles.categoryTagWrap,
                 {
                   backgroundColor: isDark
-                    ? "rgba(255, 255, 255, 0.06)"
+                    ? catMeta.darkBgColor || "rgba(255, 255, 255, 0.08)"
                     : catMeta.bgColor,
-                  borderColor: isDark ? colors.border : catMeta.color,
+                  borderColor: isDark
+                    ? catMeta.darkColor || colors.border
+                    : catMeta.color,
                 },
               ]}
             >
-              <Text style={[styles.categoryTag, { color: catMeta.color }]}>
+              <Text
+                style={[
+                  styles.categoryTag,
+                  {
+                    color: isDark
+                      ? catMeta.darkColor || colors.text
+                      : catMeta.color,
+                  },
+                ]}
+              >
                 {expense.categoryLabel}
               </Text>
             </View>
@@ -217,136 +388,30 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
             <View
               style={[
                 styles.statusBadgeWrap,
-                isExpensePaid
-                  ? {
-                      backgroundColor: isDark
-                        ? "rgba(16, 185, 129, 0.14)"
-                        : "#DCFCE7",
-                      borderColor: isDark
-                        ? "rgba(16, 185, 129, 0.28)"
-                        : "#BBF7D0",
-                    }
-                  : {
-                      backgroundColor: isDark
-                        ? "rgba(239, 68, 68, 0.14)"
-                        : "#FEF2F2",
-                      borderColor: isDark
-                        ? "rgba(239, 68, 68, 0.28)"
-                        : "#FECACA",
-                    },
+                {
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.14)"
+                    : "#DCFCE7",
+                  borderColor: isDark ? "rgba(16, 185, 129, 0.28)" : "#BBF7D0",
+                },
               ]}
             >
               <Text
                 style={[
                   styles.statusBadgeText,
                   {
-                    color: isExpensePaid
-                      ? isDark
-                        ? "#34D399"
-                        : "#16A34A"
-                      : isDark
-                        ? "#F87171"
-                        : "#B91C1C",
+                    color: isDark ? "#34D399" : "#16A34A",
                   },
                 ]}
               >
-                {isExpensePaid ? "PAID" : "UNPAID BILL"}
+                PAID BY {contributingPayors.length || 1}{" "}
+                {(contributingPayors.length || 1) === 1 ? "PAYOR" : "PAYORS"}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Payer Info */}
-        <View
-          style={[
-            styles.sectionCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.sectionHeading,
-              { color: isDark ? colors.textSecondary : "#0F172A" },
-            ]}
-          >
-            {isExpensePaid ? "Who Paid" : "Bill Status & Payer"}
-          </Text>
-          <View style={styles.payerRow}>
-            <View
-              style={[
-                styles.payerAvatar,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#DBEAFE",
-                  borderColor: colors.border,
-                  borderWidth: isDark ? 1 : 0,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.payerAvatarText,
-                  { color: isDark ? colors.accent : "#1E40AF" },
-                ]}
-              >
-                {expense.payer.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.payerName, { color: colors.text }]}>
-                {expense.payer}
-              </Text>
-              <Text style={[styles.payerSub, { color: colors.textSecondary }]}>
-                {isExpensePaid
-                  ? `Paid in Full on ${expense.date}`
-                  : `Billed to Household on ${expense.date} · Due from payors`}
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.paidMethodBadge,
-                isExpensePaid
-                  ? {
-                      backgroundColor: isDark
-                        ? "rgba(16, 185, 129, 0.14)"
-                        : "#DCFCE7",
-                      borderColor: isDark
-                        ? "rgba(16, 185, 129, 0.28)"
-                        : "#BBF7D0",
-                    }
-                  : {
-                      backgroundColor: isDark
-                        ? "rgba(239, 68, 68, 0.14)"
-                        : "#FEF2F2",
-                      borderColor: isDark
-                        ? "rgba(239, 68, 68, 0.28)"
-                        : "#FECACA",
-                    },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.paidMethodText,
-                  {
-                    color: isExpensePaid
-                      ? isDark
-                        ? "#34D399"
-                        : "#166534"
-                      : isDark
-                        ? "#F87171"
-                        : "#B91C1C",
-                  },
-                ]}
-              >
-                {isExpensePaid ? "Cash / Bank" : "Unpaid Bill"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Split Breakdown */}
+        {/* True Group Payors Section (Who Truly Paid It) */}
         <View
           style={[
             styles.sectionCard,
@@ -357,110 +422,267 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           ]}
         >
           <View style={styles.sectionHeaderRow}>
-            <Text
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text
+                style={[
+                  styles.sectionHeading,
+                  {
+                    color: isDark ? colors.text : "#0F172A",
+                    marginBottom: 2,
+                  },
+                ]}
+              >
+                Who Truly Paid ({contributingPayors.length} Group{" "}
+                {contributingPayors.length === 1 ? "Payor" : "Payors"})
+              </Text>
+              <Text
+                style={[
+                  styles.sectionSubHeading,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Paid collectively by household payors ({expense.splitMethod})
+              </Text>
+            </View>
+
+            <View
               style={[
-                styles.sectionHeading,
-                { color: isDark ? colors.textSecondary : "#0F172A" },
+                styles.settledPill,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.16)"
+                    : "#DCFCE7",
+                  borderColor: isDark ? "rgba(16, 185, 129, 0.35)" : "#86EFAC",
+                },
               ]}
             >
-              Split Breakdown
-            </Text>
-            <Text
-              style={[
-                styles.splitRule,
-                { color: isDark ? colors.accent : "#2563EB" },
-              ]}
-            >
-              {expense.splitMethod}
-            </Text>
+              <Feather
+                name="check-circle"
+                size={9}
+                color={isDark ? "#34D399" : "#15803D"}
+              />
+              <Text
+                style={[
+                  styles.settledPillText,
+                  { color: isDark ? "#34D399" : "#15803D" },
+                ]}
+              >
+                100% PAID
+              </Text>
+            </View>
           </View>
 
-          {participants.map((p, idx) => (
+          {contributingPayors.map((payor, idx) => (
             <View
-              key={idx}
+              key={payor.userId || idx}
               style={[
-                styles.splitItem,
+                styles.payorCardRow,
                 {
-                  borderBottomColor: colors.borderSubtle,
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                  borderColor: payor.isCurrentUser
+                    ? isDark
+                      ? "rgba(59, 130, 246, 0.45)"
+                      : "#93C5FD"
+                    : colors.border,
                 },
               ]}
             >
               <View
                 style={[
-                  styles.userInitials,
+                  styles.payerAvatar,
                   {
-                    backgroundColor: isDark ? colors.surfaceInset : "#F1F5F9",
-                    borderColor: colors.border,
-                    borderWidth: isDark ? 1 : 0,
+                    backgroundColor: isDark
+                      ? "rgba(59, 130, 246, 0.18)"
+                      : "#DBEAFE",
                   },
                 ]}
               >
                 <Text
                   style={[
-                    styles.userInitialsText,
-                    { color: isDark ? colors.textSecondary : "#475569" },
+                    styles.payerAvatarText,
+                    { color: isDark ? "#60A5FA" : "#1E40AF" },
                   ]}
                 >
-                  {p.name.charAt(0)}
+                  {payor.displayName.charAt(0).toUpperCase()}
                 </Text>
               </View>
-              <View style={{ flex: 1, paddingRight: 6 }}>
-                <Text style={[styles.splitUserName, { color: colors.text }]}>
-                  {p.name}
+
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={styles.payorNameRow}>
+                  <Text style={[styles.payerName, { color: colors.text }]}>
+                    {payor.displayName}
+                    {payor.isCurrentUser ? " (You)" : ""}
+                  </Text>
+                  <View
+                    style={[
+                      styles.roleBadge,
+                      {
+                        backgroundColor:
+                          payor.role === "HOST"
+                            ? isDark
+                              ? "rgba(245, 158, 11, 0.18)"
+                              : "#FEF3C7"
+                            : isDark
+                              ? "rgba(59, 130, 246, 0.18)"
+                              : "#DBEAFE",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.roleBadgeText,
+                        {
+                          color:
+                            payor.role === "HOST"
+                              ? isDark
+                                ? "#FBBF24"
+                                : "#B45309"
+                              : isDark
+                                ? "#60A5FA"
+                                : "#1D4ED8",
+                        },
+                      ]}
+                    >
+                      {payor.roleLabel}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text
+                  style={[styles.payerSub, { color: colors.textSecondary }]}
+                >
+                  {payor.note}
+                </Text>
+
+                <View style={styles.paymentMetaRow}>
+                  <Feather
+                    name="check-circle"
+                    size={11}
+                    color={isDark ? "#34D399" : "#16A34A"}
+                  />
+                  <Text
+                    style={[
+                      styles.paymentMetaText,
+                      { color: isDark ? "#34D399" : "#15803D" },
+                    ]}
+                  >
+                    Paid {payor.paidDate ? `on ${payor.paidDate}` : "in full"}
+                    {payor.paymentMethod ? ` via ${payor.paymentMethod}` : ""}
+                    {payor.referenceNumber ? ` (${payor.referenceNumber})` : ""}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={[styles.splitAmount, { color: colors.text }]}>
+                  {formatPesos(payor.shareCentavos)}
                 </Text>
                 <Text
                   style={[
-                    styles.splitUserRole,
+                    styles.sharePercentText,
                     { color: colors.textSecondary },
                   ]}
                 >
-                  {p.role}
-                </Text>
-                {p.note && (
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                      marginTop: 2,
-                    }}
-                  >
-                    <Feather
-                      name="info"
-                      size={11}
-                      color={isDark ? colors.accent : "#0284C7"}
-                    />
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: isDark ? colors.accent : "#0284C7",
-                      }}
-                    >
-                      {p.note}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={[styles.splitAmount, { color: colors.text }]}>
-                  {formatPesos(p.shareCents)}
-                </Text>
-                <Text
-                  style={[
-                    styles.statusBadge,
-                    p.status === "Paid"
-                      ? { color: isDark ? "#34D399" : "#16A34A" }
-                      : p.status === "Exempt"
-                        ? { color: colors.textMuted }
-                        : { color: isDark ? "#FBBF24" : "#EAB308" },
-                  ]}
-                >
-                  {p.status}
+                  {payor.percentage}% of bill
                 </Text>
               </View>
             </View>
           ))}
         </View>
+
+        {/* Exempt / Non-Payor Household Members (if any) */}
+        {exemptMembers.length > 0 && (
+          <View
+            style={[
+              styles.sectionCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.sectionHeaderRow}>
+              <Text
+                style={[
+                  styles.sectionHeading,
+                  {
+                    color: isDark ? colors.textSecondary : "#0F172A",
+                    marginBottom: 0,
+                  },
+                ]}
+              >
+                Exempt Members ({exemptMembers.length})
+              </Text>
+              <Text
+                style={[
+                  styles.splitRule,
+                  { color: isDark ? "#C084FC" : "#7C3AED" },
+                ]}
+              >
+                ₱0.00 Share
+              </Text>
+            </View>
+
+            {exemptMembers.map((p, idx) => (
+              <View
+                key={p.userId || idx}
+                style={[
+                  styles.splitItem,
+                  {
+                    borderBottomColor: colors.borderSubtle,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.userInitials,
+                    {
+                      backgroundColor: isDark ? colors.surfaceInset : "#F3E8FF",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.userInitialsText,
+                      { color: isDark ? "#C084FC" : "#6D28D9" },
+                    ]}
+                  >
+                    {p.displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, paddingRight: 6 }}>
+                  <Text style={[styles.splitUserName, { color: colors.text }]}>
+                    {p.displayName}
+                    {p.isCurrentUser ? " (You)" : ""}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.splitUserRole,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {p.note || "Exempted (Non-payor)"}
+                  </Text>
+                </View>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text
+                    style={[
+                      styles.splitAmount,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Exempt
+                  </Text>
+                  <Text
+                    style={[styles.statusBadge, { color: colors.textMuted }]}
+                  >
+                    ₱0.00
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Receipt Proof */}
         <View
@@ -508,12 +730,13 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                   { color: isDark ? colors.text : "#334155" },
                 ]}
               >
-                Official Document Uploaded
+                Settled Household Bill Record
               </Text>
               <Text
                 style={[styles.placeholderSub, { color: colors.textSecondary }]}
               >
-                Validated & Archived for Audit
+                Verified & Settled by {contributingPayors.length} Group{" "}
+                {contributingPayors.length === 1 ? "Payor" : "Payors"}
               </Text>
             </View>
           )}
@@ -561,12 +784,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 14,
-    borderBottomWidth: 1,
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -578,10 +800,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 2,
   },
   heroIconWrap: {
     width: 64,
@@ -600,7 +818,13 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "900",
     marginTop: 6,
+    marginBottom: 4,
+  },
+  heroSubtext: {
+    fontSize: 12,
+    fontWeight: "500",
     marginBottom: 12,
+    textAlign: "center",
   },
   tagWrap: {
     flexDirection: "row",
@@ -651,32 +875,79 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+  sectionSubHeading: {
+    fontSize: 11,
+    fontWeight: "500",
+  },
   sectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
+    alignItems: "flex-start",
+    marginBottom: 14,
   },
-  splitRule: { fontSize: 12, fontWeight: "700" },
-  payerRow: { flexDirection: "row", alignItems: "center" },
-  payerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  settledPill: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  payerAvatarText: { fontSize: 18, fontWeight: "900" },
-  payerName: { fontSize: 14, fontWeight: "700" },
-  payerSub: { fontSize: 12, marginTop: 2 },
-  paidMethodBadge: {
-    paddingHorizontal: 10,
+    gap: 4,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     borderWidth: 1,
   },
-  paidMethodText: { fontSize: 11, fontWeight: "700" },
+  settledPillText: {
+    fontSize: 8,
+    fontWeight: "800",
+  },
+  splitRule: { fontSize: 12, fontWeight: "700" },
+  payorCardRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  payerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  payerAvatarText: { fontSize: 16, fontWeight: "900" },
+  payorNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  payerName: { fontSize: 14, fontWeight: "700" },
+  roleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  roleBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  payerSub: { fontSize: 11, marginTop: 3 },
+  paymentMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  paymentMetaText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sharePercentText: {
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 2,
+  },
   splitItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -694,7 +965,7 @@ const styles = StyleSheet.create({
   userInitialsText: { fontSize: 14, fontWeight: "bold" },
   splitUserName: { fontSize: 13, fontWeight: "700" },
   splitUserRole: { fontSize: 11 },
-  splitAmount: { fontSize: 14, fontWeight: "800" },
+  splitAmount: { fontSize: 15, fontWeight: "800" },
   statusBadge: { fontSize: 10, fontWeight: "800", marginTop: 2 },
   receiptPlaceholder: {
     padding: 24,

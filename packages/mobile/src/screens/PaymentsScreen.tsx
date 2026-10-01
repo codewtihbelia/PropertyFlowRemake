@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -12,15 +12,27 @@ import {
   StatusBar,
   Platform,
   Modal,
+  Share,
+  Keyboard,
+  NativeModules,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Svg, {
+  Rect,
+  Circle,
+  Path,
+  Line,
+  Text as SvgText,
+} from "react-native-svg";
 import { formatPesos } from "@propertyflow/shared";
 import { uploadToFirebaseStorageMobile } from "../services/firebaseStorageService";
 import { auth } from "../firebase/config";
 import {
   mobileDataService,
   isPayorMember,
+  isCyclePaymentsLocked,
   HostPaymentMethod,
   DEFAULT_HOST_PAYMENT_METHODS,
 } from "../services/firebaseDataService";
@@ -36,6 +48,26 @@ export interface PaymentsScreenProps {
   onBack?: () => void;
 }
 
+interface CompletedPaymentReceipt {
+  amountCentavos: number;
+  referenceNumber: string;
+  paymentMethodName: string;
+  paymentMethodType: string;
+  receiverAccountName: string;
+  receiverAccountNumber: string;
+  payerName: string;
+  payerEmail: string;
+  householdName: string;
+  hostName: string;
+  billingCycleName: string;
+  billingCyclePeriod: string;
+  remainingBalanceCentavos: number;
+  notes?: string;
+  proofUrl?: string;
+  formattedDate: string;
+  formattedTime: string;
+}
+
 export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   householdId,
   billingCycleId,
@@ -49,7 +81,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     Platform.OS === "ios" ? 44 : 20,
   );
   const [showMenu, setShowMenu] = useState(false);
-  const { onScroll } = useNavVisibility();
+  const { onScroll, hideNav, showNav } = useNavVisibility();
   const [method, setMethod] = useState<
     "GCash" | "Maya" | "Cash" | "Bank Transfer"
   >("GCash");
@@ -60,20 +92,62 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const [showMethodDropdown, setShowMethodDropdown] = useState(false);
   const [previewQrModal, setPreviewQrModal] = useState<string | null>(null);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
+  const [copiedRefSuccess, setCopiedRefSuccess] = useState(false);
+  const [savingReceipt, setSavingReceipt] = useState(false);
+  const [receiptSaved, setReceiptSaved] = useState(false);
+  const [completedPayment, setCompletedPayment] =
+    useState<CompletedPaymentReceipt | null>(null);
+  const successScrollRef = useRef<ScrollView | null>(null);
+  const hasScrolledSuccessTopRef = useRef<boolean>(false);
+  const receiptCaptureRef = useRef<View | null>(null);
+  const svgReceiptRef = useRef<any>(null);
   const [amount, setAmount] = useState("");
   const [refNum, setRefNum] = useState("");
   const [notes, setNotes] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(() => !householdId);
   const [profile, setProfile] = useState<any | null>(null);
+  const [household, setHousehold] = useState<any | null>(() =>
+    mobileDataService.getCachedHousehold(),
+  );
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const currentUser = auth.currentUser;
+
+  useEffect(() => {
+    if (completedPayment) {
+      Keyboard.dismiss();
+      hideNav();
+      hasScrolledSuccessTopRef.current = false;
+      successScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+      const t1 = setTimeout(() => {
+        successScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+      }, 0);
+      const t2 = setTimeout(() => {
+        successScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+      }, 60);
+      const t3 = setTimeout(() => {
+        successScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+      }, 150);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+        showNav();
+      };
+    } else {
+      showNav();
+    }
+    return () => {
+      showNav();
+    };
+  }, [completedPayment, hideNav, showNav]);
 
   const activeMethod: HostPaymentMethod = useMemo(() => {
     if (selectedMethodId) {
@@ -146,6 +220,12 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   );
   const resolvedBillingCycleId =
     billingCycleId || activeCycle?.billingCycleId || "";
+  const isHostUser =
+    profile?.role === "HOST" ||
+    profile?.role === "SUPER_ADMIN" ||
+    Boolean(currentUser?.uid && household?.hostId === currentUser.uid);
+  const isPaymentsLocked =
+    isCyclePaymentsLocked(activeCycle, household) && !isHostUser;
 
   const activePayors = useMemo(() => {
     const list = members.filter(
@@ -156,9 +236,19 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       : members.filter((m) => m.status === "ACTIVE");
   }, [members]);
 
+  const currentCycleExpenses = useMemo(() => {
+    return resolvedBillingCycleId
+      ? expenses.filter((e) =>
+          e.billingCycleId
+            ? e.billingCycleId === resolvedBillingCycleId
+            : cycles.length <= 1,
+        )
+      : expenses;
+  }, [expenses, resolvedBillingCycleId, cycles.length]);
+
   const liveOutstandingCentavos = useMemo(() => {
     const payorCount = Math.max(1, activePayors.length);
-    const unpaidExpenses = expenses.filter(
+    const unpaidExpenses = currentCycleExpenses.filter(
       (e) => e.status !== "PAID" && !e.isPaid,
     );
     const liveShare = unpaidExpenses.reduce((sum, e) => {
@@ -184,11 +274,22 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     }, 0);
 
     const userPaidCentavos = payments
-      .filter((p) => p.userId === currentUser?.uid)
+      .filter(
+        (p) =>
+          p.userId === currentUser?.uid &&
+          (!resolvedBillingCycleId ||
+            p.billingCycleId === resolvedBillingCycleId),
+      )
       .reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
 
     return Math.max(0, liveShare - userPaidCentavos);
-  }, [expenses, activePayors, currentUser?.uid, payments]);
+  }, [
+    currentCycleExpenses,
+    activePayors,
+    currentUser?.uid,
+    payments,
+    resolvedBillingCycleId,
+  ]);
 
   useEffect(() => {
     if (liveOutstandingCentavos > 0 && !amount) {
@@ -233,6 +334,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     const unsubHousehold = mobileDataService.listenToHousehold(
       resolvedHouseholdId,
       (hh) => {
+        setHousehold(hh);
         if (
           hh &&
           Array.isArray(hh.paymentMethods) &&
@@ -272,13 +374,15 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         quality: 0.7,
+        base64: true,
       });
 
       if (!result.canceled && result.assets?.[0]?.uri) {
         setImageUri(result.assets[0].uri);
+        setImageBase64(result.assets[0].base64 || null);
       }
     } catch {
       Alert.alert("Error", "Could not pick image. Please try again.");
@@ -290,6 +394,14 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       Alert.alert(
         "Missing Information",
         "Could not verify current user or household ID.",
+      );
+      return;
+    }
+
+    if (isPaymentsLocked) {
+      Alert.alert(
+        "Payments Locked by Host",
+        "Your household host has not opened payments for this billing cycle yet. Please wait until bills are finalized and opened by the host.",
       );
       return;
     }
@@ -322,6 +434,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           uploadedReceiptUrl = await uploadToFirebaseStorageMobile(
             imageUri,
             `payment_proofs/${resolvedHouseholdId}/mobile`,
+            imageBase64 || undefined,
           );
         } catch (storageErr) {
           console.warn("[PaymentsScreen] Storage upload notice:", storageErr);
@@ -347,19 +460,65 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           : `Paid via ${activeMethod.name}`,
       });
 
-      setSubmitted(true);
-      Alert.alert(
-        "Payment Recorded 🎉",
-        `Your payment of ${formatPesos(amountCentavos)} via ${activeMethod.name} (Ref: ${finalRef}) has been successfully recorded and credited to your household bills.`,
-        [
-          {
-            text: "View Bills",
-            onPress: () => {
-              if (onBack) onBack();
-            },
-          },
-        ],
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      const formattedTime = now.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      const hostMemberObj = members.find((m: any) => m.role === "HOST");
+      const resolvedHostName =
+        household?.hostName ||
+        hostMemberObj?.displayName ||
+        hostMemberObj?.name ||
+        "Property Host";
+      const resolvedGroupName =
+        household?.householdName ||
+        household?.name ||
+        profile?.householdName ||
+        profile?.apartmentName ||
+        "Household Group";
+      const resolvedPayerName =
+        profile?.displayName ||
+        profile?.fullName ||
+        currentUser.displayName ||
+        "Resident";
+      const remainingAfterPayment = Math.max(
+        0,
+        liveOutstandingCentavos - amountCentavos,
       );
+
+      setSubmitted(true);
+      setReceiptSaved(false);
+      setCopiedRefSuccess(false);
+      setCompletedPayment({
+        amountCentavos,
+        referenceNumber: finalRef,
+        paymentMethodName: activeMethod.name,
+        paymentMethodType: activeMethod.type || "GCASH",
+        receiverAccountName: activeMethod.accountName || resolvedHostName,
+        receiverAccountNumber:
+          activeMethod.accountNumber ||
+          (activeMethod.qrCodeUrl ? "Host QR Code" : "Direct Handover"),
+        payerName: resolvedPayerName,
+        payerEmail: currentUser.email || profile?.email || "",
+        householdName: resolvedGroupName,
+        hostName: resolvedHostName,
+        billingCycleName: activeCycle?.name || "Active Billing Cycle",
+        billingCyclePeriod:
+          activeCycle?.startDate && activeCycle?.endDate
+            ? `${activeCycle.startDate} to ${activeCycle.endDate}`
+            : "Current Period",
+        remainingBalanceCentavos: remainingAfterPayment,
+        notes: notes.trim() || undefined,
+        proofUrl: imageUri || uploadedReceiptUrl || undefined,
+        formattedDate,
+        formattedTime,
+      });
     } catch (saveErr: any) {
       console.error("[PaymentsScreen] Submit error:", saveErr);
       Alert.alert(
@@ -371,6 +530,1532 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       setUploading(false);
     }
   };
+
+  const handleCopyReference = (refCode: string) => {
+    if (!refCode) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(refCode);
+    }
+    setCopiedRefSuccess(true);
+    setTimeout(() => setCopiedRefSuccess(false), 2500);
+  };
+
+  const handleSaveReceiptSnapshot = async () => {
+    if (!completedPayment || savingReceipt) return;
+    setSavingReceipt(true);
+
+    try {
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        const canvas = document.createElement("canvas");
+        const scale = 2;
+        const width = 460;
+        const height = completedPayment.notes ? 720 : 670;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const ctx = canvas.getContext("2d");
+
+        if (ctx) {
+          ctx.scale(scale, scale);
+
+          // Background
+          ctx.fillStyle = "#F8FAFC";
+          ctx.fillRect(0, 0, width, height);
+
+          // Receipt Outer Card
+          const cardX = 24;
+          const cardY = 24;
+          const cardW = width - 48;
+          const cardH = height - 48;
+
+          ctx.fillStyle = "#FFFFFF";
+          ctx.strokeStyle = "#E2E8F0";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.roundRect(cardX, cardY, cardW, cardH, 24);
+          ctx.fill();
+          ctx.stroke();
+
+          // Sparkle dots matching Create Group Success Screen
+          const cx = width / 2;
+          const badgeY = cardY + 58;
+          const sparkles = [
+            { dx: -24, dy: -36, r: 3, color: "#34D399" },
+            { dx: 34, dy: -24, r: 4, color: "#10B981" },
+            { dx: -36, dy: 22, r: 3.5, color: "#6EE7B7" },
+            { dx: 26, dy: 34, r: 2.5, color: "#34D399" },
+            { dx: -44, dy: -4, r: 2, color: "#10B981" },
+            { dx: 44, dy: 4, r: 2.5, color: "#6EE7B7" },
+          ];
+          sparkles.forEach((s) => {
+            ctx.fillStyle = s.color;
+            ctx.beginPath();
+            ctx.arc(cx + s.dx, badgeY + s.dy, s.r, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          // Green Star Badge Circle
+          ctx.save();
+          ctx.shadowColor = "rgba(16, 185, 129, 0.35)";
+          ctx.shadowBlur = 16;
+          ctx.shadowOffsetY = 6;
+          ctx.fillStyle = "#10B981";
+          ctx.beginPath();
+          ctx.arc(cx, badgeY, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          // Checkmark inside circle
+          ctx.strokeStyle = "#FFFFFF";
+          ctx.lineWidth = 3.5;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(cx - 10, badgeY + 1);
+          ctx.lineTo(cx - 3, badgeY + 8);
+          ctx.lineTo(cx + 11, badgeY - 7);
+          ctx.stroke();
+
+          // Title & Subtitle
+          ctx.fillStyle = "#0F172A";
+          ctx.font =
+            "800 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("Payment Recorded Successfully", cx, badgeY + 58);
+
+          ctx.fillStyle = "#64748B";
+          ctx.font =
+            "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.fillText(
+            `OFFICIAL PAYMENT RECEIPT • ${completedPayment.householdName.toUpperCase()}`,
+            cx,
+            badgeY + 78,
+          );
+
+          // Dashed Amount & Reference Box
+          const boxX = cardX + 22;
+          const boxY = badgeY + 96;
+          const boxW = cardW - 44;
+          const boxH = 108;
+
+          ctx.save();
+          ctx.fillStyle = "#F0FDF4";
+          ctx.strokeStyle = "#86EFAC";
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.roundRect(boxX, boxY, boxW, boxH, 16);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+
+          ctx.fillStyle = "#15803D";
+          ctx.font =
+            "800 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("TOTAL AMOUNT PAID", cx, boxY + 24);
+
+          ctx.fillStyle = "#0F172A";
+          ctx.font =
+            "900 30px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.fillText(
+            formatPesos(completedPayment.amountCentavos),
+            cx,
+            boxY + 60,
+          );
+
+          ctx.fillStyle = "#047857";
+          ctx.font = "700 12px monospace";
+          ctx.fillText(
+            `REF: ${completedPayment.referenceNumber}`,
+            cx,
+            boxY + 88,
+          );
+
+          // Detail Rows
+          const rows: Array<{
+            label: string;
+            value: string;
+            highlight?: boolean;
+          }> = [
+            {
+              label: "Date & Time",
+              value: `${completedPayment.formattedDate} • ${completedPayment.formattedTime}`,
+            },
+            {
+              label: "Paid By (Payor)",
+              value: completedPayment.payerEmail
+                ? `${completedPayment.payerName} (${completedPayment.payerEmail})`
+                : completedPayment.payerName,
+            },
+            {
+              label: "Household Group",
+              value: `${completedPayment.householdName} (Host: ${completedPayment.hostName})`,
+            },
+            {
+              label: "Billing Cycle",
+              value: `${completedPayment.billingCycleName} (${completedPayment.billingCyclePeriod})`,
+            },
+            {
+              label: "Payment Channel",
+              value: completedPayment.paymentMethodName,
+            },
+            {
+              label: "Receiver Account",
+              value: `${completedPayment.receiverAccountName} • ${completedPayment.receiverAccountNumber}`,
+            },
+            {
+              label: "Remaining Cycle Balance",
+              value:
+                completedPayment.remainingBalanceCentavos <= 0
+                  ? "₱0.00 (Fully Settled)"
+                  : formatPesos(completedPayment.remainingBalanceCentavos),
+              highlight: completedPayment.remainingBalanceCentavos <= 0,
+            },
+          ];
+
+          if (completedPayment.notes) {
+            rows.push({
+              label: "Payment Memo",
+              value: completedPayment.notes,
+            });
+          }
+
+          let currentY = boxY + boxH + 28;
+          rows.forEach((r, idx) => {
+            ctx.textAlign = "left";
+            ctx.fillStyle = "#64748B";
+            ctx.font =
+              "600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+            ctx.fillText(r.label, boxX, currentY);
+
+            ctx.textAlign = "right";
+            ctx.fillStyle = r.highlight ? "#059669" : "#0F172A";
+            ctx.font =
+              "700 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+            const maxValChars = 36;
+            const valStr =
+              r.value.length > maxValChars
+                ? r.value.slice(0, maxValChars - 1) + "…"
+                : r.value;
+            ctx.fillText(valStr, boxX + boxW, currentY);
+
+            if (idx < rows.length - 1) {
+              ctx.strokeStyle = "#F1F5F9";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(boxX, currentY + 12);
+              ctx.lineTo(boxX + boxW, currentY + 12);
+              ctx.stroke();
+            }
+            currentY += 34;
+          });
+
+          // Footer verification stamp
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#10B981";
+          ctx.font =
+            "700 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.fillText(
+            "✓ Verified & Recorded on Splitzy Household Ledger",
+            cx,
+            cardY + cardH - 22,
+          );
+
+          const dataUrl = canvas.toDataURL("image/png");
+          const link = document.createElement("a");
+          link.download = `Splitzy-Receipt-${completedPayment.referenceNumber}.png`;
+          link.href = dataUrl;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+        setReceiptSaved(true);
+      } else {
+        const getOptionalExpoModule = (name: string): any => {
+          try {
+            return (
+              (globalThis as any)?.expo?.modules?.[name] ??
+              (NativeModules as any)?.[name] ??
+              null
+            );
+          } catch {
+            return null;
+          }
+        };
+
+        const nativeFS = getOptionalExpoModule("ExponentFileSystem");
+        const normalizeDir = (p?: string | null) =>
+          p ? p.replace(/\/*$/, "") + "/" : "";
+
+        const fileBaseName = `Splitzy-Receipt-${completedPayment.referenceNumber}`;
+        const fileName = `${fileBaseName}.png`;
+        const cacheDir =
+          normalizeDir(nativeFS?.cacheDirectory) ||
+          normalizeDir(nativeFS?.documentDirectory);
+        const localFileUri = cacheDir ? `${cacheDir}${fileName}` : "";
+
+        let base64Png: string | null = null;
+        let capturedFileUri: string | null = null;
+
+        // 1. Try native RNViewShot ONLY if its native module is compiled into the binary
+        const hasNativeViewShot = Boolean(getOptionalExpoModule("RNViewShot"));
+        if (hasNativeViewShot && receiptCaptureRef.current) {
+          try {
+            const ViewShot = require("react-native-view-shot");
+            const captureFn =
+              ViewShot.captureRef || ViewShot.default?.captureRef;
+            if (captureFn) {
+              await new Promise((res) => setTimeout(res, 50));
+              base64Png = await captureFn(receiptCaptureRef, {
+                format: "png",
+                quality: 1,
+                result: "base64",
+              });
+            }
+          } catch {
+            // Silently fall back to react-native-svg toDataURL
+          }
+        }
+
+        // 2. Built-in native rasterizer via react-native-svg (already compiled in APK)
+        if (!base64Png && svgReceiptRef.current?.toDataURL) {
+          try {
+            base64Png = await new Promise<string | null>((resolve) => {
+              let settled = false;
+              const timer = setTimeout(() => {
+                if (!settled) {
+                  settled = true;
+                  resolve(null);
+                }
+              }, 2500);
+              svgReceiptRef.current.toDataURL(
+                (data: string) => {
+                  if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    resolve(data ? data.replace(/\s+/g, "") : null);
+                  }
+                },
+                {
+                  width: 920,
+                  height: (completedPayment.notes ? 720 : 670) * 2,
+                },
+              );
+            });
+          } catch {
+            base64Png = null;
+          }
+        }
+
+        if (base64Png) {
+          const cleanB64 = base64Png.replace(/^data:image\/\w+;base64,/, "");
+          base64Png = cleanB64;
+          if (localFileUri && nativeFS?.writeAsStringAsync) {
+            try {
+              await nativeFS.writeAsStringAsync(localFileUri, cleanB64, {
+                encoding: "base64",
+              });
+              capturedFileUri = localFileUri;
+            } catch {
+              capturedFileUri = null;
+            }
+          }
+        }
+
+        let savedToGallery = false;
+
+        // 3A. Check silently via globalThis.expo.modules so it NEVER throws
+        // "Cannot find native module 'ExpoMediaLibraryNext'" when not compiled in APK
+        const nativeMediaLib = getOptionalExpoModule("ExpoMediaLibrary");
+
+        if (nativeMediaLib && capturedFileUri) {
+          try {
+            let perm: any;
+            try {
+              perm = await nativeMediaLib.requestPermissionsAsync(true);
+            } catch {
+              perm = await nativeMediaLib.requestPermissionsAsync(false);
+            }
+            if (perm?.granted) {
+              await nativeMediaLib.saveToLibraryAsync(capturedFileUri);
+              savedToGallery = true;
+            }
+          } catch {
+            // Fall through to StorageAccessFramework
+          }
+        }
+
+        // 3B. Android StorageAccessFramework fallback (compiled into existing APK via ExponentFileSystem)
+        if (
+          !savedToGallery &&
+          Platform.OS === "android" &&
+          base64Png &&
+          nativeFS?.createSAFFileAsync &&
+          nativeFS?.writeAsStringAsync
+        ) {
+          const SAF_KEY = "@splitzy_receipt_gallery_dir_uri";
+          let targetDirUri = await AsyncStorage.getItem(SAF_KEY);
+
+          if (targetDirUri) {
+            try {
+              const safFileUri = await nativeFS.createSAFFileAsync(
+                targetDirUri,
+                fileBaseName,
+                "image/png",
+              );
+              await nativeFS.writeAsStringAsync(safFileUri, base64Png, {
+                encoding: "base64",
+              });
+              savedToGallery = true;
+            } catch {
+              targetDirUri = null;
+            }
+          }
+
+          if (!savedToGallery && nativeFS?.requestDirectoryPermissionsAsync) {
+            try {
+              const defaultPicturesUri =
+                "content://com.android.externalstorage.documents/tree/primary:Pictures/document/primary:Pictures";
+              const dirPerm =
+                await nativeFS.requestDirectoryPermissionsAsync(
+                  defaultPicturesUri,
+                );
+              if (dirPerm?.granted && dirPerm?.directoryUri) {
+                await AsyncStorage.setItem(SAF_KEY, dirPerm.directoryUri);
+                const safFileUri = await nativeFS.createSAFFileAsync(
+                  dirPerm.directoryUri,
+                  fileBaseName,
+                  "image/png",
+                );
+                await nativeFS.writeAsStringAsync(safFileUri, base64Png, {
+                  encoding: "base64",
+                });
+                savedToGallery = true;
+              }
+            } catch {
+              // Fall through if user cancels directory picker
+            }
+          }
+        }
+
+        if (savedToGallery) {
+          setReceiptSaved(true);
+          Alert.alert(
+            "Saved to Gallery",
+            `Receipt snapshot (${fileName}) has been downloaded to your photo gallery.`,
+          );
+        } else if (capturedFileUri) {
+          // If user dismissed SAF folder prompt or on iOS without MediaLibrary linked
+          await Share.share({
+            title: fileName,
+            url: capturedFileUri,
+            message: `Official Splitzy Payment Receipt (${completedPayment.referenceNumber})`,
+          });
+          setReceiptSaved(true);
+        }
+      }
+    } catch (err) {
+      console.warn("[PaymentsScreen] Receipt snapshot save error:", err);
+      Alert.alert(
+        "Could Not Save Snapshot",
+        "Unable to save the receipt snapshot right now. Please try again.",
+      );
+    } finally {
+      setSavingReceipt(false);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // VIEW: FULL-SCREEN PAYMENT SUCCESS & RECEIPT (Modeled after Create Group Success)
+  // --------------------------------------------------------------------------
+  if (completedPayment) {
+    return (
+      <View
+        key="payment-success-root"
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#F8FAFC" },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent={true}
+          backgroundColor="transparent"
+        />
+
+        {/* Top Minimal Header */}
+        <View
+          style={[
+            styles.navBarContainer,
+            {
+              paddingTop: topInset,
+              backgroundColor: isDark ? colors.background : "#F8FAFC",
+              borderBottomColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+        >
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              style={[
+                styles.circleBackBtn,
+                {
+                  backgroundColor: isDark
+                    ? colors.card
+                    : "rgba(15, 23, 42, 0.05)",
+                  borderColor: colors.border,
+                  borderWidth: isDark ? 1 : 0,
+                },
+              ]}
+              onPress={() => {
+                setCompletedPayment(null);
+                if (onBack) onBack();
+              }}
+              activeOpacity={0.7}
+            >
+              <Feather
+                name="chevron-left"
+                size={24}
+                color={isDark ? colors.text : "#0F172A"}
+              />
+            </TouchableOpacity>
+            <Text style={[styles.navTitle, { color: colors.text }]}>
+              Payment Receipt
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.iconNavBtn,
+                {
+                  backgroundColor: isDark
+                    ? colors.card
+                    : "rgba(15, 23, 42, 0.05)",
+                  borderColor: colors.border,
+                  borderWidth: isDark ? 1 : 0,
+                },
+              ]}
+              onPress={handleSaveReceiptSnapshot}
+              activeOpacity={0.7}
+            >
+              <Feather
+                name={receiptSaved ? "check" : "download"}
+                size={20}
+                color={
+                  receiptSaved ? "#10B981" : isDark ? colors.text : "#0F172A"
+                }
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView
+          key={`payment-success-scroll-${completedPayment.referenceNumber}`}
+          ref={successScrollRef}
+          contentOffset={{ x: 0, y: 0 }}
+          onLayout={() => {
+            if (!hasScrolledSuccessTopRef.current) {
+              successScrollRef.current?.scrollTo({
+                x: 0,
+                y: 0,
+                animated: false,
+              });
+            }
+          }}
+          onContentSizeChange={() => {
+            if (!hasScrolledSuccessTopRef.current) {
+              hasScrolledSuccessTopRef.current = true;
+              successScrollRef.current?.scrollTo({
+                x: 0,
+                y: 0,
+                animated: false,
+              });
+            }
+          }}
+          contentContainerStyle={[
+            styles.successScrollContent,
+            { paddingBottom: Math.max(insets.bottom + 32, 48) },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Capturable Receipt Snapshot Region for Gallery Download */}
+          <View
+            ref={receiptCaptureRef}
+            collapsable={false}
+            style={[
+              styles.capturableReceiptWrap,
+              { backgroundColor: isDark ? colors.background : "#F8FAFC" },
+            ]}
+          >
+            {/* Celebratory Green Star Badge with Sparkles (Matched to Create Group Success Screen) */}
+            <View style={styles.badgeWrapper}>
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    top: 4,
+                    left: 26,
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: "#34D399",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    top: 18,
+                    right: 10,
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: "#10B981",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    bottom: 16,
+                    left: 8,
+                    width: 7,
+                    height: 7,
+                    borderRadius: 4,
+                    backgroundColor: "#6EE7B7",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    bottom: 6,
+                    right: 24,
+                    width: 5,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor: "#34D399",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    top: 42,
+                    left: 2,
+                    width: 4,
+                    height: 4,
+                    borderRadius: 2,
+                    backgroundColor: "#10B981",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sparkleDot,
+                  {
+                    top: 48,
+                    right: 2,
+                    width: 5,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor: "#6EE7B7",
+                  },
+                ]}
+              />
+
+              <View style={styles.starBadgeCircle}>
+                <Feather name="check" size={32} color="#FFFFFF" />
+              </View>
+            </View>
+
+            <Text style={[styles.successTitle, { color: colors.text }]}>
+              Payment Recorded Successfully
+            </Text>
+            <Text
+              style={[styles.successSubtitle, { color: colors.textSecondary }]}
+            >
+              Your payment of{" "}
+              <Text style={{ fontWeight: "700", color: colors.text }}>
+                {formatPesos(completedPayment.amountCentavos)}
+              </Text>{" "}
+              for{" "}
+              <Text style={{ fontWeight: "700", color: colors.text }}>
+                {completedPayment.householdName}
+              </Text>{" "}
+              has been recorded and credited to your billing cycle.
+            </Text>
+
+            {/* Dashed Reference & Hero Amount Box (Matched to Create Group Success Invite Box) */}
+            <View
+              style={[
+                styles.receiptHeroBox,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.receiptStatusBadge}>
+                <Feather name="check-circle" size={12} color="#059669" />
+                <Text style={styles.receiptStatusBadgeText}>
+                  RECORDED & CREDITED
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.receiptHeroLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                TOTAL AMOUNT PAID
+              </Text>
+              <Text style={[styles.receiptHeroAmount, { color: colors.text }]}>
+                {formatPesos(completedPayment.amountCentavos)}
+              </Text>
+
+              <View
+                style={[
+                  styles.receiptHeroDivider,
+                  { backgroundColor: isDark ? colors.border : "#E2E8F0" },
+                ]}
+              />
+
+              <Text
+                style={[
+                  styles.receiptHeroLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                TRANSACTION REFERENCE
+              </Text>
+              <Text
+                style={[
+                  styles.receiptRefCodeText,
+                  { color: isDark ? colors.accent : "#0F172A" },
+                ]}
+                selectable
+              >
+                {completedPayment.referenceNumber}
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.copyRefBtn,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                  copiedRefSuccess && styles.copyRefBtnSuccess,
+                ]}
+                onPress={() =>
+                  handleCopyReference(completedPayment.referenceNumber)
+                }
+                activeOpacity={0.8}
+              >
+                <Feather
+                  name={copiedRefSuccess ? "check" : "copy"}
+                  size={14}
+                  color={
+                    copiedRefSuccess
+                      ? "#FFFFFF"
+                      : isDark
+                        ? colors.text
+                        : "#0F172A"
+                  }
+                />
+                <Text
+                  style={[
+                    styles.copyRefBtnText,
+                    isDark && { color: colors.text },
+                    copiedRefSuccess && { color: "#FFFFFF" },
+                  ]}
+                >
+                  {copiedRefSuccess ? "Reference Copied!" : "Copy Reference"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Full Payment Information Receipt Card */}
+            <View
+              style={[
+                styles.receiptDetailsCard,
+                {
+                  backgroundColor: isDark ? colors.card : "#FFFFFF",
+                  borderColor: isDark ? colors.border : "#E2E8F0",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.receiptCardHeader,
+                  { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                ]}
+              >
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <View
+                    style={[
+                      styles.receiptCardHeaderIcon,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(16, 185, 129, 0.15)"
+                          : "#ECFDF5",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="receipt-outline"
+                      size={16}
+                      color={isDark ? "#34D399" : "#059669"}
+                    />
+                  </View>
+                  <View>
+                    <Text
+                      style={[
+                        styles.receiptCardHeaderTitle,
+                        { color: colors.text },
+                      ]}
+                    >
+                      Full Payment Information
+                    </Text>
+                    <Text
+                      style={[
+                        styles.receiptCardHeaderSub,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Official Splitzy Household Receipt
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={[
+                    styles.receiptVerifiedTag,
+                    isDark && {
+                      backgroundColor: "rgba(59, 130, 246, 0.15)",
+                      borderColor: "rgba(59, 130, 246, 0.3)",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="shield"
+                    size={11}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.receiptVerifiedTagText,
+                      { color: isDark ? colors.accent : "#2563EB" },
+                    ]}
+                  >
+                    Verified
+                  </Text>
+                </View>
+              </View>
+
+              {/* Detail Rows */}
+              <View style={styles.receiptRowsContainer}>
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Date & Time
+                  </Text>
+                  <Text
+                    style={[styles.receiptInfoValue, { color: colors.text }]}
+                  >
+                    {completedPayment.formattedDate} •{" "}
+                    {completedPayment.formattedTime}
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Paid By (Payor)
+                  </Text>
+                  <View
+                    style={{ alignItems: "flex-end", flex: 1, marginLeft: 12 }}
+                  >
+                    <Text
+                      style={[styles.receiptInfoValue, { color: colors.text }]}
+                    >
+                      {completedPayment.payerName}
+                    </Text>
+                    {completedPayment.payerEmail ? (
+                      <Text
+                        style={[
+                          styles.receiptInfoSubValue,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {completedPayment.payerEmail}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Household Group
+                  </Text>
+                  <View
+                    style={{ alignItems: "flex-end", flex: 1, marginLeft: 12 }}
+                  >
+                    <Text
+                      style={[styles.receiptInfoValue, { color: colors.text }]}
+                    >
+                      {completedPayment.householdName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.receiptInfoSubValue,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Host: {completedPayment.hostName}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Billing Cycle
+                  </Text>
+                  <View
+                    style={{ alignItems: "flex-end", flex: 1, marginLeft: 12 }}
+                  >
+                    <Text
+                      style={[styles.receiptInfoValue, { color: colors.text }]}
+                    >
+                      {completedPayment.billingCycleName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.receiptInfoSubValue,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {completedPayment.billingCyclePeriod}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Payment Method
+                  </Text>
+                  <Text
+                    style={[styles.receiptInfoValue, { color: colors.text }]}
+                  >
+                    {completedPayment.paymentMethodName}
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Receiver Account
+                  </Text>
+                  <View
+                    style={{ alignItems: "flex-end", flex: 1, marginLeft: 12 }}
+                  >
+                    <Text
+                      style={[styles.receiptInfoValue, { color: colors.text }]}
+                    >
+                      {completedPayment.receiverAccountName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.receiptInfoSubValue,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {completedPayment.receiverAccountNumber}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.receiptInfoRow,
+                    !completedPayment.notes &&
+                      !completedPayment.proofUrl && { borderBottomWidth: 0 },
+                    { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.receiptInfoLabel,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    Remaining Cycle Dues
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.receiptInfoValue,
+                        {
+                          color:
+                            completedPayment.remainingBalanceCentavos <= 0
+                              ? isDark
+                                ? "#34D399"
+                                : "#059669"
+                              : colors.text,
+                        },
+                      ]}
+                    >
+                      {formatPesos(completedPayment.remainingBalanceCentavos)}
+                    </Text>
+                    {completedPayment.remainingBalanceCentavos <= 0 && (
+                      <View style={styles.settledMiniPill}>
+                        <Text style={styles.settledMiniPillText}>
+                          Fully Settled
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                {completedPayment.notes ? (
+                  <View
+                    style={[
+                      styles.receiptInfoRow,
+                      !completedPayment.proofUrl && { borderBottomWidth: 0 },
+                      { borderBottomColor: isDark ? colors.border : "#F1F5F9" },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.receiptInfoLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Payment Memo
+                    </Text>
+                    <Text
+                      style={[
+                        styles.receiptInfoValue,
+                        {
+                          color: colors.text,
+                          flex: 1,
+                          textAlign: "right",
+                          marginLeft: 16,
+                        },
+                      ]}
+                    >
+                      {completedPayment.notes}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {completedPayment.proofUrl ? (
+                  <View style={styles.receiptProofSection}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.receiptInfoLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Attached Payment Proof
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setPreviewQrModal(completedPayment.proofUrl || null)
+                        }
+                      >
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "700",
+                            color: isDark ? colors.accent : "#2563EB",
+                          }}
+                        >
+                          Tap to Enlarge
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.receiptProofThumbWrap,
+                        { borderColor: isDark ? colors.border : "#E2E8F0" },
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        setPreviewQrModal(completedPayment.proofUrl || null)
+                      }
+                    >
+                      <Image
+                        source={{ uri: completedPayment.proofUrl }}
+                        style={styles.receiptProofThumb}
+                        resizeMode="cover"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </View>
+
+          {/* Snapshot Saved Confirmation Banner */}
+          {receiptSaved && (
+            <View
+              style={[
+                styles.snapshotSavedBanner,
+                isDark && {
+                  backgroundColor: "rgba(16, 185, 129, 0.14)",
+                  borderColor: "rgba(16, 185, 129, 0.35)",
+                },
+              ]}
+            >
+              <Feather
+                name="check-circle"
+                size={16}
+                color={isDark ? "#34D399" : "#059669"}
+              />
+              <Text
+                style={[
+                  styles.snapshotSavedBannerText,
+                  { color: isDark ? "#34D399" : "#065F46" },
+                ]}
+              >
+                Receipt snapshot automatically downloaded to your gallery (
+                <Text style={{ fontWeight: "800" }}>
+                  Splitzy-Receipt-{completedPayment.referenceNumber}.png
+                </Text>
+                )
+              </Text>
+            </View>
+          )}
+
+          {/* Action Buttons (Matched to Create Group Success Screen) */}
+          <View style={{ width: "100%", gap: 12 }}>
+            <TouchableOpacity
+              style={[
+                styles.successPrimaryPillBtn,
+                receiptSaved && {
+                  backgroundColor: "#10B981",
+                  shadowColor: "#10B981",
+                },
+                !receiptSaved &&
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
+              ]}
+              onPress={handleSaveReceiptSnapshot}
+              disabled={savingReceipt}
+              activeOpacity={0.85}
+            >
+              {savingReceipt ? (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={styles.successPrimaryPillBtnText}>
+                    Downloading Snapshot to Gallery...
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <Feather
+                    name={receiptSaved ? "check-circle" : "download"}
+                    size={17}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.successPrimaryPillBtnText}>
+                    {receiptSaved
+                      ? "Saved to Gallery • Download Again"
+                      : "Save Receipt Snapshot"}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.successSecondaryOutlineBtn,
+                {
+                  backgroundColor: isDark ? colors.card : "#FFFFFF",
+                  borderColor: isDark ? colors.border : "#CBD5E1",
+                },
+              ]}
+              onPress={() => {
+                setCompletedPayment(null);
+                if (onBack) onBack();
+              }}
+              activeOpacity={0.85}
+            >
+              <Feather
+                name="check"
+                size={16}
+                color={isDark ? colors.text : "#0F172A"}
+              />
+              <Text
+                style={[
+                  styles.successSecondaryOutlineBtnText,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Done • Back to Bills
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.successTertiaryTextBtn}
+              onPress={() => {
+                setCompletedPayment(null);
+                setSubmitted(false);
+                setRefNum("");
+                setNotes("");
+                setImageUri(null);
+                setImageBase64(null);
+                setReceiptSaved(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.successTertiaryTextBtnLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Record Another Payment
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* Offscreen Native Vector Receipt Renderer (react-native-svg toDataURL) */}
+        <View
+          pointerEvents="none"
+          collapsable={false}
+          style={{
+            position: "absolute",
+            left: -2000,
+            top: 0,
+            width: 460,
+            height: completedPayment.notes ? 720 : 670,
+            opacity: 0,
+          }}
+        >
+          {(() => {
+            const svgW = 460;
+            const svgH = completedPayment.notes ? 720 : 670;
+            const cardX = 24;
+            const cardY = 24;
+            const cardW = svgW - 48;
+            const cardH = svgH - 48;
+            const cx = svgW / 2;
+            const badgeY = cardY + 58;
+            const boxX = cardX + 22;
+            const boxY = badgeY + 96;
+            const boxW = cardW - 44;
+            const boxH = 108;
+
+            const svgRows: Array<{
+              label: string;
+              value: string;
+              highlight?: boolean;
+            }> = [
+              {
+                label: "Date & Time",
+                value: `${completedPayment.formattedDate} • ${completedPayment.formattedTime}`,
+              },
+              {
+                label: "Paid By (Payor)",
+                value: completedPayment.payerEmail
+                  ? `${completedPayment.payerName} (${completedPayment.payerEmail})`
+                  : completedPayment.payerName,
+              },
+              {
+                label: "Household Group",
+                value: `${completedPayment.householdName} (Host: ${completedPayment.hostName})`,
+              },
+              {
+                label: "Billing Cycle",
+                value: `${completedPayment.billingCycleName} (${completedPayment.billingCyclePeriod})`,
+              },
+              {
+                label: "Payment Channel",
+                value: completedPayment.paymentMethodName,
+              },
+              {
+                label: "Receiver Account",
+                value: `${completedPayment.receiverAccountName} • ${completedPayment.receiverAccountNumber}`,
+              },
+              {
+                label: "Remaining Cycle Balance",
+                value:
+                  completedPayment.remainingBalanceCentavos <= 0
+                    ? "₱0.00 (Fully Settled)"
+                    : formatPesos(completedPayment.remainingBalanceCentavos),
+                highlight: completedPayment.remainingBalanceCentavos <= 0,
+              },
+            ];
+
+            if (completedPayment.notes) {
+              svgRows.push({
+                label: "Payment Memo",
+                value: completedPayment.notes,
+              });
+            }
+
+            return (
+              <Svg
+                ref={svgReceiptRef}
+                width={svgW}
+                height={svgH}
+                viewBox={`0 0 ${svgW} ${svgH}`}
+              >
+                <Rect x={0} y={0} width={svgW} height={svgH} fill="#F8FAFC" />
+                <Rect
+                  x={cardX}
+                  y={cardY}
+                  width={cardW}
+                  height={cardH}
+                  rx={24}
+                  ry={24}
+                  fill="#FFFFFF"
+                  stroke="#E2E8F0"
+                  strokeWidth={1.5}
+                />
+                <Circle cx={cx - 24} cy={badgeY - 36} r={3} fill="#34D399" />
+                <Circle cx={cx + 34} cy={badgeY - 24} r={4} fill="#10B981" />
+                <Circle cx={cx - 36} cy={badgeY + 22} r={3.5} fill="#6EE7B7" />
+                <Circle cx={cx + 26} cy={badgeY + 34} r={2.5} fill="#34D399" />
+                <Circle cx={cx} cy={badgeY} r={30} fill="#10B981" />
+                <Path
+                  d={`M ${cx - 10} ${badgeY + 1} L ${cx - 3} ${badgeY + 8} L ${cx + 11} ${badgeY - 7}`}
+                  stroke="#FFFFFF"
+                  strokeWidth={3.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+                <SvgText
+                  x={cx}
+                  y={badgeY + 58}
+                  fill="#0F172A"
+                  fontSize="19"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  Payment Recorded Successfully
+                </SvgText>
+                <SvgText
+                  x={cx}
+                  y={badgeY + 78}
+                  fill="#64748B"
+                  fontSize="11"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  {`OFFICIAL PAYMENT RECEIPT • ${completedPayment.householdName.toUpperCase()}`}
+                </SvgText>
+                <Rect
+                  x={boxX}
+                  y={boxY}
+                  width={boxW}
+                  height={boxH}
+                  rx={16}
+                  ry={16}
+                  fill="#F0FDF4"
+                  stroke="#86EFAC"
+                  strokeWidth={1.5}
+                  strokeDasharray="5, 4"
+                />
+                <SvgText
+                  x={cx}
+                  y={boxY + 24}
+                  fill="#15803D"
+                  fontSize="10"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  TOTAL AMOUNT PAID
+                </SvgText>
+                <SvgText
+                  x={cx}
+                  y={boxY + 60}
+                  fill="#0F172A"
+                  fontSize="28"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  {formatPesos(completedPayment.amountCentavos)}
+                </SvgText>
+                <SvgText
+                  x={cx}
+                  y={boxY + 88}
+                  fill="#047857"
+                  fontSize="12"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  {`REF: ${completedPayment.referenceNumber}`}
+                </SvgText>
+
+                {svgRows.map((r, idx) => {
+                  const rowY = boxY + boxH + 28 + idx * 34;
+                  const maxValChars = 36;
+                  const valStr =
+                    r.value.length > maxValChars
+                      ? r.value.slice(0, maxValChars - 1) + "…"
+                      : r.value;
+                  return (
+                    <React.Fragment key={r.label}>
+                      <SvgText
+                        x={boxX}
+                        y={rowY}
+                        fill="#64748B"
+                        fontSize="12"
+                        fontWeight="600"
+                        textAnchor="start"
+                      >
+                        {r.label}
+                      </SvgText>
+                      <SvgText
+                        x={boxX + boxW}
+                        y={rowY}
+                        fill={r.highlight ? "#059669" : "#0F172A"}
+                        fontSize="12"
+                        fontWeight="bold"
+                        textAnchor="end"
+                      >
+                        {valStr}
+                      </SvgText>
+                      {idx < svgRows.length - 1 ? (
+                        <Line
+                          x1={boxX}
+                          y1={rowY + 12}
+                          x2={boxX + boxW}
+                          y2={rowY + 12}
+                          stroke="#F1F5F9"
+                          strokeWidth={1}
+                        />
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })}
+
+                <SvgText
+                  x={cx}
+                  y={cardY + cardH - 22}
+                  fill="#10B981"
+                  fontSize="11"
+                  fontWeight="bold"
+                  textAnchor="middle"
+                >
+                  ✓ Verified & Recorded on Splitzy Household Ledger
+                </SvgText>
+              </Svg>
+            );
+          })()}
+        </View>
+
+        {/* Lightbox for Proof Preview */}
+        <Modal
+          visible={Boolean(previewQrModal)}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setPreviewQrModal(null)}
+        >
+          <View style={styles.lightboxOverlay}>
+            <TouchableOpacity
+              style={styles.lightboxCloseBtn}
+              onPress={() => setPreviewQrModal(null)}
+            >
+              <Feather name="x" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            {previewQrModal ? (
+              <Image
+                source={{ uri: previewQrModal }}
+                style={styles.lightboxImage}
+                resizeMode="contain"
+              />
+            ) : null}
+          </View>
+        </Modal>
+      </View>
+    );
+  }
 
   if (loading && !resolvedHouseholdId) {
     return (
@@ -423,7 +2108,10 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      key="payment-form-root"
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <StatusBar
         barStyle={colors.statusBar}
         translucent={true}
@@ -489,6 +2177,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       </View>
 
       <ScrollView
+        key="payment-form-scroll"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
@@ -553,20 +2242,38 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             onPress={() => setShowMethodDropdown(!showMethodDropdown)}
             activeOpacity={0.8}
           >
-            <View
-              style={[
-                styles.methodIconBadgeSmall,
-                {
-                  backgroundColor: getMethodBadge(activeMethod.type).bgColor,
-                },
-              ]}
-            >
-              <Feather
-                name={getMethodBadge(activeMethod.type).icon as any}
-                size={16}
-                color={getMethodBadge(activeMethod.type).color}
-              />
-            </View>
+            {activeMethod.customIconUrl ? (
+              <View
+                style={[
+                  styles.customIconBadgeSmall,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: activeMethod.customIconUrl }}
+                  style={styles.customIconImgSmall}
+                  resizeMode="contain"
+                />
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.methodIconBadgeSmall,
+                  {
+                    backgroundColor: getMethodBadge(activeMethod.type).bgColor,
+                  },
+                ]}
+              >
+                <Feather
+                  name={getMethodBadge(activeMethod.type).icon as any}
+                  size={16}
+                  color={getMethodBadge(activeMethod.type).color}
+                />
+              </View>
+            )}
 
             <View style={{ flex: 1, marginLeft: 10 }}>
               <Text
@@ -663,18 +2370,36 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                     }}
                     activeOpacity={0.7}
                   >
-                    <View
-                      style={[
-                        styles.methodIconBadgeSmall,
-                        { backgroundColor: badge.bgColor },
-                      ]}
-                    >
-                      <Feather
-                        name={badge.icon as any}
-                        size={15}
-                        color={badge.color}
-                      />
-                    </View>
+                    {m.customIconUrl ? (
+                      <View
+                        style={[
+                          styles.customIconBadgeSmall,
+                          isDark && {
+                            backgroundColor: colors.surfaceInset,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Image
+                          source={{ uri: m.customIconUrl }}
+                          style={styles.customIconImgSmall}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.methodIconBadgeSmall,
+                          { backgroundColor: badge.bgColor },
+                        ]}
+                      >
+                        <Feather
+                          name={badge.icon as any}
+                          size={15}
+                          color={badge.color}
+                        />
+                      </View>
+                    )}
 
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <View
@@ -783,14 +2508,36 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                 Host Verified Payment
               </Text>
             </View>
-            <Text
-              style={[
-                styles.hostMethodTypeTag,
-                { color: colors.textSecondary },
-              ]}
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
             >
-              {activeMethod.name}
-            </Text>
+              {activeMethod.customIconUrl ? (
+                <View
+                  style={[
+                    styles.customIconBadgeSmall,
+                    { width: 32, height: 24, padding: 1 },
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: activeMethod.customIconUrl }}
+                    style={styles.customIconImgSmall}
+                    resizeMode="contain"
+                  />
+                </View>
+              ) : null}
+              <Text
+                style={[
+                  styles.hostMethodTypeTag,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {activeMethod.name}
+              </Text>
+            </View>
           </View>
 
           {/* Account Details with Copy Button */}
@@ -1055,32 +2802,67 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           onChangeText={setNotes}
         />
 
-        <TouchableOpacity
-          style={[
-            styles.submitBtn,
-            {
-              backgroundColor: colors.primary,
-              shadowColor: colors.primary,
-            },
-            uploading && styles.submitBtnDisabled,
-          ]}
-          onPress={handleSubmit}
-          disabled={uploading}
-          activeOpacity={0.85}
-        >
-          {uploading ? (
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+        {isPaymentsLocked ? (
+          <View
+            style={[
+              styles.submitBtn,
+              {
+                backgroundColor: isDark
+                  ? "rgba(245, 158, 11, 0.15)"
+                  : "#FEF3C7",
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FCD34D",
+                shadowOpacity: 0,
+                elevation: 0,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              },
+            ]}
+          >
+            <Feather
+              name="lock"
+              size={16}
+              color={isDark ? "#FBBF24" : "#B45309"}
+            />
+            <Text
+              style={[
+                styles.submitBtnText,
+                { color: isDark ? "#FBBF24" : "#92400E" },
+              ]}
             >
-              <ActivityIndicator color="#FFFFFF" size="small" />
-              <Text style={styles.submitBtnText}>Uploading Receipt...</Text>
-            </View>
-          ) : (
-            <Text style={styles.submitBtnText}>
-              {submitted ? "Payment Submitted" : "Submit Payment Proof"}
+              Bills Under Review · Payments Locked
             </Text>
-          )}
-        </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.submitBtn,
+              {
+                backgroundColor: colors.primary,
+                shadowColor: colors.primary,
+              },
+              uploading && styles.submitBtnDisabled,
+            ]}
+            onPress={handleSubmit}
+            disabled={uploading}
+            activeOpacity={0.85}
+          >
+            {uploading ? (
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.submitBtnText}>Uploading Receipt...</Text>
+              </View>
+            ) : (
+              <Text style={styles.submitBtnText}>
+                {submitted ? "Payment Submitted" : "Submit Payment Proof"}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       {/* Menu Modal matching elevated bottom sheet design */}
@@ -1257,7 +3039,6 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   navBarContainer: {
-    borderBottomWidth: 1,
     zIndex: 50,
   },
   navBar: {
@@ -1616,5 +3397,302 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: 15,
     fontWeight: "700",
+  },
+  customIconBadgeSmall: {
+    width: 38,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 2,
+  },
+  customIconImgSmall: {
+    width: "100%",
+    height: "100%",
+  },
+  // Full-Screen Payment Success & Receipt Styles (Modeled after Create Group Success)
+  successScrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    alignItems: "center",
+  },
+  capturableReceiptWrap: {
+    width: "100%",
+    alignItems: "center",
+    paddingTop: 8,
+    paddingHorizontal: 4,
+  },
+  badgeWrapper: {
+    width: 110,
+    height: 110,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+    position: "relative",
+  },
+  sparkleDot: {
+    position: "absolute",
+    backgroundColor: "#34D399",
+  },
+  starBadgeCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#10B981",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#10B981",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    fontSize: 13,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 22,
+    paddingHorizontal: 8,
+  },
+  receiptHeroBox: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
+    borderStyle: "dashed",
+    marginBottom: 18,
+  },
+  receiptStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 10,
+  },
+  receiptStatusBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#047857",
+    letterSpacing: 0.6,
+  },
+  receiptHeroLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.1,
+    color: "#64748B",
+    marginBottom: 4,
+  },
+  receiptHeroAmount: {
+    fontSize: 32,
+    fontWeight: "900",
+    color: "#0F172A",
+    marginBottom: 4,
+  },
+  receiptHeroDivider: {
+    width: "100%",
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 14,
+  },
+  receiptRefCodeText: {
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 1.5,
+    color: "#0F172A",
+    marginBottom: 12,
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+  },
+  copyRefBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    gap: 6,
+  },
+  copyRefBtnSuccess: {
+    backgroundColor: "#10B981",
+    borderColor: "#10B981",
+  },
+  copyRefBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  receiptDetailsCard: {
+    width: "100%",
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+    marginBottom: 18,
+  },
+  receiptCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  receiptCardHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptCardHeaderTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  receiptCardHeaderSub: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  receiptVerifiedTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  receiptVerifiedTagText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  receiptRowsContainer: {
+    paddingHorizontal: 16,
+  },
+  receiptInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  receiptInfoLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  receiptInfoValue: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  receiptInfoSubValue: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  settledMiniPill: {
+    backgroundColor: "#DCFCE7",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  settledMiniPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#15803D",
+  },
+  receiptProofSection: {
+    paddingVertical: 12,
+  },
+  receiptProofThumbWrap: {
+    height: 120,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+  },
+  receiptProofThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  snapshotSavedBanner: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    marginBottom: 16,
+  },
+  snapshotSavedBannerText: {
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
+    lineHeight: 17,
+  },
+  successPrimaryPillBtn: {
+    width: "100%",
+    backgroundColor: "#0F172A",
+    borderRadius: 999,
+    paddingVertical: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  successPrimaryPillBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  successSecondaryOutlineBtn: {
+    width: "100%",
+    borderRadius: 999,
+    paddingVertical: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  successSecondaryOutlineBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  successTertiaryTextBtn: {
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  successTertiaryTextBtnLabel: {
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

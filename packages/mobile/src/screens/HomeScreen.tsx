@@ -23,6 +23,7 @@ import {
   cleanBillTitle,
   buildRealNotificationsList,
   isNotificationItemUnread,
+  isCyclePaymentsLocked,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -246,6 +247,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [expandedWaterBills, setExpandedWaterBills] = useState<
     Record<string, boolean>
   >({});
+  const [selectedSettledExpense, setSelectedSettledExpense] = useState<
+    any | null
+  >(null);
   const [showActivitiesModal, setShowActivitiesModal] =
     useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -257,13 +261,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [cloudNotifications, setCloudNotifications] = useState<any[]>([]);
   const [readNotificationIds, setReadNotificationIds] = useState<
     Record<string, boolean>
-  >(() => mobileDataService.getCachedReadNotifications());
+  >(() => mobileDataService.getCachedReadNotifications(firebaseUser?.uid));
 
   const activeCycle =
     cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
     cycles[0];
+  const oldestCycleId =
+    cycles.length > 0 ? cycles[cycles.length - 1]?.billingCycleId : undefined;
+  const activeCycleExpenses = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return expenses;
+    return expenses.filter(
+      (e) =>
+        e.billingCycleId === activeCycle.billingCycleId ||
+        (!e.billingCycleId &&
+          (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId)),
+    );
+  }, [expenses, activeCycle?.billingCycleId, cycles.length, oldestCycleId]);
   const myBill = memberBills.find((bill) => bill.userId === firebaseUser?.uid);
-  const totalExpenses = expenses.reduce(
+  const totalExpenses = activeCycleExpenses.reduce(
     (sum, expense) => sum + expense.amountCents,
     0,
   );
@@ -625,13 +640,131 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       ? activePayorsList.length
       : activeMembersList.length,
   );
+  const isPaymentsLocked = isCyclePaymentsLocked(activeCycle, household);
+
+  // Track which active payors have settled their shares for the active cycle
+  const settledPayorUidsForActiveCycle = useMemo(() => {
+    const settled = new Set<string>();
+    if (activePayorsList.length === 0 || activeCycleExpenses.length === 0) {
+      return settled;
+    }
+    const cycleId = activeCycle?.billingCycleId;
+    const isSingleCycle = cycles.length <= 1;
+
+    activePayorsList.forEach((p) => {
+      const uid = p.userId || p.memberId || p.id;
+      if (!uid) return;
+      const b = memberBills.find((mb) => mb.userId === uid);
+      const userPaidFromPmts = payments
+        .filter((pmt) => {
+          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+          if (!cycleId) return true;
+          return (
+            pmt.billingCycleId === cycleId ||
+            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+              isSingleCycle)
+          );
+        })
+        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
+
+      let payorShareTotal = 0;
+      let allUserSplitsMarkedPaid = true;
+      activeCycleExpenses.forEach((exp) => {
+        const mySplit = Array.isArray(exp.splitDetails)
+          ? exp.splitDetails.find((s: any) => s.userId === uid)
+          : null;
+        if (mySplit?.isExempt) return;
+        const share =
+          mySplit && typeof mySplit.shareCentavos === "number"
+            ? mySplit.shareCentavos
+            : Math.round((exp.amountCents || 0) / payorCount);
+        payorShareTotal += share;
+        if (
+          !exp.isPaid &&
+          exp.status !== "PAID" &&
+          !mySplit?.isPaid &&
+          share > 0
+        ) {
+          allUserSplitsMarkedPaid = false;
+        }
+      });
+
+      if (payorShareTotal <= 0) return;
+      const effectivePaid = Math.max(
+        b?.totalPaidCentavos || 0,
+        userPaidFromPmts,
+      );
+      const isMemberBillSettled =
+        b &&
+        typeof b.outstandingCentavos === "number" &&
+        b.outstandingCentavos === 0 &&
+        (b.totalPaidCentavos || 0) > 0;
+      if (
+        effectivePaid >= payorShareTotal ||
+        allUserSplitsMarkedPaid ||
+        isMemberBillSettled
+      ) {
+        settled.add(uid);
+      }
+    });
+
+    return settled;
+  }, [
+    activePayorsList,
+    activeCycleExpenses,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    memberBills,
+    payments,
+    payorCount,
+  ]);
+
+  // Check if all active payors have settled their shares strictly for the active cycle
+  const allPayorsSettled = useMemo(() => {
+    if (activePayorsList.length === 0 || activeCycleExpenses.length === 0)
+      return false;
+    return activePayorsList.every((p) => {
+      const uid = p.userId || p.memberId || p.id;
+      return Boolean(uid && settledPayorUidsForActiveCycle.has(uid));
+    });
+  }, [
+    activePayorsList,
+    activeCycleExpenses.length,
+    settledPayorUidsForActiveCycle,
+  ]);
+
+  useEffect(() => {
+    if (allPayorsSettled && householdId && activeCycle?.billingCycleId) {
+      const hasUnpaid = activeCycleExpenses.some(
+        (e) => e.status !== "PAID" || !e.isPaid,
+      );
+      if (hasUnpaid) {
+        mobileDataService
+          .markExpensesPaidIfAllSettled(householdId, activeCycle.billingCycleId)
+          .catch(() => {});
+      }
+    }
+  }, [
+    allPayorsSettled,
+    householdId,
+    activeCycle?.billingCycleId,
+    activeCycleExpenses,
+  ]);
 
   // Map real Firestore expenses to UI items
   const realExpensesMapped = useMemo(() => {
     return expenses.map((exp) => {
       const categoryMeta = getCategoryMeta(exp.category);
+      const belongsToActiveCycle =
+        !activeCycle?.billingCycleId ||
+        exp.billingCycleId === activeCycle.billingCycleId ||
+        (!exp.billingCycleId &&
+          (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId));
 
-      const isPaid = exp.status === "PAID" || exp.isPaid === true;
+      const isPaid =
+        exp.status === "PAID" ||
+        exp.isPaid === true ||
+        (belongsToActiveCycle && allPayorsSettled);
       const formatted = isPaid
         ? `-₱${(exp.amountCents / 100).toFixed(2)}`
         : `₱${(exp.amountCents / 100).toFixed(2)}`;
@@ -683,6 +816,62 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       }
 
       const displayTitle = cleanBillTitle(exp.title, exp.category, group1Title);
+      const mySplitEntry = Array.isArray(exp.splitDetails)
+        ? exp.splitDetails.find(
+            (s: any) =>
+              s.userId === firebaseUser?.uid ||
+              s.memberId === firebaseUser?.uid,
+          )
+        : null;
+
+      const mySharePaid =
+        isCurrentUserPayor &&
+        Boolean(
+          isPaid ||
+          mySplitEntry?.isPaid ||
+          (belongsToActiveCycle &&
+            firebaseUser?.uid &&
+            settledPayorUidsForActiveCycle.has(firebaseUser.uid)),
+        );
+
+      let paidPayorsCount = 0;
+      const waitingPayorNames: string[] = [];
+      activePayorsList.forEach((p) => {
+        const pUid = p.userId || p.memberId || p.id;
+        const pSplit = Array.isArray(exp.splitDetails)
+          ? exp.splitDetails.find(
+              (s: any) =>
+                s.userId === pUid || s.memberId === pUid || s.id === pUid,
+            )
+          : null;
+        const isPayorPaid = Boolean(
+          isPaid ||
+          pSplit?.isPaid ||
+          (belongsToActiveCycle &&
+            pUid &&
+            settledPayorUidsForActiveCycle.has(pUid)),
+        );
+        if (isPayorPaid) {
+          paidPayorsCount += 1;
+        } else {
+          const firstName = (p.displayName || p.name || "Roommate").split(
+            " ",
+          )[0];
+          waitingPayorNames.push(firstName);
+        }
+      });
+
+      const waitingSummary =
+        waitingPayorNames.length === 0
+          ? ""
+          : waitingPayorNames.length <= 2
+            ? `Waiting on ${waitingPayorNames.join(", ")}`
+            : `Waiting on ${waitingPayorNames.slice(0, 2).join(", ")} +${waitingPayorNames.length - 2}`;
+
+      const groupProgressText =
+        paidPayorsCount > 0 && waitingSummary
+          ? `${paidPayorsCount}/${payorCount} payors settled · ${waitingSummary}`
+          : `${paidPayorsCount}/${payorCount} payors settled`;
 
       return {
         id: exp.id,
@@ -698,6 +887,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         amountFormatted: formatted,
         myShareCents,
         myShareFormatted: formatPesos(myShareCents),
+        mySharePaid,
+        paidPayorsCount,
+        waitingSummary,
+        groupProgressText,
         isPaid,
         status: exp.status || (isPaid ? "PAID" : "UNPAID"),
       };
@@ -712,6 +905,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     cycleAttendance,
     attendanceSubmissions,
     activeMembersList,
+    activePayorsList,
+    settledPayorUidsForActiveCycle,
+    allPayorsSettled,
   ]);
 
   const allDisplayExpenses = realExpensesMapped;
@@ -730,17 +926,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     );
   }, [allDisplayExpenses, searchQuery]);
 
-  // Separate Upcoming (Unpaid) Bills from Settled Expenses
+  // Separate Upcoming (Unpaid) Bills for the active cycle from Settled Expenses
   const upcomingBills = useMemo(() => {
-    return filteredExpenses.filter((e) => !e.isPaid);
-  }, [filteredExpenses]);
+    return filteredExpenses.filter((e) => {
+      if (e.isPaid) return false;
+      if (!activeCycle?.billingCycleId) return true;
+      return (
+        e.billingCycleId === activeCycle.billingCycleId ||
+        (!e.billingCycleId &&
+          (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId))
+      );
+    });
+  }, [
+    filteredExpenses,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    oldestCycleId,
+  ]);
 
   const settledExpenses = useMemo(() => {
     return filteredExpenses.filter((e) => e.isPaid);
   }, [filteredExpenses]);
 
-  // Unpaid total dues calculation
-  const unpaidExpenses = expenses.filter(
+  // Unpaid total dues calculation strictly for the active billing cycle
+  const unpaidExpenses = activeCycleExpenses.filter(
     (e) => e.status !== "PAID" && !e.isPaid,
   );
 
@@ -809,8 +1018,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
   useEffect(() => {
-    if (!householdId || payorCount === 0 || expenses.length === 0) return;
-    const hasStaleSplit = expenses.some((e) => {
+    if (!householdId || payorCount === 0 || activeCycleExpenses.length === 0)
+      return;
+    const hasStaleSplit = activeCycleExpenses.some((e) => {
       if (e.status === "PAID" || e.isPaid) return false;
       const isWater = (e.category || "").toLowerCase().includes("water");
       if (isWater) {
@@ -838,14 +1048,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       Math.abs(myBill.outstandingCentavos - liveShareCents) > 100;
 
     if (hasStaleSplit || isMemberBillStale) {
-      mobileDataService
-        .recalculateUnpaidExpensesForHousehold(householdId)
-        .catch(() => {});
+      const timer = setTimeout(() => {
+        mobileDataService
+          .recalculateUnpaidExpensesForHousehold(householdId)
+          .catch(() => {});
+      }, 800);
+      return () => clearTimeout(timer);
     }
   }, [
     householdId,
     payorCount,
-    expenses,
+    activeCycleExpenses,
     myBill,
     liveShareCents,
     waterConfig?.pricingModel,
@@ -885,6 +1098,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       const ownCost = days * rate;
       const totalShare = isPayor ? ownCost + extraPerPayor : 0;
 
+      const splitEntry = Array.isArray(bill?.rawExpense?.splitDetails)
+        ? bill.rawExpense.splitDetails.find(
+            (s: any) => s.userId === uid || s.memberId === uid,
+          )
+        : null;
+      const isMemberPaid = isPayor
+        ? Boolean(
+            bill?.isPaid ||
+            splitEntry?.isPaid ||
+            (uid && settledPayorUidsForActiveCycle.has(uid)),
+          )
+        : true;
+
       return {
         userId: uid,
         displayName:
@@ -894,6 +1120,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         ownWaterCentavos: isPayor ? ownCost : 0,
         nonPayorAbsorptionCentavos: isPayor ? extraPerPayor : 0,
         totalShareCentavos: totalShare,
+        isPaid: isMemberPaid,
         isCurrentUser: isCurrent,
       };
     });
@@ -982,19 +1209,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           color: "#2563EB",
         });
       } else {
+        const canSettleNow =
+          isCurrentUserPayor && (!isPaymentsLocked || isHost);
         list.push({
           id: `exp_new_${exp.id}`,
           type: "bill_added",
           title: isMePayer
             ? `You Added Bill: ${cleanTitle}`
             : `${payer} Added Bill: ${cleanTitle}`,
-          desc: `Total: ${amtStr}${myShareStr ? ` · ${myShareStr}` : ""}.`,
+          desc: `Total: ${amtStr}${myShareStr ? ` · ${myShareStr}` : ""}${
+            isCurrentUserPayor && isPaymentsLocked && !isHost
+              ? " · Payments locked by host"
+              : ""
+          }.`,
           timestamp: exp.createdAt || exp.date || "",
           dateFormatted: exp.date || "Recent",
           amountFormatted: amtStr,
-          actionText: isCurrentUserPayor ? "Settle Now" : "View Bill",
+          actionText: canSettleNow ? "Settle Now" : "View Bill",
           onAction: () =>
-            isCurrentUserPayor && onOpenSettleDues
+            canSettleNow && onOpenSettleDues
               ? onOpenSettleDues()
               : onNavigate("bills"),
           icon: "file-text",
@@ -1015,6 +1248,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     firebaseUser?.uid,
     isHost,
     isCurrentUserPayor,
+    isPaymentsLocked,
     payorCount,
     onNavigate,
     onOpenExpenseHistory,
@@ -1079,9 +1313,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const hasUnreadNotifications = useMemo(() => {
     return realNotifications.some((item) =>
-      isNotificationItemUnread(item, readNotificationIds),
+      isNotificationItemUnread(item, readNotificationIds, firebaseUser?.uid),
     );
-  }, [realNotifications, readNotificationIds]);
+  }, [realNotifications, readNotificationIds, firebaseUser?.uid]);
 
   const recentPayerName =
     payments.length > 0 && payments[0]?.payerName
@@ -2074,7 +2308,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         activeOpacity={0.85}
                         onPress={() => {
                           if (
+                            !bill.mySharePaid &&
                             dueInfo.status === "pay_now" &&
+                            (!isPaymentsLocked || isHost) &&
                             onOpenSettleDues
                           ) {
                             onOpenSettleDues();
@@ -2123,18 +2359,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             ]}
                             numberOfLines={1}
                           >
-                            {isWaterBill
-                              ? `${bill.date} · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)}/day attendance`
-                              : `${bill.date} · Added by ${bill.payerName}`}
+                            {bill.paidPayorsCount > 0
+                              ? `${bill.date} · ${bill.groupProgressText}`
+                              : isWaterBill
+                                ? `${bill.date} · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)}/day attendance`
+                                : `${bill.date} · Added by ${bill.payerName}`}
                           </Text>
                           {isCurrentUserPayor && bill.myShareCents > 0 ? (
                             <Text
                               style={[
                                 styles.upcomingBillShareText,
                                 isDark && { color: colors.accent },
+                                bill.mySharePaid && {
+                                  color: isDark ? "#34D399" : "#16A34A",
+                                },
                               ]}
                             >
-                              Your share: {bill.myShareFormatted}
+                              {bill.mySharePaid
+                                ? `Your share: ${bill.myShareFormatted} (Paid ✓) · ${bill.paidPayorsCount}/${payorCount} paid`
+                                : bill.paidPayorsCount > 0
+                                  ? `Your share: ${bill.myShareFormatted} · ${bill.paidPayorsCount}/${payorCount} payors paid`
+                                  : `Your share: ${bill.myShareFormatted}`}
                             </Text>
                           ) : !isCurrentUserPayor ? (
                             <Text
@@ -2145,7 +2390,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                 },
                               ]}
                             >
-                              Exempt (Non-payor)
+                              Exempt (Non-payor) · {bill.paidPayorsCount}/
+                              {payorCount} payors paid
                             </Text>
                           ) : null}
                         </View>
@@ -2156,14 +2402,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             style={[
                               styles.dueBadge,
                               {
-                                backgroundColor: dueInfo.badgeBg,
-                                borderColor: dueInfo.badgeBorder,
+                                backgroundColor: bill.mySharePaid
+                                  ? isDark
+                                    ? "rgba(16, 185, 129, 0.16)"
+                                    : "#DCFCE7"
+                                  : isPaymentsLocked && !isHost
+                                    ? isDark
+                                      ? "rgba(245, 158, 11, 0.16)"
+                                      : "#FEF3C7"
+                                    : dueInfo.badgeBg,
+                                borderColor: bill.mySharePaid
+                                  ? isDark
+                                    ? "rgba(16, 185, 129, 0.35)"
+                                    : "#86EFAC"
+                                  : isPaymentsLocked && !isHost
+                                    ? isDark
+                                      ? "rgba(245, 158, 11, 0.3)"
+                                      : "#FDE68A"
+                                    : dueInfo.badgeBorder,
                               },
                             ]}
                             activeOpacity={0.8}
                             onPress={() => {
                               if (
+                                !bill.mySharePaid &&
                                 dueInfo.status === "pay_now" &&
+                                (!isPaymentsLocked || isHost) &&
                                 onOpenSettleDues
                               ) {
                                 onOpenSettleDues();
@@ -2175,10 +2439,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             <Text
                               style={[
                                 styles.dueBadgeText,
-                                { color: dueInfo.textColor },
+                                {
+                                  color: bill.mySharePaid
+                                    ? isDark
+                                      ? "#34D399"
+                                      : "#15803D"
+                                    : isPaymentsLocked && !isHost
+                                      ? isDark
+                                        ? "#FBBF24"
+                                        : "#B45309"
+                                      : dueInfo.textColor,
+                                },
                               ]}
                             >
-                              {dueInfo.label}
+                              {bill.mySharePaid
+                                ? "Your Share Paid ✓"
+                                : isPaymentsLocked && !isHost
+                                  ? "Locked"
+                                  : dueInfo.label}
                             </Text>
                           </TouchableOpacity>
                           <View style={styles.upcomingBillAmountWrap}>
@@ -2430,11 +2708,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                           isDark && {
                                             color: colors.textMuted,
                                           },
+                                          item.role !== "NON_PAYOR" &&
+                                            item.isPaid && {
+                                              color: isDark
+                                                ? "#34D399"
+                                                : "#16A34A",
+                                              fontWeight: "700",
+                                            },
                                         ]}
                                       >
                                         {item.role === "NON_PAYOR"
                                           ? "Exempt"
-                                          : "Water Share"}
+                                          : item.isPaid
+                                            ? "Paid ✓"
+                                            : "Water Share"}
                                       </Text>
                                     </View>
                                   </View>
@@ -2480,11 +2767,42 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* Recent Expenses Section (Settled & Paid items) */}
             <View style={[styles.sectionHeader, { marginTop: 24 }]}>
-              <Text
-                style={[styles.sectionTitle, isDark && { color: colors.text }]}
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
               >
-                Recent Expenses
-              </Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Recent Expenses
+                </Text>
+                {settledExpenses.length > 0 && (
+                  <View
+                    style={[
+                      styles.countBadge,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(16, 185, 129, 0.15)"
+                          : "#DCFCE7",
+                        borderColor: isDark
+                          ? "rgba(16, 185, 129, 0.35)"
+                          : "#86EFAC",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.countBadgeText,
+                        { color: isDark ? "#34D399" : "#15803D" },
+                      ]}
+                    >
+                      {settledExpenses.length}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity onPress={onOpenExpenseHistory}>
                 <Text
                   style={[
@@ -2555,7 +2873,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         },
                       ]}
                       activeOpacity={0.85}
-                      onPress={onOpenExpenseHistory}
+                      onPress={() => setSelectedSettledExpense(expense)}
                     >
                       {/* Left Icon Container */}
                       <View
@@ -2575,35 +2893,112 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         />
                       </View>
 
-                      {/* Middle Title & Details */}
+                      {/* Middle Title & Breakdown Summary */}
                       <View style={styles.expenseDetailsWrap}>
-                        <Text
-                          style={[
-                            styles.expenseTitle,
-                            isDark && { color: colors.text },
-                          ]}
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
                         >
-                          {expense.title}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.expenseTitle,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
+                            {expense.title}
+                          </Text>
+                          <View
+                            style={{
+                              backgroundColor: isDark
+                                ? "rgba(16, 185, 129, 0.16)"
+                                : "#DCFCE7",
+                              borderWidth: 1,
+                              borderColor: isDark
+                                ? "rgba(16, 185, 129, 0.35)"
+                                : "#86EFAC",
+                              paddingHorizontal: 6,
+                              paddingVertical: 1.5,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 9,
+                                fontWeight: "800",
+                                color: isDark ? "#34D399" : "#15803D",
+                              }}
+                            >
+                              PAID
+                            </Text>
+                          </View>
+                        </View>
                         <Text
                           style={[
                             styles.expenseSubtitle,
                             isDark && { color: colors.textSecondary },
                           ]}
                         >
-                          {expense.date} · Paid by {expense.payerName}
+                          {expense.date} · Settled by group payors
+                          {/* {expense.payerName || "Household"} */}
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "600",
+                            color: isDark ? colors.accent : "#2563EB",
+                            marginTop: 3,
+                          }}
+                        >
+                          {isCurrentUserPayor
+                            ? `Split across ${payorCount} ${payorCount === 1 ? "payor" : "payors"} · Your share: ${expense.myShareFormatted}`
+                            : "Exempt (Non-payor) · Tap for breakdown"}
                         </Text>
                       </View>
 
-                      {/* Right Negative Amount in Pesos */}
-                      <Text
-                        style={[
-                          styles.expenseAmountText,
-                          isDark && { color: colors.text },
-                        ]}
+                      {/* Right Amount & Breakdown Hint */}
+                      <View
+                        style={{
+                          alignItems: "flex-end",
+                          alignSelf: "center",
+                          justifyContent: "center",
+                        }}
                       >
-                        {expense.amountFormatted}
-                      </Text>
+                        <Text
+                          style={[
+                            styles.expenseAmountText,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {formatPesos(expense.amountCents)}
+                        </Text>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 2,
+                            marginTop: 3,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: "700",
+                              color: isDark ? "#34D399" : "#16A34A",
+                            }}
+                          >
+                            Breakdown
+                          </Text>
+                          <Feather
+                            name="chevron-right"
+                            size={12}
+                            color={isDark ? "#34D399" : "#16A34A"}
+                          />
+                        </View>
+                      </View>
                     </TouchableOpacity>
                   );
                 })
@@ -2612,6 +3007,274 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </ScrollView>
         )}
       </Animated.View>
+
+      {/* Settled Expense Breakdown Modal */}
+      <SmoothBottomSheetModal
+        visible={Boolean(selectedSettledExpense)}
+        onClose={() => setSelectedSettledExpense(null)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title={selectedSettledExpense?.title || "Expense Breakdown"}
+        subtitle={`${selectedSettledExpense?.category || "Bill"} · ${selectedSettledExpense?.date || "Settled"}`}
+        icon={
+          <Feather
+            name={
+              (selectedSettledExpense?.categoryMeta?.featherIcon as any) ||
+              "check-circle"
+            }
+            size={18}
+            color={selectedSettledExpense?.categoryMeta?.color || "#10B981"}
+          />
+        }
+        maxHeight="86%"
+      >
+        {selectedSettledExpense && (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            style={{ marginTop: 4, maxHeight: 440 }}
+          >
+            <View
+              style={{
+                backgroundColor: isDark ? colors.surfaceInset : "#F0FDF4",
+                borderRadius: 16,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(16, 185, 129, 0.3)" : "#BBF7D0",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 16,
+              }}
+            >
+              <View>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: isDark ? colors.textSecondary : "#15803D",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Total Settled Bill
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 22,
+                    fontWeight: "800",
+                    color: isDark ? colors.text : "#0F172A",
+                    marginTop: 2,
+                  }}
+                >
+                  {formatPesos(selectedSettledExpense.amountCents || 0)}
+                </Text>
+              </View>
+              <View
+                style={{
+                  backgroundColor: isDark
+                    ? "rgba(16, 185, 129, 0.2)"
+                    : "#DCFCE7",
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 10,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <Feather
+                  name="check-circle"
+                  size={14}
+                  color={isDark ? "#34D399" : "#15803D"}
+                />
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "800",
+                    color: isDark ? "#34D399" : "#15803D",
+                  }}
+                >
+                  ALL PAID
+                </Text>
+              </View>
+            </View>
+
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "800",
+                color: isDark ? colors.text : "#0F172A",
+                marginBottom: 10,
+              }}
+            >
+              Roommate Split Breakdown ({activeMembersList.length})
+            </Text>
+
+            <View style={{ gap: 8, marginBottom: 18 }}>
+              {activeMembersList.map((m) => {
+                const uid = m.userId || m.memberId;
+                const isPayor = isPayorMember(m);
+                const rawSplits =
+                  selectedSettledExpense.rawExpense?.splitDetails || [];
+                const memberSplit = Array.isArray(rawSplits)
+                  ? rawSplits.find((s: any) => s.userId === uid)
+                  : null;
+                const shareCents = !isPayor
+                  ? 0
+                  : memberSplit && typeof memberSplit.shareCentavos === "number"
+                    ? memberSplit.shareCentavos
+                    : Math.round(
+                        (selectedSettledExpense.amountCents || 0) / payorCount,
+                      );
+                const mName =
+                  m.displayName ||
+                  m.name ||
+                  (m.role === "HOST" ? "Host" : "Roommate");
+
+                return (
+                  <View
+                    key={uid}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      backgroundColor: isDark ? colors.card : "#F8FAFC",
+                      borderWidth: 1,
+                      borderColor: isDark ? colors.border : "#E2E8F0",
+                      borderRadius: 12,
+                      padding: 12,
+                    }}
+                  >
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "700",
+                            color: isDark ? colors.text : "#0F172A",
+                          }}
+                        >
+                          {mName}
+                        </Text>
+                        <View
+                          style={{
+                            backgroundColor: isPayor
+                              ? isDark
+                                ? "rgba(59, 130, 246, 0.16)"
+                                : "#DBEAFE"
+                              : isDark
+                                ? "rgba(168, 85, 247, 0.16)"
+                                : "#F3E8FF",
+                            paddingHorizontal: 6,
+                            paddingVertical: 1.5,
+                            borderRadius: 5,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 9,
+                              fontWeight: "800",
+                              color: isPayor
+                                ? isDark
+                                  ? "#60A5FA"
+                                  : "#1D4ED8"
+                                : isDark
+                                  ? "#C084FC"
+                                  : "#6D28D9",
+                            }}
+                          >
+                            {m.role === "HOST"
+                              ? "HOST"
+                              : isPayor
+                                ? "PAYOR"
+                                : "NON-PAYOR"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: isDark ? colors.textSecondary : "#64748B",
+                          marginTop: 2,
+                        }}
+                      >
+                        {memberSplit?.note ||
+                          (isPayor
+                            ? `Fair share across ${payorCount} payors`
+                            : "Exempted (Non-payor)")}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: "800",
+                          color: isDark ? colors.text : "#0F172A",
+                        }}
+                      >
+                        {isPayor ? formatPesos(shareCents) : "Exempt"}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "700",
+                          color: isDark ? "#34D399" : "#16A34A",
+                          marginTop: 1,
+                        }}
+                      >
+                        {isPayor ? "Paid ✓" : "₱0.00"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={[
+                  styles.modalCancelBtn,
+                  isDark && {
+                    backgroundColor: colors.cardSecondary,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setSelectedSettledExpense(null)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Close
+                </Text>
+              </TouchableOpacity>
+              {onOpenExpenseHistory && (
+                <TouchableOpacity
+                  style={[
+                    styles.modalSubmitBtn,
+                    isDark && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => {
+                    setSelectedSettledExpense(null);
+                    onOpenExpenseHistory();
+                  }}
+                >
+                  <Text style={styles.modalSubmitBtnText}>
+                    Full Expense History
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
+        )}
+      </SmoothBottomSheetModal>
 
       {/* Join Household with Code Modal */}
       <SmoothBottomSheetModal
@@ -3692,7 +4355,7 @@ const styles = StyleSheet.create({
   },
   expenseItemCard: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     padding: 14,
     borderRadius: 20,
     backgroundColor: "#FFFFFF",
@@ -3711,11 +4374,15 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.05)",
     justifyContent: "center",
     alignItems: "center",
+    alignSelf: "flex-start",
     marginRight: 14,
+    marginTop: 2,
   },
   expenseDetailsWrap: {
     flex: 1,
     paddingRight: 8,
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
   },
   expenseTitle: {
     fontSize: 15,
