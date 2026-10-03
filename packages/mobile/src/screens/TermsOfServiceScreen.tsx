@@ -6,718 +6,1137 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  TextInput,
+  Share,
+  Alert,
   Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useTheme } from "../context/ThemeContext";
 
-interface TermsOfServiceScreenProps {
+export interface TermsOfServiceScreenProps {
   onBack: () => void;
   onAccept?: () => void;
+  onOpenPrivacyPolicy?: () => void;
   showAcceptButton?: boolean;
 }
 
-interface SectionItem {
-  id: string;
-  number: string;
-  title: string;
-  content: string[];
-  keyPoints?: string[];
-}
-
-const SECTIONS: SectionItem[] = [
-  {
-    id: "acceptance",
-    number: "01",
-    title: "Acceptance of Terms",
-    content: [
-      'By creating an account, downloading, or using Splitzy (the "Service"), you agree to be legally bound by these Terms of Service ("Terms"). If you do not agree with any part of these Terms, you may not access or use the Service.',
-      "You must be at least 18 years of age or the legal age of majority in your jurisdiction to create an independent household. By agreeing, you represent that all registration information you submit is accurate and truthful.",
-    ],
-    keyPoints: [
-      "Agreement is required to create a household or join as a payor.",
-      "All submitted credentials and household data must be accurate.",
-    ],
-  },
-  {
-    id: "service-scope",
-    number: "02",
-    title: "Scope of Service & Utility Splitting",
-    content: [
-      "Splitzy provides a digital coordination system for roommates, housemates, and property hosts to track group expenditures, record utility meter readings, log attendance-based utility subtractions, and reconcile payment settlements.",
-      "Splitzy is not a registered bank, financial institution, or money transmitter. We do not hold escrow deposits or process fiat transfers directly. All financial transactions occur between roommates or via external payment channels (e.g., GCash, Maya, bank transfer, cash).",
-    ],
-    keyPoints: [
-      "Splitzy facilitates calculations and ledger recording only.",
-      "Roommates settle balances directly through their preferred payment methods.",
-    ],
-  },
-  {
-    id: "roles",
-    number: "03",
-    title: "Host and Payor Responsibilities",
-    content: [
-      "Household Host: The designated Host administers the household space, inputs utility invoices, defines billing cycles, sets default allocation rules, and verifies payment receipts uploaded by payors. Hosts agree to input legitimate utility amounts and preserve transparent calculation logs.",
-      "Roommate / Payor: Payors agree to review monthly statements promptly, declare accurate vacation dates or temporary absences before bill cycles lock, and submit legitimate proof of payment receipts upon settlement.",
-    ],
-    keyPoints: [
-      "Hosts must upload genuine bill receipts and maintain transparent ledgers.",
-      "Payors are responsible for timely review and settlement of assigned shares.",
-    ],
-  },
-  {
-    id: "centavo-math",
-    number: "04",
-    title: "Centavo Precision & Allocation Engine",
-    content: [
-      "Splitzy operates on an exact integer centavo math engine to prevent floating-point rounding errors. Bill shares are divided with mathematical precision, and any remaining fractional centavos are distributed deterministically according to our verified fairness algorithm.",
-      "Attendance adjustments for utilities (such as electricity, water, and gas) calculate daily rates based on validated days present during the specific billing cycle. Fixed recurring costs (such as unit rent or broadband internet) are distributed evenly unless otherwise agreed in writing.",
-    ],
-    keyPoints: [
-      "All calculations are performed with exact integer centavo precision.",
-      "Variable utilities reflect validated attendance days; fixed fees split evenly.",
-    ],
-  },
-  {
-    id: "receipts-payments",
-    number: "05",
-    title: "Receipt Verification & Payment Proofs",
-    content: [
-      "When settling bills, members may upload digital transfer receipts or screenshots. Users guarantee that all uploaded images represent genuine payment receipts with valid transaction reference numbers.",
-      "Hosts maintain final verification authority to approve or mark payments as pending upon confirming receipt of funds in their designated accounts. Splitzy maintains an immutable audit trail of all settlement actions.",
-    ],
-    keyPoints: [
-      "Never upload fraudulent, forged, or duplicate payment receipts.",
-      "Full audit logs record who uploaded, approved, or adjusted every bill.",
-    ],
-  },
-  {
-    id: "attendance-rules",
-    number: "06",
-    title: "Attendance Logging & Vacation Policies",
-    content: [
-      "Residents must mark periods of absence or vacation prior to the host finalizing the monthly billing cycle. Once a billing period is locked and archived by the Host, historical attendance adjustments cannot be retroactively applied without Host re-calculation.",
-      "Hosts may configure minimum threshold rules (e.g., absences under 3 days do not qualify for utility discounts) as agreed upon within the household charter.",
-    ],
-    keyPoints: [
-      "Absences must be logged before the billing cycle is officially finalized.",
-      "Household-level custom rules govern minimum day deduction thresholds.",
-    ],
-  },
-  {
-    id: "acceptable-use",
-    number: "07",
-    title: "Acceptable Use & User Conduct",
-    content: [
-      "You agree not to use Splitzy for any unlawful purpose, money laundering, harassment of roommates, or unauthorized data scraping.",
-      "Any member found intentionally fabricating billing amounts, forging receipts, or attempting to compromise the security of other households will have their account immediately suspended.",
-    ],
-    keyPoints: [
-      "Zero tolerance for forged receipts or fraudulent expense reports.",
-      "Violation results in immediate household revocation and account suspension.",
-    ],
-  },
-  {
-    id: "termination",
-    number: "08",
-    title: "Termination & Data Export",
-    content: [
-      "You may leave a household or request account deletion at any time. When leaving a household, your historical payment records remain part of the household ledger for tax and dispute accountability.",
-      "Hosts wishing to close an active household must ensure all pending member dues have been marked resolved or forgiven prior to archiving the group.",
-    ],
-    keyPoints: [
-      "You retain the right to export your billing transaction history.",
-      "Archived ledger entries are retained for household accounting integrity.",
-    ],
-  },
-  {
-    id: "disclaimer",
-    number: "09",
-    title: "Disclaimer of Warranties & Liability",
-    content: [
-      'Splitzy is provided on an "AS IS" and "AS AVAILABLE" basis. While we strive for 100% calculation accuracy and high availability, we are not liable for roommate interpersonal disputes, unpaid rents, eviction proceedings, or external payment processor delays.',
-      "Under no circumstances shall Splitzy, its developers, or affiliates be liable for indirect, incidental, or consequential damages resulting from household bill disputes.",
-    ],
-  },
-  {
-    id: "contact",
-    number: "10",
-    title: "Modifications & Contact",
-    content: [
-      "We reserve the right to modify these Terms at any time. We will provide in-app notification when material updates are published. Continued use after changes constitutes agreement.",
-      "For questions regarding these Terms or household dispute assistance, please reach out to our team at support@splitzy.app or visit our website.",
-    ],
-  },
+const QUICK_NAV_ITEMS = [
+  { id: "acceptance", label: "1. Acceptance" },
+  { id: "accounts", label: "2. Accounts" },
+  { id: "splits", label: "3. Expense Splits" },
+  { id: "payments", label: "4. Payments & Non-Banking" },
+  { id: "conduct", label: "5. Conduct" },
+  { id: "modifications", label: "6. Termination" },
 ];
 
 export const TermsOfServiceScreen: React.FC<TermsOfServiceScreenProps> = ({
   onBack,
   onAccept,
-  showAcceptButton = false,
+  onOpenPrivacyPolicy,
+  showAcceptButton = true,
 }) => {
   const insets = useSafeAreaInsets();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeSectionId, setActiveSectionId] = useState<string>("acceptance");
+  const { isDark, colors } = useTheme();
   const scrollViewRef = useRef<ScrollView>(null);
 
-  const filteredSections = SECTIONS.filter(
-    (s) =>
-      s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.content.some((p) =>
-        p.toLowerCase().includes(searchQuery.toLowerCase()),
-      ),
+  const [activeNav, setActiveNav] = useState("acceptance");
+  const [isAgreed, setIsAgreed] = useState(false);
+  const sectionPositions = useRef<Record<string, number>>({});
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        title: "Splitzy Terms of Service",
+        message:
+          "Splitzy Legal Agreement & Household Expense Splitting Protocols: https://splitzy.app/terms",
+      });
+    } catch {
+      // Ignore cancel
+    }
+  };
+
+  const handleScrollToSection = (id: string) => {
+    setActiveNav(id);
+    const y = sectionPositions.current[id];
+    if (y !== undefined && scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        y: Math.max(0, y - 16),
+        animated: true,
+      });
+    }
+  };
+
+  const handleAccept = () => {
+    if (!isAgreed) {
+      Alert.alert(
+        "Agreement Required",
+        "Please confirm that you have reviewed and agree to the Splitzy Terms of Service before continuing.",
+      );
+      return;
+    }
+    if (onAccept) {
+      onAccept();
+    } else {
+      onBack();
+    }
+  };
+
+  const topInset = Math.max(
+    Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+    insets.top,
+    Platform.OS === "ios" ? 44 : 20,
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View
+      style={[
+        styles.screen,
+        { backgroundColor: isDark ? colors.background : "#F8FAFC" },
+      ]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor="transparent"
+        translucent
+      />
 
-      {/* Top Header */}
-      <View style={styles.header}>
+      {/* Header Bar */}
+      <View
+        style={[
+          styles.headerBar,
+          {
+            paddingTop: topInset + 8,
+            backgroundColor: isDark ? colors.surface : "#FFFFFF",
+            borderBottomColor: isDark ? colors.border : "#F1F5F9",
+          },
+        ]}
+      >
         <TouchableOpacity
+          style={[
+            styles.headerCircleBtn,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
           onPress={onBack}
-          style={styles.backButton}
           activeOpacity={0.7}
-          accessibilityLabel="Back"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Feather name="arrow-left" size={22} color="#0F172A" />
+          <Feather
+            name="chevron-left"
+            size={22}
+            color={isDark ? colors.text : "#0F172A"}
+          />
         </TouchableOpacity>
 
-        <View style={styles.headerTitleContainer}>
-          <View style={styles.headerBadgeRow}>
-            <View style={styles.iconSquare}>
-              <Feather name="file-text" size={15} color="#2563EB" />
-            </View>
-            <Text style={styles.headerTitle}>Terms of Service</Text>
-          </View>
-          <Text style={styles.headerSubtitle}>
-            Splitzy Roommate Expense Platform
+        <View style={styles.headerTitleWrap}>
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: isDark ? colors.text : "#0F172A" },
+            ]}
+          >
+            Terms of Service
+          </Text>
+          <Text
+            style={[
+              styles.headerSubtitle,
+              { color: isDark ? colors.textSecondary : "#64748B" },
+            ]}
+          >
+            Splitzy Legal Agreement
           </Text>
         </View>
 
-        <View style={styles.headerActionPlaceholder} />
-      </View>
-
-      {/* Metadata Bar */}
-      <View style={styles.metadataBar}>
-        <View style={styles.metadataItem}>
-          <Feather name="calendar" size={13} color="#64748B" />
-          <Text style={styles.metadataText}>Updated September 2026</Text>
-        </View>
-        <Text style={styles.metadataDot}>·</Text>
-        <View style={styles.metadataItem}>
-          <Feather name="shield" size={13} color="#64748B" />
-          <Text style={styles.metadataText}>Version 2.4</Text>
-        </View>
-      </View>
-
-      {/* Search Input */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBox}>
-          <Feather name="search" size={16} color="#94A3B8" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search terms or clauses..."
-            placeholderTextColor="#94A3B8"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            clearButtonMode="while-editing"
+        <TouchableOpacity
+          style={[
+            styles.headerCircleBtn,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onPress={handleShare}
+          activeOpacity={0.7}
+        >
+          <Feather
+            name="share"
+            size={18}
+            color={isDark ? colors.text : "#0F172A"}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <Feather name="x-circle" size={16} color="#94A3B8" />
-            </TouchableOpacity>
-          )}
-        </View>
+        </TouchableOpacity>
       </View>
 
-      {/* Quick Jump Section Pills (when not searching) */}
-      {searchQuery.trim().length === 0 && (
-        <View style={styles.quickNavWrapper}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.quickNavScroll}
-          >
-            {SECTIONS.map((sec) => (
-              <TouchableOpacity
-                key={sec.id}
-                style={[
-                  styles.quickNavPill,
-                  activeSectionId === sec.id && styles.quickNavPillActive,
-                ]}
-                onPress={() => setActiveSectionId(sec.id)}
-                activeOpacity={0.75}
-              >
-                <Text
-                  style={[
-                    styles.quickNavText,
-                    activeSectionId === sec.id && styles.quickNavTextActive,
-                  ]}
-                >
-                  {sec.number}. {sec.title.split(" ")[0]}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Content Scroll View */}
       <ScrollView
         ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom + 28, 40) },
+          { paddingBottom: insets.bottom + 100 },
         ]}
-        showsVerticalScrollIndicator={true}
+        showsVerticalScrollIndicator={false}
       >
-        {/* Intro Highlight Banner */}
-        <View style={styles.introCard}>
-          <View style={styles.introHeaderRow}>
-            <Ionicons name="information-circle" size={20} color="#2563EB" />
-            <Text style={styles.introTitle}>Summary for Roommates</Text>
+        {/* Top Meta Pill Row */}
+        <View style={styles.metaRow}>
+          <View
+            style={[
+              styles.versionPill,
+              {
+                backgroundColor: isDark ? "rgba(37, 99, 235, 0.15)" : "#EFF6FF",
+                borderColor: isDark ? "rgba(37, 99, 235, 0.3)" : "#DBEAFE",
+              },
+            ]}
+          >
+            <Ionicons name="checkmark-circle" size={14} color="#2563EB" />
+            <Text style={styles.versionPillText}>
+              Version 3.4 • Last updated: Oct 2025
+            </Text>
           </View>
-          <Text style={styles.introBody}>
-            Splitzy is designed to foster harmony and transparency. Our software
-            calculates precise mathematical splits using integer centavo
-            precision and verified attendance. Please read these terms to
-            understand your rights, payment settlement duties, and host
-            privileges.
+          <Text
+            style={[
+              styles.readTimeText,
+              { color: isDark ? colors.textSecondary : "#94A3B8" },
+            ]}
+          >
+            6 min read
           </Text>
         </View>
 
-        {/* Section Cards */}
-        {filteredSections.map((sec) => {
-          const isActive = activeSectionId === sec.id && !searchQuery;
-          return (
-            <View
-              key={sec.id}
+        {/* Hero Gradient Card: Roommate Harmony First */}
+        <LinearGradient
+          colors={["#2563EB", "#1D4ED8"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.heroIconBox}>
+            <MaterialCommunityIcons
+              name="handshake-outline"
+              size={22}
+              color="#FFFFFF"
+            />
+          </View>
+          <Text style={styles.heroTitle}>Roommate Harmony First</Text>
+          <Text style={styles.heroBody}>
+            Welcome to Splitzy. By logging rent, utilities, groceries, and
+            managing shared expenses, you agree to these legal conditions
+            designed to keep household finances transparent, fair, and
+            dispute-free.
+          </Text>
+        </LinearGradient>
+
+        {/* Quick Navigation Header & Pills */}
+        <View style={styles.quickNavSection}>
+          <View style={styles.quickNavHeaderRow}>
+            <Text
               style={[
-                styles.sectionCard,
-                isActive && styles.sectionCardHighlighted,
+                styles.quickNavHeaderTitle,
+                { color: isDark ? colors.textSecondary : "#94A3B8" },
               ]}
             >
-              {/* Section Header */}
-              <View style={styles.sectionHeaderRow}>
-                <View style={styles.sectionNumberBadge}>
-                  <Text style={styles.sectionNumberText}>{sec.number}</Text>
-                </View>
-                <Text style={styles.sectionTitle}>{sec.title}</Text>
-              </View>
+              QUICK NAVIGATION
+            </Text>
+            <Text style={styles.quickNavTapToJump}>Tap to jump</Text>
+          </View>
 
-              {/* Section Body */}
-              <View style={styles.sectionBody}>
-                {sec.content.map((paragraph, pIdx) => (
-                  <Text key={pIdx} style={styles.paragraphText}>
-                    {paragraph}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickNavScroll}
+          >
+            {QUICK_NAV_ITEMS.map((item) => {
+              const isActive = activeNav === item.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.quickNavPill,
+                    {
+                      backgroundColor: isActive
+                        ? isDark
+                          ? "#2563EB"
+                          : "#EFF6FF"
+                        : isDark
+                          ? colors.card
+                          : "#FFFFFF",
+                      borderColor: isActive
+                        ? "#93C5FD"
+                        : isDark
+                          ? colors.border
+                          : "#E2E8F0",
+                    },
+                  ]}
+                  onPress={() => handleScrollToSection(item.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.quickNavPillText,
+                      {
+                        color: isActive
+                          ? isDark
+                            ? "#FFFFFF"
+                            : "#2563EB"
+                          : isDark
+                            ? colors.textSecondary
+                            : "#64748B",
+                        fontWeight: isActive ? "700" : "600",
+                      },
+                    ]}
+                  >
+                    {item.label}
                   </Text>
-                ))}
-              </View>
-
-              {/* Key Takeaways if available */}
-              {sec.keyPoints && sec.keyPoints.length > 0 && (
-                <View style={styles.keyPointsBox}>
-                  <Text style={styles.keyPointsTitle}>Key Principles:</Text>
-                  {sec.keyPoints.map((point, kIdx) => (
-                    <View key={kIdx} style={styles.keyPointRow}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={15}
-                        color="#10B981"
-                        style={{ marginTop: 2, marginRight: 6 }}
-                      />
-                      <Text style={styles.keyPointText}>{point}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          );
-        })}
-
-        {filteredSections.length === 0 && (
-          <View style={styles.emptyState}>
-            <Feather name="search" size={32} color="#94A3B8" />
-            <Text style={styles.emptyTitle}>No matching clauses found</Text>
-            <Text style={styles.emptySubtitle}>
-              Try searching with different keywords like "utility", "host", or
-              "payment".
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyResetBtn}
-              onPress={() => setSearchQuery("")}
-            >
-              <Text style={styles.emptyResetText}>Clear Search</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Support & Legal Inquiries Card */}
-        <View style={styles.supportCard}>
-          <Feather name="mail" size={20} color="#2563EB" />
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.supportTitle}>
-              Have questions about our Terms?
-            </Text>
-            <Text style={styles.supportText}>
-              Reach our legal & customer success team at support@splitzy.app
-            </Text>
-          </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
-      </ScrollView>
 
-      {/* Optional Sticky Accept Button (for registration / onboarding flows) */}
-      {showAcceptButton && (
+        {/* SECTION 1: Acceptance of Terms & Eligibility */}
         <View
           style={[
-            styles.bottomStickyBar,
-            { paddingBottom: Math.max(insets.bottom + 12, 20) },
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
           ]}
+          onLayout={(e) => {
+            sectionPositions.current["acceptance"] = e.nativeEvent.layout.y;
+          }}
         >
-          <TouchableOpacity
-            style={styles.acceptButton}
-            onPress={onAccept || onBack}
-            activeOpacity={0.88}
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>1</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Acceptance of Terms & Eligibility
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.clauseBody,
+              { color: isDark ? colors.textSecondary : "#334155" },
+            ]}
           >
-            <Text style={styles.acceptButtonText}>I Agree to the Terms</Text>
-            <Feather name="check" size={18} color="#FFFFFF" />
+            By downloading, accessing, or using the Splitzy application, you
+            represent that you are at least 18 years old and legally competent
+            to enter into this contract. Splitzy is intended exclusively for
+            non-commercial residential roommates, household members, and
+            domestic partners to balance communal overheads.
+          </Text>
+
+          {/* Info Callout */}
+          <View
+            style={[
+              styles.infoCallout,
+              {
+                backgroundColor: isDark ? "rgba(37, 99, 235, 0.12)" : "#EFF6FF",
+                borderColor: isDark ? "rgba(37, 99, 235, 0.25)" : "#BFDBFE",
+              },
+            ]}
+          >
+            <Feather
+              name="info"
+              size={16}
+              color="#2563EB"
+              style={{ marginTop: 2 }}
+            />
+            <Text
+              style={[
+                styles.infoCalloutText,
+                { color: isDark ? "#93C5FD" : "#1E40AF" },
+              ]}
+            >
+              If you do not agree with any clause within this document, you must
+              immediately deactivate your household group and uninstall the
+              application.
+            </Text>
+          </View>
+        </View>
+
+        {/* SECTION 2: Account Security & Roommate Groups */}
+        <View
+          style={[
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onLayout={(e) => {
+            sectionPositions.current["accounts"] = e.nativeEvent.layout.y;
+          }}
+        >
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>2</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Account Security & Roommate Groups
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.clauseBody,
+              { color: isDark ? colors.textSecondary : "#334155" },
+            ]}
+          >
+            You must provide true and verified contact information (phone number
+            and active email address). You are solely responsible for all
+            entries and approvals made under your credentials.
+          </Text>
+
+          {/* Sub Grid Tiles */}
+          <View style={styles.subGridRow}>
+            <View
+              style={[
+                styles.subGridTile,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                  borderColor: isDark ? colors.border : "#E2E8F0",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.subGridTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Invites & Keys
+              </Text>
+              <Text
+                style={[
+                  styles.subGridText,
+                  { color: isDark ? colors.textSecondary : "#64748B" },
+                ]}
+              >
+                Only share household join codes with verified co-tenants.
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.subGridTile,
+                {
+                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                  borderColor: isDark ? colors.border : "#E2E8F0",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.subGridTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Group Admin
+              </Text>
+              <Text
+                style={[
+                  styles.subGridText,
+                  { color: isDark ? colors.textSecondary : "#64748B" },
+                ]}
+              >
+                The leaseholder or creator holds authority to archive rooms.
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* SECTION 3: Expense Splitting & Calculation Rules */}
+        <View
+          style={[
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onLayout={(e) => {
+            sectionPositions.current["splits"] = e.nativeEvent.layout.y;
+          }}
+        >
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>3</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Expense Splitting & Calculation Rules
+            </Text>
+          </View>
+
+          <Text
+            style={[
+              styles.clauseLeadText,
+              { color: isDark ? colors.textSecondary : "#475569" },
+            ]}
+          >
+            Splitzy offers multiple calculation paradigms:
+          </Text>
+
+          <View style={styles.ruleBulletList}>
+            <View style={styles.ruleBulletRow}>
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={18}
+                color="#2563EB"
+                style={{ marginTop: 1 }}
+              />
+              <Text
+                style={[
+                  styles.ruleBulletText,
+                  { color: isDark ? colors.text : "#334155" },
+                ]}
+              >
+                <Text style={{ fontWeight: "700" }}>Equal Distribution: </Text>
+                Total receipt sum divided evenly across all active household
+                members.
+              </Text>
+            </View>
+
+            <View style={styles.ruleBulletRow}>
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={18}
+                color="#2563EB"
+                style={{ marginTop: 1 }}
+              />
+              <Text
+                style={[
+                  styles.ruleBulletText,
+                  { color: isDark ? colors.text : "#334155" },
+                ]}
+              >
+                <Text style={{ fontWeight: "700" }}>
+                  Custom Ratios & Sq. Footage:{" "}
+                </Text>
+                Room-based percentages determined during initial room
+                configuration.
+              </Text>
+            </View>
+
+            <View style={styles.ruleBulletRow}>
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={18}
+                color="#2563EB"
+                style={{ marginTop: 1 }}
+              />
+              <Text
+                style={[
+                  styles.ruleBulletText,
+                  { color: isDark ? colors.text : "#334155" },
+                ]}
+              >
+                <Text style={{ fontWeight: "700" }}>
+                  Attendance Utility Offsets:{" "}
+                </Text>
+                Prorated metrics when a tenant is absent for prolonged periods
+                (as configured by group consent).
+              </Text>
+            </View>
+          </View>
+
+          <Text
+            style={[
+              styles.italicAuditNote,
+              { color: isDark ? colors.textSecondary : "#64748B" },
+            ]}
+          >
+            All roommates share joint responsibility for auditing receipts
+            within 14 calendar days of upload.
+          </Text>
+        </View>
+
+        {/* SECTION 4: Payments, Ledger & Non-Banking Status */}
+        <View
+          style={[
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onLayout={(e) => {
+            sectionPositions.current["payments"] = e.nativeEvent.layout.y;
+          }}
+        >
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>4</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Payments, Ledger & Non-Banking Status
+            </Text>
+          </View>
+
+          {/* Warm Amber Bank Warning Box */}
+          <View
+            style={[
+              styles.bankingWarningBox,
+              {
+                backgroundColor: isDark
+                  ? "rgba(245, 158, 11, 0.12)"
+                  : "#FFFBEB",
+                borderColor: isDark ? "rgba(245, 158, 11, 0.28)" : "#FEF3C7",
+              },
+            ]}
+          >
+            <View style={styles.bankingWarningHeader}>
+              <MaterialCommunityIcons
+                name="bank-outline"
+                size={20}
+                color="#B45309"
+              />
+              <Text style={styles.bankingWarningTitle}>
+                Splitzy is Not a Banking Institution
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.bankingWarningBody,
+                { color: isDark ? "#FDE68A" : "#78350F" },
+              ]}
+            >
+              Splitzy does not store user deposits, issue loans, or hold escrow
+              funds. Our application operates solely as a synchronization{" "}
+              <Text style={{ fontWeight: "700" }}>
+                ledger for recordkeeping
+              </Text>
+              .
+            </Text>
+          </View>
+
+          <Text
+            style={[
+              styles.clauseBody,
+              { color: isDark ? colors.textSecondary : "#334155" },
+            ]}
+          >
+            When marking a debt as "Settled via Cash", "Venmo", "Zelle", or
+            "Bank Transfer", you confirm that the underlying physical or digital
+            fiat transaction has been fully executed outside the application.
+            Splitzy bears no liability for unfulfilled promises or incorrect
+            peer-to-peer external routing.
+          </Text>
+        </View>
+
+        {/* SECTION 5: Prohibited Conduct */}
+        <View
+          style={[
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onLayout={(e) => {
+            sectionPositions.current["conduct"] = e.nativeEvent.layout.y;
+          }}
+        >
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>5</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Prohibited Conduct
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.clauseBody,
+              { color: isDark ? colors.textSecondary : "#334155" },
+            ]}
+          >
+            Users agree not to exploit the platform for money laundering,
+            recording fictitious fraudulent debts to coerce roommates,
+            generating harassing expense descriptions, or reverse engineering
+            application algorithms.
+          </Text>
+        </View>
+
+        {/* SECTION 6: Modifications & Termination */}
+        <View
+          style={[
+            styles.clauseCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isDark ? colors.border : "#E2E8F0",
+            },
+          ]}
+          onLayout={(e) => {
+            sectionPositions.current["modifications"] = e.nativeEvent.layout.y;
+          }}
+        >
+          <View style={styles.clauseHeaderRow}>
+            <View style={styles.clauseBadge}>
+              <Text style={styles.clauseBadgeText}>6</Text>
+            </View>
+            <Text
+              style={[
+                styles.clauseTitle,
+                { color: isDark ? colors.text : "#0F172A" },
+              ]}
+            >
+              Modifications & Termination
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.clauseBody,
+              { color: isDark ? colors.textSecondary : "#334155" },
+            ]}
+          >
+            We reserve the right to revise these terms to reflect local tenancy
+            guidelines or software enhancements. Continued usage 30 days after
+            in-app push notification represents binding consent.
+          </Text>
+        </View>
+
+        {/* Security Badge */}
+        <View style={styles.encryptionBadgeRow}>
+          <Feather name="lock" size={14} color="#94A3B8" />
+          <Text
+            style={[
+              styles.encryptionBadgeText,
+              { color: isDark ? colors.textSecondary : "#64748B" },
+            ]}
+          >
+            256-Bit Encrypted Household Ledgers
+          </Text>
+        </View>
+
+        {/* Agreement Checkbox Card */}
+        <TouchableOpacity
+          style={[
+            styles.checkboxCard,
+            {
+              backgroundColor: isDark ? colors.card : "#FFFFFF",
+              borderColor: isAgreed
+                ? "#2563EB"
+                : isDark
+                  ? colors.border
+                  : "#E2E8F0",
+            },
+          ]}
+          onPress={() => setIsAgreed(!isAgreed)}
+          activeOpacity={0.8}
+        >
+          <View
+            style={[
+              styles.checkboxBox,
+              {
+                borderColor: isAgreed ? "#2563EB" : "#CBD5E1",
+                backgroundColor: isAgreed ? "#2563EB" : "transparent",
+              },
+            ]}
+          >
+            {isAgreed && <Feather name="check" size={13} color="#FFFFFF" />}
+          </View>
+          <Text
+            style={[
+              styles.checkboxLabel,
+              { color: isDark ? colors.text : "#334155" },
+            ]}
+          >
+            I confirm that I have reviewed the Splitzy Terms of Service and
+            agree to <Text style={{ fontWeight: "700" }}>abide</Text> by the
+            household expense splitting protocols.
+          </Text>
+        </TouchableOpacity>
+
+        {/* Primary CTA Button */}
+        {showAcceptButton && (
+          <TouchableOpacity
+            style={[
+              styles.acceptBtn,
+              {
+                opacity: isAgreed ? 1 : 0.65,
+              },
+            ]}
+            onPress={handleAccept}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.acceptBtnText}>Accept & Continue</Text>
+            <Feather name="arrow-right" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
+
+        {/* Secondary Links */}
+        <View style={styles.secondaryLinksRow}>
+          <TouchableOpacity
+            onPress={() => {
+              if (onOpenPrivacyPolicy) {
+                onOpenPrivacyPolicy();
+              } else {
+                Alert.alert(
+                  "Privacy Policy",
+                  "Review Splitzy Privacy & Security Trust protocols in your profile settings.",
+                );
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.secondaryLinkText}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.secondaryDot}>•</Text>
+          <TouchableOpacity
+            onPress={() => {
+              Alert.alert(
+                "Roommate Dispute FAQ",
+                "Splitzy provides calculation logs and audit timestamps to help tenants resolve discrepancies peacefully. In case of disagreement, consult the timestamped ledger in Group Reports.",
+              );
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.secondaryLinkText}>Roommate Dispute FAQ</Text>
           </TouchableOpacity>
         </View>
-      )}
+      </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
   },
-  header: {
+  headerBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
+    paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
   },
-  backButton: {
+  headerCircleBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: 20,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F1F5F9",
   },
-  headerTitleContainer: {
-    alignItems: "center",
-    flex: 1,
-    marginHorizontal: 8,
-  },
-  headerBadgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  iconSquare: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: "#EFF6FF",
+  headerTitleWrap: {
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "800",
-    color: "#0F172A",
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
     fontSize: 11,
-    color: "#64748B",
-    marginTop: 1,
     fontWeight: "500",
-  },
-  headerActionPlaceholder: {
-    width: 40,
-  },
-  metadataBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    gap: 8,
-  },
-  metadataItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  metadataText: {
-    fontSize: 11,
-    color: "#64748B",
-    fontWeight: "600",
-  },
-  metadataDot: {
-    color: "#94A3B8",
-    fontSize: 12,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 6,
-    backgroundColor: "#FFFFFF",
-  },
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F1F5F9",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 40,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    color: "#0F172A",
-    paddingVertical: 0,
-  },
-  quickNavWrapper: {
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    paddingBottom: 10,
-  },
-  quickNavScroll: {
-    paddingHorizontal: 16,
-    gap: 6,
-  },
-  quickNavPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: "#F1F5F9",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-  quickNavPillActive: {
-    backgroundColor: "#EFF6FF",
-    borderColor: "#93C5FD",
-  },
-  quickNavText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#64748B",
-  },
-  quickNavTextActive: {
-    color: "#2563EB",
-    fontWeight: "700",
+    marginTop: 1,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
-    gap: 14,
+    gap: 16,
   },
-  introCard: {
-    backgroundColor: "#EFF6FF",
-    borderRadius: 16,
-    padding: 16,
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+  },
+  versionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
   },
-  introHeaderRow: {
+  versionPillText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  readTimeText: {
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  heroCard: {
+    borderRadius: 20,
+    padding: 20,
+  },
+  heroIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  heroTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 6,
+    letterSpacing: -0.2,
+  },
+  heroBody: {
+    fontSize: 12.5,
+    color: "rgba(255, 255, 255, 0.9)",
+    lineHeight: 19,
+  },
+  quickNavSection: {
+    gap: 10,
+  },
+  quickNavHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+  },
+  quickNavHeaderTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  quickNavTapToJump: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  quickNavScroll: {
+    gap: 8,
+    paddingHorizontal: 2,
+  },
+  quickNavPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  quickNavPillText: {
+    fontSize: 12,
+  },
+  clauseCard: {
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+  },
+  clauseHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  clauseBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clauseBadgeText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  clauseTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    flex: 1,
+    letterSpacing: -0.2,
+  },
+  clauseBody: {
+    fontSize: 12.5,
+    lineHeight: 19,
+  },
+  infoCallout: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    marginTop: 12,
+  },
+  infoCalloutText: {
+    flex: 1,
+    fontSize: 11.5,
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+  subGridRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  subGridTile: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+  },
+  subGridTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  subGridText: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  clauseLeadText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  ruleBulletList: {
+    gap: 8,
+    marginBottom: 8,
+  },
+  ruleBulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  ruleBulletText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  italicAuditNote: {
+    fontSize: 11.5,
+    fontStyle: "italic",
+    lineHeight: 17,
+    marginTop: 8,
+  },
+  bankingWarningBox: {
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  bankingWarningHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     marginBottom: 6,
   },
-  introTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#1E40AF",
+  bankingWarningTitle: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#92400E",
   },
-  introBody: {
+  bankingWarningBody: {
     fontSize: 12,
-    color: "#1E3A8A",
     lineHeight: 18,
-    fontWeight: "500",
   },
-  sectionCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
-  },
-  sectionCardHighlighted: {
-    borderColor: "#93C5FD",
-    backgroundColor: "#FFFFFF",
-  },
-  sectionHeaderRow: {
+  encryptionBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
-    gap: 10,
-  },
-  sectionNumberBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: "#F1F5F9",
-    alignItems: "center",
     justifyContent: "center",
-  },
-  sectionNumberText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#2563EB",
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#0F172A",
-    flex: 1,
-  },
-  sectionBody: {
-    gap: 8,
-  },
-  paragraphText: {
-    fontSize: 12.5,
-    color: "#334155",
-    lineHeight: 19,
-  },
-  keyPointsBox: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
     gap: 6,
+    marginTop: 4,
+    marginBottom: 4,
   },
-  keyPointsTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    marginBottom: 2,
+  encryptionBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
-  keyPointRow: {
+  checkboxCard: {
     flexDirection: "row",
     alignItems: "flex-start",
+    gap: 12,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
   },
-  keyPointText: {
-    flex: 1,
-    fontSize: 11.5,
-    color: "#0F766E",
-    fontWeight: "600",
-    lineHeight: 16,
-  },
-  emptyState: {
+  checkboxBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 48,
-    gap: 8,
+    marginTop: 2,
   },
-  emptyTitle: {
+  checkboxLabel: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  acceptBtn: {
+    backgroundColor: "#2563EB",
+    borderRadius: 16,
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#2563EB",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  acceptBtnText: {
+    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
-    color: "#0F172A",
   },
-  emptySubtitle: {
-    fontSize: 12,
-    color: "#64748B",
-    textAlign: "center",
-    maxWidth: 260,
+  secondaryLinksRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 4,
   },
-  emptyResetBtn: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "#EFF6FF",
-  },
-  emptyResetText: {
+  secondaryLinkText: {
     fontSize: 12,
     fontWeight: "700",
     color: "#2563EB",
   },
-  supportCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    marginTop: 8,
-  },
-  supportTitle: {
-    fontSize: 12.5,
-    fontWeight: "700",
-    color: "#0F172A",
-  },
-  supportText: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 1,
-  },
-  bottomStickyBar: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFFFFF",
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
-  },
-  acceptButton: {
-    backgroundColor: "#2563EB",
-    borderRadius: 14,
-    height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  acceptButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
+  secondaryDot: {
+    fontSize: 12,
+    color: "#94A3B8",
   },
 });

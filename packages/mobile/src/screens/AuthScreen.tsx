@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -12,6 +12,8 @@ import {
   useWindowDimensions,
   Image,
   Platform,
+  Animated,
+  Easing,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NavigationBar } from "../utils/safeNavigationBar";
@@ -29,6 +31,10 @@ import { mobileDataService } from "../services/firebaseDataService";
 import { assets } from "../../assets/assets";
 import { Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
+import { BlurView } from "expo-blur";
+import { authPinService, StoredPinUser } from "../services/authPinService";
+import { AuthPinScreen } from "./AuthPinScreen";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { ForgotPasswordScreen } from "./ForgotPasswordScreen";
 import { EmailVerificationScreen } from "./EmailVerificationScreen";
 import { OtpVerificationScreen } from "./OtpVerificationScreen";
@@ -41,22 +47,39 @@ interface AuthScreenProps {
     displayName: string;
     email: string;
     role?: string;
+    isNewSignup?: boolean;
   }) => void;
+  initialTab?: "signin" | "signup";
+  onBackToSavedProfile?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  onLoginSuccess,
+  initialTab,
+  onBackToSavedProfile,
+}) => {
   const { isDark, colors, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [authView, setAuthView] = useState<
     | "auth"
+    | "pin_auth"
     | "forgot_password"
     | "email_verification"
     | "otp_verification"
     | "terms_of_service"
     | "privacy_policy"
   >("auth");
-  const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
+  const [activeTab, setActiveTab] = useState<"signin" | "signup">(
+    initialTab || "signin",
+  );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -97,7 +120,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     }
   }, [isDark]);
 
-  const completeLogin = async (fbUser: any, fallbackRole: string = "PAYOR") => {
+  const completeLogin = async (
+    fbUser: any,
+    fallbackRole: string = "PAYOR",
+    isNewSignup: boolean = false,
+  ) => {
     try {
       const existingProfile = await Promise.race([
         mobileDataService.getUserProfile(fbUser.uid),
@@ -127,20 +154,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         })
         .catch((e) => console.warn("Background syncUserProfile warning:", e));
 
-      onLoginSuccess({
+      // Cache session password in authPinService for secure PIN credential encryption if user chooses to save
+      if (password) {
+        authPinService.setSessionPassword(fbUser.uid, password);
+      }
+
+      await onLoginSuccess({
         uid: fbUser.uid,
         displayName,
         email: fbUser.email || email.trim(),
         role: userRole,
+        isNewSignup,
       });
     } catch (err) {
       console.warn("completeLogin fallback warning:", err);
-      onLoginSuccess({
+      await onLoginSuccess({
         uid: fbUser.uid,
         displayName:
           fbUser.displayName || name.trim() || fbUser.email || "Resident",
         email: fbUser.email || email.trim(),
         role: fallbackRole,
+        isNewSignup,
       });
     }
   };
@@ -193,23 +227,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           password,
         );
 
-        // If unverified, guide user to email verification
-        if (!userCredential.user.emailVerified) {
-          try {
-            await sendEmailVerification(userCredential.user);
-          } catch (e) {
-            console.log("Email verification dispatch on signin notice:", e);
-          }
-          setPendingSignup({
-            fbUser: userCredential.user,
-            name: name.trim(),
-            email: email.trim(),
-            role: "PAYOR",
-          });
-          setAuthView("email_verification");
-          return;
-        }
-
+        // Complete login directly with primary credentials (email & password)
         await completeLogin(userCredential.user, "PAYOR");
       }
     } catch (err: any) {
@@ -244,13 +262,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
         WebBrowser.maybeCompleteAuthSession();
       }
+      // Note: For browser-based OAuth endpoints (expo-auth-session), Google requires a Web Client ID.
+      // Passing an Android-specific client ID to accounts.google.com/o/oauth2/v2/auth triggers Error 400: invalid_request.
       const clientId =
-        Platform.OS === "android"
-          ? googleAndroidClientId || googleWebClientId
-          : googleIosClientId || googleWebClientId;
-      const redirectUri = AuthSession.makeRedirectUri({
-        scheme: "splitzy",
-      });
+        googleWebClientId ||
+        (Platform.OS === "android" ? googleAndroidClientId : googleIosClientId);
+
+      // Use the registered redirect URI matching Google Cloud Console:
+      // Google Cloud has 'https://auth.expo.io/@splitzy01/splitzy-mobile' registered
+      const configuredRedirectUri =
+        process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI?.trim();
+      const redirectUri =
+        configuredRedirectUri ||
+        (Platform.OS === "web"
+          ? AuthSession.makeRedirectUri()
+          : "https://auth.expo.io/@splitzy01/splitzy-mobile");
+
       const discovery = {
         authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenEndpoint: "https://oauth2.googleapis.com/token",
@@ -312,7 +339,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         userName={pendingSignup.name}
         onVerified={async () => {
           try {
-            await completeLogin(pendingSignup.fbUser, pendingSignup.role);
+            await completeLogin(pendingSignup.fbUser, pendingSignup.role, true);
           } catch (e) {
             console.warn("onVerified completeLogin notice:", e);
             onLoginSuccess({
@@ -320,6 +347,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               displayName: pendingSignup.name || "Resident",
               email: pendingSignup.email,
               role: pendingSignup.role,
+              isNewSignup: true,
             });
           }
         }}
@@ -431,13 +459,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         >
           {/* Top Bar with Brand and Theme Toggle */}
           <View style={styles.topBarRow}>
-            <View style={styles.topBarSpacer} />
+            {onBackToSavedProfile ? (
+              <TouchableOpacity
+                style={styles.backToSavedBtn}
+                onPress={onBackToSavedProfile}
+                activeOpacity={0.7}
+                accessibilityLabel="Back to saved profile"
+              >
+                <Feather
+                  name="arrow-left"
+                  size={20}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.topBarSpacer} />
+            )}
 
             {/* Logo Badge */}
             <View style={styles.logoContainer}>
               <View style={styles.logoBadge}>
                 <Image
-                  source={assets.favicon}
+                  source={assets.sBlueLogo}
                   style={styles.logoImage}
                   resizeMode="cover"
                 />
@@ -688,7 +731,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               styles.bottomBlueContent,
               {
                 backgroundColor: bottomBgColor,
-                paddingBottom: Math.max(insets.bottom + 24, 42),
+                paddingBottom: Math.max(insets.bottom + 36, 56),
               },
             ]}
           >
@@ -903,6 +946,14 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
   },
+  backToSavedBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   themeToggleBtn: {
     width: 38,
     height: 38,
@@ -1015,9 +1066,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.2,
+    borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 14,
+    borderRadius: 48,
     paddingHorizontal: 14,
     height: 48,
   },
@@ -1072,7 +1123,7 @@ const styles = StyleSheet.create({
   /* Primary Button */
   primaryActionButton: {
     backgroundColor: "#2563EB",
-    borderRadius: 16,
+    borderRadius: 50,
     height: 50,
     justifyContent: "center",
     alignItems: "center",
@@ -1148,31 +1199,21 @@ const styles = StyleSheet.create({
   },
   socialButtonWhite: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 48,
     height: 48,
     width: "100%",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
   },
   socialButtonBlack: {
     backgroundColor: "#0F172A",
-    borderRadius: 16,
+    borderRadius: 48,
     height: 48,
     width: "100%",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
   },
   socialButtonInner: {
     flexDirection: "row",
@@ -1247,5 +1288,184 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: "#2563EB",
     zIndex: 9999,
+  },
+  inlineQuickPinCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    padding: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    marginTop: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  inlineQuickPinLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  inlineQuickPinAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  inlineQuickPinAvatarImg: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  inlineQuickPinAvatarText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  inlineQuickPinInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  inlineQuickPinHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  inlineQuickPinTitle: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  inlineQuickPinBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  inlineQuickPinBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  inlineQuickPinSubtitle: {
+    fontSize: 11.5,
+    fontWeight: "500",
+    color: "#64748B",
+  },
+  inlineQuickPinChevronBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  otherWaysInlineTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  otherWaysInlineBubble: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+  otherWaysInlineText: {
+    color: "#FFFFFF",
+    fontSize: 12.5,
+    fontWeight: "700",
+    letterSpacing: -0.1,
+  },
+  otherWaysModalBody: {
+    gap: 12,
+    paddingTop: 6,
+    paddingBottom: 10,
+  },
+  otherWaysOptionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    gap: 14,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  otherWaysOptionIconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  otherWaysOptionInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  otherWaysTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  otherWaysOptionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  configuredBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+  },
+  configuredBadgeText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#059669",
+  },
+  otherWaysOptionSubtitle: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  otherWaysOptionHint: {
+    fontSize: 11,
+    color: "#94A3B8",
+    marginTop: 1,
+  },
+  cancelOtherWaysBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  cancelOtherWaysText: {
+    fontSize: 13.5,
+    fontWeight: "700",
   },
 });

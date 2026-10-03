@@ -20,6 +20,8 @@ import {
   isPayorMember,
   cleanBillTitle,
   isCyclePaymentsLocked,
+  computeCycleWaterBreakdown,
+  computeFairSplitShareCentavos,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -297,15 +299,38 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
         return sum;
       }
 
-      if (isWater && mySplit && typeof mySplit.shareCentavos === "number") {
-        return sum + mySplit.shareCentavos;
+      if (isWater) {
+        const isPersonDayMode =
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel;
+        if (isPersonDayMode) {
+          const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+          const { getPayorShareCentavos } = computeCycleWaterBreakdown(
+            activeMembers,
+            cycleAttendance,
+            attendanceSubmissions,
+            rate,
+            e.splitDetails,
+          );
+          return sum + getPayorShareCentavos(currentUser?.uid);
+        }
+        if (mySplit && typeof mySplit.shareCentavos === "number") {
+          return sum + mySplit.shareCentavos;
+        }
       }
 
       const splitPayors = e.splitDetails
         ? e.splitDetails.filter((s: any) => !s.isExempt)
         : [];
+      const splitPayorsSum = splitPayors.reduce(
+        (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+        0,
+      );
       const isSplitStale =
-        splitPayors.length > 0 && splitPayors.length !== payorCount;
+        (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+        (!isWater &&
+          splitPayors.length > 0 &&
+          splitPayorsSum !== e.amountCents);
 
       if (
         !isSplitStale &&
@@ -317,11 +342,22 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
           return sum + mySplit.shareCentavos;
         }
       }
-      return sum + Math.round(e.amountCents / payorCount);
+      return (
+        sum +
+        computeFairSplitShareCentavos(
+          e.amountCents,
+          activePayors,
+          currentUser?.uid,
+        )
+      );
     }, 0);
   }, [
     currentCycleExpenses,
     activePayors,
+    activeMembers,
+    cycleAttendance,
+    attendanceSubmissions,
+    waterConfig,
     currentUser?.uid,
     isCurrentUserPayor,
   ]);
@@ -623,16 +659,49 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 : "Cloud synced"}
             </Text>
 
+            {/* Redesigned Hero Card with balanced, state-harmonious UI */}
             <View
               style={[
                 styles.heroCard,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  shadowOpacity: 0,
-                  elevation: 0,
-                },
+                isMyCycleSettled
+                  ? isDark
+                    ? {
+                        backgroundColor: colors.card,
+                        borderWidth: 1,
+                        borderColor: "rgba(16, 185, 129, 0.35)",
+                      }
+                    : {
+                        backgroundColor: "#FFFFFF",
+                        borderWidth: 1,
+                        borderColor: "#A7F3D0",
+                      }
+                  : myShareCents === 0
+                    ? isDark
+                      ? {
+                          backgroundColor: colors.card,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          shadowOpacity: 0,
+                          elevation: 0,
+                        }
+                      : {
+                          backgroundColor: "#FFFFFF",
+                          borderWidth: 1,
+                          borderColor: "#E2E8F0",
+                          shadowColor: "#0F172A",
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.05,
+                          shadowRadius: 10,
+                          elevation: 2,
+                        }
+                    : {
+                        backgroundColor: "#2563EB",
+                        shadowColor: "#2563EB",
+                        shadowOffset: { width: 0, height: 6 },
+                        shadowOpacity: 0.28,
+                        shadowRadius: 16,
+                        elevation: 5,
+                      },
               ]}
             >
               {!isCurrentUserPayor && (
@@ -641,24 +710,31 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 6,
-                    marginBottom: 6,
+                    marginBottom: 10,
                   }}
                 >
                   <View
                     style={{
                       backgroundColor: isDark
-                        ? colors.cardSecondary
-                        : "#E2E8F0",
-                      paddingHorizontal: 8,
+                        ? "rgba(255, 255, 255, 0.08)"
+                        : myShareCents > 0
+                          ? "rgba(255, 255, 255, 0.12)"
+                          : "#F1F5F9",
+                      paddingHorizontal: 9,
                       paddingVertical: 3,
                       borderRadius: 6,
                     }}
                   >
                     <Text
                       style={{
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: "800",
-                        color: isDark ? colors.textSecondary : "#475569",
+                        letterSpacing: 0.5,
+                        color: isDark
+                          ? colors.textSecondary
+                          : myShareCents > 0
+                            ? "#CBD5E1"
+                            : "#475569",
                       }}
                     >
                       EXEMPT (NON-PAYOR)
@@ -666,49 +742,141 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   </View>
                 </View>
               )}
-              <Text
-                style={[
-                  styles.heroLabel,
-                  isDark && { color: colors.textMuted },
-                ]}
-              >
-                Total Remaining Due
-              </Text>
+
+              <View style={styles.heroTopRow}>
+                <Text
+                  style={[
+                    styles.heroLabel,
+                    isMyCycleSettled
+                      ? { color: isDark ? "#34D399" : "#059669" }
+                      : myShareCents === 0
+                        ? { color: isDark ? colors.textMuted : "#64748B" }
+                        : { color: "rgba(255, 255, 255, 0.85)" },
+                  ]}
+                >
+                  Total Remaining Due
+                </Text>
+
+                {isMyCycleSettled ? (
+                  <View
+                    style={[
+                      styles.settledTopChip,
+                      isDark
+                        ? {
+                            backgroundColor: "rgba(16, 185, 129, 0.14)",
+                            borderColor: "rgba(16, 185, 129, 0.3)",
+                          }
+                        : {
+                            backgroundColor: "#ECFDF5",
+                            borderColor: "#A7F3D0",
+                          },
+                    ]}
+                  >
+                    <Feather
+                      name="check-circle"
+                      size={12}
+                      color={isDark ? "#34D399" : "#059669"}
+                    />
+                    <Text
+                      style={[
+                        styles.settledTopChipText,
+                        { color: isDark ? "#34D399" : "#047857" },
+                      ]}
+                    >
+                      Settled ✓
+                    </Text>
+                  </View>
+                ) : myShareCents === 0 ? (
+                  <View
+                    style={[
+                      styles.settledTopChip,
+                      isDark
+                        ? {
+                            backgroundColor: "rgba(255, 255, 255, 0.06)",
+                            borderColor: "rgba(255, 255, 255, 0.12)",
+                          }
+                        : {
+                            backgroundColor: "#F1F5F9",
+                            borderColor: "#E2E8F0",
+                          },
+                    ]}
+                  >
+                    <Feather
+                      name="check"
+                      size={12}
+                      color={isDark ? colors.textMuted : "#64748B"}
+                    />
+                    <Text
+                      style={[
+                        styles.settledTopChipText,
+                        { color: isDark ? colors.textSecondary : "#64748B" },
+                      ]}
+                    >
+                      Up to Date
+                    </Text>
+                  </View>
+                ) : isPaymentsLocked && !isHostUser ? (
+                  <View
+                    style={[
+                      styles.settledTopChip,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(245, 158, 11, 0.15)"
+                          : "rgba(245, 158, 11, 0.18)",
+                        borderColor: isDark
+                          ? "rgba(245, 158, 11, 0.35)"
+                          : "rgba(245, 158, 11, 0.35)",
+                      },
+                    ]}
+                  >
+                    <Feather name="lock" size={11} color="#FBBF24" />
+                    <Text
+                      style={[styles.settledTopChipText, { color: "#FBBF24" }]}
+                    >
+                      Locked
+                    </Text>
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      styles.settledTopChip,
+                      {
+                        backgroundColor: "rgba(255, 255, 255, 0.18)",
+                        borderColor: "rgba(255, 255, 255, 0.3)",
+                      },
+                    ]}
+                  >
+                    <Feather name="calendar" size={11} color="#FFFFFF" />
+                    <Text
+                      style={[styles.settledTopChipText, { color: "#FFFFFF" }]}
+                    >
+                      Due This Cycle
+                    </Text>
+                  </View>
+                )}
+              </View>
+
               <Text
                 style={[
                   styles.heroAmount,
-                  isDark && { color: colors.text },
-                  isMyCycleSettled && { color: isDark ? "#34D399" : "#16A34A" },
+                  isMyCycleSettled
+                    ? { color: isDark ? "#FFFFFF" : "#0F172A" }
+                    : myShareCents === 0
+                      ? { color: isDark ? "#FFFFFF" : "#0F172A" }
+                      : { color: "#FFFFFF" },
                 ]}
               >
                 {formatPesos(myShareCents)}
               </Text>
-              {isMyCycleSettled && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 6,
-                    marginTop: 2,
-                    marginBottom: 4,
-                  }}
-                >
-                  <Feather name="check-circle" size={14} color="#10B981" />
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: "700",
-                      color: isDark ? "#34D399" : "#16A34A",
-                    }}
-                  >
-                    All Settled! No remaining balance
-                  </Text>
-                </View>
-              )}
+
               <Text
                 style={[
                   styles.heroSub,
-                  isDark && { color: colors.textSecondary },
+                  isMyCycleSettled
+                    ? { color: isDark ? colors.textSecondary : "#475569" }
+                    : myShareCents === 0
+                      ? { color: isDark ? colors.textSecondary : "#64748B" }
+                      : { color: "rgba(255, 255, 255, 0.9)" },
                 ]}
               >
                 {isCurrentUserPayor
@@ -723,32 +891,35 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   <View
                     style={[
                       styles.payNowBtn,
+                      isDark
+                        ? {
+                            backgroundColor: "rgba(16, 185, 129, 0.12)",
+                            borderWidth: 1,
+                            borderColor: "rgba(16, 185, 129, 0.25)",
+                          }
+                        : {
+                            backgroundColor: "#ECFDF5",
+                            borderWidth: 1,
+                            borderColor: "#A7F3D0",
+                          },
                       {
-                        backgroundColor: isDark
-                          ? "rgba(16, 185, 129, 0.15)"
-                          : "#DCFCE7",
-                        borderWidth: 1,
-                        borderColor: isDark
-                          ? "rgba(16, 185, 129, 0.35)"
-                          : "#86EFAC",
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: 6,
+                        gap: 8,
                       },
                     ]}
                   >
                     <Feather
-                      name="check-circle"
-                      size={16}
-                      color={isDark ? "#34D399" : "#16A34A"}
+                      name="check"
+                      size={15}
+                      color={isDark ? "#34D399" : "#059669"}
                     />
                     <Text
                       style={[
                         styles.payNowText,
                         {
-                          color: isDark ? "#34D399" : "#15803D",
-                          fontWeight: "800",
+                          color: isDark ? "#34D399" : "#065F46",
                         },
                       ]}
                     >
@@ -759,29 +930,35 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   <View
                     style={[
                       styles.payNowBtn,
+                      isDark
+                        ? {
+                            backgroundColor: colors.cardSecondary,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                          }
+                        : {
+                            backgroundColor: "#F8FAFC",
+                            borderWidth: 1,
+                            borderColor: "#E2E8F0",
+                          },
                       {
-                        backgroundColor: isDark
-                          ? colors.cardSecondary
-                          : "#F1F5F9",
-                        borderWidth: 1,
-                        borderColor: isDark ? colors.border : "#CBD5E1",
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: 6,
+                        gap: 7,
                       },
                     ]}
                   >
                     <Feather
                       name="clock"
-                      size={15}
+                      size={14}
                       color={isDark ? colors.textSecondary : "#64748B"}
                     />
                     <Text
                       style={[
                         styles.payNowText,
                         {
-                          color: isDark ? colors.textSecondary : "#475569",
+                          color: isDark ? colors.textSecondary : "#64748B",
                           fontWeight: "700",
                         },
                       ]}
@@ -796,40 +973,40 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       {
                         backgroundColor: isDark
                           ? "rgba(245, 158, 11, 0.15)"
-                          : "#FEF3C7",
+                          : "rgba(245, 158, 11, 0.15)",
                         borderWidth: 1,
-                        borderColor: isDark
-                          ? "rgba(245, 158, 11, 0.35)"
-                          : "#FCD34D",
+                        borderColor: "rgba(245, 158, 11, 0.35)",
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: 6,
+                        gap: 8,
                       },
                     ]}
                   >
-                    <Feather
-                      name="lock"
-                      size={15}
-                      color={isDark ? "#FBBF24" : "#B45309"}
-                    />
+                    <Feather name="lock" size={14} color="#FBBF24" />
                     <Text
                       style={[
                         styles.payNowText,
                         {
-                          color: isDark ? "#FBBF24" : "#92400E",
-                          fontWeight: "800",
+                          color: "#FBBF24",
                         },
                       ]}
                     >
-                      Bills Under Review · Payments Locked
+                      Bills Under Review · Locked by Host
                     </Text>
                   </View>
                 ) : (
                   <TouchableOpacity
                     style={[
                       styles.payNowBtn,
-                      isDark && { backgroundColor: colors.primary },
+                      {
+                        backgroundColor: "#FFFFFF",
+                        shadowColor: "#000000",
+                        shadowOffset: { width: 0, height: 3 },
+                        shadowOpacity: 0.12,
+                        shadowRadius: 6,
+                        elevation: 3,
+                      },
                     ]}
                     onPress={() => {
                       if (onPayPress) onPayPress();
@@ -840,7 +1017,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                     <Text
                       style={[
                         styles.payNowText,
-                        isDark && { color: "#FFFFFF" },
+                        { color: "#2563EB", fontWeight: "800" },
                       ]}
                     >
                       Pay with GCash / Bank →
@@ -904,49 +1081,21 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                     const rate = Number(
                       waterConfig?.rateCentavosPerPersonPerDay ?? 500,
                     );
-                    const myAtt = cycleAttendance.filter(
-                      (a) =>
-                        a.userId === currentUser?.uid && a.status === "PRESENT",
-                    ).length;
-                    const mySub =
-                      attendanceSubmissions[currentUser?.uid || ""]
-                        ?.daysPresent || 0;
-                    const myDays = myAtt > 0 ? myAtt : mySub;
-                    const ownCost = myDays * rate;
-                    const totalNonPayorWater = members
-                      .filter((m) => m.status === "ACTIVE" && !isPayorMember(m))
-                      .reduce((npSum, np) => {
-                        const npUid = np.userId || np.memberId;
-                        const npAtt = cycleAttendance.filter(
-                          (a) => a.userId === npUid && a.status === "PRESENT",
-                        ).length;
-                        const npSub =
-                          attendanceSubmissions[npUid]?.daysPresent || 0;
-                        const npDays = npAtt > 0 ? npAtt : npSub;
-                        return npSum + npDays * rate;
-                      }, 0);
-                    const extraPerPayor =
-                      payorCount > 0
-                        ? Math.round(totalNonPayorWater / payorCount)
-                        : 0;
+                    const {
+                      getPayorShareCentavos,
+                      totalAmountCentavos: computedWaterTotal,
+                    } = computeCycleWaterBreakdown(
+                      activeMembers,
+                      cycleAttendance,
+                      attendanceSubmissions,
+                      rate,
+                      e.splitDetails,
+                    );
                     if (isCurrentUserPayor) {
-                      waterMyShare = ownCost + extraPerPayor;
+                      waterMyShare = getPayorShareCentavos(currentUser?.uid);
                     }
-
-                    const totalAllWater = members
-                      .filter((m) => m.status === "ACTIVE")
-                      .reduce((sum, m) => {
-                        const mUid = m.userId || m.memberId;
-                        const att = cycleAttendance.filter(
-                          (a) => a.userId === mUid && a.status === "PRESENT",
-                        ).length;
-                        const sub =
-                          attendanceSubmissions[mUid]?.daysPresent || 0;
-                        const days = att > 0 ? att : sub;
-                        return sum + days * rate;
-                      }, 0);
-                    if (totalAllWater > 0) {
-                      waterTotalCentavos = totalAllWater;
+                    if (computedWaterTotal > 0) {
+                      waterTotalCentavos = computedWaterTotal;
                     }
                   } else if (
                     waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
@@ -960,7 +1109,11 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       payorCount;
                   } else {
                     if (isCurrentUserPayor) {
-                      waterMyShare = Math.round(e.amountCents / payorCount);
+                      waterMyShare = computeFairSplitShareCentavos(
+                        e.amountCents,
+                        activePayors,
+                        currentUser?.uid,
+                      );
                     }
                   }
                 }
@@ -970,10 +1123,15 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                       (s: any) => !s.isExempt && s.shareCentavos > 0,
                     )
                   : [];
+                const splitPayorsSum = splitPayors.reduce(
+                  (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+                  0,
+                );
                 const isSplitStale =
                   !isWater &&
                   splitPayors.length > 0 &&
-                  splitPayors.length !== payorCount;
+                  (splitPayors.length !== payorCount ||
+                    splitPayorsSum !== e.amountCents);
                 const mySplit = e.splitDetails?.find(
                   (s: any) => s.userId === currentUser?.uid,
                 );
@@ -985,7 +1143,11 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                         mySplit &&
                         typeof mySplit.shareCentavos === "number"
                       ? mySplit.shareCentavos
-                      : Math.round(e.amountCents / payorCount);
+                      : computeFairSplitShareCentavos(
+                          e.amountCents,
+                          activePayors,
+                          currentUser?.uid,
+                        );
                 const dueInfo = getBillDueStatus(
                   e,
                   activeCycle,
@@ -1600,35 +1762,56 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: "900", color: "#0F172A" },
   subtitle: { fontSize: 12, color: "#64748B", marginTop: 2, marginBottom: 16 },
   heroCard: {
-    backgroundColor: "#2563EB",
     borderRadius: 22,
-    padding: 24,
+    padding: 22,
     marginBottom: 24,
-    shadowColor: "#2563EB",
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+  },
+  heroTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
   },
   heroLabel: {
-    color: "#BFDBFE",
-    fontSize: 12,
-    fontWeight: "bold",
+    fontSize: 11,
+    fontWeight: "800",
     textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   heroAmount: {
-    color: "#FFFFFF",
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: "900",
-    marginVertical: 6,
+    marginVertical: 4,
+    letterSpacing: -0.5,
   },
-  heroSub: { color: "#EFF6FF", fontSize: 11, marginBottom: 18 },
+  heroSub: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 18,
+  },
   payNowBtn: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     alignItems: "center",
+    justifyContent: "center",
   },
-  payNowText: { color: "#2563EB", fontWeight: "bold", fontSize: 13 },
+  payNowText: {
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  settledTopChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  settledTopChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   sectionTitle: {
     fontSize: 15,
     fontWeight: "800",
@@ -1704,6 +1887,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 1,
+    display: "none",
   },
   statusBadgeTextPaid: {
     color: "#047857",

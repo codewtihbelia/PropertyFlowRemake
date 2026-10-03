@@ -12,6 +12,7 @@ import {
   query,
   orderBy,
   writeBatch,
+  arrayUnion,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { updateProfile as updateAuthProfile } from "firebase/auth";
@@ -611,6 +612,464 @@ export function isPayorMember(member: any): boolean {
   return member.role !== "NON_PAYOR";
 }
 
+export function getMemberPrimaryId(member: any): string {
+  return String(member?.userId || member?.memberId || member?.id || "").trim();
+}
+
+export function matchesMemberUid(
+  member: any,
+  targetId?: string | null,
+): boolean {
+  if (!member || !targetId) return false;
+  const cleanTarget = String(targetId).trim();
+  if (!cleanTarget) return false;
+  const strippedTarget = cleanTarget.replace(/^mem_/, "");
+  const candidates = [member.userId, member.memberId, member.id]
+    .filter(Boolean)
+    .map((v) => String(v).trim());
+  return candidates.some(
+    (c) => c === cleanTarget || c.replace(/^mem_/, "") === strippedTarget,
+  );
+}
+
+/**
+ * Computes the exact centavo share for a payor at `payorIndex` out of `payorCount` payors
+ * using floor division + remainder distribution so the sum of all payor shares equals
+ * `totalCentavos` to the exact centavo (e.g., ₱800.00 / 3 => ₱266.67, ₱266.67, ₱266.66).
+ */
+export function getFairSplitShareAtIndex(
+  totalCentavos: number,
+  payorCount: number,
+  payorIndex: number,
+): number {
+  const count = Math.max(1, Math.floor(Number(payorCount) || 1));
+  const total = Math.max(0, Math.round(Number(totalCentavos) || 0));
+  const safeIndex =
+    payorIndex >= 0 && payorIndex < count ? Math.floor(payorIndex) : 0;
+  const baseShare = Math.floor(total / count);
+  const remainder = total % count;
+  return safeIndex < remainder ? baseShare + 1 : baseShare;
+}
+
+/**
+ * Resolves a specific payor's exact centavo fair share from a payors list.
+ * Matches `targetUid` against `payors` (via userId/memberId/id) to find their deterministic index.
+ */
+export function computeFairSplitShareCentavos(
+  totalCentavos: number,
+  payors: any[],
+  targetUid?: string | null,
+  fallbackIndex: number = 0,
+): number {
+  const safePayors = Array.isArray(payors) ? payors : [];
+  const count = Math.max(1, safePayors.length);
+  let idx = fallbackIndex;
+  if (targetUid && safePayors.length > 0) {
+    const foundIdx = safePayors.findIndex((p) =>
+      matchesMemberUid(p, targetUid),
+    );
+    if (foundIdx >= 0) {
+      idx = foundIdx;
+    }
+  }
+  return getFairSplitShareAtIndex(totalCentavos, count, idx);
+}
+
+function getPayorMapValue(
+  mapObj: Record<string, any> | undefined | null,
+  payorMember: any,
+): number {
+  if (!mapObj || typeof mapObj !== "object") return 0;
+  for (const [k, v] of Object.entries(mapObj)) {
+    if (matchesMemberUid(payorMember, k)) {
+      const num = Number(v);
+      return Number.isFinite(num) && num > 0 ? num : 0;
+    }
+  }
+  return 0;
+}
+
+export interface ComputedWaterMemberBreakdown {
+  userId: string;
+  displayName: string;
+  role: string;
+  isPayor: boolean;
+  isExempt: boolean;
+  daysPresent: number;
+  rateCentavosPerDay: number;
+  ownWaterCentavos: number;
+  nonPayorWaterCentavos: number;
+  nonPayorWaterNotes: string[];
+  nonPayorAllocationSummary: string;
+  shareCentavos: number;
+  note: string;
+}
+
+/**
+ * Shared deterministic calculator for PER_PERSON_DAY water attendance shares.
+ * Honors each Non-Payor's saved allocationMode (FAIR_SPLIT, SPECIFIC_PAYOR, CUSTOM_SPLIT)
+ * from attendanceSubmissions with fallback to existingSplitDetails.
+ */
+export function computeCycleWaterBreakdown(
+  activeMembers: any[],
+  cycleAttendance: any[] = [],
+  attendanceSubmissions: Record<string, any> | any[] = {},
+  rateCentavosPerDay: number = 500,
+  existingSplitDetails?: any[],
+): {
+  membersBreakdown: ComputedWaterMemberBreakdown[];
+  totalAmountCentavos: number;
+  getPayorShareCentavos: (targetUid?: string | null) => number;
+} {
+  const rate =
+    Number.isFinite(Number(rateCentavosPerDay)) &&
+    Number(rateCentavosPerDay) > 0
+      ? Number(rateCentavosPerDay)
+      : 500;
+  const safeMembers = Array.isArray(activeMembers) ? activeMembers : [];
+  const activePayors = safeMembers.filter((m) => isPayorMember(m));
+  const effectivePayors = activePayors.length > 0 ? activePayors : safeMembers;
+
+  const subList: any[] = Array.isArray(attendanceSubmissions)
+    ? attendanceSubmissions
+    : attendanceSubmissions && typeof attendanceSubmissions === "object"
+      ? Object.values(attendanceSubmissions)
+      : [];
+
+  const findSubForMember = (m: any) =>
+    subList.find(
+      (s: any) => s && matchesMemberUid(m, s.userId || s.memberId || s.id),
+    );
+
+  const findExistingSplit = (m: any) =>
+    Array.isArray(existingSplitDetails)
+      ? existingSplitDetails.find((s: any) =>
+          matchesMemberUid(m, s?.userId || s?.memberId || s?.id),
+        )
+      : null;
+
+  const memberDaysMap = new Map<string, number>();
+  const payorOwnMap = new Map<string, number>();
+  const payorExtraMap = new Map<string, number>();
+  const payorExtraNotesMap = new Map<string, string[]>();
+  const nonPayorNoteMap = new Map<string, string>();
+  const nonPayorSummaryMap = new Map<string, string>();
+
+  effectivePayors.forEach((p: any) => {
+    const pUid = getMemberPrimaryId(p);
+    payorExtraMap.set(pUid, 0);
+    payorExtraNotesMap.set(pUid, []);
+  });
+
+  for (const m of safeMembers) {
+    const uid = getMemberPrimaryId(m);
+    const userAttRecords = (cycleAttendance || []).filter((a: any) =>
+      matchesMemberUid(m, a?.userId),
+    );
+    const presentFromAtt = userAttRecords.filter(
+      (a: any) => a?.status === "PRESENT",
+    ).length;
+    const subRecord = findSubForMember(m);
+    const existingSplit = findExistingSplit(m);
+
+    const daysPresent =
+      userAttRecords.length > 0
+        ? presentFromAtt
+        : subRecord?.daysPresent !== undefined
+          ? Number(subRecord.daysPresent)
+          : existingSplit?.daysPresent !== undefined
+            ? Number(existingSplit.daysPresent)
+            : 0;
+
+    memberDaysMap.set(uid, daysPresent);
+    const cost = daysPresent * rate;
+
+    if (isPayorMember(m)) {
+      payorOwnMap.set(uid, cost);
+    } else {
+      const npName = m.displayName || m.name || "Non-payor";
+      const mode = subRecord?.allocationMode || "FAIR_SPLIT";
+      const assignedPayorId = subRecord?.assignedPayorId;
+      const customSplits =
+        subRecord?.customPayorSplitsCentavos &&
+        typeof subRecord.customPayorSplitsCentavos === "object"
+          ? subRecord.customPayorSplitsCentavos
+          : null;
+      const customPcts =
+        subRecord?.customPayorPercentages &&
+        typeof subRecord.customPayorPercentages === "object"
+          ? subRecord.customPayorPercentages
+          : null;
+
+      const matchedTargetPayor =
+        mode === "SPECIFIC_PAYOR" && assignedPayorId
+          ? effectivePayors.find((p: any) =>
+              matchesMemberUid(p, assignedPayorId),
+            )
+          : null;
+
+      if (matchedTargetPayor) {
+        const targetUid = getMemberPrimaryId(matchedTargetPayor);
+        const targetName =
+          matchedTargetPayor.displayName || matchedTargetPayor.name || "Payor";
+        payorExtraMap.set(
+          targetUid,
+          (payorExtraMap.get(targetUid) || 0) + cost,
+        );
+        if (cost > 0) {
+          payorExtraNotesMap
+            .get(targetUid)
+            ?.push(`₱${(cost / 100).toFixed(2)} from ${npName} (Assigned)`);
+        }
+        nonPayorSummaryMap.set(
+          uid,
+          cost > 0
+            ? `Assigned to ${targetName} (₱${(cost / 100).toFixed(2)})`
+            : `Assigned to ${targetName}`,
+        );
+        nonPayorNoteMap.set(
+          uid,
+          `Exempted (Non-payor) — ${daysPresent} days water cost (₱${(cost / 100).toFixed(2)}) assigned to ${targetName}`,
+        );
+      } else if (mode === "CUSTOM_SPLIT" && (customSplits || customPcts)) {
+        const savedEntries = effectivePayors.map((p: any) => {
+          const pUid = getMemberPrimaryId(p);
+          return {
+            pUid,
+            pName: p.displayName || p.name || "Payor",
+            savedCents: getPayorMapValue(customSplits, p),
+            savedPct: getPayorMapValue(customPcts, p),
+          };
+        });
+        const savedCentsSum = savedEntries.reduce(
+          (acc, e) => acc + e.savedCents,
+          0,
+        );
+        const savedPctSum = savedEntries.reduce(
+          (acc, e) => acc + e.savedPct,
+          0,
+        );
+
+        if ((savedCentsSum > 0 || savedPctSum > 0) && cost > 0) {
+          let distributed = 0;
+          const useCents = savedCentsSum > 0;
+          const activeEntries = savedEntries.filter((e) =>
+            useCents ? e.savedCents > 0 : e.savedPct > 0,
+          );
+          const customParts: string[] = [];
+
+          activeEntries.forEach((entry, idx) => {
+            let share = 0;
+            if (useCents) {
+              if (Math.abs(savedCentsSum - cost) <= 5) {
+                share =
+                  idx === activeEntries.length - 1
+                    ? Math.max(0, cost - distributed)
+                    : Math.round(entry.savedCents);
+              } else {
+                share =
+                  idx === activeEntries.length - 1
+                    ? Math.max(0, cost - distributed)
+                    : Math.round((cost * entry.savedCents) / savedCentsSum);
+              }
+            } else {
+              share =
+                idx === activeEntries.length - 1
+                  ? Math.max(0, cost - distributed)
+                  : Math.round((cost * entry.savedPct) / savedPctSum);
+            }
+            distributed += share;
+            payorExtraMap.set(
+              entry.pUid,
+              (payorExtraMap.get(entry.pUid) || 0) + share,
+            );
+            if (share > 0) {
+              payorExtraNotesMap
+                .get(entry.pUid)
+                ?.push(`₱${(share / 100).toFixed(2)} from ${npName} (Custom)`);
+              const shortPayorName = entry.pName.split(" ")[0] || entry.pName;
+              customParts.push(
+                `${shortPayorName} ₱${(share / 100).toFixed(2)}`,
+              );
+            }
+          });
+
+          const breakdownStr =
+            customParts.length > 0
+              ? `Custom split: ${customParts.join(", ")}`
+              : "Custom split across payors";
+          nonPayorSummaryMap.set(uid, breakdownStr);
+          nonPayorNoteMap.set(
+            uid,
+            `Exempted (Non-payor) — ${daysPresent} days water cost (₱${(cost / 100).toFixed(2)}) · ${breakdownStr}`,
+          );
+        } else {
+          effectivePayors.forEach((p: any, idx: number) => {
+            const pUid = getMemberPrimaryId(p);
+            const extraPer =
+              effectivePayors.length > 0
+                ? getFairSplitShareAtIndex(cost, effectivePayors.length, idx)
+                : 0;
+            payorExtraMap.set(pUid, (payorExtraMap.get(pUid) || 0) + extraPer);
+            if (extraPer > 0) {
+              payorExtraNotesMap
+                .get(pUid)
+                ?.push(`₱${(extraPer / 100).toFixed(2)} from ${npName}`);
+            }
+          });
+          nonPayorSummaryMap.set(
+            uid,
+            cost > 0 ? "Split fairly across payors" : "Exempted",
+          );
+          nonPayorNoteMap.set(
+            uid,
+            `Exempted (Non-payor) — ${daysPresent} days water cost split fairly across payors`,
+          );
+        }
+      } else if (
+        !subRecord &&
+        subList.length === 0 &&
+        Array.isArray(existingSplitDetails) &&
+        existingSplitDetails.some(
+          (s: any) => typeof s?.nonPayorWaterCentavos === "number",
+        )
+      ) {
+        // Fallback to persisted splitDetails when attendanceSubmissions listener hasn't emitted yet
+        const npExisting = findExistingSplit(m);
+        nonPayorSummaryMap.set(
+          uid,
+          npExisting?.note
+            ? String(npExisting.note).replace(
+                /^Exempted \(Non-payor\)\s*[—·-]\s*/i,
+                "",
+              )
+            : "Exempted",
+        );
+        nonPayorNoteMap.set(
+          uid,
+          npExisting?.note ||
+            `Exempted (Non-payor) — ${daysPresent} days water cost absorbed by payors`,
+        );
+      } else {
+        effectivePayors.forEach((p: any, idx: number) => {
+          const pUid = getMemberPrimaryId(p);
+          const extraPer =
+            effectivePayors.length > 0
+              ? getFairSplitShareAtIndex(cost, effectivePayors.length, idx)
+              : 0;
+          payorExtraMap.set(pUid, (payorExtraMap.get(pUid) || 0) + extraPer);
+          if (extraPer > 0) {
+            payorExtraNotesMap
+              .get(pUid)
+              ?.push(`₱${(extraPer / 100).toFixed(2)} from ${npName}`);
+          }
+        });
+        nonPayorSummaryMap.set(
+          uid,
+          cost > 0 ? "Split fairly across payors" : "Exempted",
+        );
+        nonPayorNoteMap.set(
+          uid,
+          `Exempted (Non-payor) — ${daysPresent} days water cost split fairly across payors`,
+        );
+      }
+    }
+  }
+
+  // If subList was not yet loaded and existingSplitDetails had nonPayorWaterCentavos, preserve them
+  const usePersistedPayorExtra =
+    subList.length === 0 &&
+    Array.isArray(existingSplitDetails) &&
+    existingSplitDetails.some(
+      (s: any) =>
+        typeof s?.nonPayorWaterCentavos === "number" &&
+        s.nonPayorWaterCentavos > 0,
+    );
+
+  let totalAmountCentavos = 0;
+  const membersBreakdown: ComputedWaterMemberBreakdown[] = safeMembers.map(
+    (m: any) => {
+      const uid = getMemberPrimaryId(m);
+      const isPayor = isPayorMember(m);
+      const daysPresent = memberDaysMap.get(uid) || 0;
+      const existingSplit = findExistingSplit(m);
+
+      if (isPayor) {
+        const ownCost = payorOwnMap.get(uid) || 0;
+        const extraForThisPayor = usePersistedPayorExtra
+          ? Number(existingSplit?.nonPayorWaterCentavos ?? 0)
+          : payorExtraMap.get(uid) || 0;
+        const extraNotes = payorExtraNotesMap.get(uid) || [];
+        const totalPayorShare = ownCost + extraForThisPayor;
+        totalAmountCentavos += totalPayorShare;
+
+        const computedNote =
+          usePersistedPayorExtra && existingSplit?.note
+            ? String(existingSplit.note)
+            : extraForThisPayor > 0
+              ? `${daysPresent} days @ ₱${rate / 100}/day (₱${(
+                  ownCost / 100
+                ).toFixed(2)}) + non-payor share (${
+                  extraNotes.length > 0
+                    ? extraNotes.join(", ")
+                    : `₱${(extraForThisPayor / 100).toFixed(2)}`
+                })`
+              : `${daysPresent} days present @ ₱${rate / 100}/day`;
+
+        return {
+          userId: uid,
+          displayName: m.displayName || m.name || "Roommate",
+          role: m.role || "PAYOR",
+          isPayor: true,
+          isExempt: false,
+          daysPresent,
+          rateCentavosPerDay: rate,
+          ownWaterCentavos: ownCost,
+          nonPayorWaterCentavos: extraForThisPayor,
+          nonPayorWaterNotes: extraNotes,
+          nonPayorAllocationSummary: "",
+          shareCentavos: totalPayorShare,
+          note: computedNote,
+        };
+      } else {
+        const summary = nonPayorSummaryMap.get(uid) || "Exempted";
+        const note =
+          nonPayorNoteMap.get(uid) ||
+          `Exempted (Non-payor) — ${daysPresent} days water cost absorbed by payors`;
+        return {
+          userId: uid,
+          displayName: m.displayName || m.name || "Roommate",
+          role: "NON_PAYOR",
+          isPayor: false,
+          isExempt: true,
+          daysPresent,
+          rateCentavosPerDay: rate,
+          ownWaterCentavos: 0,
+          nonPayorWaterCentavos: 0,
+          nonPayorWaterNotes: [],
+          nonPayorAllocationSummary: summary,
+          shareCentavos: 0,
+          note,
+        };
+      }
+    },
+  );
+
+  const getPayorShareCentavos = (targetUid?: string | null): number => {
+    if (!targetUid) return 0;
+    const found = membersBreakdown.find((item) =>
+      matchesMemberUid({ userId: item.userId }, targetUid),
+    );
+    return found && found.isPayor ? found.shareCentavos : 0;
+  };
+
+  return {
+    membersBreakdown,
+    totalAmountCentavos,
+    getPayorShareCentavos,
+  };
+}
+
 /**
  * Excludes group name suffixes from bill/expense titles (e.g. "Electricity - Administrators" -> "Electricity").
  */
@@ -977,7 +1436,8 @@ function notifyReadSubscribers(targetUid?: string) {
 
 export const mobileDataService = {
   getCachedProfile(uid?: string): any {
-    if (uid && _cachedUserProfile && _cachedUserProfile.uid !== uid) {
+    if (!uid) return null;
+    if (_cachedUserProfile && _cachedUserProfile.uid !== uid) {
       return null;
     }
     return _cachedUserProfile;
@@ -2234,14 +2694,17 @@ export const mobileDataService = {
             // Mode 2: Fixed monthly household total split equally across payors
             const fixedMonthlyCents =
               waterConfig.fixedMonthlyAmountCentavos || expData.amountCents;
-            const shareCentavos = Math.round(
-              fixedMonthlyCents / effectivePayors.length,
-            );
             newSplitDetails = activeMembers.map((m: any) => {
+              const uid = m.userId || m.memberId || m.id || "";
               const isPayor = isPayorMember(m);
               if (isPayor) {
+                const shareCentavos = computeFairSplitShareCentavos(
+                  fixedMonthlyCents,
+                  effectivePayors,
+                  uid,
+                );
                 return {
-                  userId: m.userId || m.memberId,
+                  userId: uid,
                   displayName: m.displayName || "Roommate",
                   shareCentavos,
                   isPaid: false,
@@ -2335,80 +2798,30 @@ export const mobileDataService = {
             const rate = Number(
               waterConfig?.rateCentavosPerPersonPerDay ?? 500,
             );
-            let nonPayorTotalCentavos = 0;
-            const payorIndividual = new Map<string, number>();
+            const { membersBreakdown, totalAmountCentavos: totalWaterCents } =
+              computeCycleWaterBreakdown(
+                activeMembers,
+                attRecords,
+                subRecords,
+                rate,
+                expData.splitDetails,
+              );
 
-            for (const m of activeMembers) {
-              const uid = m.userId || m.memberId;
-              const presentFromAtt = attRecords.filter(
-                (a: any) => a.userId === uid && a.status === "PRESENT",
-              ).length;
-              const subRecord = subRecords.find((s: any) => s.userId === uid);
-              const daysPresent =
-                presentFromAtt > 0
-                  ? presentFromAtt
-                  : subRecord?.daysPresent || memberDaysMap.get(uid) || 0;
-              memberDaysMap.set(uid, daysPresent);
-              const cost = daysPresent * rate;
-              if (isPayorMember(m)) {
-                payorIndividual.set(uid, cost);
-              } else {
-                nonPayorTotalCentavos += cost;
-              }
-            }
-
-            const extraPerPayor =
-              effectivePayors.length > 0
-                ? Math.round(nonPayorTotalCentavos / effectivePayors.length)
-                : 0;
-            const nonPayorNames = activeNonPayors
-              .map((np: any) => np.displayName || "Non-payor")
-              .join(", ");
-            let totalWaterCents = 0;
-
-            newSplitDetails = activeMembers.map((m: any) => {
-              const uid = m.userId || m.memberId;
-              const isPayor = isPayorMember(m);
-              const daysPresent = memberDaysMap.get(uid) || 0;
-              if (isPayor) {
-                const ownCost = payorIndividual.get(uid) || 0;
-                const totalPayorShare = ownCost + extraPerPayor;
-                totalWaterCents += totalPayorShare;
-                return {
-                  userId: uid,
-                  displayName: m.displayName || "Roommate",
-                  shareCentavos: totalPayorShare,
-                  ownWaterCentavos: ownCost,
-                  nonPayorWaterCentavos: extraPerPayor,
-                  daysPresent,
-                  rateCentavosPerDay: rate,
-                  isPaid: false,
-                  isExempt: false,
-                  role: m.role || "PAYOR",
-                  note:
-                    extraPerPayor > 0
-                      ? `${daysPresent} days @ ₱${rate / 100}/day (₱${(
-                          ownCost / 100
-                        ).toFixed(2)}) + non-payor absorption (₱${(
-                          extraPerPayor / 100
-                        ).toFixed(2)} from ${nonPayorNames})`
-                      : `${daysPresent} days present @ ₱${rate / 100}/day`,
-                };
-              } else {
-                return {
-                  userId: uid,
-                  displayName: m.displayName || "Roommate",
-                  shareCentavos: 0,
-                  ownWaterCentavos: 0,
-                  nonPayorWaterCentavos: 0,
-                  daysPresent,
-                  rateCentavosPerDay: rate,
-                  isPaid: true,
-                  isExempt: true,
-                  role: "NON_PAYOR",
-                  note: `Exempted (Non-payor) — ${daysPresent} days water cost absorbed by payors`,
-                };
-              }
+            newSplitDetails = membersBreakdown.map((item) => {
+              memberDaysMap.set(item.userId, item.daysPresent);
+              return {
+                userId: item.userId,
+                displayName: item.displayName,
+                shareCentavos: item.shareCentavos,
+                ownWaterCentavos: item.ownWaterCentavos,
+                nonPayorWaterCentavos: item.nonPayorWaterCentavos,
+                daysPresent: item.daysPresent,
+                rateCentavosPerDay: item.rateCentavosPerDay,
+                isPaid: item.isExempt,
+                isExempt: item.isExempt,
+                role: item.role,
+                note: item.note,
+              };
             });
 
             if (
@@ -2420,12 +2833,16 @@ export const mobileDataService = {
           }
         } else {
           const payorCount = Math.max(1, effectivePayors.length);
-          const shareCentavos = Math.round(expData.amountCents / payorCount);
 
           newSplitDetails = activeMembers.map((m: any) => {
             const uid = m.userId || m.memberId || m.id || "";
             const isPayor = isPayorMember(m);
             if (isPayor) {
+              const shareCentavos = computeFairSplitShareCentavos(
+                expData.amountCents,
+                effectivePayors,
+                uid,
+              );
               return {
                 userId: uid,
                 displayName: m.displayName || "Roommate",
@@ -2575,13 +2992,17 @@ export const mobileDataService = {
                 if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
                   share = waterConfig.fixedPerPersonAmountCentavos || 0;
                 } else {
-                  share = Math.round(
-                    exp.amountCents / Math.max(1, effectivePayors.length),
+                  share = computeFairSplitShareCentavos(
+                    exp.amountCents,
+                    effectivePayors,
+                    uid,
                   );
                 }
               } else {
-                share = Math.round(
-                  exp.amountCents / Math.max(1, effectivePayors.length),
+                share = computeFairSplitShareCentavos(
+                  exp.amountCents,
+                  effectivePayors,
+                  uid,
                 );
               }
             }
@@ -2905,66 +3326,26 @@ export const mobileDataService = {
             if (subSnap) subRecords = subSnap.docs.map((d) => d.data());
           } catch {}
         }
-        let totalNonPayorWater = 0;
-        const memberDaysMap = new Map<string, number>();
-        for (const m of activeMembers) {
-          const uid = m.userId || m.memberId;
-          const present = attRecords.filter(
-            (a: any) => a.userId === uid && a.status === "PRESENT",
-          ).length;
-          const sub = subRecords.find((s: any) => s.userId === uid);
-          const days = present > 0 ? present : sub?.daysPresent || 0;
-          memberDaysMap.set(uid, days);
-          const cost = days * rate;
-          if (!isPayorMember(m)) totalNonPayorWater += cost;
-        }
-        const extraPerPayor =
-          effectivePayors.length > 0
-            ? Math.round(totalNonPayorWater / effectivePayors.length)
-            : 0;
-        const nonPayorNames = activeNonPayors
-          .map((np) => np.displayName || "Non-payor")
-          .join(", ");
+        const { membersBreakdown } = computeCycleWaterBreakdown(
+          activeMembers,
+          attRecords,
+          subRecords,
+          rate,
+        );
 
-        splitDetails = activeMembers.map((m) => {
-          const uid = m.userId || m.memberId;
-          const isPayor = isPayorMember(m);
-          const days = memberDaysMap.get(uid) || 0;
-          if (isPayor) {
-            const ownCost = days * rate;
-            const payorTotal = ownCost + extraPerPayor;
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: payorTotal,
-              ownWaterCentavos: ownCost,
-              nonPayorWaterCentavos: extraPerPayor,
-              daysPresent: days,
-              rateCentavosPerDay: rate,
-              isPaid,
-              isExempt: false,
-              role: m.role || "PAYOR",
-              note:
-                extraPerPayor > 0
-                  ? `${days} days @ ₱${rate / 100}/day (₱${(ownCost / 100).toFixed(2)}) + non-payor split (₱${(extraPerPayor / 100).toFixed(2)} from ${nonPayorNames})`
-                  : `${days} days present @ ₱${rate / 100}/day`,
-            };
-          } else {
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: 0,
-              ownWaterCentavos: 0,
-              nonPayorWaterCentavos: 0,
-              daysPresent: days,
-              rateCentavosPerDay: rate,
-              isPaid: true,
-              isExempt: true,
-              role: "NON_PAYOR",
-              note: `Exempted (Non-payor) — ${days} days water cost absorbed by payors`,
-            };
-          }
-        });
+        splitDetails = membersBreakdown.map((item) => ({
+          userId: item.userId,
+          displayName: item.displayName,
+          shareCentavos: item.shareCentavos,
+          ownWaterCentavos: item.ownWaterCentavos,
+          nonPayorWaterCentavos: item.nonPayorWaterCentavos,
+          daysPresent: item.daysPresent,
+          rateCentavosPerDay: item.rateCentavosPerDay,
+          isPaid: item.isExempt ? true : isPaid,
+          isExempt: item.isExempt,
+          role: item.role,
+          note: item.note,
+        }));
       } else if (pricingModel === "FIXED_PER_PERSON_MONTH") {
         const flatRate = waterConfig?.fixedPerPersonAmountCentavos || 0;
         splitDetails = activeMembers.map((m) => {
@@ -2982,15 +3363,20 @@ export const mobileDataService = {
           };
         });
       } else {
-        const shareCentavos = Math.round(
-          expense.amountCents / effectivePayors.length,
-        );
         splitDetails = activeMembers.map((m) => {
+          const uid = m.userId || m.memberId || m.id || "";
           const isPayor = isPayorMember(m);
+          const shareCentavos = isPayor
+            ? computeFairSplitShareCentavos(
+                expense.amountCents,
+                effectivePayors,
+                uid,
+              )
+            : 0;
           return {
-            userId: m.userId || m.memberId,
+            userId: uid,
             displayName: m.displayName || "Roommate",
-            shareCentavos: isPayor ? shareCentavos : 0,
+            shareCentavos,
             isPaid: !isPayor || isPaid,
             isExempt: !isPayor,
             role: m.role || (isPayor ? "PAYOR" : "NON_PAYOR"),
@@ -3004,13 +3390,18 @@ export const mobileDataService = {
       // Standard Bills (Rent, Wifi, Groceries, Electricity, Other):
       // Fairly split ONLY on payors. Non-payors are 100% exempted.
       const payorCount = Math.max(1, effectivePayors.length);
-      const shareCentavos = Math.round(expense.amountCents / payorCount);
 
       splitDetails = activeMembers.map((m) => {
+        const uid = m.userId || m.memberId || m.id || "";
         const isPayor = isPayorMember(m);
         if (isPayor) {
+          const shareCentavos = computeFairSplitShareCentavos(
+            expense.amountCents,
+            effectivePayors,
+            uid,
+          );
           return {
-            userId: m.userId || m.memberId,
+            userId: uid,
             displayName: m.displayName || "Roommate",
             shareCentavos,
             percentage: Math.round((100 / payorCount) * 10) / 10,
@@ -3872,16 +4263,18 @@ export const mobileDataService = {
           waterConfig.fixedMonthlyAmountCentavos || 0,
         );
         billTitle = "Water (Fixed Household)";
-        const shareCentavos =
-          effectivePayors.length > 0
-            ? Math.round(totalAmountCentavos / effectivePayors.length)
-            : 0;
 
         splitDetails = activeMembers.map((m: any) => {
+          const uid = m.userId || m.memberId || m.id || "";
           const isPayor = isPayorMember(m);
           if (isPayor) {
+            const shareCentavos = computeFairSplitShareCentavos(
+              totalAmountCentavos,
+              effectivePayors,
+              uid,
+            );
             return {
-              userId: m.userId || m.memberId,
+              userId: uid,
               displayName: m.displayName || "Roommate",
               shareCentavos,
               isPaid: false,
@@ -3923,76 +4316,28 @@ export const mobileDataService = {
         const attRecords = attSnap ? attSnap.docs.map((d) => d.data()) : [];
         const subRecords = subSnap ? subSnap.docs.map((d) => d.data()) : [];
 
-        let nonPayorTotalCentavos = 0;
-        const payorIndividual = new Map<string, number>();
-        const memberDaysMap = new Map<string, number>();
+        const { membersBreakdown, totalAmountCentavos: computedWaterTotal } =
+          computeCycleWaterBreakdown(
+            activeMembers,
+            attRecords,
+            subRecords,
+            rate,
+          );
+        totalAmountCentavos = computedWaterTotal;
 
-        for (const m of activeMembers) {
-          const uid = m.userId || m.memberId;
-          const presentCount = attRecords.filter(
-            (a: any) => a.userId === uid && a.status === "PRESENT",
-          ).length;
-          const subRecord = subRecords.find((s: any) => s.userId === uid);
-          const daysPresent =
-            presentCount > 0 ? presentCount : subRecord?.daysPresent || 0;
-          memberDaysMap.set(uid, daysPresent);
-          const cost = daysPresent * rate;
-
-          if (isPayorMember(m)) {
-            payorIndividual.set(uid, cost);
-          } else {
-            nonPayorTotalCentavos += cost;
-          }
-        }
-
-        const extraPerPayor =
-          effectivePayors.length > 0
-            ? Math.round(nonPayorTotalCentavos / effectivePayors.length)
-            : 0;
-        const nonPayorNames = activeNonPayors
-          .map((np: any) => np.displayName || "Non-payor")
-          .join(", ");
-
-        splitDetails = activeMembers.map((m: any) => {
-          const uid = m.userId || m.memberId;
-          const isPayor = isPayorMember(m);
-          const daysPresent = memberDaysMap.get(uid) || 0;
-          if (isPayor) {
-            const ownCost = payorIndividual.get(uid) || 0;
-            const totalPayorShare = ownCost + extraPerPayor;
-            totalAmountCentavos += totalPayorShare;
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: totalPayorShare,
-              ownWaterCentavos: ownCost,
-              nonPayorWaterCentavos: extraPerPayor,
-              daysPresent,
-              rateCentavosPerDay: rate,
-              isPaid: false,
-              isExempt: false,
-              role: m.role || "PAYOR",
-              note:
-                extraPerPayor > 0
-                  ? `${daysPresent} days @ ₱${rate / 100}/day (₱${(ownCost / 100).toFixed(2)}) + non-payor absorption (₱${(extraPerPayor / 100).toFixed(2)} from ${nonPayorNames})`
-                  : `${daysPresent} days present @ ₱${rate / 100}/day`,
-            };
-          } else {
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: 0,
-              ownWaterCentavos: 0,
-              nonPayorWaterCentavos: 0,
-              daysPresent,
-              rateCentavosPerDay: rate,
-              isPaid: true,
-              isExempt: true,
-              role: "NON_PAYOR",
-              note: `Exempted (Non-payor) — ${daysPresent} days water cost absorbed by payors`,
-            };
-          }
-        });
+        splitDetails = membersBreakdown.map((item) => ({
+          userId: item.userId,
+          displayName: item.displayName,
+          shareCentavos: item.shareCentavos,
+          ownWaterCentavos: item.ownWaterCentavos,
+          nonPayorWaterCentavos: item.nonPayorWaterCentavos,
+          daysPresent: item.daysPresent,
+          rateCentavosPerDay: item.rateCentavosPerDay,
+          isPaid: item.isExempt,
+          isExempt: item.isExempt,
+          role: item.role,
+          note: item.note,
+        }));
       }
 
       const existingWaterExp = expSnap.docs.find((ed) => {
@@ -4278,15 +4623,20 @@ export const mobileDataService = {
       if (totalAmountCentavos <= 0) return null;
 
       const payorCount = Math.max(1, effectivePayors.length);
-      const shareCentavos = Math.round(totalAmountCentavos / payorCount);
       const ratePesosStr = (rateCentavos / 100).toFixed(2);
       const meterSummaryNote = `Prev: ${prev} kWh → Curr: ${curr} kWh (${consumedKwh} kWh × ₱${ratePesosStr}/kWh)`;
 
       let splitDetails = activeMembers.map((m: any) => {
+        const uid = m.userId || m.memberId || m.id || "";
         const isPayor = isPayorMember(m);
         if (isPayor) {
+          const shareCentavos = computeFairSplitShareCentavos(
+            totalAmountCentavos,
+            effectivePayors,
+            uid,
+          );
           return {
-            userId: m.userId || m.memberId,
+            userId: uid,
             displayName: m.displayName || "Roommate",
             shareCentavos,
             percentage: Math.round((100 / payorCount) * 10) / 10,
@@ -5192,6 +5542,14 @@ export const mobileDataService = {
     daysPresent: number,
     daysAbsent: number,
     amountCentavos: number,
+    allocationConfig?: {
+      allocationMode: "FAIR_SPLIT" | "SPECIFIC_PAYOR" | "CUSTOM_SPLIT";
+      assignedPayorId?: string;
+      assignedPayorName?: string;
+      customPayorSplitsCentavos?: Record<string, number>;
+      customPayorPercentages?: Record<string, number>;
+      customSplitInputType?: "PESO" | "PERCENT";
+    },
   ): Promise<void> {
     if (!householdId || !cycleId || !userId) return;
     try {
@@ -5211,6 +5569,19 @@ export const mobileDataService = {
           daysPresent,
           daysAbsent,
           amountCentavos,
+          ...(allocationConfig
+            ? {
+                allocationMode: allocationConfig.allocationMode,
+                assignedPayorId: allocationConfig.assignedPayorId || "",
+                assignedPayorName: allocationConfig.assignedPayorName || "",
+                customPayorSplitsCentavos:
+                  allocationConfig.customPayorSplitsCentavos || {},
+                customPayorPercentages:
+                  allocationConfig.customPayorPercentages || {},
+                customSplitInputType:
+                  allocationConfig.customSplitInputType || "PESO",
+              }
+            : {}),
           status: "SUBMITTED",
           submittedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -5498,5 +5869,272 @@ export const mobileDataService = {
     } catch (err) {
       console.warn("[Firestore Mobile] markNotificationsRead docs sync:", err);
     }
+  },
+
+  listenToHouseholdMessages(
+    householdId: string,
+    callback: (messages: any[]) => void,
+  ): () => void {
+    if (!householdId) {
+      callback([]);
+      return () => {};
+    }
+    const colRef = collection(db, `households/${householdId}/messages`);
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const msgs = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Sort in memory by createdAt or timestamp ascending
+        msgs.sort((a: any, b: any) => {
+          const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+          const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+          return timeA - timeB;
+        });
+        callback(msgs);
+      },
+      (err) => {
+        console.warn(
+          "[Firestore Mobile] listenToHouseholdMessages error:",
+          err,
+        );
+      },
+    );
+  },
+
+  async sendHouseholdMessage(
+    householdId: string,
+    message: {
+      conversationId: string;
+      senderId: string;
+      senderName: string;
+      text: string;
+      recipientId?: string;
+      type?: "text" | "expense_split" | "payment_claim" | "receipt_review";
+      meta?: any;
+    },
+  ): Promise<string> {
+    if (!householdId) {
+      throw new Error("householdId is required to send a message");
+    }
+    const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const nowIso = new Date().toISOString();
+    const newDoc = {
+      id: msgId,
+      householdId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      senderName: message.senderName,
+      text: message.text,
+      recipientId: message.recipientId || null,
+      type: message.type || "text",
+      meta: message.meta || {},
+      readBy: [message.senderId],
+      createdAt: nowIso,
+      timestamp: nowIso,
+    };
+    await setDoc(
+      doc(db, `households/${householdId}/messages`, msgId),
+      sanitizeData(newDoc),
+    );
+    return msgId;
+  },
+
+  async updateHouseholdMessage(
+    householdId: string,
+    messageId: string,
+    updates: any,
+  ): Promise<void> {
+    if (!householdId || !messageId) return;
+    await updateDoc(
+      doc(db, `households/${householdId}/messages`, messageId),
+      sanitizeData(updates),
+    );
+  },
+
+  async markHouseholdMessagesRead(
+    householdId: string,
+    messageIds: string[],
+    userId: string,
+  ): Promise<void> {
+    if (!householdId || !userId || !messageIds.length) return;
+    try {
+      await Promise.all(
+        messageIds.map(async (msgId) => {
+          const docRef = doc(db, `households/${householdId}/messages`, msgId);
+          await updateDoc(docRef, {
+            readBy: arrayUnion(userId),
+          }).catch(() => {});
+        }),
+      );
+    } catch (e) {
+      console.warn("[Firestore Mobile] markHouseholdMessagesRead:", e);
+    }
+  },
+
+  async seedHouseholdMessagesIfEmpty(
+    _householdId: string,
+    _initialMessages: any[],
+  ): Promise<void> {
+    // No-op: Do not auto-seed dummy data so deleted databases stay clean
+    return;
+  },
+
+  async updateUserHeartbeat(
+    householdId?: string,
+    userId?: string,
+  ): Promise<void> {
+    const uid = userId || auth.currentUser?.uid;
+    if (!uid) return;
+    const nowIso = new Date().toISOString();
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        lastActiveAt: nowIso,
+      }).catch(async () => {
+        await setDoc(
+          doc(db, "users", uid),
+          { lastActiveAt: nowIso },
+          { merge: true },
+        );
+      });
+
+      if (householdId) {
+        // Also update member doc if it exists
+        const memberRef = doc(db, `households/${householdId}/members`, uid);
+        await updateDoc(memberRef, {
+          lastActiveAt: nowIso,
+        }).catch(() => {});
+      }
+    } catch (e) {
+      // Quiet background failure
+    }
+  },
+
+  async setHouseholdUserNote(
+    householdId: string,
+    userId: string,
+    note: string,
+    emoji?: string,
+  ): Promise<void> {
+    if (!userId) return;
+    const nowIso = new Date().toISOString();
+    // Allow empty emoji ("") when the user selects "None"
+    const cleanEmoji =
+      typeof emoji === "string"
+        ? emoji.trim()
+        : emoji
+          ? String(emoji).trim()
+          : "";
+    const noteData = {
+      thoughtNote: note.trim(),
+      thoughtEmoji: cleanEmoji,
+      noteUpdatedAt: nowIso,
+    };
+
+    // 1. Update user document (current user has write permission on users/{userId})
+    try {
+      await updateDoc(doc(db, "users", userId), noteData).catch(async () => {
+        await setDoc(doc(db, "users", userId), noteData, { merge: true });
+      });
+    } catch (e) {
+      console.warn("[Firestore Mobile] updateUser note notice:", e);
+    }
+
+    // 2. Update member document in household (members collection has public read and user update)
+    if (householdId) {
+      try {
+        await updateDoc(
+          doc(db, `households/${householdId}/members`, userId),
+          noteData,
+        ).catch(async () => {
+          await updateDoc(
+            doc(db, `households/${householdId}/members`, `mem_${userId}`),
+            noteData,
+          ).catch(() => {});
+        });
+      } catch (e) {
+        console.warn("[Firestore Mobile] updateMember note notice:", e);
+      }
+    }
+  },
+
+  async deleteHouseholdUserNote(
+    householdId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!userId) return;
+    const clearData = {
+      thoughtNote: deleteField(),
+      thoughtEmoji: deleteField(),
+      noteUpdatedAt: deleteField(),
+    };
+
+    try {
+      await updateDoc(doc(db, "users", userId), clearData).catch(() => {});
+    } catch {}
+
+    if (householdId) {
+      try {
+        await updateDoc(
+          doc(db, `households/${householdId}/members`, userId),
+          clearData,
+        ).catch(async () => {
+          await updateDoc(
+            doc(db, `households/${householdId}/members`, `mem_${userId}`),
+            clearData,
+          ).catch(() => {});
+        });
+      } catch {}
+    }
+  },
+
+  listenToHouseholdNotes(
+    householdId: string,
+    callback: (
+      notes: Record<
+        string,
+        { note: string; emoji?: string; updatedAt: string }
+      >,
+    ) => void,
+  ): () => void {
+    if (!householdId) {
+      callback({});
+      return () => {};
+    }
+    // Listen to households/{householdId}/members which already has 'allow read: if true;' in firestore.rules
+    const membersCol = collection(db, `households/${householdId}/members`);
+    return onSnapshot(
+      membersCol,
+      (snapshot) => {
+        const result: Record<
+          string,
+          { note: string; emoji?: string; updatedAt: string }
+        > = {};
+        snapshot.forEach((d) => {
+          const data = d.data();
+          const uid = data.userId || data.memberId || d.id;
+          if (data && data.thoughtNote) {
+            result[uid] = {
+              note: data.thoughtNote,
+              emoji:
+                data.thoughtEmoji !== undefined && data.thoughtEmoji !== null
+                  ? String(data.thoughtEmoji).trim()
+                  : "",
+              updatedAt: data.noteUpdatedAt || "",
+            };
+          }
+        });
+        callback(result);
+      },
+      (error) => {
+        console.warn(
+          "[Firestore Mobile] listenToHouseholdNotes notice:",
+          error,
+        );
+        callback({});
+      },
+    );
   },
 };

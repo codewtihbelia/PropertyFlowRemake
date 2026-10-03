@@ -21,6 +21,9 @@ import {
   cleanBillTitle,
   isPayorMember,
   isCyclePaymentsLocked,
+  computeCycleWaterBreakdown,
+  computeFairSplitShareCentavos,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
@@ -50,8 +53,10 @@ interface ParticipantInfo {
   status: "Pending" | "Settled";
   owesCents: number;
   waterShareCents?: number;
+  waterOwnCents?: number;
   waterNonPayorCents?: number;
   waterDaysPresent?: number;
+  waterAllocationSummary?: string;
 }
 
 function formatShortDate(dateStr?: string): string {
@@ -467,6 +472,76 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       : activeMembersList.length,
   );
 
+  const cycleWaterExpense = useMemo(() => {
+    return currentCycleExpenses.find((e) =>
+      (e.category || "").toLowerCase().includes("water"),
+    );
+  }, [currentCycleExpenses]);
+
+  const cycleWaterBreakdown = useMemo(() => {
+    const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+    return computeCycleWaterBreakdown(
+      activeMembersList,
+      cycleAttendance,
+      attendanceSubmissions,
+      rate,
+      cycleWaterExpense?.splitDetails,
+    );
+  }, [
+    activeMembersList,
+    cycleAttendance,
+    attendanceSubmissions,
+    waterConfig?.rateCentavosPerPersonPerDay,
+    cycleWaterExpense?.splitDetails,
+  ]);
+
+  // Auto-heal in ViewGroupScreen if payors changed or water splits need update
+  useEffect(() => {
+    if (!householdId || payorCount === 0 || currentCycleExpenses.length === 0)
+      return;
+    const hasStaleSplit = currentCycleExpenses.some((e) => {
+      if (e.status === "PAID" || e.isPaid) return false;
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      if (isWater) {
+        if (
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel
+        ) {
+          if (!e.splitDetails || !Array.isArray(e.splitDetails)) return true;
+          const hasDivergentPayor = activePayorsList.some((p) => {
+            const pUid = p.userId || p.memberId || p.id;
+            const saved = e.splitDetails?.find((s: any) =>
+              matchesMemberUid(p, s.userId),
+            );
+            const expected = cycleWaterBreakdown.getPayorShareCentavos(pUid);
+            return !saved || saved.shareCentavos !== expected;
+          });
+          return (
+            hasDivergentPayor ||
+            e.amountCents !== cycleWaterBreakdown.totalAmountCentavos
+          );
+        }
+        return false;
+      }
+      const splitPayors = e.splitDetails
+        ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
+        : [];
+      return splitPayors.length > 0 && splitPayors.length !== payorCount;
+    });
+    if (hasStaleSplit) {
+      mobileDataService
+        .recalculateUnpaidExpensesForHousehold(householdId)
+        .catch(() => {});
+    }
+  }, [
+    householdId,
+    payorCount,
+    currentCycleExpenses,
+    waterConfig?.pricingModel,
+    activePayorsList,
+    cycleWaterBreakdown,
+  ]);
+
   const myPhoto =
     profile?.profilePicture || profile?.photoURL || firebaseUser?.photoURL;
 
@@ -474,112 +549,132 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     if (activeMembersList.length === 0) return [];
     return activeMembersList.map((m) => {
       const uid = m.userId || m.memberId;
-      const userBill = uniqueBills.find((b) => b.userId === uid);
+      const userBill = uniqueBills.find((b) => matchesMemberUid(m, b.userId));
       const isPayor = isPayorMember(m);
       let owes = 0;
       let totalCycleShare = 0;
       let memberWaterShare = 0;
+      let memberWaterOwn = 0;
       let memberWaterNonPayor = 0;
-      const memberWaterDays = getMemberAttendanceDays(uid);
+
+      const waterMember = cycleWaterBreakdown.membersBreakdown.find((mb) =>
+        matchesMemberUid(m, mb.userId),
+      );
+      const memberWaterDays =
+        waterMember?.daysPresent ?? getMemberAttendanceDays(uid);
 
       if (isPayor) {
+        const isPersonDayMode =
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel;
+
+        if (isPersonDayMode) {
+          const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+          memberWaterOwn =
+            waterMember?.ownWaterCentavos ?? memberWaterDays * rate;
+          memberWaterNonPayor = waterMember?.nonPayorWaterCentavos ?? 0;
+          memberWaterShare =
+            waterMember?.shareCentavos ?? memberWaterOwn + memberWaterNonPayor;
+        } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+          const flat = Number(waterConfig?.fixedPerPersonAmountCentavos || 0);
+          memberWaterShare = flat;
+          memberWaterOwn = flat;
+          memberWaterNonPayor = 0;
+        } else {
+          const fixedTotal = Number(
+            waterConfig?.fixedMonthlyAmountCentavos ||
+              cycleWaterExpense?.amountCents ||
+              0,
+          );
+          const fixedShare = computeFairSplitShareCentavos(
+            fixedTotal,
+            activePayorsList,
+            uid,
+          );
+          memberWaterShare = fixedShare;
+          memberWaterOwn = fixedShare;
+          memberWaterNonPayor = 0;
+        }
+
         totalCycleShare = currentCycleExpenses.reduce((sum, e) => {
           const isWater = (e.category || "").toLowerCase().includes("water");
           if (isWater) {
-            const isPersonDayMode =
-              waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-              !waterConfig?.pricingModel;
-            if (isPersonDayMode) {
-              const rate = Number(
-                waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-              );
-              const ownCost = memberWaterDays * rate;
-              const totalNonPayorWater = activeMembersList
-                .filter((np) => !isPayorMember(np))
-                .reduce((npSum, np) => {
-                  const npUid = np.userId || np.memberId;
-                  return npSum + getMemberAttendanceDays(npUid) * rate;
-                }, 0);
-              const extraPerPayor =
-                payorCount > 0
-                  ? Math.round(totalNonPayorWater / payorCount)
-                  : 0;
-              return sum + ownCost + extraPerPayor;
-            } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
-              return (
-                sum + Number(waterConfig?.fixedPerPersonAmountCentavos || 0)
-              );
-            } else {
-              return sum + Math.round(e.amountCents / payorCount);
-            }
+            return sum + memberWaterShare;
           }
+          const splitPayors = e.splitDetails
+            ? e.splitDetails.filter(
+                (s: any) => !s.isExempt && s.shareCentavos > 0,
+              )
+            : [];
+          const splitPayorsSum = splitPayors.reduce(
+            (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+            0,
+          );
+          const isSplitStale =
+            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+            (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
           if (
+            !isSplitStale &&
             e.splitDetails &&
             Array.isArray(e.splitDetails) &&
             e.splitDetails.length > 0
           ) {
-            const mySplit = e.splitDetails.find((s: any) => s.userId === uid);
+            const mySplit = e.splitDetails.find((s: any) =>
+              matchesMemberUid(m, s.userId),
+            );
             if (mySplit && typeof mySplit.shareCentavos === "number") {
               return sum + mySplit.shareCentavos;
             }
           }
-          return sum + Math.round(e.amountCents / payorCount);
+          return (
+            sum +
+            computeFairSplitShareCentavos(
+              e.amountCents || 0,
+              activePayorsList,
+              uid,
+            )
+          );
         }, 0);
 
         const liveShare = unpaidCycleExpenses.reduce((sum, e) => {
           const isWater = (e.category || "").toLowerCase().includes("water");
           if (isWater) {
-            const isPersonDayMode =
-              waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-              !waterConfig?.pricingModel;
-
-            if (isPersonDayMode) {
-              const rate = Number(
-                waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-              );
-              const ownCost = memberWaterDays * rate;
-              const totalNonPayorWater = activeMembersList
-                .filter((np) => !isPayorMember(np))
-                .reduce((npSum, np) => {
-                  const npUid = np.userId || np.memberId;
-                  return npSum + getMemberAttendanceDays(npUid) * rate;
-                }, 0);
-              const extraPerPayor =
-                payorCount > 0
-                  ? Math.round(totalNonPayorWater / payorCount)
-                  : 0;
-              const payorTotal = ownCost + extraPerPayor;
-
-              memberWaterShare += payorTotal;
-              memberWaterNonPayor += extraPerPayor;
-              return sum + payorTotal;
-            } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
-              const flat = Number(
-                waterConfig?.fixedPerPersonAmountCentavos || 0,
-              );
-              memberWaterShare += flat;
-              return sum + flat;
-            } else {
-              const eq = Math.round(e.amountCents / payorCount);
-              memberWaterShare += eq;
-              return sum + eq;
-            }
+            return sum + memberWaterShare;
           }
 
+          const splitPayors = e.splitDetails
+            ? e.splitDetails.filter(
+                (s: any) => !s.isExempt && s.shareCentavos > 0,
+              )
+            : [];
+          const splitPayorsSum = splitPayors.reduce(
+            (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+            0,
+          );
+          const isSplitStale =
+            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+            (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
           if (
+            !isSplitStale &&
             e.splitDetails &&
             Array.isArray(e.splitDetails) &&
             e.splitDetails.length > 0
           ) {
-            const mySplit = e.splitDetails.find((s: any) => s.userId === uid);
-            if (mySplit && mySplit.isPaid === true) {
-              return sum;
-            }
+            const mySplit = e.splitDetails.find((s: any) =>
+              matchesMemberUid(m, s.userId),
+            );
             if (mySplit && typeof mySplit.shareCentavos === "number") {
               return sum + mySplit.shareCentavos;
             }
           }
-          return sum + Math.round(e.amountCents / payorCount);
+          return (
+            sum +
+            computeFairSplitShareCentavos(
+              e.amountCents || 0,
+              activePayorsList,
+              uid,
+            )
+          );
         }, 0);
 
         const paidCentavos =
@@ -587,6 +682,11 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
             ? userBill.totalPaidCentavos
             : 0;
         owes = Math.max(0, liveShare - paidCentavos);
+      } else {
+        // Non-payor member
+        memberWaterShare = 0;
+        memberWaterOwn = 0;
+        memberWaterNonPayor = 0;
       }
 
       const paidForCycle =
@@ -621,19 +721,22 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         status: isPayorCycleSettled ? "Settled" : "Pending",
         owesCents: owes,
         waterShareCents: memberWaterShare,
+        waterOwnCents: memberWaterOwn,
         waterNonPayorCents: memberWaterNonPayor,
         waterDaysPresent: memberWaterDays,
+        waterAllocationSummary: waterMember?.nonPayorAllocationSummary || "",
       };
     });
   }, [
     activeMembersList,
+    activePayorsList,
     uniqueBills,
     currentCycleExpenses,
     unpaidCycleExpenses,
+    cycleWaterExpense,
+    cycleWaterBreakdown,
     waterConfig,
     payorCount,
-    cycleAttendance,
-    attendanceSubmissions,
     userPhotosMap,
     myPhoto,
     firebaseUser?.uid,
@@ -1824,6 +1927,34 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                           </Text>
                         </View>
                       )}
+                    {p.role === "NON_PAYOR" && (
+                      <View
+                        style={[
+                          styles.participantWaterBreakdownWrap,
+                          isDark && {
+                            backgroundColor: "rgba(100, 116, 139, 0.15)",
+                            borderColor: "rgba(100, 116, 139, 0.3)",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="droplet"
+                          size={11}
+                          color={isDark ? colors.textMuted : "#64748B"}
+                        />
+                        <Text
+                          style={[
+                            styles.participantWaterBreakdownText,
+                            { color: isDark ? colors.textMuted : "#64748B" },
+                          ]}
+                        >
+                          {p.waterDaysPresent || 0}d
+                          {p.waterAllocationSummary
+                            ? ` · ${p.waterAllocationSummary}`
+                            : ""}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
                     <Text

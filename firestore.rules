@@ -203,6 +203,28 @@ service cloud.firestore {
         allow read: if true;
         allow create, update, delete: if isHost(householdId) || isSuperAdmin();
       }
+
+      // Subcollection: messages (household group chats & settlement claims)
+      match /messages/{messageId} {
+        allow read, create, update: if isAuthenticated() && (isHouseholdMember(householdId) || isHost(householdId) || isSuperAdmin());
+        allow delete: if isAuthenticated() && (resource.data.senderId == request.auth.uid || isHost(householdId) || isSuperAdmin());
+      }
+
+      // Subcollection: notes (Facebook Messenger thought notes per roommate)
+      match /notes/{noteId} {
+        allow read: if true;
+        allow create, update: if isAuthenticated() && (
+          request.auth.uid == noteId ||
+          isHouseholdMember(householdId) ||
+          isHost(householdId) ||
+          isSuperAdmin()
+        );
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == noteId ||
+          isHost(householdId) ||
+          isSuperAdmin()
+        );
+      }
     }
 
     // Invitations

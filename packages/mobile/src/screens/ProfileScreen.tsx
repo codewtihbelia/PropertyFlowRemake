@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { formatPesos } from "@propertyflow/shared";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { auth } from "../firebase/config";
 import { mobileDataService } from "../services/firebaseDataService";
@@ -22,6 +23,8 @@ import { uploadImageToCloudinaryMobile } from "../services/cloudinaryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useTheme } from "../context/ThemeContext";
+import { authPinService } from "../services/authPinService";
+import { PinSetupModal } from "../components/PinSetupModal";
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -61,16 +64,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [profile, setProfile] = useState<any | null>(() => cachedProfile);
   const [loading, setLoading] = useState(() => !cachedProfile);
   const [household, setHousehold] = useState<any | null>(null);
+  const [households, setHouseholds] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  // Preference switches & values matching design
-  const [defaultCurrency, setDefaultCurrency] = useState("USD ($)");
+  // Preference switches & values matching design (defaulting to Philippine Peso)
+  const [defaultCurrency, setDefaultCurrency] = useState("PHP (₱)");
   const [defaultCurrencyFull, setDefaultCurrencyFull] = useState(
-    "United States Dollar (USD)",
+    "Philippine Peso (PHP)",
   );
   const [defaultSplitRule, setDefaultSplitRule] = useState("Equal");
   const [billReminders, setBillReminders] = useState(true);
   const [biometricSecurity, setBiometricSecurity] = useState(true);
+  const [authPinEnabled, setAuthPinEnabled] = useState(false);
+  const [hasAuthPinConfigured, setHasAuthPinConfigured] = useState(false);
+  const [showPinSetupModal, setShowPinSetupModal] = useState(false);
+  const [isPinChangeMode, setIsPinChangeMode] = useState(false);
 
   // Modals
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
@@ -81,21 +91,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   // Editable Form Inputs
   const [displayNameInput, setDisplayNameInput] = useState("");
-  const [phoneInput, setPhoneInput] = useState("0917-123-4567");
+  const [phoneInput, setPhoneInput] = useState("");
 
   useEffect(() => {
     if (!firebaseUser?.uid) return;
     mobileDataService.getUserProfile(firebaseUser.uid).then((p) => {
       if (p) {
         setProfile(p);
-        setDisplayNameInput(p.displayName || currentUser.name);
+        setDisplayNameInput(p.displayName || currentUser.name || "Resident");
         if (p.phoneNumber) setPhoneInput(p.phoneNumber);
         if (p.preferredCurrency) {
           setDefaultCurrency(p.preferredCurrency);
           setDefaultCurrencyFull(
-            p.preferredCurrency === "PHP (₱)"
-              ? "Philippine Peso (PHP)"
-              : "United States Dollar (USD)",
+            p.preferredCurrency === "USD ($)"
+              ? "United States Dollar (USD)"
+              : "Philippine Peso (PHP)",
           );
         }
         if (p.defaultSplitRule) setDefaultSplitRule(p.defaultSplitRule);
@@ -111,7 +121,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       (p) => {
         if (p) {
           setProfile(p);
-          setDisplayNameInput(p.displayName || currentUser.name);
+          setDisplayNameInput(p.displayName || currentUser.name || "Resident");
           if (p.phoneNumber) setPhoneInput(p.phoneNumber);
         }
         setLoading(false);
@@ -120,6 +130,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
     return () => unsub();
   }, [firebaseUser?.uid]);
+
+  // Listen to all households on the cloud to determine user's real groups
+  useEffect(() => {
+    const unsubHouseholds = mobileDataService.listenToHouseholds(
+      (list: any[]) => {
+        setHouseholds(list || []);
+      },
+    );
+    return () => unsubHouseholds();
+  }, []);
 
   useEffect(() => {
     const hhId = profile?.householdId;
@@ -149,20 +169,220 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     profile?.displayName ||
     firebaseUser?.displayName ||
     currentUser.name ||
-    "Mainul Islam Arafat";
+    "Resident";
   const userEmail =
-    profile?.email ||
-    firebaseUser?.email ||
-    currentUser.email ||
-    "arafat@splitzy.app";
+    profile?.email || firebaseUser?.email || currentUser.email || "";
   const photoUrl = profile?.profilePicture || firebaseUser?.photoURL;
 
   // Handle derived from name
   const usernameHandle =
-    (displayName || "arafat")
+    (displayName || "resident")
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "")
-      .slice(0, 16) || "arafat";
+      .slice(0, 16) || "resident";
+
+  // Derive all active households/groups associated with the user in Firestore
+  const userGroups = useMemo(() => {
+    if (!firebaseUser?.uid) return [];
+    const uid = firebaseUser.uid;
+    const emailLower = (userEmail || "").trim().toLowerCase();
+
+    return households.filter((h: any) => {
+      const isHost = h.hostId === uid || h.hostUid === uid;
+      const isPrimary =
+        h.householdId === profile?.householdId || h.id === profile?.householdId;
+      const isInHouseholdIds =
+        Array.isArray(profile?.householdIds) &&
+        (profile.householdIds.includes(h.householdId) ||
+          profile.householdIds.includes(h.id));
+      const isInMembers =
+        Array.isArray(h.members) &&
+        h.members.some(
+          (m: any) =>
+            m.id === uid ||
+            m.userId === uid ||
+            m.memberId === uid ||
+            (m.email && emailLower && m.email.toLowerCase() === emailLower),
+        );
+      const isInMemberUids =
+        Array.isArray(h.memberUids) && h.memberUids.includes(uid);
+
+      return (
+        isHost || isPrimary || isInHouseholdIds || isInMembers || isInMemberUids
+      );
+    });
+  }, [
+    households,
+    firebaseUser?.uid,
+    profile?.householdId,
+    profile?.householdIds,
+    userEmail,
+  ]);
+
+  // Real count of active groups from the cloud
+  const groupsCount = useMemo(() => {
+    if (userGroups.length > 0) return userGroups.length;
+    if (
+      Array.isArray(profile?.householdIds) &&
+      profile.householdIds.length > 0
+    ) {
+      return profile.householdIds.length;
+    }
+    if (profile?.householdId) return 1;
+    return 0;
+  }, [userGroups.length, profile?.householdIds, profile?.householdId]);
+
+  const groupsLabel = useMemo(() => {
+    return groupsCount === 1 ? "1 Active" : `${groupsCount} Active`;
+  }, [groupsCount]);
+
+  // Subscribe to real cloud payments and expenses for all user households
+  useEffect(() => {
+    const hhIds = new Set<string>();
+    if (profile?.householdId) hhIds.add(profile.householdId);
+    if (Array.isArray(profile?.householdIds)) {
+      profile.householdIds.forEach((id: string) => id && hhIds.add(id));
+    }
+    userGroups.forEach((h: any) => {
+      const id = h.householdId || h.id;
+      if (id) hhIds.add(id);
+    });
+
+    if (hhIds.size === 0) {
+      setPayments([]);
+      setExpenses([]);
+      return;
+    }
+
+    const unsubs: (() => void)[] = [];
+    const paymentsByHh: Record<string, any[]> = {};
+    const expensesByHh: Record<string, any[]> = {};
+
+    hhIds.forEach((hhId) => {
+      const unsubP = mobileDataService.listenToPayments(hhId, (items) => {
+        paymentsByHh[hhId] = items || [];
+        setPayments(Object.values(paymentsByHh).flat());
+      });
+      const unsubE = mobileDataService.listenToExpenses(hhId, (items) => {
+        expensesByHh[hhId] = items || [];
+        setExpenses(Object.values(expensesByHh).flat());
+      });
+      unsubs.push(unsubP, unsubE);
+    });
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [profile?.householdId, profile?.householdIds, userGroups]);
+
+  // Compute Total Paid in Philippine Pesos based on real payment records on the cloud
+  const totalPaidCentavos = useMemo(() => {
+    if (!firebaseUser?.uid) return 0;
+    const uid = firebaseUser.uid;
+    const emailLower = (userEmail || "").trim().toLowerCase();
+
+    const userPayments = payments.filter((p: any) => {
+      if (p.status === "REJECTED") return false;
+      return (
+        p.userId === uid ||
+        (p.userEmail && emailLower && p.userEmail.toLowerCase() === emailLower)
+      );
+    });
+
+    return userPayments.reduce(
+      (sum, p) => sum + (Number(p.amountCentavos) || 0),
+      0,
+    );
+  }, [payments, firebaseUser?.uid, userEmail]);
+
+  const totalPaidDisplay = useMemo(() => {
+    return formatPesos(totalPaidCentavos);
+  }, [totalPaidCentavos]);
+
+  // Compute Settled percentage based on real cloud bills and expenses
+  const settledPercentage = useMemo(() => {
+    if (!firebaseUser?.uid) return 100;
+    const uid = firebaseUser.uid;
+    const emailLower = (userEmail || "").trim().toLowerCase();
+
+    let userAssignedExpenseCount = 0;
+    let userSettledExpenseCount = 0;
+    let totalAssignedShareCentavos = 0;
+    let settledShareCentavos = 0;
+
+    expenses.forEach((exp: any) => {
+      let userSplit: any = null;
+      if (Array.isArray(exp.splitDetails) && exp.splitDetails.length > 0) {
+        userSplit = exp.splitDetails.find(
+          (s: any) =>
+            s.userId === uid ||
+            s.memberId === uid ||
+            (s.email && emailLower && s.email.toLowerCase() === emailLower),
+        );
+      }
+
+      if (Array.isArray(exp.splitDetails) && exp.splitDetails.length > 0) {
+        if (!userSplit || userSplit.isExempt) return;
+      }
+
+      userAssignedExpenseCount++;
+
+      const share =
+        userSplit && typeof userSplit.shareCentavos === "number"
+          ? userSplit.shareCentavos
+          : typeof exp.amountCents === "number"
+            ? exp.amountCents
+            : 0;
+
+      totalAssignedShareCentavos += share;
+
+      const isExpenseFullyPaid = exp.status === "PAID" || exp.isPaid === true;
+      const isSplitPaid =
+        userSplit && (userSplit.isPaid === true || userSplit.status === "PAID");
+
+      if (isExpenseFullyPaid || isSplitPaid) {
+        userSettledExpenseCount++;
+        settledShareCentavos += share;
+      }
+    });
+
+    // If user has 0 assigned expenses:
+    if (userAssignedExpenseCount === 0) {
+      if (isHostUser && expenses.length > 0) {
+        const paidExp = expenses.filter(
+          (e: any) => e.status === "PAID" || e.isPaid === true,
+        ).length;
+        return Math.round((paidExp / expenses.length) * 100);
+      }
+      return 100; // All dues clear
+    }
+
+    // If total payments cover all assigned shares, user is 100% settled
+    if (
+      totalPaidCentavos >= totalAssignedShareCentavos &&
+      totalAssignedShareCentavos > 0
+    ) {
+      return 100;
+    }
+
+    if (totalAssignedShareCentavos > 0) {
+      const effectiveSettled = Math.max(
+        settledShareCentavos,
+        totalPaidCentavos,
+      );
+      return Math.min(
+        100,
+        Math.max(
+          0,
+          Math.round((effectiveSettled / totalAssignedShareCentavos) * 100),
+        ),
+      );
+    }
+
+    return Math.round(
+      (userSettledExpenseCount / userAssignedExpenseCount) * 100,
+    );
+  }, [expenses, firebaseUser?.uid, userEmail, isHostUser, totalPaidCentavos]);
 
   const handlePickAndUploadPhoto = async () => {
     try {
@@ -206,6 +426,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         setProfile((prev: any) =>
           prev ? { ...prev, profilePicture: secureUrl } : null,
         );
+        // Sync to device saved profile
+        const savedUser = await authPinService.getSavedDeviceProfile();
+        if (savedUser && savedUser.uid === firebaseUser.uid) {
+          await authPinService.saveLastPinUser({
+            ...savedUser,
+            photoURL: secureUrl,
+          });
+        }
       }
 
       Alert.alert(
@@ -268,6 +496,73 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         .saveUserProfile({ uid: firebaseUser.uid, biometricSecurity: val })
         .catch(() => {});
     }
+  };
+
+  useEffect(() => {
+    if (!firebaseUser?.uid) return;
+    authPinService.isPinEnabled(firebaseUser.uid).then(setAuthPinEnabled);
+    authPinService
+      .hasPinConfigured(firebaseUser.uid)
+      .then(setHasAuthPinConfigured);
+  }, [firebaseUser?.uid]);
+
+  const proceedEnableAuthPin = async () => {
+    if (!firebaseUser?.uid) return;
+    const hasPin = await authPinService.hasPinConfigured(firebaseUser.uid);
+    if (!hasPin) {
+      setIsPinChangeMode(false);
+      setShowPinSetupModal(true);
+      return;
+    }
+    setAuthPinEnabled(true);
+    await authPinService.setPinEnabled(firebaseUser.uid, true);
+    await authPinService.saveDeviceProfile({
+      uid: firebaseUser.uid,
+      displayName:
+        profile?.displayName ||
+        firebaseUser.displayName ||
+        firebaseUser.email ||
+        "Resident",
+      email: firebaseUser.email || profile?.email || "",
+      photoURL: profile?.profilePicture || firebaseUser.photoURL || undefined,
+      role: profile?.role || "PAYOR",
+    });
+  };
+
+  const handleToggleAuthPin = async (val: boolean) => {
+    if (!firebaseUser?.uid) return;
+    if (val) {
+      const existingSaved = await authPinService.getSavedDeviceProfile();
+      if (existingSaved && existingSaved.uid !== firebaseUser.uid) {
+        const existingName =
+          existingSaved.displayName || existingSaved.email || "Another account";
+        Alert.alert(
+          "Override Saved Profile?",
+          `"${existingName}" is currently saved on this device. As Splitzy is a financial app, only one profile can be saved per device.\n\nEnabling PIN for your account will replace "${existingName}" as the saved profile on this device. Do you want to continue?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Override & Continue",
+              style: "destructive",
+              onPress: async () => {
+                await authPinService.removeDeviceProfile(existingSaved.uid);
+                await proceedEnableAuthPin();
+              },
+            },
+          ],
+        );
+        return;
+      }
+      await proceedEnableAuthPin();
+    } else {
+      setAuthPinEnabled(false);
+      await authPinService.setPinEnabled(firebaseUser.uid, false);
+    }
+  };
+
+  const handleOpenChangePin = () => {
+    setIsPinChangeMode(true);
+    setShowPinSetupModal(true);
   };
 
   if (loading && !profile && !cachedProfile) {
@@ -525,18 +820,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             ]}
           />
 
-          {/* 3 Column Statistics */}
+          {/* 3 Column Statistics - Real Cloud Data */}
           <View style={styles.heroStatsRow}>
             {/* Column 1: Groups */}
             <TouchableOpacity
               style={styles.statCol}
               onPress={() => {
-                if (isHostUser) {
-                  onOpenManageGroup && onOpenManageGroup("details");
-                } else if (onOpenViewGroup) {
-                  onOpenViewGroup();
+                if (groupsCount > 0) {
+                  if (isHostUser) {
+                    onOpenManageGroup && onOpenManageGroup("details");
+                  } else if (onOpenViewGroup) {
+                    onOpenViewGroup();
+                  } else {
+                    onOpenManageGroup && onOpenManageGroup("details");
+                  }
                 } else {
-                  onOpenManageGroup && onOpenManageGroup("details");
+                  onOpenManageGroup && onOpenManageGroup("join");
                 }
               }}
               activeOpacity={0.7}
@@ -551,8 +850,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </Text>
               <Text
                 style={[styles.statValueDark, isDark && { color: colors.text }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
               >
-                {profile?.householdId ? "1 Active" : "3 Active"}
+                {groupsLabel}
               </Text>
             </TouchableOpacity>
 
@@ -564,8 +865,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               ]}
             />
 
-            {/* Column 2: Total Paid */}
-            <View style={styles.statCol}>
+            {/* Column 2: Total Paid (Philippine Peso) */}
+            <TouchableOpacity
+              style={styles.statCol}
+              onPress={() => {
+                Alert.alert(
+                  "Total Paid",
+                  `You have completed a total of ${totalPaidDisplay} in payments recorded on the cloud.`,
+                );
+              }}
+              activeOpacity={0.7}
+            >
               <Text
                 style={[
                   styles.statLabel,
@@ -574,8 +884,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               >
                 Total Paid
               </Text>
-              <Text style={styles.statValueGreen}>$1,405</Text>
-            </View>
+              <Text
+                style={styles.statValueGreen}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {totalPaidDisplay}
+              </Text>
+            </TouchableOpacity>
 
             {/* Vertical Separator */}
             <View
@@ -586,7 +902,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             />
 
             {/* Column 3: Settled */}
-            <View style={styles.statCol}>
+            <TouchableOpacity
+              style={styles.statCol}
+              onPress={() => {
+                Alert.alert(
+                  "Settlement Rate",
+                  `Your shared bills and expenses are currently ${settledPercentage}% settled.`,
+                );
+              }}
+              activeOpacity={0.7}
+            >
               <Text
                 style={[
                   styles.statLabel,
@@ -595,8 +920,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               >
                 Settled
               </Text>
-              <Text style={styles.statValueBlue}>98%</Text>
-            </View>
+              <Text
+                style={styles.statValueBlue}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {settledPercentage}%
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -966,6 +1297,141 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               thumbColor="#FFFFFF"
             />
           </View>
+
+          <View
+            style={[
+              styles.itemDivider,
+              isDark && { backgroundColor: colors.borderSubtle },
+            ]}
+          />
+
+          {/* 4-Digit Quick Access PIN */}
+          <View style={styles.cardItemRow}>
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(59, 130, 246, 0.15)"
+                    : "#EFF6FF",
+                },
+              ]}
+            >
+              <Feather
+                name="lock"
+                size={18}
+                color={isDark ? colors.accent : colors.primary}
+              />
+            </View>
+            <View style={styles.itemContent}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                <Text
+                  style={[styles.itemTitle, isDark && { color: colors.text }]}
+                >
+                  4-Digit Access PIN
+                </Text>
+                {authPinEnabled && hasAuthPinConfigured && (
+                  <View
+                    style={{
+                      backgroundColor: isDark
+                        ? "rgba(16, 185, 129, 0.15)"
+                        : "#DCFCE7",
+                      paddingHorizontal: 6,
+                      paddingVertical: 1,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        fontWeight: "800",
+                        color: isDark ? "#34D399" : "#16A34A",
+                      }}
+                    >
+                      ACTIVE ✓
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                {hasAuthPinConfigured
+                  ? authPinEnabled
+                    ? "Unlock dashboard with permanent PIN"
+                    : "Configured but currently disabled"
+                  : "Quick dashboard entry without password"}
+              </Text>
+            </View>
+            <Switch
+              value={authPinEnabled}
+              onValueChange={handleToggleAuthPin}
+              trackColor={{
+                false: isDark ? "#2A2D35" : "#E2E8F0",
+                true: colors.primary,
+              }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          {/* Change PIN option when PIN is configured */}
+          {hasAuthPinConfigured && (
+            <>
+              <View
+                style={[
+                  styles.itemDivider,
+                  isDark && { backgroundColor: colors.borderSubtle },
+                ]}
+              />
+              <TouchableOpacity
+                style={styles.cardItemRow}
+                activeOpacity={0.7}
+                onPress={handleOpenChangePin}
+              >
+                <View
+                  style={[
+                    styles.itemIconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255, 255, 255, 0.06)"
+                        : "#F1F5F9",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="key"
+                    size={16}
+                    color={isDark ? colors.textSecondary : "#64748B"}
+                  />
+                </View>
+                <View style={styles.itemContent}>
+                  <Text
+                    style={[styles.itemTitle, isDark && { color: colors.text }]}
+                  >
+                    Change 4-Digit PIN
+                  </Text>
+                  <Text
+                    style={[
+                      styles.itemSubtitle,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Update your permanent security passcode
+                  </Text>
+                </View>
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? colors.textMuted : "#94A3B8"}
+                />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* SECTION: DISPLAY & APPEARANCE */}
@@ -1712,7 +2178,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               borderColor: "rgba(239, 68, 68, 0.28)",
             },
           ]}
-          onPress={onSignOut}
+          onPress={() => {
+            Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Sign Out",
+                style: "destructive",
+                onPress: () => {
+                  if (onSignOut) onSignOut();
+                },
+              },
+            ]);
+          }}
           activeOpacity={0.8}
         >
           <Feather
@@ -1721,7 +2198,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             color={isDark ? "#F87171" : "#DC2626"}
             style={{ marginRight: 8 }}
           />
-          <Text style={[styles.signOutBtnText, isDark && { color: "#F87171" }]}>
+          <Text
+            style={[
+              styles.signOutBtnText,
+              { color: isDark ? "#F87171" : "#DC2626" },
+            ]}
+          >
             Sign Out
           </Text>
         </TouchableOpacity>
@@ -2215,6 +2697,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </View>
         </View>
       </SmoothBottomSheetModal>
+
+      {/* 4-Digit PIN Setup / Change Modal */}
+      {firebaseUser?.uid && (
+        <PinSetupModal
+          visible={showPinSetupModal}
+          onClose={() => setShowPinSetupModal(false)}
+          uid={firebaseUser.uid}
+          isChangeMode={isPinChangeMode}
+          onSuccess={() => {
+            setAuthPinEnabled(true);
+            setHasAuthPinConfigured(true);
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -2550,6 +3046,20 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
 
+  lockProfileBtn: {
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFF6FF",
+    paddingVertical: 15,
+    borderRadius: 18,
+  },
+  lockProfileBtnText: {
+    color: "#2563EB",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   signOutBtn: {
     marginTop: 20,
     flexDirection: "row",

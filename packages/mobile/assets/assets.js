@@ -4,6 +4,7 @@ import gcashLogo from "../assets/gcashLogo.png";
 import mayaLogo from "../assets/mayaLogo.png";
 import bankLogo from "../assets/bankLogo.png";
 import cashLogo from "../assets/cashLogo.png";
+import sBlueLogo from "../assets/sBlueLogo.png";
 
 export const assets = {
   favicon,
@@ -12,4 +13,5 @@ export const assets = {
   mayaLogo,
   bankLogo,
   cashLogo,
+  sBlueLogo,
 };

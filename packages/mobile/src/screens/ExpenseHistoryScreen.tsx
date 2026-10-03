@@ -20,6 +20,7 @@ import {
   MobilePayment,
   cleanBillTitle,
   isPayorMember,
+  computeFairSplitShareCentavos,
 } from "../services/firebaseDataService";
 import { getCategoryMeta } from "../services/categoryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
@@ -385,10 +386,25 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
             }));
 
       const effPayors = sourceMembers.filter((m: any) => isPayorMember(m));
-      const effPayorCount = Math.max(
-        1,
-        effPayors.length > 0 ? effPayors.length : sourceMembers.length,
+      const effectivePayorList =
+        effPayors.length > 0 ? effPayors : sourceMembers;
+      const effPayorCount = Math.max(1, effectivePayorList.length);
+
+      const isWater = (exp.category || exp.title || "")
+        .toLowerCase()
+        .includes("water");
+      const populatedPayorSplits = rawSplits.filter((s: any) => !s.isExempt);
+      const rawSplitsSum = populatedPayorSplits.reduce(
+        (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+        0,
       );
+      const hasPopulatedSplits = populatedPayorSplits.some(
+        (s: any) => Number(s.shareCentavos) > 0,
+      );
+      const isSavedSplitExact =
+        isWater ||
+        (populatedPayorSplits.length === effPayorCount &&
+          rawSplitsSum === (exp.amountCents || 0));
 
       sourceMembers.forEach((m: any) => {
         const uid = m.userId || m.memberId || m.id;
@@ -400,11 +416,16 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
 
         const shareCentavos = isExempt
           ? 0
-          : splitEntry &&
+          : isSavedSplitExact &&
+              splitEntry &&
               typeof splitEntry.shareCentavos === "number" &&
-              splitEntry.shareCentavos > 0
+              (splitEntry.shareCentavos > 0 || hasPopulatedSplits)
             ? splitEntry.shareCentavos
-            : Math.round((exp.amountCents || 0) / effPayorCount);
+            : computeFairSplitShareCentavos(
+                exp.amountCents || 0,
+                effectivePayorList,
+                uid,
+              );
 
         const percentage = isExempt
           ? 0
@@ -497,7 +518,11 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       const myShareCents = myEntry
         ? myEntry.shareCentavos
         : isCurrentUserPayor
-          ? Math.round((exp.amountCents || 0) / effPayorCount)
+          ? computeFairSplitShareCentavos(
+              exp.amountCents || 0,
+              effectivePayorList,
+              currentUser?.uid,
+            )
           : 0;
 
       const recordedBy =
@@ -828,6 +853,14 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           <View style={{ alignItems: "center" }}>
             <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
               Paid Bill History
+            </Text>
+            <Text
+              style={[
+                styles.navSubtitle,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              Settled household bills & payor breakdowns
             </Text>
           </View>
 

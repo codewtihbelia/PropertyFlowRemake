@@ -8,6 +8,11 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
+  TextInput,
+  BackHandler,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -15,6 +20,9 @@ import { auth } from "../firebase/config";
 import {
   mobileDataService,
   isPayorMember,
+  computeCycleWaterBreakdown,
+  getFairSplitShareAtIndex,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { WaterSettingsModal } from "../components/WaterSettingsModal";
@@ -41,7 +49,37 @@ interface MonthSection {
   startDayNum: number;
   endDayNum: number;
   leadingEmptyDays: number;
+  weeks: Array<Array<CycleDate | null>>;
 }
+
+const parseLocalDate = (dateStr?: string, fallback?: Date): Date => {
+  if (!dateStr) return fallback || new Date();
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+  if (match) {
+    return new Date(
+      parseInt(match[1], 10),
+      parseInt(match[2], 10) - 1,
+      parseInt(match[3], 10),
+      12,
+      0,
+      0,
+      0,
+    );
+  }
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) {
+    return new Date(
+      parsed.getFullYear(),
+      parsed.getMonth(),
+      parsed.getDate(),
+      12,
+      0,
+      0,
+      0,
+    );
+  }
+  return fallback || new Date();
+};
 
 const generateCycleDates = (
   startStr?: string,
@@ -49,19 +87,33 @@ const generateCycleDates = (
 ): CycleDate[] => {
   const dates: CycleDate[] = [];
   const now = new Date();
+  const defaultStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1,
+    12,
+    0,
+    0,
+    0,
+  );
+  const defaultEnd = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    0,
+    12,
+    0,
+    0,
+    0,
+  );
 
-  let start = startStr
-    ? new Date(startStr)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
-  let end = endStr
-    ? new Date(endStr)
-    : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  let start = startStr ? parseLocalDate(startStr, defaultStart) : defaultStart;
+  let end = endStr ? parseLocalDate(endStr, defaultEnd) : defaultEnd;
 
   if (isNaN(start.getTime())) {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    start = defaultStart;
   }
   if (isNaN(end.getTime()) || end < start) {
-    end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 12, 0, 0, 0);
   }
 
   const cur = new Date(start);
@@ -131,6 +183,23 @@ const groupDatesByMonth = (cycleDates: CycleDate[]): MonthSection[] => {
     const last = dates[dates.length - 1];
     // Monday-first index: Monday = 0, ..., Sunday = 6
     const leadingEmptyDays = (first.rawDate.getDay() + 6) % 7;
+
+    // Build exact 7-column week rows so every date aligns strictly under MON..SUN
+    const cells: Array<CycleDate | null> = [];
+    for (let i = 0; i < leadingEmptyDays; i++) {
+      cells.push(null);
+    }
+    for (const d of dates) {
+      cells.push(d);
+    }
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+    const weeks: Array<Array<CycleDate | null>> = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      weeks.push(cells.slice(i, i + 7));
+    }
+
     sections.push({
       monthKey: `${first.rawDate.getFullYear()}-${first.rawDate.getMonth()}`,
       monthName: fullMonthNames[first.rawDate.getMonth()],
@@ -139,6 +208,7 @@ const groupDatesByMonth = (cycleDates: CycleDate[]): MonthSection[] => {
       startDayNum: first.dayNum,
       endDayNum: last.dayNum,
       leadingEmptyDays,
+      weeks,
     });
   });
 
@@ -162,12 +232,28 @@ const AVATAR_COLORS = [
   "#059669",
 ];
 
+export type PayorAllocationMode =
+  | "FAIR_SPLIT"
+  | "SPECIFIC_PAYOR"
+  | "CUSTOM_SPLIT";
+
 export const AttendanceScreen: React.FC<{
   householdId?: string;
   billingCycleId?: string;
   userId?: string;
   onBack?: () => void;
-}> = ({ householdId, billingCycleId, userId, onBack }) => {
+  onUnsavedChangesChange?: (hasUnsaved: boolean) => void;
+  pendingLeaveAction?: (() => void) | null;
+  onClearPendingLeave?: () => void;
+}> = ({
+  householdId,
+  billingCycleId,
+  userId,
+  onBack,
+  onUnsavedChangesChange,
+  pendingLeaveAction,
+  onClearPendingLeave,
+}) => {
   const { isDark, colors } = useTheme();
   const currentUser = auth.currentUser;
   const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
@@ -179,8 +265,35 @@ export const AttendanceScreen: React.FC<{
   );
   const [cycles, setCycles] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [memberBills, setMemberBills] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [savedPresentDates, setSavedPresentDates] = useState<string[]>([]);
   const [presentDates, setPresentDates] = useState<string[]>([]);
+  const [hasUserModifiedDraft, setHasUserModifiedDraft] =
+    useState<boolean>(false);
+  const hasUserModifiedDraftRef = useRef<boolean>(false);
+  const [isEditingAttendance, setIsEditingAttendance] =
+    useState<boolean>(false);
+  const [showLockedHint, setShowLockedHint] = useState<boolean>(false);
+  const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
+  const [showLeavePromptModal, setShowLeavePromptModal] =
+    useState<boolean>(false);
+  const localPendingLeaveRef = useRef<(() => void) | null>(null);
+
+  // Non-payor allocation state inside the Submit Attendance bottom sheet
+  const [allocationMode, setAllocationMode] =
+    useState<PayorAllocationMode>("FAIR_SPLIT");
+  const [selectedSpecificPayorId, setSelectedSpecificPayorId] =
+    useState<string>("");
+  const [customSplitInputType, setCustomSplitInputType] = useState<
+    "PESO" | "PERCENT"
+  >("PESO");
+  const [customPayorInputs, setCustomPayorInputs] = useState<
+    Record<string, string>
+  >({});
+
   const [allCycleAttendance, setAllCycleAttendance] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<Record<string, any>>({});
   const optimisticPresentRef = useRef<Set<string>>(new Set());
@@ -202,13 +315,18 @@ export const AttendanceScreen: React.FC<{
   const [loading, setLoading] = useState<boolean>(true);
 
   const presentSet = useMemo(() => new Set(presentDates), [presentDates]);
+  const savedPresentSet = useMemo(
+    () => new Set(savedPresentDates),
+    [savedPresentDates],
+  );
 
   const activeUserId = userId || currentUser?.uid || "";
 
   const activeCycle = useMemo(
     () =>
-      cycles.find((c) => c.billingCycleId === billingCycleId) ||
-      cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
+      (billingCycleId &&
+        cycles.find((c) => c.billingCycleId === billingCycleId)) ||
+      cycles.find((c) => c.status === "ACTIVE") ||
       cycles[0],
     [billingCycleId, cycles],
   );
@@ -267,8 +385,203 @@ export const AttendanceScreen: React.FC<{
       ? fixedMonthlyPesos / payingRoommatesCount
       : fixedPerPersonPesos;
 
+  const oldestCycleId =
+    cycles.length > 0 ? cycles[cycles.length - 1]?.billingCycleId : undefined;
+  const knownCycleIds = useMemo(
+    () => new Set(cycles.map((c) => c.billingCycleId).filter(Boolean)),
+    [cycles],
+  );
+
+  const currentCycleExpenses = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return [];
+    return expenses.filter(
+      (e) =>
+        e.billingCycleId === activeCycle.billingCycleId ||
+        ((!e.billingCycleId || !knownCycleIds.has(e.billingCycleId)) &&
+          (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId)),
+    );
+  }, [
+    expenses,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    oldestCycleId,
+    knownCycleIds,
+  ]);
+
+  const settledPayorUids = useMemo(() => {
+    const settled = new Set<string>();
+    if (currentCycleExpenses.length === 0 || activePayors.length === 0) {
+      return settled;
+    }
+    const payorCount = Math.max(1, activePayors.length);
+    const cycleId = activeCycle?.billingCycleId;
+    const isSingleCycle = cycles.length <= 1;
+
+    activePayors.forEach((p) => {
+      const uid = p.userId || p.memberId || p.id;
+      if (!uid) return;
+      const b = memberBills.find((mb) => mb.userId === uid);
+      const userPaidFromPmts = payments
+        .filter((pmt) => {
+          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+          if (!cycleId) return true;
+          return (
+            pmt.billingCycleId === cycleId ||
+            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+              isSingleCycle)
+          );
+        })
+        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
+
+      let payorShareTotal = 0;
+      let allUserSplitsMarkedPaid = true;
+      currentCycleExpenses.forEach((exp) => {
+        const mySplit = Array.isArray(exp.splitDetails)
+          ? exp.splitDetails.find((s: any) => s.userId === uid)
+          : null;
+        if (mySplit?.isExempt) return;
+        const share =
+          mySplit && typeof mySplit.shareCentavos === "number"
+            ? mySplit.shareCentavos
+            : Math.round((exp.amountCents || 0) / payorCount);
+        payorShareTotal += share;
+        if (
+          !exp.isPaid &&
+          exp.status !== "PAID" &&
+          !mySplit?.isPaid &&
+          share > 0
+        ) {
+          allUserSplitsMarkedPaid = false;
+        }
+      });
+
+      if (payorShareTotal <= 0) return;
+      const effectivePaid = Math.max(
+        b?.totalPaidCentavos || 0,
+        userPaidFromPmts,
+      );
+      const isMemberBillSettled =
+        b &&
+        typeof b.outstandingCentavos === "number" &&
+        b.outstandingCentavos === 0 &&
+        (b.totalPaidCentavos || 0) > 0;
+      if (
+        effectivePaid >= payorShareTotal ||
+        allUserSplitsMarkedPaid ||
+        isMemberBillSettled
+      ) {
+        settled.add(uid);
+      }
+    });
+
+    return settled;
+  }, [
+    currentCycleExpenses,
+    activePayors,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    memberBills,
+    payments,
+  ]);
+
+  const allExpensesMarkedPaid =
+    currentCycleExpenses.length > 0 &&
+    currentCycleExpenses.some((e) => (Number(e.amountCents) || 0) > 0) &&
+    currentCycleExpenses.every(
+      (e) =>
+        (Number(e.amountCents) || 0) <= 0 || e.status === "PAID" || e.isPaid,
+    );
+
+  const allPayorsSettled =
+    allExpensesMarkedPaid ||
+    (currentCycleExpenses.length > 0 &&
+      activePayors.length > 0 &&
+      activePayors.every((p) => {
+        const uid = p.userId || p.memberId || p.id;
+        return Boolean(uid && settledPayorUids.has(uid));
+      }));
+
+  const isCycleClosedOrPaidOff = Boolean(
+    activeCycle &&
+    (activeCycle.status === "CLOSED" ||
+      activeCycle.status === "ARCHIVED" ||
+      allPayorsSettled),
+  );
+
   const mySubmission = submissions[activeUserId];
-  const isMyAttendanceSubmitted = Boolean(mySubmission);
+  const isMyAttendanceSubmitted =
+    Boolean(mySubmission) && !isCycleClosedOrPaidOff;
+
+  const myMember = useMemo(
+    () =>
+      members.find(
+        (m) =>
+          (m.userId || m.memberId || m.id) === activeUserId ||
+          (m.userId && m.userId.replace("mem_", "") === activeUserId),
+      ),
+    [members, activeUserId],
+  );
+  // Only Non-Payors choose how Payors cover their water due in the Submit Bottom Sheet
+  const isMyMemberPayor = useMemo(
+    () => (myMember ? isPayorMember(myMember) : true),
+    [myMember],
+  );
+
+  // Calendar is locked when submitted and user hasn't tapped "Edit Attendance"
+  const isCalendarLocked = Boolean(
+    isCycleClosedOrPaidOff || (isMyAttendanceSubmitted && !isEditingAttendance),
+  );
+
+  // Detect whether draft markings differ from saved Firestore markings
+  const areDraftDatesDifferent = useMemo(() => {
+    if (presentSet.size !== savedPresentSet.size) return true;
+    for (const d of presentSet) {
+      if (!savedPresentSet.has(d)) return true;
+    }
+    return false;
+  }, [presentSet, savedPresentSet]);
+
+  const hasUnsavedChanges = Boolean(
+    !isCycleClosedOrPaidOff &&
+    !isFixedMode &&
+    hasUserModifiedDraft &&
+    (areDraftDatesDifferent ||
+      (!isMyAttendanceSubmitted && presentSet.size > 0)),
+  );
+
+  useEffect(() => {
+    onUnsavedChangesChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onUnsavedChangesChange]);
+
+  // Trigger Unsaved Markings Modal when parent navigation attempts to switch tabs
+  useEffect(() => {
+    if (pendingLeaveAction) {
+      if (hasUnsavedChanges) {
+        localPendingLeaveRef.current = pendingLeaveAction;
+        setShowLeavePromptModal(true);
+      } else {
+        const action = pendingLeaveAction;
+        onClearPendingLeave?.();
+        action();
+      }
+    }
+  }, [pendingLeaveAction, hasUnsavedChanges, onClearPendingLeave]);
+
+  // Intercept Android hardware back button when unsaved markings exist
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (hasUnsavedChanges) {
+        localPendingLeaveRef.current = () => {
+          if (onBack) onBack();
+        };
+        setShowLeavePromptModal(true);
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [hasUnsavedChanges, onBack]);
 
   useEffect(() => {
     let mounted = true;
@@ -336,226 +649,111 @@ export const AttendanceScreen: React.FC<{
         checkReady();
       },
     );
+    const unsubExpenses = mobileDataService.listenToExpenses(
+      resolvedHouseholdId,
+      (data) => {
+        setExpenses(data);
+      },
+    );
+    const unsubPayments = mobileDataService.listenToPayments(
+      resolvedHouseholdId,
+      (data) => {
+        setPayments(data);
+      },
+    );
     return () => {
       clearTimeout(safetyTimer);
       unsubCycles();
       unsubWater();
       unsubMembers();
+      unsubExpenses();
+      unsubPayments();
     };
   }, [resolvedHouseholdId, isProfileLoaded]);
 
-  const latestSyncContextRef = useRef({
+  useEffect(() => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId) {
+      setMemberBills([]);
+      return;
+    }
+    return mobileDataService.listenToMemberBills(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setMemberBills,
+    );
+  }, [resolvedHouseholdId, resolvedBillingCycleId]);
+
+  useEffect(() => {
+    if (allPayorsSettled && resolvedHouseholdId && resolvedBillingCycleId) {
+      const hasUnpaid = currentCycleExpenses.some(
+        (e) => e.status !== "PAID" || !e.isPaid,
+      );
+      if (hasUnpaid) {
+        mobileDataService
+          .markExpensesPaidIfAllSettled(
+            resolvedHouseholdId,
+            resolvedBillingCycleId,
+          )
+          .catch(() => {});
+      }
+    }
+  }, [
+    allPayorsSettled,
     resolvedHouseholdId,
     resolvedBillingCycleId,
-    activeUserId,
-    cycleDatesLength: cycleDates.length,
-    isFixedMode,
-    myFixedSharePesos,
-    ratePerDayPesos,
-    isMyAttendanceSubmitted,
-  });
-  latestSyncContextRef.current = {
-    resolvedHouseholdId,
-    resolvedBillingCycleId,
-    activeUserId,
-    cycleDatesLength: cycleDates.length,
-    isFixedMode,
-    myFixedSharePesos,
-    ratePerDayPesos,
-    isMyAttendanceSubmitted,
-  };
+    currentCycleExpenses,
+  ]);
 
-  const runCoalescedBillSync = async () => {
-    const ctx = latestSyncContextRef.current;
-    if (
-      !ctx.resolvedHouseholdId ||
-      !ctx.resolvedBillingCycleId ||
-      !ctx.activeUserId
-    ) {
-      return;
-    }
-    if (isSyncingBillsRef.current) {
-      needsFollowUpBillSyncRef.current = true;
-      return;
-    }
-    isSyncingBillsRef.current = true;
-    try {
-      do {
-        needsFollowUpBillSyncRef.current = false;
-        const latestCtx = latestSyncContextRef.current;
-        const currentPresentCount = optimisticPresentRef.current.size;
-        const currentAbsentCount = Math.max(
-          0,
-          latestCtx.cycleDatesLength - currentPresentCount,
-        );
-        const currentWaterFee = latestCtx.isFixedMode
-          ? latestCtx.myFixedSharePesos
-          : currentPresentCount * latestCtx.ratePerDayPesos;
-
-        if (latestCtx.isMyAttendanceSubmitted) {
-          await mobileDataService
-            .submitAttendance(
-              latestCtx.resolvedHouseholdId,
-              latestCtx.resolvedBillingCycleId,
-              latestCtx.activeUserId,
-              currentPresentCount,
-              currentAbsentCount,
-              Math.round(currentWaterFee * 100),
-            )
-            .catch(() => {});
-        }
-
-        await mobileDataService.syncCycleWaterBill(
-          latestCtx.resolvedHouseholdId,
-          latestCtx.resolvedBillingCycleId,
-        );
-      } while (needsFollowUpBillSyncRef.current);
-    } catch (err) {
-      console.warn("[AttendanceScreen] background bill sync warning:", err);
-    } finally {
-      isSyncingBillsRef.current = false;
-    }
-  };
-
-  const flushPendingMutations = async () => {
-    const ctx = latestSyncContextRef.current;
-    if (
-      !ctx.resolvedHouseholdId ||
-      !ctx.resolvedBillingCycleId ||
-      !ctx.activeUserId
-    ) {
-      return;
-    }
-    if (isFlushingBatchRef.current || pendingMutationsRef.current.size === 0) {
-      return;
-    }
-
-    isFlushingBatchRef.current = true;
-    const entriesToFlush: Array<{
-      date: string;
-      status: "PRESENT" | "ABSENT";
-    }> = [];
-
-    pendingMutationsRef.current.forEach((status, date) => {
-      entriesToFlush.push({ date, status });
-      inFlightMutationsRef.current.set(date, status);
-    });
-    pendingMutationsRef.current.clear();
-
-    try {
-      if (entriesToFlush.length === 1) {
-        const single = entriesToFlush[0];
-        await mobileDataService.toggleAttendance(
-          ctx.resolvedHouseholdId,
-          ctx.resolvedBillingCycleId,
-          ctx.activeUserId,
-          single.date,
-          single.status,
-        );
-      } else if (entriesToFlush.length > 1) {
-        await mobileDataService.bulkToggleAttendance(
-          ctx.resolvedHouseholdId,
-          ctx.resolvedBillingCycleId,
-          ctx.activeUserId,
-          entriesToFlush,
-        );
-      }
-    } catch (err) {
-      console.warn("[AttendanceScreen] flushPendingMutations error:", err);
-      // Remove failed entries from inFlight if not superseded by newer taps
-      for (const item of entriesToFlush) {
-        if (!pendingMutationsRef.current.has(item.date)) {
-          inFlightMutationsRef.current.delete(item.date);
-        }
-      }
-    } finally {
-      isFlushingBatchRef.current = false;
-      // Clear in-flight guard after a brief grace window if snapshot hasn't already cleared it
-      setTimeout(() => {
-        for (const item of entriesToFlush) {
-          if (
-            inFlightMutationsRef.current.get(item.date) === item.status &&
-            !pendingMutationsRef.current.has(item.date)
-          ) {
-            inFlightMutationsRef.current.delete(item.date);
-          }
-        }
-      }, 1200);
-
-      if (pendingMutationsRef.current.size > 0) {
-        flushPendingMutations();
-      }
-    }
-  };
-
-  const scheduleAttendanceSync = (immediateBatch = false) => {
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    if (immediateBatch) {
-      flushPendingMutations();
-    } else {
-      flushTimerRef.current = setTimeout(() => {
+  useEffect(() => {
+    if (isCycleClosedOrPaidOff) {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
-        flushPendingMutations();
-      }, 140);
+      }
+      if (billSyncTimerRef.current) {
+        clearTimeout(billSyncTimerRef.current);
+        billSyncTimerRef.current = null;
+      }
+      pendingMutationsRef.current.clear();
+      inFlightMutationsRef.current.clear();
+      hasUserModifiedDraftRef.current = false;
+      setHasUserModifiedDraft(false);
+      setIsEditingAttendance(false);
+      setShowLockedHint(false);
     }
-
-    if (billSyncTimerRef.current) {
-      clearTimeout(billSyncTimerRef.current);
-    }
-    billSyncTimerRef.current = setTimeout(() => {
-      billSyncTimerRef.current = null;
-      runCoalescedBillSync();
-    }, 380);
-  };
+  }, [isCycleClosedOrPaidOff]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
 
-    // Reset optimistic caches when switching cycles or users
+    // Reset draft caches when switching cycles or users
     optimisticPresentRef.current = new Set();
     pendingMutationsRef.current.clear();
     inFlightMutationsRef.current.clear();
+    hasUserModifiedDraftRef.current = false;
+    setHasUserModifiedDraft(false);
+    setIsEditingAttendance(false);
+    setShowLockedHint(false);
 
     const unsubAtt = mobileDataService.listenToAttendance(
       resolvedHouseholdId,
       resolvedBillingCycleId,
       activeUserId,
       (markedDates) => {
-        const merged = new Set<string>();
+        const savedList: string[] = [];
         Object.entries(markedDates).forEach(([date, status]) => {
           if (status === "PRESENT") {
-            merged.add(date);
-          }
-          // If server snapshot now matches our in-flight mutation, clear in-flight entry
-          if (inFlightMutationsRef.current.get(date) === status) {
-            inFlightMutationsRef.current.delete(date);
+            savedList.push(date);
           }
         });
+        setSavedPresentDates(savedList);
 
-        // Overlay any still-in-flight mutations not yet reflected in snapshot
-        inFlightMutationsRef.current.forEach((status, date) => {
-          if (status === "PRESENT") {
-            merged.add(date);
-          } else {
-            merged.delete(date);
-          }
-        });
-
-        // Overlay any newer pending local taps
-        pendingMutationsRef.current.forEach((status, date) => {
-          if (status === "PRESENT") {
-            merged.add(date);
-          } else {
-            merged.delete(date);
-          }
-        });
-
-        optimisticPresentRef.current = merged;
-        setPresentDates(Array.from(merged));
+        // Only overwrite local draft if user is not actively editing unsaved markings
+        if (!hasUserModifiedDraftRef.current) {
+          optimisticPresentRef.current = new Set(savedList);
+          setPresentDates(savedList);
+        }
       },
     );
 
@@ -580,73 +778,116 @@ export const AttendanceScreen: React.FC<{
         clearTimeout(billSyncTimerRef.current);
         billSyncTimerRef.current = null;
       }
-      if (pendingMutationsRef.current.size > 0) {
-        flushPendingMutations();
-        runCoalescedBillSync();
-      }
       unsubAtt();
       unsubCycleAll();
       unsubSubs();
     };
   }, [activeUserId, resolvedBillingCycleId, resolvedHouseholdId]);
 
-  // Zero-latency synchronous toggle with coalesced background sync
+  const handleStartEditing = () => {
+    if (isCycleClosedOrPaidOff) return;
+    setIsEditingAttendance(true);
+    setShowLockedHint(false);
+  };
+
+  const handleCancelEditing = () => {
+    optimisticPresentRef.current = new Set(savedPresentDates);
+    setPresentDates([...savedPresentDates]);
+    hasUserModifiedDraftRef.current = false;
+    setHasUserModifiedDraft(false);
+    setIsEditingAttendance(false);
+    setShowLockedHint(false);
+  };
+
+  // Draft toggle on calendar date (requires explicit submit before leaving)
   const toggleDay = (iso: string) => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
       return;
 
-    const isCurrentlyPresent = optimisticPresentRef.current.has(iso);
-    const nextStatus: "PRESENT" | "ABSENT" = isCurrentlyPresent
-      ? "ABSENT"
-      : "PRESENT";
-
-    if (nextStatus === "PRESENT") {
-      optimisticPresentRef.current.add(iso);
-    } else {
-      optimisticPresentRef.current.delete(iso);
+    if (isCycleClosedOrPaidOff) {
+      Alert.alert(
+        "Cycle Settled & Closed",
+        "This billing cycle has already been paid off or closed. Attendance has been reset and will unlock when your host starts the next billing cycle.",
+      );
+      return;
     }
 
-    pendingMutationsRef.current.set(iso, nextStatus);
+    if (isCalendarLocked) {
+      setShowLockedHint(true);
+      return;
+    }
+
+    const isCurrentlyPresent = optimisticPresentRef.current.has(iso);
+    if (isCurrentlyPresent) {
+      optimisticPresentRef.current.delete(iso);
+    } else {
+      optimisticPresentRef.current.add(iso);
+    }
+
+    hasUserModifiedDraftRef.current = true;
+    setHasUserModifiedDraft(true);
     setPresentDates(Array.from(optimisticPresentRef.current));
-    scheduleAttendanceSync(false);
   };
 
   const markAll = () => {
-    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
+    if (
+      !resolvedHouseholdId ||
+      !resolvedBillingCycleId ||
+      !activeUserId ||
+      isCycleClosedOrPaidOff
+    )
       return;
+
+    if (isCalendarLocked) {
+      setShowLockedHint(true);
+      return;
+    }
 
     const nextSet = new Set<string>();
     for (const d of cycleDates) {
       nextSet.add(d.iso);
-      pendingMutationsRef.current.set(d.iso, "PRESENT");
     }
     optimisticPresentRef.current = nextSet;
+    hasUserModifiedDraftRef.current = true;
+    setHasUserModifiedDraft(true);
     setPresentDates(Array.from(nextSet));
-    scheduleAttendanceSync(true);
   };
 
   const clearAll = () => {
-    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
+    if (
+      !resolvedHouseholdId ||
+      !resolvedBillingCycleId ||
+      !activeUserId ||
+      isCycleClosedOrPaidOff
+    )
       return;
 
-    optimisticPresentRef.current = new Set<string>();
-    for (const d of cycleDates) {
-      pendingMutationsRef.current.set(d.iso, "ABSENT");
+    if (isCalendarLocked) {
+      setShowLockedHint(true);
+      return;
     }
+
+    optimisticPresentRef.current = new Set<string>();
+    hasUserModifiedDraftRef.current = true;
+    setHasUserModifiedDraft(true);
     setPresentDates([]);
-    scheduleAttendanceSync(true);
   };
 
   const totalDays = cycleDates.length;
-  const presentCount = presentDates.length;
-  const absentCount = Math.max(0, totalDays - presentCount);
-  const waterFee = isFixedMode
-    ? myFixedSharePesos
-    : presentCount * ratePerDayPesos;
+  const rawPresentCount = presentDates.length;
+  const presentCount = isCycleClosedOrPaidOff ? 0 : rawPresentCount;
+  const absentCount = isCycleClosedOrPaidOff
+    ? 0
+    : Math.max(0, totalDays - presentCount);
+  const waterFee = isCycleClosedOrPaidOff
+    ? 0
+    : isFixedMode
+      ? myFixedSharePesos
+      : presentCount * ratePerDayPesos;
   const { onScroll } = useNavVisibility();
 
-  // Handle Submit / Update Attendance
-  const handleSubmitAttendance = async () => {
+  // Initialize and open the slide-up Submit Attendance Bottom Sheet
+  const handleOpenSubmitModal = () => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId) {
       Alert.alert(
         "Notice",
@@ -655,23 +896,349 @@ export const AttendanceScreen: React.FC<{
       return;
     }
 
+    if (isCycleClosedOrPaidOff) {
+      Alert.alert(
+        "Cycle Settled & Closed",
+        "This billing cycle is already paid off or closed. Attendance is reset to zero until the next billing cycle starts.",
+      );
+      return;
+    }
+
+    // Pre-populate Non-Payor payor allocation settings from existing submission or fair defaults
+    const savedMode: PayorAllocationMode =
+      mySubmission?.allocationMode === "SPECIFIC_PAYOR" ||
+      mySubmission?.allocationMode === "CUSTOM_SPLIT"
+        ? mySubmission.allocationMode
+        : "FAIR_SPLIT";
+    setAllocationMode(savedMode);
+
+    const firstPayorUid =
+      activePayors[0]?.userId ||
+      activePayors[0]?.memberId ||
+      activePayors[0]?.id ||
+      "";
+    const initialSpecificId =
+      mySubmission?.assignedPayorId &&
+      activePayors.some(
+        (p) =>
+          (p.userId || p.memberId || p.id) === mySubmission.assignedPayorId,
+      )
+        ? mySubmission.assignedPayorId
+        : firstPayorUid;
+    setSelectedSpecificPayorId(initialSpecificId);
+
+    const savedInputType: "PESO" | "PERCENT" =
+      mySubmission?.customSplitInputType === "PERCENT" ? "PERCENT" : "PESO";
+    setCustomSplitInputType(savedInputType);
+
+    const initialInputs: Record<string, string> = {};
+    const payorCount = Math.max(1, activePayors.length);
+    const savedSplitsCents = mySubmission?.customPayorSplitsCentavos || {};
+    const savedPcts = mySubmission?.customPayorPercentages || {};
+    const hasSavedCustom =
+      Object.keys(savedSplitsCents).length > 0 ||
+      Object.keys(savedPcts).length > 0;
+
+    let runningCents = 0;
+    let runningPct = 0;
+    const totalFeeCents = Math.round(waterFee * 100);
+
+    activePayors.forEach((p, idx) => {
+      const pUid = p.userId || p.memberId || p.id;
+      if (!pUid) return;
+      if (hasSavedCustom) {
+        if (savedInputType === "PERCENT") {
+          const pctVal = Number(savedPcts[pUid] ?? 0);
+          initialInputs[pUid] =
+            pctVal > 0 ? String(Math.round(pctVal * 10) / 10) : "0";
+        } else {
+          const centsVal = Number(savedSplitsCents[pUid] ?? 0);
+          const scaledPesos =
+            mySubmission?.amountCentavos > 0 && totalFeeCents > 0
+              ? ((centsVal / mySubmission.amountCentavos) * totalFeeCents) / 100
+              : centsVal / 100;
+          initialInputs[pUid] =
+            scaledPesos > 0 ? scaledPesos.toFixed(2) : "0.00";
+        }
+      } else {
+        if (savedInputType === "PERCENT") {
+          const pct =
+            idx === activePayors.length - 1
+              ? Math.max(0, Math.round((100 - runningPct) * 10) / 10)
+              : Math.round((100 / payorCount) * 10) / 10;
+          runningPct += pct;
+          initialInputs[pUid] = String(pct);
+        } else {
+          const shareCents = getFairSplitShareAtIndex(
+            totalFeeCents,
+            payorCount,
+            idx,
+          );
+          runningCents += shareCents;
+          initialInputs[pUid] = (shareCents / 100).toFixed(2);
+        }
+      }
+    });
+
+    setCustomPayorInputs(initialInputs);
+    setShowSubmitModal(true);
+  };
+
+  // Switch Custom Split between Peso (₱) and Percentage (%) while preserving current proportions
+  const handleToggleCustomInputType = (nextType: "PESO" | "PERCENT") => {
+    if (nextType === customSplitInputType) return;
+    const nextInputs: Record<string, string> = {};
+    const payorCount = Math.max(1, activePayors.length);
+
+    if (nextType === "PERCENT") {
+      let sumPesos = 0;
+      activePayors.forEach((p) => {
+        const pUid = p.userId || p.memberId || p.id;
+        sumPesos += Math.max(
+          0,
+          parseFloat(customPayorInputs[pUid] || "0") || 0,
+        );
+      });
+      let runningPct = 0;
+      activePayors.forEach((p, idx) => {
+        const pUid = p.userId || p.memberId || p.id;
+        const val = Math.max(
+          0,
+          parseFloat(customPayorInputs[pUid] || "0") || 0,
+        );
+        const pct =
+          sumPesos > 0
+            ? idx === activePayors.length - 1
+              ? Math.max(0, Math.round((100 - runningPct) * 10) / 10)
+              : Math.round((val / sumPesos) * 100 * 10) / 10
+            : Math.round((100 / payorCount) * 10) / 10;
+        runningPct += pct;
+        nextInputs[pUid] = String(pct);
+      });
+    } else {
+      let sumPct = 0;
+      activePayors.forEach((p) => {
+        const pUid = p.userId || p.memberId || p.id;
+        sumPct += Math.max(0, parseFloat(customPayorInputs[pUid] || "0") || 0);
+      });
+      const totalCents = Math.round(waterFee * 100);
+      let runningCents = 0;
+      activePayors.forEach((p, idx) => {
+        const pUid = p.userId || p.memberId || p.id;
+        const pct = Math.max(
+          0,
+          parseFloat(customPayorInputs[pUid] || "0") || 0,
+        );
+        const cents =
+          sumPct > 0
+            ? idx === activePayors.length - 1
+              ? Math.max(0, totalCents - runningCents)
+              : Math.round((totalCents * pct) / sumPct)
+            : Math.round(totalCents / payorCount);
+        runningCents += cents;
+        nextInputs[pUid] = (cents / 100).toFixed(2);
+      });
+    }
+
+    setCustomSplitInputType(nextType);
+    setCustomPayorInputs(nextInputs);
+  };
+
+  const handleDistributeCustomEqually = () => {
+    const nextInputs: Record<string, string> = {};
+    const payorCount = Math.max(1, activePayors.length);
+    const totalCents = Math.round(waterFee * 100);
+    let runningCents = 0;
+    let runningPct = 0;
+
+    activePayors.forEach((p, idx) => {
+      const pUid = p.userId || p.memberId || p.id;
+      if (!pUid) return;
+      if (customSplitInputType === "PERCENT") {
+        const pct =
+          idx === activePayors.length - 1
+            ? Math.max(0, Math.round((100 - runningPct) * 10) / 10)
+            : Math.round((100 / payorCount) * 10) / 10;
+        runningPct += pct;
+        nextInputs[pUid] = String(pct);
+      } else {
+        const cents = getFairSplitShareAtIndex(totalCents, payorCount, idx);
+        runningCents += cents;
+        nextInputs[pUid] = (cents / 100).toFixed(2);
+      }
+    });
+
+    setCustomPayorInputs(nextInputs);
+  };
+
+  // Compute live Custom Split totals & validation
+  const customSplitSummary = useMemo(() => {
+    const payorSharesCents: Record<string, number> = {};
+    const payorPercentages: Record<string, number> = {};
+    const totalTargetCents = Math.round(waterFee * 100);
+    let totalEnteredPesos = 0;
+    let totalEnteredPercent = 0;
+
+    activePayors.forEach((p) => {
+      const pUid = p.userId || p.memberId || p.id;
+      if (!pUid) return;
+      const rawVal = Math.max(
+        0,
+        parseFloat(customPayorInputs[pUid] || "0") || 0,
+      );
+      if (customSplitInputType === "PERCENT") {
+        totalEnteredPercent += rawVal;
+      } else {
+        totalEnteredPesos += rawVal;
+      }
+    });
+
+    let distributedCents = 0;
+    activePayors.forEach((p, idx) => {
+      const pUid = p.userId || p.memberId || p.id;
+      if (!pUid) return;
+      const rawVal = Math.max(
+        0,
+        parseFloat(customPayorInputs[pUid] || "0") || 0,
+      );
+      if (customSplitInputType === "PERCENT") {
+        payorPercentages[pUid] = Math.round(rawVal * 10) / 10;
+        const cents =
+          idx === activePayors.length - 1 &&
+          Math.abs(totalEnteredPercent - 100) <= 0.5
+            ? Math.max(0, totalTargetCents - distributedCents)
+            : Math.round((totalTargetCents * rawVal) / 100);
+        distributedCents += cents;
+        payorSharesCents[pUid] = cents;
+      } else {
+        const cents = Math.round(rawVal * 100);
+        payorSharesCents[pUid] = cents;
+        payorPercentages[pUid] =
+          totalTargetCents > 0
+            ? Math.round((cents / totalTargetCents) * 100 * 10) / 10
+            : 0;
+      }
+    });
+
+    const allocatedPesos =
+      customSplitInputType === "PERCENT"
+        ? (totalTargetCents * (totalEnteredPercent / 100)) / 100
+        : totalEnteredPesos;
+    const allocatedPercent =
+      customSplitInputType === "PERCENT"
+        ? totalEnteredPercent
+        : waterFee > 0
+          ? (totalEnteredPesos / waterFee) * 100
+          : 100;
+
+    const remainingPesos = waterFee - allocatedPesos;
+    const remainingPercent = 100 - allocatedPercent;
+
+    const isValid =
+      waterFee <= 0
+        ? true
+        : customSplitInputType === "PERCENT"
+          ? Math.abs(totalEnteredPercent - 100) <= 0.5
+          : Math.abs(totalEnteredPesos - waterFee) <= 0.05;
+
+    return {
+      payorSharesCents,
+      payorPercentages,
+      allocatedPesos,
+      allocatedPercent,
+      remainingPesos,
+      remainingPercent,
+      isValid,
+    };
+  }, [activePayors, customPayorInputs, customSplitInputType, waterFee]);
+
+  // Confirm & Submit Attendance from the slide-up Bottom Sheet
+  const handleConfirmSubmitAttendance = async () => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId) {
+      return;
+    }
+
+    if (!isMyMemberPayor && activePayors.length > 0) {
+      if (allocationMode === "SPECIFIC_PAYOR" && !selectedSpecificPayorId) {
+        Alert.alert(
+          "Select a Payor",
+          "Please choose which payor will cover your water bill.",
+        );
+        return;
+      }
+      if (allocationMode === "CUSTOM_SPLIT" && !customSplitSummary.isValid) {
+        Alert.alert(
+          "Custom Split Incomplete",
+          customSplitInputType === "PERCENT"
+            ? `Your custom percentages currently add up to ${customSplitSummary.allocatedPercent.toFixed(1)}%. Please adjust them to total 100%.`
+            : `Your custom amounts currently add up to ₱${customSplitSummary.allocatedPesos.toFixed(2)} out of ₱${waterFee.toFixed(2)}. Please match the total water due.`,
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
-      // Flush any pending rapid date taps before recording submission
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      if (pendingMutationsRef.current.size > 0) {
-        await flushPendingMutations();
-      }
-
-      const finalPresentCount = optimisticPresentRef.current.size;
+      const finalPresentSet = optimisticPresentRef.current;
+      const finalPresentCount = finalPresentSet.size;
       const finalAbsentCount = Math.max(0, totalDays - finalPresentCount);
       const finalWaterFee = isFixedMode
         ? myFixedSharePesos
         : finalPresentCount * ratePerDayPesos;
       const centavos = Math.round(finalWaterFee * 100);
+
+      // 1. Batch-save all cycle dates (PRESENT / ABSENT) to Firestore
+      if (cycleDates.length > 0) {
+        const entries: Array<{ date: string; status: "PRESENT" | "ABSENT" }> =
+          cycleDates.map((d) => ({
+            date: d.iso,
+            status: finalPresentSet.has(d.iso) ? "PRESENT" : "ABSENT",
+          }));
+        await mobileDataService.bulkToggleAttendance(
+          resolvedHouseholdId,
+          resolvedBillingCycleId,
+          activeUserId,
+          entries,
+        );
+      }
+
+      // 2. Build allocationConfig if user is a Non-Payor
+      let allocationConfig:
+        | {
+            allocationMode: PayorAllocationMode;
+            assignedPayorId?: string;
+            assignedPayorName?: string;
+            customPayorSplitsCentavos?: Record<string, number>;
+            customPayorPercentages?: Record<string, number>;
+            customSplitInputType?: "PESO" | "PERCENT";
+          }
+        | undefined;
+
+      if (!isMyMemberPayor) {
+        const targetPayor = activePayors.find(
+          (p) => (p.userId || p.memberId || p.id) === selectedSpecificPayorId,
+        );
+        allocationConfig = {
+          allocationMode,
+          assignedPayorId:
+            allocationMode === "SPECIFIC_PAYOR" ? selectedSpecificPayorId : "",
+          assignedPayorName:
+            allocationMode === "SPECIFIC_PAYOR"
+              ? targetPayor?.displayName || "Payor"
+              : "",
+          customPayorSplitsCentavos:
+            allocationMode === "CUSTOM_SPLIT"
+              ? customSplitSummary.payorSharesCents
+              : {},
+          customPayorPercentages:
+            allocationMode === "CUSTOM_SPLIT"
+              ? customSplitSummary.payorPercentages
+              : {},
+          customSplitInputType,
+        };
+      }
+
+      // 3. Submit attendance & sync cycle water bills
       await mobileDataService.submitAttendance(
         resolvedHouseholdId,
         resolvedBillingCycleId,
@@ -679,24 +1246,97 @@ export const AttendanceScreen: React.FC<{
         finalPresentCount,
         finalAbsentCount,
         centavos,
+        allocationConfig,
       );
-      // Ensure water bill expense & all memberBills are immediately updated
       await mobileDataService.syncCycleWaterBill(
         resolvedHouseholdId,
         resolvedBillingCycleId,
       );
 
+      // 4. Lock calendar into saved view mode and clear unsaved state
+      const committedDates = Array.from(finalPresentSet);
+      setSavedPresentDates(committedDates);
+      setPresentDates(committedDates);
+      hasUserModifiedDraftRef.current = false;
+      setHasUserModifiedDraft(false);
+      setIsEditingAttendance(false);
+      setShowLockedHint(false);
+      setShowSubmitModal(false);
       setIsSubmitting(false);
+
+      // If submission was triggered from the Unsaved Markings Leave Prompt, complete navigation
+      if (localPendingLeaveRef.current) {
+        const leaveFn = localPendingLeaveRef.current;
+        localPendingLeaveRef.current = null;
+        onClearPendingLeave?.();
+        leaveFn();
+        return;
+      }
+
+      const allocationNote = !isMyMemberPayor
+        ? allocationMode === "SPECIFIC_PAYOR"
+          ? ` Assigned to ${
+              activePayors.find(
+                (p) =>
+                  (p.userId || p.memberId || p.id) === selectedSpecificPayorId,
+              )?.displayName || "selected payor"
+            }.`
+          : allocationMode === "CUSTOM_SPLIT"
+            ? " Custom split applied across payors."
+            : " Split fairly across all payors."
+        : "";
+
       Alert.alert(
-        "Attendance Synced",
+        "Attendance Submitted & Locked",
         `Your water presence (${finalPresentCount} days present, ₱${finalWaterFee.toFixed(
           2,
-        )}) has been submitted and updated synchronously across all household bills. You can still edit your dates anytime.`,
+        )}) has been saved and locked to prevent accidental edits.${allocationNote}`,
       );
     } catch (err: any) {
       setIsSubmitting(false);
       Alert.alert("Error", err.message || "Failed to submit attendance.");
     }
+  };
+
+  // Discard unsaved draft changes and proceed with leaving the screen
+  const handleDiscardAndLeave = () => {
+    optimisticPresentRef.current = new Set(savedPresentDates);
+    setPresentDates([...savedPresentDates]);
+    hasUserModifiedDraftRef.current = false;
+    setHasUserModifiedDraft(false);
+    setIsEditingAttendance(false);
+    setShowLockedHint(false);
+    setShowLeavePromptModal(false);
+
+    const leaveFn = localPendingLeaveRef.current || pendingLeaveAction;
+    localPendingLeaveRef.current = null;
+    onClearPendingLeave?.();
+    if (leaveFn) {
+      leaveFn();
+    }
+  };
+
+  const handleStayOnScreen = () => {
+    setShowLeavePromptModal(false);
+    localPendingLeaveRef.current = null;
+    onClearPendingLeave?.();
+  };
+
+  const handleSubmitFromLeaveModal = () => {
+    setShowLeavePromptModal(false);
+    handleOpenSubmitModal();
+  };
+
+  const handleBackPress = () => {
+    if (!onBack) return;
+    if (hasUnsavedChanges) {
+      localPendingLeaveRef.current = () => {
+        onBack();
+      };
+      setShowLeavePromptModal(true);
+      return;
+    }
+    onBack();
   };
 
   // Manual Refresh Handler
@@ -705,14 +1345,24 @@ export const AttendanceScreen: React.FC<{
     setIsRefreshing(true);
     try {
       if (resolvedBillingCycleId) {
-        await mobileDataService.syncCycleWaterBill(
+        await mobileDataService
+          .markExpensesPaidIfAllSettled(
+            resolvedHouseholdId,
+            resolvedBillingCycleId,
+          )
+          .catch(() => {});
+        if (!isCycleClosedOrPaidOff) {
+          await mobileDataService.syncCycleWaterBill(
+            resolvedHouseholdId,
+            resolvedBillingCycleId,
+          );
+        }
+      }
+      if (!isCycleClosedOrPaidOff) {
+        await mobileDataService.recalculateUnpaidExpensesForHousehold(
           resolvedHouseholdId,
-          resolvedBillingCycleId,
         );
       }
-      await mobileDataService.recalculateUnpaidExpensesForHousehold(
-        resolvedHouseholdId,
-      );
     } catch (err) {
       console.warn("[AttendanceScreen] refresh notice:", err);
     } finally {
@@ -774,7 +1424,7 @@ export const AttendanceScreen: React.FC<{
               borderColor: colors.border,
             },
           ]}
-          onPress={() => (onBack ? onBack() : null)}
+          onPress={handleBackPress}
           activeOpacity={0.7}
         >
           <Feather
@@ -911,21 +1561,41 @@ export const AttendanceScreen: React.FC<{
                   <View
                     style={[
                       styles.activeCyclePill,
+                      isCycleClosedOrPaidOff && {
+                        backgroundColor: "rgba(16, 185, 129, 0.24)",
+                      },
                       isDark && {
-                        backgroundColor: "rgba(59, 130, 246, 0.18)",
-                        borderColor: colors.borderHighlighted,
+                        backgroundColor: isCycleClosedOrPaidOff
+                          ? "rgba(16, 185, 129, 0.18)"
+                          : "rgba(59, 130, 246, 0.18)",
+                        borderColor: isCycleClosedOrPaidOff
+                          ? "rgba(16, 185, 129, 0.4)"
+                          : colors.borderHighlighted,
                         borderWidth: 1,
                       },
                     ]}
                   >
-                    <View style={styles.activeCycleDot} />
+                    <View
+                      style={[
+                        styles.activeCycleDot,
+                        isCycleClosedOrPaidOff && {
+                          backgroundColor: "#34D399",
+                        },
+                      ]}
+                    />
                     <Text
                       style={[
                         styles.activeCyclePillText,
-                        isDark && { color: colors.accent },
+                        isDark && {
+                          color: isCycleClosedOrPaidOff
+                            ? "#34D399"
+                            : colors.accent,
+                        },
                       ]}
                     >
-                      Active Billing Cycle
+                      {isCycleClosedOrPaidOff
+                        ? "Cycle Settled & Closed"
+                        : "Active Billing Cycle"}
                     </Text>
                   </View>
                   <Text
@@ -934,7 +1604,9 @@ export const AttendanceScreen: React.FC<{
                       isDark && { color: colors.textSecondary },
                     ]}
                   >
-                    {totalDays} Total Days
+                    {isCycleClosedOrPaidOff
+                      ? "Reset to 0"
+                      : `${totalDays} Total Days`}
                   </Text>
                 </View>
 
@@ -1057,6 +1729,52 @@ export const AttendanceScreen: React.FC<{
                 </View>
               </View>
 
+              {/* Cycle Settled & Closed Reset Banner */}
+              {isCycleClosedOrPaidOff && (
+                <View
+                  style={[
+                    styles.settledResetBanner,
+                    isDark && {
+                      backgroundColor: "rgba(16, 185, 129, 0.12)",
+                      borderColor: "rgba(16, 185, 129, 0.3)",
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.settledResetIconWrap,
+                      isDark && { backgroundColor: "rgba(16, 185, 129, 0.2)" },
+                    ]}
+                  >
+                    <Ionicons
+                      name="checkmark-done-circle"
+                      size={22}
+                      color={isDark ? "#34D399" : "#059669"}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.settledResetTitle,
+                        isDark && { color: "#6EE7B7" },
+                      ]}
+                    >
+                      Cycle Paid Off & Attendance Reset
+                    </Text>
+                    <Text
+                      style={[
+                        styles.settledResetSub,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      All dues for this billing cycle have been settled or
+                      closed. Attendance counters are reset to zero awaiting the
+                      next cycle.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
               {/* =========================================================================
                 WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
                 ========================================================================= */}
@@ -1105,50 +1823,201 @@ export const AttendanceScreen: React.FC<{
                   </Text>
                 </View>
 
-                {!isFixedMode && (
+                {!isFixedMode && !isCycleClosedOrPaidOff && (
                   <View style={styles.feeBarActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.markAllBtn,
-                        isDark && { backgroundColor: colors.primaryLight },
-                      ]}
-                      onPress={markAll}
-                      activeOpacity={0.65}
-                    >
-                      <Text
+                    {isCalendarLocked ? (
+                      <TouchableOpacity
                         style={[
-                          styles.markAllBtnText,
-                          isDark && { color: colors.accent },
+                          styles.editAttendancePillBtn,
+                          isDark && {
+                            backgroundColor: colors.primaryLight,
+                            borderColor: colors.borderHighlighted,
+                          },
                         ]}
+                        onPress={handleStartEditing}
+                        activeOpacity={0.7}
                       >
-                        Mark All
-                      </Text>
-                    </TouchableOpacity>
+                        <Feather
+                          name="edit-2"
+                          size={12}
+                          color={isDark ? colors.accent : "#2563EB"}
+                        />
+                        <Text
+                          style={[
+                            styles.editAttendancePillBtnText,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
+                          Edit Attendance
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <>
+                        <TouchableOpacity
+                          style={[
+                            styles.markAllBtn,
+                            isDark && { backgroundColor: colors.primaryLight },
+                          ]}
+                          onPress={markAll}
+                          activeOpacity={0.65}
+                        >
+                          <Text
+                            style={[
+                              styles.markAllBtnText,
+                              isDark && { color: colors.accent },
+                            ]}
+                          >
+                            Mark All
+                          </Text>
+                        </TouchableOpacity>
 
-                    <TouchableOpacity
+                        <TouchableOpacity
+                          style={[
+                            styles.clearBtn,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          onPress={clearAll}
+                          activeOpacity={0.65}
+                        >
+                          <Text
+                            style={[
+                              styles.clearBtnText,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                          >
+                            Clear
+                          </Text>
+                        </TouchableOpacity>
+
+                        {isMyAttendanceSubmitted && isEditingAttendance && (
+                          <TouchableOpacity
+                            style={[
+                              styles.cancelEditPillBtn,
+                              isDark && {
+                                backgroundColor: "rgba(239, 68, 68, 0.14)",
+                                borderColor: "rgba(239, 68, 68, 0.3)",
+                              },
+                            ]}
+                            onPress={handleCancelEditing}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.cancelEditPillBtnText,
+                                isDark && { color: "#FCA5A5" },
+                              ]}
+                            >
+                              Cancel
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    )}
+                  </View>
+                )}
+
+                {isCycleClosedOrPaidOff && (
+                  <View
+                    style={[
+                      styles.settledFeePill,
+                      isDark && {
+                        backgroundColor: "rgba(16, 185, 129, 0.16)",
+                        borderColor: "rgba(16, 185, 129, 0.35)",
+                      },
+                    ]}
+                  >
+                    <Text
                       style={[
-                        styles.clearBtn,
-                        isDark && {
-                          backgroundColor: colors.surfaceInset,
-                          borderColor: colors.border,
-                          borderWidth: 1,
-                        },
+                        styles.settledFeePillText,
+                        isDark && { color: "#34D399" },
                       ]}
-                      onPress={clearAll}
-                      activeOpacity={0.65}
                     >
-                      <Text
-                        style={[
-                          styles.clearBtnText,
-                          isDark && { color: colors.textSecondary },
-                        ]}
-                      >
-                        Clear
-                      </Text>
-                    </TouchableOpacity>
+                      Settled · ₱0.00
+                    </Text>
                   </View>
                 )}
               </View>
+
+              {/* Locked Calendar Hint Banner (when user taps a locked date) */}
+              {showLockedHint &&
+                isCalendarLocked &&
+                !isCycleClosedOrPaidOff && (
+                  <View
+                    style={[
+                      styles.lockedHintBanner,
+                      isDark && {
+                        backgroundColor: "rgba(37, 99, 235, 0.14)",
+                        borderColor: "rgba(59, 130, 246, 0.35)",
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="lock"
+                      size={15}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                    <Text
+                      style={[
+                        styles.lockedHintText,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      Attendance is locked to prevent accidental edits.
+                    </Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.lockedHintActionBtn,
+                        isDark && { backgroundColor: colors.primary },
+                      ]}
+                      onPress={handleStartEditing}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.lockedHintActionText}>Edit Now</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+              {/* Unsaved Markings Indicator Banner */}
+              {hasUnsavedChanges && !isCycleClosedOrPaidOff && (
+                <View
+                  style={[
+                    styles.unsavedDraftBanner,
+                    isDark && {
+                      backgroundColor: "rgba(245, 158, 11, 0.14)",
+                      borderColor: "rgba(245, 158, 11, 0.35)",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="alert-circle"
+                    size={18}
+                    color={isDark ? "#FBBF24" : "#D97706"}
+                  />
+                  <Text
+                    style={[
+                      styles.unsavedDraftText,
+                      isDark && { color: "#FDE68A" },
+                    ]}
+                  >
+                    Unsaved markings ({presentCount} day
+                    {presentCount === 1 ? "" : "s"}). Tap Submit below before
+                    leaving.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.unsavedDraftSubmitMiniBtn}
+                    onPress={handleOpenSubmitModal}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.unsavedDraftSubmitMiniText}>
+                      Submit
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* =========================================================================
                 CALENDAR SECTION - Grouped by Month with Clean Dates ONLY (No ₱5)
@@ -1223,10 +2092,12 @@ export const AttendanceScreen: React.FC<{
                 </View>
               ) : (
                 monthSections.map((sec) => {
-                  const sectionPresentCount = sec.dates.reduce(
-                    (acc, d) => (presentSet.has(d.iso) ? acc + 1 : acc),
-                    0,
-                  );
+                  const sectionPresentCount = isCycleClosedOrPaidOff
+                    ? 0
+                    : sec.dates.reduce(
+                        (acc, d) => (presentSet.has(d.iso) ? acc + 1 : acc),
+                        0,
+                      );
                   const totalInSec = sec.dates.length;
                   const rangeLabel = `${sec.dates[0].monthShort} ${sec.startDayNum} – ${
                     sec.dates[sec.dates.length - 1].monthShort
@@ -1292,91 +2163,133 @@ export const AttendanceScreen: React.FC<{
                           </View>
                         </View>
 
-                        <Text
-                          style={[
-                            styles.monthPresentRatio,
-                            isDark && { color: colors.accent },
-                          ]}
-                        >
-                          {sectionPresentCount} / {totalInSec} Present
-                        </Text>
-                      </View>
-
-                      {/* Weekday Row */}
-                      <View style={styles.weekdaysRow}>
-                        {weekdayLabels.map((w) => (
+                        <View style={styles.monthHeaderRightRow}>
+                          {isCalendarLocked && !isCycleClosedOrPaidOff && (
+                            <View
+                              style={[
+                                styles.lockedCalendarBadge,
+                                isDark && {
+                                  backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                },
+                              ]}
+                            >
+                              <Feather
+                                name="lock"
+                                size={10}
+                                color={isDark ? "#34D399" : "#059669"}
+                              />
+                              <Text
+                                style={[
+                                  styles.lockedCalendarBadgeText,
+                                  isDark && { color: "#34D399" },
+                                ]}
+                              >
+                                Locked
+                              </Text>
+                            </View>
+                          )}
                           <Text
-                            key={w}
                             style={[
-                              styles.weekdayText,
-                              isDark && { color: colors.textMuted },
+                              styles.monthPresentRatio,
+                              isDark && { color: colors.accent },
                             ]}
                           >
-                            {w}
+                            {sectionPresentCount} / {totalInSec} Present
                           </Text>
+                        </View>
+                      </View>
+
+                      {/* Weekday Row - 7 equal flex:1 columns */}
+                      <View style={styles.weekdaysRow}>
+                        {weekdayLabels.map((w) => (
+                          <View key={w} style={styles.weekdayCell}>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.weekdayText,
+                                isDark && { color: colors.textMuted },
+                              ]}
+                            >
+                              {w}
+                            </Text>
+                          </View>
                         ))}
                       </View>
 
-                      {/* Days Grid - Only dates, no ₱5 per user instruction! */}
+                      {/* Days Grid - Deterministic 7-column week rows so SUN column never wraps */}
                       <View style={styles.daysGrid}>
-                        {/* Leading empty spacers to align day of week */}
-                        {Array.from({ length: sec.leadingEmptyDays }).map(
-                          (_, idx) => (
-                            <View
-                              key={`spacer_${idx}`}
-                              style={styles.dayBoxEmpty}
-                            />
-                          ),
-                        )}
-
-                        {/* Actual Cycle Dates - Clean date numbers only */}
-                        {sec.dates.map((d) => {
-                          const isPresent = presentSet.has(d.iso);
-                          return (
-                            <TouchableOpacity
-                              key={d.iso}
-                              style={[
-                                styles.dayBox,
-                                isPresent
-                                  ? [
-                                      styles.dayBoxPresent,
-                                      isDark && {
-                                        backgroundColor: colors.primary,
-                                        borderColor: colors.primary,
-                                        shadowColor: colors.primary,
-                                      },
-                                    ]
-                                  : [
-                                      styles.dayBoxAbsent,
-                                      isDark && {
-                                        backgroundColor: colors.surfaceInset,
-                                        borderColor:
-                                          "rgba(255, 255, 255, 0.12)",
-                                      },
-                                    ],
-                              ]}
-                              onPress={() => toggleDay(d.iso)}
-                              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                              activeOpacity={0.6}
-                            >
-                              <Text
-                                style={[
-                                  styles.dayNumberText,
-                                  isPresent
-                                    ? styles.dayNumberTextPresent
-                                    : [
-                                        styles.dayNumberTextAbsent,
-                                        isDark && {
-                                          color: colors.textSecondary,
-                                        },
-                                      ],
-                                ]}
-                              >
-                                {d.dayNum}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
+                        {sec.weeks.map((week, weekIdx) => (
+                          <View
+                            key={`week_${sec.monthKey}_${weekIdx}`}
+                            style={styles.weekRow}
+                          >
+                            {week.map((d, colIdx) => {
+                              if (!d) {
+                                return (
+                                  <View
+                                    key={`spacer_${sec.monthKey}_${weekIdx}_${colIdx}`}
+                                    style={styles.dayBoxEmpty}
+                                  />
+                                );
+                              }
+                              const isPresent =
+                                !isCycleClosedOrPaidOff &&
+                                presentSet.has(d.iso);
+                              return (
+                                <TouchableOpacity
+                                  key={d.iso}
+                                  style={[
+                                    styles.dayBox,
+                                    isPresent
+                                      ? [
+                                          styles.dayBoxPresent,
+                                          isDark && {
+                                            backgroundColor: colors.primary,
+                                            borderColor: colors.primary,
+                                            shadowColor: colors.primary,
+                                          },
+                                        ]
+                                      : [
+                                          styles.dayBoxAbsent,
+                                          isDark && {
+                                            backgroundColor:
+                                              colors.surfaceInset,
+                                            borderColor:
+                                              "rgba(255, 255, 255, 0.12)",
+                                          },
+                                        ],
+                                    isCycleClosedOrPaidOff && { opacity: 0.65 },
+                                  ]}
+                                  onPress={() => toggleDay(d.iso)}
+                                  hitSlop={{
+                                    top: 4,
+                                    bottom: 4,
+                                    left: 4,
+                                    right: 4,
+                                  }}
+                                  activeOpacity={isCalendarLocked ? 0.85 : 0.6}
+                                >
+                                  <Text
+                                    numberOfLines={1}
+                                    style={[
+                                      styles.dayNumberText,
+                                      isPresent
+                                        ? styles.dayNumberTextPresent
+                                        : [
+                                            styles.dayNumberTextAbsent,
+                                            isDark && {
+                                              color: colors.textSecondary,
+                                            },
+                                          ],
+                                    ]}
+                                  >
+                                    {d.dayNum}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        ))}
                       </View>
                     </View>
                   );
@@ -1415,304 +2328,487 @@ export const AttendanceScreen: React.FC<{
                 </View>
 
                 <View style={styles.roommatesList}>
-                  {members.map((member, index) => {
-                    const mUid = member.userId || member.memberId;
-                    const isMe = mUid === activeUserId;
-                    const isPayor = isPayorMember(member);
-
-                    // Calculate days present for this member from allCycleAttendance or submissions
-                    const attPresentCount = allCycleAttendance.filter(
-                      (a) =>
-                        (a.userId === mUid ||
-                          a.userId === member.userId ||
-                          a.userId === member.memberId ||
-                          a.userId === member.id ||
-                          (member.userId &&
-                            a.userId === member.userId.replace("mem_", "")) ||
-                          (mUid && a.userId === mUid.replace("mem_", ""))) &&
-                        a.status === "PRESENT",
-                    ).length;
-                    const memberSub =
-                      submissions[mUid] ||
-                      (member.userId
-                        ? submissions[member.userId]
-                        : undefined) ||
-                      (member.memberId
-                        ? submissions[member.memberId]
-                        : undefined) ||
-                      (member.id ? submissions[member.id] : undefined) ||
-                      (mUid
-                        ? submissions[mUid.replace("mem_", "")]
-                        : undefined);
-                    const subPresentCount = memberSub?.daysPresent || 0;
-                    const memberPresentCount = isMe
-                      ? presentCount
-                      : attPresentCount > 0
-                        ? attPresentCount
-                        : subPresentCount;
-
-                    const memberAbsentCount = Math.max(
-                      0,
-                      totalDays - memberPresentCount,
-                    );
-                    // Effective daily rate (defaults safely to ₱5.00/day)
-                    const effectiveDailyRate =
+                  {(() => {
+                    const liveWaterBreakdown = computeCycleWaterBreakdown(
+                      members,
+                      allCycleAttendance,
+                      submissions,
                       Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
-                        ? Number(waterConfig.rateCentavosPerPersonPerDay) / 100
-                        : 5.0;
-
-                    // Real amount based on presence: if member has presence days, ALWAYS calculate presence * daily rate
-                    const memberWaterTotal =
-                      memberPresentCount > 0
-                        ? memberPresentCount * effectiveDailyRate
-                        : isFixedMode
-                          ? myFixedSharePesos
-                          : 0;
-
-                    const memberSubmission = submissions[mUid];
-                    const isSubmitted = isMe
-                      ? isMyAttendanceSubmitted
-                      : Boolean(memberSubmission);
-                    const hasMarked = isMe
-                      ? presentCount > 0
-                      : memberPresentCount > 0;
-
-                    const avatarInitials = getInitials(
-                      member.displayName || member.name,
+                        ? Number(waterConfig?.rateCentavosPerPersonPerDay)
+                        : 500,
                     );
-                    const avatarBg = isMe
-                      ? "#2563EB"
-                      : AVATAR_COLORS[index % AVATAR_COLORS.length];
+                    return members.map((member, index) => {
+                      const mUid =
+                        member.userId || member.memberId || member.id;
+                      const isMe = mUid === activeUserId;
+                      const isPayor = isPayorMember(member);
+                      const memberWaterInfo =
+                        liveWaterBreakdown.membersBreakdown.find((b) =>
+                          matchesMemberUid(member, b.userId),
+                        );
 
-                    return (
-                      <View
-                        key={mUid}
-                        style={[
-                          styles.memberCard,
-                          isDark && {
-                            backgroundColor: isMe
-                              ? "rgba(59, 130, 246, 0.12)"
-                              : colors.surfaceInset,
-                            borderColor: isMe
-                              ? colors.borderHighlighted
-                              : colors.border,
-                          },
-                          !isDark && isMe && styles.memberCardHighlight,
-                        ]}
-                      >
-                        {/* Avatar */}
-                        {member.profilePicture || member.photoURL ? (
-                          <Image
-                            source={{
-                              uri: member.profilePicture || member.photoURL,
-                            }}
-                            style={styles.memberAvatarImg}
-                          />
-                        ) : (
-                          <View
-                            style={[
-                              styles.memberAvatar,
-                              { backgroundColor: avatarBg },
-                            ]}
-                          >
-                            <Text style={styles.memberAvatarText}>
-                              {avatarInitials}
-                            </Text>
-                          </View>
-                        )}
+                      // Calculate days present for this member from allCycleAttendance or submissions
+                      const attPresentCount = allCycleAttendance.filter(
+                        (a) =>
+                          (a.userId === mUid ||
+                            a.userId === member.userId ||
+                            a.userId === member.memberId ||
+                            a.userId === member.id ||
+                            (member.userId &&
+                              a.userId === member.userId.replace("mem_", "")) ||
+                            (mUid && a.userId === mUid.replace("mem_", ""))) &&
+                          a.status === "PRESENT",
+                      ).length;
+                      const memberSub =
+                        submissions[mUid] ||
+                        (member.userId
+                          ? submissions[member.userId]
+                          : undefined) ||
+                        (member.memberId
+                          ? submissions[member.memberId]
+                          : undefined) ||
+                        (member.id ? submissions[member.id] : undefined) ||
+                        (mUid
+                          ? submissions[mUid.replace("mem_", "")]
+                          : undefined);
+                      const subPresentCount = memberSub?.daysPresent || 0;
+                      const rawMemberPresentCount = isMe
+                        ? rawPresentCount
+                        : attPresentCount > 0
+                          ? attPresentCount
+                          : subPresentCount;
+                      const memberPresentCount = isCycleClosedOrPaidOff
+                        ? 0
+                        : rawMemberPresentCount;
 
-                        {/* Details */}
-                        <View style={styles.memberInfoCol}>
-                          <View style={styles.memberNameRow}>
-                            <Text
+                      const memberAbsentCount = isCycleClosedOrPaidOff
+                        ? 0
+                        : Math.max(0, totalDays - memberPresentCount);
+                      // Effective daily rate (defaults safely to ₱5.00/day)
+                      const effectiveDailyRate =
+                        Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
+                          ? Number(waterConfig.rateCentavosPerPersonPerDay) /
+                            100
+                          : 5.0;
+
+                      const ownWaterPesos = isCycleClosedOrPaidOff
+                        ? 0
+                        : memberPresentCount > 0
+                          ? memberPresentCount * effectiveDailyRate
+                          : isFixedMode
+                            ? myFixedSharePesos
+                            : 0;
+
+                      const absorbedNonPayorPesos =
+                        isCycleClosedOrPaidOff || !isPayor
+                          ? 0
+                          : (memberWaterInfo?.nonPayorWaterCentavos || 0) / 100;
+
+                      // For Payors, show their total effective water share (own + absorbed Non-Payor share).
+                      // For Non-Payors, show their generated water amount alongside who covers it.
+                      const memberWaterTotal = isCycleClosedOrPaidOff
+                        ? 0
+                        : isPayor
+                          ? ownWaterPesos + absorbedNonPayorPesos
+                          : ownWaterPesos;
+
+                      const memberSubmission = memberSub || submissions[mUid];
+                      const isSubmitted = isCycleClosedOrPaidOff
+                        ? false
+                        : isMe
+                          ? isMyAttendanceSubmitted
+                          : Boolean(memberSubmission);
+                      const hasMarked = isCycleClosedOrPaidOff
+                        ? false
+                        : isMe
+                          ? presentCount > 0
+                          : memberPresentCount > 0;
+
+                      const nonPayorAllocationLabel =
+                        !isPayor && (isSubmitted || memberSubmission)
+                          ? memberWaterInfo?.nonPayorAllocationSummary ||
+                            (memberSubmission?.allocationMode ===
+                            "SPECIFIC_PAYOR"
+                              ? `Paid by ${memberSubmission.assignedPayorName || "Assigned Payor"}`
+                              : memberSubmission?.allocationMode ===
+                                  "CUSTOM_SPLIT"
+                                ? "Custom Split on Payors"
+                                : "Split Fairly on Payors")
+                          : isPayor && absorbedNonPayorPesos > 0
+                            ? memberWaterInfo?.nonPayorWaterNotes?.length
+                              ? `+${memberWaterInfo.nonPayorWaterNotes.join(", ")}`
+                              : `+₱${absorbedNonPayorPesos.toFixed(2)} non-payor`
+                            : null;
+
+                      const avatarInitials = getInitials(
+                        member.displayName || member.name,
+                      );
+                      const avatarBg = isMe
+                        ? "#2563EB"
+                        : AVATAR_COLORS[index % AVATAR_COLORS.length];
+
+                      return (
+                        <View
+                          key={mUid}
+                          style={[
+                            styles.memberCard,
+                            isDark && {
+                              backgroundColor: isMe
+                                ? "rgba(59, 130, 246, 0.12)"
+                                : colors.surfaceInset,
+                              borderColor: isMe
+                                ? colors.borderHighlighted
+                                : colors.border,
+                            },
+                            !isDark && isMe && styles.memberCardHighlight,
+                          ]}
+                        >
+                          {/* Avatar */}
+                          {member.profilePicture || member.photoURL ? (
+                            <Image
+                              source={{
+                                uri: member.profilePicture || member.photoURL,
+                              }}
+                              style={styles.memberAvatarImg}
+                            />
+                          ) : (
+                            <View
                               style={[
-                                styles.memberName,
-                                isDark && { color: colors.text },
+                                styles.memberAvatar,
+                                { backgroundColor: avatarBg },
                               ]}
-                              numberOfLines={1}
                             >
-                              {member.displayName || "Roommate"}
-                              {isMe ? " (You)" : ""}
-                            </Text>
+                              <Text style={styles.memberAvatarText}>
+                                {avatarInitials}
+                              </Text>
+                            </View>
+                          )}
 
-                            {/* Synced Badge */}
-                            {isSubmitted && (
-                              <View
+                          {/* Details */}
+                          <View style={styles.memberInfoCol}>
+                            <View style={styles.memberNameRow}>
+                              <Text
                                 style={[
-                                  styles.syncedPill,
-                                  isDark && {
-                                    backgroundColor: colors.primary,
-                                  },
+                                  styles.memberName,
+                                  isDark && { color: colors.text },
                                 ]}
+                                numberOfLines={1}
                               >
-                                <Text style={styles.syncedPillText}>
-                                  Synced
-                                </Text>
-                              </View>
-                            )}
+                                {member.displayName || "Roommate"}
+                                {isMe ? " (You)" : ""}
+                              </Text>
 
-                            {/* Exempt Badge */}
-                            {!isPayor && (
-                              <View
-                                style={[
-                                  styles.exemptPill,
-                                  isDark && {
-                                    backgroundColor: colors.surfaceInset,
-                                    borderColor: colors.border,
-                                  },
-                                ]}
-                              >
-                                <Text
+                              {/* Synced Badge */}
+                              {isSubmitted && (
+                                <View
                                   style={[
-                                    styles.exemptPillText,
-                                    isDark && { color: colors.textMuted },
+                                    styles.syncedPill,
+                                    isDark && {
+                                      backgroundColor: colors.primary,
+                                    },
                                   ]}
                                 >
-                                  Exempt
-                                </Text>
-                              </View>
-                            )}
+                                  <Text style={styles.syncedPillText}>
+                                    Synced
+                                  </Text>
+                                </View>
+                              )}
+
+                              {/* Exempt Badge */}
+                              {!isPayor && (
+                                <View
+                                  style={[
+                                    styles.exemptPill,
+                                    isDark && {
+                                      backgroundColor: colors.surfaceInset,
+                                      borderColor: colors.border,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.exemptPillText,
+                                      isDark && { color: colors.textMuted },
+                                    ]}
+                                  >
+                                    Exempt
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+
+                            <Text
+                              style={[
+                                styles.memberStaySub,
+                                isDark && { color: colors.textSecondary },
+                              ]}
+                            >
+                              {memberPresentCount} days present •{" "}
+                              {memberAbsentCount} off
+                              {nonPayorAllocationLabel
+                                ? ` • ${nonPayorAllocationLabel}`
+                                : ""}
+                            </Text>
                           </View>
 
-                          <Text
-                            style={[
-                              styles.memberStaySub,
-                              isDark && { color: colors.textSecondary },
-                            ]}
-                          >
-                            {memberPresentCount} days present •{" "}
-                            {memberAbsentCount} off
-                          </Text>
+                          {/* Right Due & Status */}
+                          <View style={styles.memberDueCol}>
+                            <Text
+                              style={[
+                                styles.memberDueAmount,
+                                isDark && { color: colors.text },
+                              ]}
+                            >
+                              ₱{memberWaterTotal.toFixed(2)}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.memberStatusLabel,
+                                isCycleClosedOrPaidOff ||
+                                hasMarked ||
+                                isSubmitted
+                                  ? [
+                                      styles.memberStatusMarked,
+                                      isDark && { color: colors.success },
+                                    ]
+                                  : [
+                                      styles.memberStatusPending,
+                                      isDark && { color: colors.textMuted },
+                                    ],
+                              ]}
+                            >
+                              {isCycleClosedOrPaidOff
+                                ? !isPayor
+                                  ? "Exempt"
+                                  : "Settled"
+                                : hasMarked || isSubmitted
+                                  ? !isPayor
+                                    ? "Marked (Exempt)"
+                                    : "Marked"
+                                  : !isPayor
+                                    ? "Exempt"
+                                    : "Pending"}
+                            </Text>
+                          </View>
                         </View>
-
-                        {/* Right Due & Status */}
-                        <View style={styles.memberDueCol}>
-                          <Text
-                            style={[
-                              styles.memberDueAmount,
-                              isDark && { color: colors.text },
-                            ]}
-                          >
-                            ₱{memberWaterTotal.toFixed(2)}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.memberStatusLabel,
-                              hasMarked || isSubmitted
-                                ? [
-                                    styles.memberStatusMarked,
-                                    isDark && { color: colors.success },
-                                  ]
-                                : [
-                                    styles.memberStatusPending,
-                                    isDark && { color: colors.textMuted },
-                                  ],
-                            ]}
-                          >
-                            {hasMarked || isSubmitted
-                              ? !isPayor
-                                ? "Marked (Exempt)"
-                                : "Marked"
-                              : !isPayor
-                                ? "Exempt"
-                                : "Pending"}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </View>
               </View>
 
               {/* =========================================================================
-                SUBMIT / UPDATE BUTTON & BANNER - Pixel perfect match to Image 2
-                Allows editing anytime and synchronizes all bills across app
+                SUBMIT / EDIT BUTTON & BANNER
+                Requires explicit submit before leaving; locks calendar after submission
+                with an Edit Attendance button, and opens the bottom sheet on Submit
                 ========================================================================= */}
               <View style={styles.submissionContainer}>
                 <View
                   style={[
                     styles.submissionNoticeBox,
-                    isMyAttendanceSubmitted
+                    isCycleClosedOrPaidOff || isCalendarLocked
                       ? styles.submissionNoticeBoxSubmitted
-                      : styles.submissionNoticeBoxPending,
+                      : hasUnsavedChanges
+                        ? styles.submissionNoticeBoxWarning
+                        : styles.submissionNoticeBoxPending,
                     isDark &&
-                      (isMyAttendanceSubmitted
+                      (isCycleClosedOrPaidOff || isCalendarLocked
                         ? {
                             backgroundColor: "rgba(16, 185, 129, 0.12)",
                             borderColor: "rgba(16, 185, 129, 0.25)",
                           }
-                        : {
-                            backgroundColor: "rgba(59, 130, 246, 0.12)",
-                            borderColor: "rgba(59, 130, 246, 0.25)",
-                          }),
+                        : hasUnsavedChanges
+                          ? {
+                              backgroundColor: "rgba(245, 158, 11, 0.14)",
+                              borderColor: "rgba(245, 158, 11, 0.32)",
+                            }
+                          : {
+                              backgroundColor: "rgba(59, 130, 246, 0.12)",
+                              borderColor: "rgba(59, 130, 246, 0.25)",
+                            }),
                   ]}
                 >
                   <Ionicons
                     name={
-                      isMyAttendanceSubmitted
-                        ? "checkmark-circle"
-                        : "water-outline"
+                      isCycleClosedOrPaidOff || isCalendarLocked
+                        ? "lock-closed"
+                        : hasUnsavedChanges
+                          ? "alert-circle"
+                          : "water-outline"
                     }
                     size={18}
                     color={
-                      isMyAttendanceSubmitted
+                      isCycleClosedOrPaidOff || isCalendarLocked
                         ? isDark
                           ? colors.success
                           : "#059669"
-                        : isDark
-                          ? colors.accent
-                          : "#2563EB"
+                        : hasUnsavedChanges
+                          ? isDark
+                            ? "#FBBF24"
+                            : "#D97706"
+                          : isDark
+                            ? colors.accent
+                            : "#2563EB"
                     }
                   />
                   <Text
                     style={[
                       styles.submissionNoticeText,
-                      isMyAttendanceSubmitted &&
+                      (isCycleClosedOrPaidOff || isCalendarLocked) &&
                         styles.submissionNoticeTextSubmitted,
+                      hasUnsavedChanges && styles.submissionNoticeTextWarning,
                       isDark && {
-                        color: isMyAttendanceSubmitted ? "#6EE7B7" : "#93C5FD",
+                        color:
+                          isCycleClosedOrPaidOff || isCalendarLocked
+                            ? "#6EE7B7"
+                            : hasUnsavedChanges
+                              ? "#FDE68A"
+                              : "#93C5FD",
                       },
                     ]}
                   >
-                    {isMyAttendanceSubmitted
-                      ? `Presence submitted (${presentCount} days, ₱${waterFee.toFixed(
-                          2,
-                        )}). You can edit dates above anytime — bills will update synchronously.`
-                      : "Submit your water presence for this cycle. You can make adjustments and resubmit anytime."}
+                    {isCycleClosedOrPaidOff
+                      ? "This billing cycle is paid off and closed. Your water attendance and dues have been reset to zero (₱0.00) for the next cycle."
+                      : isCalendarLocked
+                        ? `Attendance submitted & locked (${presentCount} days, ₱${waterFee.toFixed(
+                            2,
+                          )})${
+                            !isMyMemberPayor && mySubmission
+                              ? mySubmission.allocationMode === "SPECIFIC_PAYOR"
+                                ? ` • Covered by ${mySubmission.assignedPayorName || "Specific Payor"}`
+                                : mySubmission.allocationMode === "CUSTOM_SPLIT"
+                                  ? " • Covered via Custom Payor Split"
+                                  : " • Split fairly across Payors"
+                              : ""
+                          }. Tap Edit Attendance below to modify.`
+                        : hasUnsavedChanges
+                          ? `You have unsaved attendance markings (${presentCount} days, ₱${waterFee.toFixed(
+                              2,
+                            )}). Please submit your markings before leaving this screen.`
+                          : "Mark the days you were present above, then tap Submit Attendance to confirm and lock your markings."}
                   </Text>
                 </View>
 
-                <TouchableOpacity
-                  style={[
-                    styles.submitButton,
-                    isDark && {
-                      backgroundColor: colors.primary,
-                      shadowColor: colors.primary,
-                    },
-                    isSubmitting && { opacity: 0.75 },
-                  ]}
-                  onPress={handleSubmitAttendance}
-                  disabled={isSubmitting}
-                  activeOpacity={0.85}
-                >
-                  {isSubmitting ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
+                {isCycleClosedOrPaidOff ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.submitButton,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#94A3B8",
+                        shadowOpacity: 0,
+                        elevation: 0,
+                      },
+                    ]}
+                    disabled
+                  >
                     <View style={styles.submitBtnInner}>
-                      <Text style={styles.submitButtonText}>
-                        {isMyAttendanceSubmitted
-                          ? `Update Water Presence (₱${waterFee.toFixed(2)})`
-                          : `Submit Water Presence (₱${waterFee.toFixed(2)})`}
+                      <Text
+                        style={[
+                          styles.submitButtonText,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        Cycle Settled · Attendance Reset (₱0.00)
                       </Text>
                       <Feather
-                        name={isMyAttendanceSubmitted ? "check" : "arrow-right"}
+                        name="check"
                         size={18}
-                        color="#FFFFFF"
+                        color={isDark ? colors.textSecondary : "#FFFFFF"}
                         style={{ marginLeft: 8 }}
                       />
                     </View>
-                  )}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                ) : isCalendarLocked ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.editAttendanceMainBtn,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.primary,
+                      },
+                    ]}
+                    onPress={handleStartEditing}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.submitBtnInner}>
+                      <Feather
+                        name="edit-2"
+                        size={17}
+                        color={isDark ? colors.accent : "#2563EB"}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text
+                        style={[
+                          styles.editAttendanceMainBtnText,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        Edit Attendance Markings
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.submitActionRow}>
+                    {isMyAttendanceSubmitted && isEditingAttendance && (
+                      <TouchableOpacity
+                        style={[
+                          styles.cancelEditMainBtn,
+                          isDark && {
+                            backgroundColor: colors.surfaceInset,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                        onPress={handleCancelEditing}
+                        disabled={isSubmitting}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.cancelEditMainBtnText,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Cancel
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        { flex: 1 },
+                        isDark && {
+                          backgroundColor: colors.primary,
+                          shadowColor: colors.primary,
+                        },
+                        isSubmitting && { opacity: 0.75 },
+                      ]}
+                      onPress={handleOpenSubmitModal}
+                      disabled={isSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <View style={styles.submitBtnInner}>
+                          <Text style={styles.submitButtonText}>
+                            {isMyAttendanceSubmitted
+                              ? `Save & Submit Attendance (₱${waterFee.toFixed(2)})`
+                              : `Submit Attendance (₱${waterFee.toFixed(2)})`}
+                          </Text>
+                          <Feather
+                            name="arrow-up-circle"
+                            size={18}
+                            color="#FFFFFF"
+                            style={{ marginLeft: 8 }}
+                          />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 <Text
                   style={[
@@ -1720,15 +2816,973 @@ export const AttendanceScreen: React.FC<{
                     isDark && { color: colors.textMuted },
                   ]}
                 >
-                  {isMyAttendanceSubmitted
-                    ? "✓ Real-time synced · Tap any day to edit and re-sync"
-                    : "Tap above to mark days present, then submit to sync dues"}
+                  {isCycleClosedOrPaidOff
+                    ? "✓ Cycle closed & settled · Ready for your host to start the next cycle"
+                    : isCalendarLocked
+                      ? "🔒 Locked after submission to prevent accidental edits"
+                      : !isMyMemberPayor
+                        ? "Tap Submit to choose which Payors cover your water share"
+                        : "Tap Submit to confirm and lock your water attendance markings"}
                 </Text>
               </View>
             </>
           )}
         </ScrollView>
       )}
+
+      {/* =========================================================================
+        UNSAVED MARKINGS NAVIGATION GUARD MODAL
+        Prompts user to Submit Now, Stay on Screen, or Discard Changes & Leave
+        ========================================================================= */}
+      <Modal
+        visible={showLeavePromptModal}
+        transparent
+        animationType="fade"
+        onRequestClose={handleStayOnScreen}
+      >
+        <View style={styles.modalOverlayCenter}>
+          <View
+            style={[
+              styles.unsavedModalCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.unsavedModalIconCircle,
+                isDark && { backgroundColor: "rgba(245, 158, 11, 0.16)" },
+              ]}
+            >
+              <Ionicons
+                name="warning-outline"
+                size={28}
+                color={isDark ? "#FBBF24" : "#D97706"}
+              />
+            </View>
+
+            <Text
+              style={[
+                styles.unsavedModalTitle,
+                isDark && { color: colors.text },
+              ]}
+            >
+              Unsaved Attendance Markings
+            </Text>
+
+            <Text
+              style={[
+                styles.unsavedModalDesc,
+                isDark && { color: colors.textSecondary },
+              ]}
+            >
+              You marked{" "}
+              <Text
+                style={{
+                  fontWeight: "800",
+                  color: isDark ? colors.text : "#0F172A",
+                }}
+              >
+                {presentCount} present day{presentCount === 1 ? "" : "s"} (₱
+                {waterFee.toFixed(2)})
+              </Text>{" "}
+              without submitting. Submit your attendance now so your markings
+              aren't lost.
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.unsavedModalPrimaryBtn,
+                isDark && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleSubmitFromLeaveModal}
+              activeOpacity={0.85}
+            >
+              <Feather name="check-circle" size={16} color="#FFFFFF" />
+              <Text style={styles.unsavedModalPrimaryBtnText}>Submit Now</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.unsavedModalSecondaryBtn,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={handleStayOnScreen}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.unsavedModalSecondaryBtnText,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Stay on Screen
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.unsavedModalDangerBtn}
+              onPress={handleDiscardAndLeave}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.unsavedModalDangerBtnText}>
+                Discard Changes & Leave
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* =========================================================================
+        SLIDE-UP SUBMIT ATTENDANCE BOTTOM SHEET MODAL
+        Non-Payors choose how Payors cover their water bill:
+        1) Split Fairly, 2) Assign Specific Payor, or 3) Custom Split (₱ or %)
+        ========================================================================= */}
+      <Modal
+        visible={showSubmitModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!isSubmitting) {
+            setShowSubmitModal(false);
+          }
+        }}
+      >
+        <KeyboardAvoidingView
+          style={styles.bottomSheetOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableOpacity
+            style={styles.bottomSheetBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              if (!isSubmitting) {
+                setShowSubmitModal(false);
+              }
+            }}
+          />
+
+          <View
+            style={[
+              styles.bottomSheetContainer,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            {/* Drag Handle */}
+            <View style={styles.bottomSheetHandleWrap}>
+              <View
+                style={[
+                  styles.bottomSheetHandle,
+                  isDark && { backgroundColor: colors.border },
+                ]}
+              />
+            </View>
+
+            {/* Sheet Header */}
+            <View style={styles.bottomSheetHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.bottomSheetTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  {!isMyMemberPayor
+                    ? "Submit & Assign Water Bill"
+                    : "Confirm Water Attendance"}
+                </Text>
+                <Text
+                  style={[
+                    styles.bottomSheetSubtitle,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  {!isMyMemberPayor
+                    ? "Choose how Payors will cover your water bill share"
+                    : "Review and lock your attendance markings for this cycle"}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.bottomSheetCloseBtn,
+                  isDark && { backgroundColor: colors.surfaceInset },
+                ]}
+                onPress={() => {
+                  if (!isSubmitting) {
+                    setShowSubmitModal(false);
+                  }
+                }}
+                disabled={isSubmitting}
+              >
+                <Feather
+                  name="x"
+                  size={18}
+                  color={isDark ? colors.textSecondary : "#64748B"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.bottomSheetScroll}
+              contentContainerStyle={styles.bottomSheetScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Summary Pill Card */}
+              <View
+                style={[
+                  styles.sheetSummaryCard,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View style={styles.sheetSummaryCol}>
+                  <Text
+                    style={[
+                      styles.sheetSummaryLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Present Days
+                  </Text>
+                  <Text
+                    style={[
+                      styles.sheetSummaryVal,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {presentCount} / {totalDays} days
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.sheetSummaryDivider,
+                    isDark && { backgroundColor: colors.border },
+                  ]}
+                />
+
+                <View style={styles.sheetSummaryCol}>
+                  <Text
+                    style={[
+                      styles.sheetSummaryLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Daily Rate
+                  </Text>
+                  <Text
+                    style={[
+                      styles.sheetSummaryVal,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    ₱{ratePerDayPesos.toFixed(2)}/day
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.sheetSummaryDivider,
+                    isDark && { backgroundColor: colors.border },
+                  ]}
+                />
+
+                <View style={styles.sheetSummaryCol}>
+                  <Text
+                    style={[
+                      styles.sheetSummaryLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Water Due
+                  </Text>
+                  <Text
+                    style={[
+                      styles.sheetSummaryValAccent,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
+                    ₱{waterFee.toFixed(2)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* NON-PAYOR PAYOR ALLOCATION OPTIONS */}
+              {!isMyMemberPayor ? (
+                <View style={styles.allocationSection}>
+                  <Text
+                    style={[
+                      styles.allocationSectionTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Who pays your ₱{waterFee.toFixed(2)} water bill?
+                  </Text>
+
+                  {/* Mode Selector Tabs */}
+                  <View style={styles.allocationModeList}>
+                    {/* Option 1: Split Fairly */}
+                    <TouchableOpacity
+                      style={[
+                        styles.allocationModeCard,
+                        allocationMode === "FAIR_SPLIT" &&
+                          styles.allocationModeCardActive,
+                        isDark && {
+                          backgroundColor:
+                            allocationMode === "FAIR_SPLIT"
+                              ? "rgba(37, 99, 235, 0.16)"
+                              : colors.surfaceInset,
+                          borderColor:
+                            allocationMode === "FAIR_SPLIT"
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                      onPress={() => setAllocationMode("FAIR_SPLIT")}
+                      activeOpacity={0.8}
+                    >
+                      <View
+                        style={[
+                          styles.allocationRadioOuter,
+                          allocationMode === "FAIR_SPLIT" &&
+                            styles.allocationRadioOuterActive,
+                        ]}
+                      >
+                        {allocationMode === "FAIR_SPLIT" && (
+                          <View style={styles.allocationRadioInner} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.allocationModeTitle,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          Split Fairly Among All Payors
+                        </Text>
+                        <Text
+                          style={[
+                            styles.allocationModeSub,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Equally divides ₱{waterFee.toFixed(2)} across{" "}
+                          {activePayors.length} payor
+                          {activePayors.length === 1 ? "" : "s"} (₱
+                          {(
+                            waterFee / Math.max(1, activePayors.length)
+                          ).toFixed(2)}{" "}
+                          each)
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Option 2: Assign Specific Payor */}
+                    <TouchableOpacity
+                      style={[
+                        styles.allocationModeCard,
+                        allocationMode === "SPECIFIC_PAYOR" &&
+                          styles.allocationModeCardActive,
+                        isDark && {
+                          backgroundColor:
+                            allocationMode === "SPECIFIC_PAYOR"
+                              ? "rgba(37, 99, 235, 0.16)"
+                              : colors.surfaceInset,
+                          borderColor:
+                            allocationMode === "SPECIFIC_PAYOR"
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                      onPress={() => {
+                        setAllocationMode("SPECIFIC_PAYOR");
+                        if (
+                          !selectedSpecificPayorId &&
+                          activePayors.length > 0
+                        ) {
+                          const firstP = activePayors[0];
+                          setSelectedSpecificPayorId(
+                            firstP.userId || firstP.memberId || firstP.id,
+                          );
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View
+                        style={[
+                          styles.allocationRadioOuter,
+                          allocationMode === "SPECIFIC_PAYOR" &&
+                            styles.allocationRadioOuterActive,
+                        ]}
+                      >
+                        {allocationMode === "SPECIFIC_PAYOR" && (
+                          <View style={styles.allocationRadioInner} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.allocationModeTitle,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          Assign Specific Payor
+                        </Text>
+                        <Text
+                          style={[
+                            styles.allocationModeSub,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Choose 1 payor to cover 100% of your ₱
+                          {waterFee.toFixed(2)} water bill
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Option 3: Custom Split on Payors */}
+                    <TouchableOpacity
+                      style={[
+                        styles.allocationModeCard,
+                        allocationMode === "CUSTOM_SPLIT" &&
+                          styles.allocationModeCardActive,
+                        isDark && {
+                          backgroundColor:
+                            allocationMode === "CUSTOM_SPLIT"
+                              ? "rgba(37, 99, 235, 0.16)"
+                              : colors.surfaceInset,
+                          borderColor:
+                            allocationMode === "CUSTOM_SPLIT"
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                      onPress={() => {
+                        setAllocationMode("CUSTOM_SPLIT");
+                        const hasValues = Object.values(customPayorInputs).some(
+                          (v) => Number(v) > 0,
+                        );
+                        if (!hasValues) {
+                          handleDistributeCustomEqually();
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View
+                        style={[
+                          styles.allocationRadioOuter,
+                          allocationMode === "CUSTOM_SPLIT" &&
+                            styles.allocationRadioOuterActive,
+                        ]}
+                      >
+                        {allocationMode === "CUSTOM_SPLIT" && (
+                          <View style={styles.allocationRadioInner} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.allocationModeTitle,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          Custom Split on Payors
+                        </Text>
+                        <Text
+                          style={[
+                            styles.allocationModeSub,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Enter custom Peso (₱) amounts or percentages (%) per
+                          payor
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* PAYORS LIST DETAILS BASED ON SELECTED ALLOCATION MODE */}
+                  <View
+                    style={[
+                      styles.payorsListBox,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.payorsListHeader}>
+                      <Text
+                        style={[
+                          styles.payorsListHeaderTitle,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        {allocationMode === "FAIR_SPLIT"
+                          ? `Payors Breakdown (${activePayors.length})`
+                          : allocationMode === "SPECIFIC_PAYOR"
+                            ? "Select a Payor"
+                            : "Custom Split per Payor"}
+                      </Text>
+
+                      {allocationMode === "CUSTOM_SPLIT" && (
+                        <View style={styles.unitToggleWrap}>
+                          <TouchableOpacity
+                            style={[
+                              styles.unitToggleBtn,
+                              customSplitInputType === "PESO" &&
+                                styles.unitToggleBtnActive,
+                            ]}
+                            onPress={() => handleToggleCustomInputType("PESO")}
+                          >
+                            <Text
+                              style={[
+                                styles.unitToggleBtnText,
+                                customSplitInputType === "PESO" &&
+                                  styles.unitToggleBtnTextActive,
+                              ]}
+                            >
+                              ₱ Peso
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.unitToggleBtn,
+                              customSplitInputType === "PERCENT" &&
+                                styles.unitToggleBtnActive,
+                            ]}
+                            onPress={() =>
+                              handleToggleCustomInputType("PERCENT")
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.unitToggleBtnText,
+                                customSplitInputType === "PERCENT" &&
+                                  styles.unitToggleBtnTextActive,
+                              ]}
+                            >
+                              % Percent
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+
+                    {activePayors.map((payor: any, idx: number) => {
+                      const pUid =
+                        payor.userId || payor.memberId || payor.id || "";
+                      const pName = payor.displayName || payor.name || "Payor";
+                      const pInitials = getInitials(pName);
+                      const avatarColor =
+                        AVATAR_COLORS[idx % AVATAR_COLORS.length];
+
+                      if (allocationMode === "FAIR_SPLIT") {
+                        const totalFeeCents = Math.round(waterFee * 100);
+                        const fairShareCents = getFairSplitShareAtIndex(
+                          totalFeeCents,
+                          Math.max(1, activePayors.length),
+                          idx,
+                        );
+                        const fairShare = fairShareCents / 100;
+                        return (
+                          <View
+                            key={pUid}
+                            style={[
+                              styles.payorOptionRow,
+                              isDark && { borderBottomColor: colors.border },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.payorMiniAvatar,
+                                { backgroundColor: avatarColor },
+                              ]}
+                            >
+                              <Text style={styles.payorMiniAvatarText}>
+                                {pInitials}
+                              </Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[
+                                  styles.payorRowName,
+                                  isDark && { color: colors.text },
+                                ]}
+                              >
+                                {pName}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.payorRowSub,
+                                  isDark && { color: colors.textSecondary },
+                                ]}
+                              >
+                                Equal share (
+                                {(
+                                  100 / Math.max(1, activePayors.length)
+                                ).toFixed(1)}
+                                %)
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.payorRowAmount,
+                                isDark && { color: colors.accent },
+                              ]}
+                            >
+                              +₱{fairShare.toFixed(2)}
+                            </Text>
+                          </View>
+                        );
+                      }
+
+                      if (allocationMode === "SPECIFIC_PAYOR") {
+                        const isSelected = selectedSpecificPayorId === pUid;
+                        return (
+                          <TouchableOpacity
+                            key={pUid}
+                            style={[
+                              styles.payorOptionRow,
+                              isSelected && styles.payorOptionRowSelected,
+                              isDark && {
+                                borderBottomColor: colors.border,
+                                backgroundColor: isSelected
+                                  ? "rgba(37, 99, 235, 0.15)"
+                                  : "transparent",
+                              },
+                            ]}
+                            onPress={() => setSelectedSpecificPayorId(pUid)}
+                            activeOpacity={0.75}
+                          >
+                            <View
+                              style={[
+                                styles.payorMiniAvatar,
+                                { backgroundColor: avatarColor },
+                              ]}
+                            >
+                              <Text style={styles.payorMiniAvatarText}>
+                                {pInitials}
+                              </Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[
+                                  styles.payorRowName,
+                                  isDark && { color: colors.text },
+                                ]}
+                              >
+                                {pName}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.payorRowSub,
+                                  isDark && { color: colors.textSecondary },
+                                ]}
+                              >
+                                {isSelected
+                                  ? "Covers 100% of your water bill"
+                                  : "Tap to assign"}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.payorRowAmount,
+                                !isSelected && {
+                                  color: isDark ? colors.textMuted : "#94A3B8",
+                                },
+                                isSelected &&
+                                  isDark && { color: colors.accent },
+                              ]}
+                            >
+                              {isSelected ? `₱${waterFee.toFixed(2)}` : "₱0.00"}
+                            </Text>
+                            <View
+                              style={[
+                                styles.allocationRadioOuter,
+                                { marginLeft: 8, marginRight: 0 },
+                                isSelected && styles.allocationRadioOuterActive,
+                              ]}
+                            >
+                              {isSelected && (
+                                <View style={styles.allocationRadioInner} />
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      }
+
+                      // CUSTOM_SPLIT
+                      const rawInput = customPayorInputs[pUid] ?? "";
+                      const resolvedCents =
+                        customSplitSummary.payorSharesCents[pUid] || 0;
+                      const resolvedPesos = resolvedCents / 100;
+                      const resolvedPct =
+                        customSplitSummary.payorPercentages[pUid] || 0;
+
+                      return (
+                        <View
+                          key={pUid}
+                          style={[
+                            styles.payorOptionRow,
+                            isDark && { borderBottomColor: colors.border },
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.payorMiniAvatar,
+                              { backgroundColor: avatarColor },
+                            ]}
+                          >
+                            <Text style={styles.payorMiniAvatarText}>
+                              {pInitials}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text
+                              style={[
+                                styles.payorRowName,
+                                isDark && { color: colors.text },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {pName}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.payorRowSub,
+                                isDark && { color: colors.textSecondary },
+                              ]}
+                            >
+                              {customSplitInputType === "PESO"
+                                ? `${resolvedPct.toFixed(1)}% of bill`
+                                : `≈ ₱${resolvedPesos.toFixed(2)}`}
+                            </Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.customSplitInputWrap,
+                              isDark && {
+                                backgroundColor: colors.card,
+                                borderColor: colors.border,
+                              },
+                            ]}
+                          >
+                            {customSplitInputType === "PESO" && (
+                              <Text
+                                style={[
+                                  styles.customSplitUnitPrefix,
+                                  isDark && { color: colors.textSecondary },
+                                ]}
+                              >
+                                ₱
+                              </Text>
+                            )}
+                            <TextInput
+                              style={[
+                                styles.customSplitInput,
+                                isDark && { color: colors.text },
+                              ]}
+                              keyboardType="decimal-pad"
+                              value={rawInput}
+                              placeholder="0.00"
+                              placeholderTextColor={
+                                isDark ? colors.textMuted : "#94A3B8"
+                              }
+                              onChangeText={(txt) => {
+                                const cleaned = txt.replace(/[^0-9.]/g, "");
+                                setCustomPayorInputs(
+                                  (prev: Record<string, string>) => ({
+                                    ...prev,
+                                    [pUid]: cleaned,
+                                  }),
+                                );
+                              }}
+                            />
+                            {customSplitInputType === "PERCENT" && (
+                              <Text
+                                style={[
+                                  styles.customSplitUnitPrefix,
+                                  isDark && { color: colors.textSecondary },
+                                ]}
+                              >
+                                %
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+
+                    {/* Custom Split Footer Validation & Equalize Button */}
+                    {allocationMode === "CUSTOM_SPLIT" && (
+                      <View style={styles.customSplitFooter}>
+                        <View style={styles.customSplitTotalRow}>
+                          <Text
+                            style={[
+                              styles.customSplitTotalLabel,
+                              !customSplitSummary.isValid && {
+                                color: "#EF4444",
+                              },
+                              customSplitSummary.isValid && {
+                                color: isDark ? "#34D399" : "#059669",
+                              },
+                            ]}
+                          >
+                            {customSplitInputType === "PESO"
+                              ? `Allocated: ₱${customSplitSummary.allocatedPesos.toFixed(
+                                  2,
+                                )} / ₱${waterFee.toFixed(2)}`
+                              : `Allocated: ${customSplitSummary.allocatedPercent.toFixed(
+                                  1,
+                                )}% / 100%`}
+                          </Text>
+
+                          <TouchableOpacity
+                            style={styles.distributeEquallyBtn}
+                            onPress={handleDistributeCustomEqually}
+                          >
+                            <Text style={styles.distributeEquallyBtnText}>
+                              Split Equally
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {!customSplitSummary.isValid && (
+                          <Text style={styles.customSplitErrorText}>
+                            {customSplitInputType === "PESO"
+                              ? customSplitSummary.remainingPesos > 0
+                                ? `₱${customSplitSummary.remainingPesos.toFixed(
+                                    2,
+                                  )} remaining to allocate.`
+                                : `Exceeded total by ₱${Math.abs(
+                                    customSplitSummary.remainingPesos,
+                                  ).toFixed(2)}.`
+                              : customSplitSummary.remainingPercent > 0
+                                ? `${customSplitSummary.remainingPercent.toFixed(
+                                    1,
+                                  )}% remaining to reach 100%.`
+                                : `Exceeded 100% by ${Math.abs(
+                                    customSplitSummary.remainingPercent,
+                                  ).toFixed(1)}%.`}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.payorConfirmInfoBox,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={22}
+                    color={isDark ? colors.accent : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.payorConfirmInfoText,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Once submitted, your attendance calendar will lock to
+                    prevent accidental taps. You can tap{" "}
+                    <Text
+                      style={{
+                        fontWeight: "800",
+                        color: isDark ? colors.text : "#0F172A",
+                      }}
+                    >
+                      Edit Attendance
+                    </Text>{" "}
+                    anytime you return to make changes.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Bottom Sheet Action Buttons */}
+            <View
+              style={[
+                styles.bottomSheetFooter,
+                isDark && { borderTopColor: colors.border },
+              ]}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.sheetKeepEditingBtn,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setShowSubmitModal(false)}
+                disabled={isSubmitting}
+              >
+                <Text
+                  style={[
+                    styles.sheetKeepEditingBtnText,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Keep Editing
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sheetConfirmSubmitBtn,
+                  isDark && { backgroundColor: colors.primary },
+                  !isMyMemberPayor &&
+                    allocationMode === "CUSTOM_SPLIT" &&
+                    !customSplitSummary.isValid && { opacity: 0.5 },
+                  isSubmitting && { opacity: 0.75 },
+                ]}
+                onPress={handleConfirmSubmitAttendance}
+                disabled={
+                  isSubmitting ||
+                  (!isMyMemberPayor &&
+                    allocationMode === "CUSTOM_SPLIT" &&
+                    !customSplitSummary.isValid)
+                }
+                activeOpacity={0.85}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Feather name="check-circle" size={16} color="#FFFFFF" />
+                    <Text style={styles.sheetConfirmSubmitBtnText}>
+                      Confirm & Submit
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Host Water Settings Modal */}
       {isHost && resolvedHouseholdId && (
@@ -1906,6 +3960,40 @@ const styles = StyleSheet.create({
     color: "#FACC15",
   },
 
+  /* Cycle Settled & Reset Banner */
+  settledResetBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+    gap: 12,
+  },
+  settledResetIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#D1FAE5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  settledResetTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#065F46",
+    marginBottom: 2,
+  },
+  settledResetSub: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#047857",
+    fontWeight: "600",
+  },
+
   /* Water Utility Fee Bar matching Image 1 */
   feeBarCard: {
     flexDirection: "row",
@@ -1939,6 +4027,7 @@ const styles = StyleSheet.create({
   },
   feeBarActions: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   markAllBtn: {
@@ -1963,12 +4052,115 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#64748B",
   },
+  editAttendancePillBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  editAttendancePillBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  cancelEditPillBtn: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  cancelEditPillBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  settledFeePill: {
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  settledFeePillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#059669",
+  },
+
+  /* Locked & Unsaved Hint Banners */
+  lockedHintBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  lockedHintText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E3A8A",
+  },
+  lockedHintActionBtn: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  lockedHintActionText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  unsavedDraftBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  unsavedDraftText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#92400E",
+    lineHeight: 16,
+  },
+  unsavedDraftSubmitMiniBtn: {
+    backgroundColor: "#D97706",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  unsavedDraftSubmitMiniText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
 
   /* Monthly Calendar Card matching Image 1 */
   calendarCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 14,
@@ -1985,6 +4177,25 @@ const styles = StyleSheet.create({
     gap: 6,
     flexWrap: "wrap",
     flex: 1,
+  },
+  monthHeaderRightRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  lockedCalendarBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  lockedCalendarBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#059669",
   },
   monthDot: {
     width: 8,
@@ -2015,31 +4226,38 @@ const styles = StyleSheet.create({
   },
   weekdaysRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    marginBottom: 8,
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 6,
+  },
+  weekdayCell: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   weekdayText: {
-    width: "13.2%",
     textAlign: "center",
     fontSize: 10,
     fontWeight: "700",
     color: "#94A3B8",
   },
   daysGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: "column",
     gap: 4,
-    justifyContent: "flex-start",
+  },
+  weekRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
   dayBoxEmpty: {
-    width: "13.2%",
+    flex: 1,
     aspectRatio: 1,
   },
   dayBox: {
-    width: "13.2%",
+    flex: 1,
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
@@ -2059,8 +4277,9 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
   },
   dayNumberText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   dayNumberTextPresent: {
     color: "#FFFFFF",
@@ -2243,7 +4462,7 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
   },
 
-  /* Submit Water Bill Attendance Button matching Image 2 */
+  /* Submit Water Bill Attendance Button */
   submissionContainer: {
     marginBottom: 24,
   },
@@ -2265,6 +4484,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ECFDF5",
     borderColor: "#A7F3D0",
   },
+  submissionNoticeBoxWarning: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
   submissionNoticeText: {
     flex: 1,
     fontSize: 12,
@@ -2274,6 +4497,15 @@ const styles = StyleSheet.create({
   },
   submissionNoticeTextSubmitted: {
     color: "#065F46",
+  },
+  submissionNoticeTextWarning: {
+    color: "#92400E",
+  },
+  submitActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
   },
   submitButton: {
     backgroundColor: "#2563EB",
@@ -2286,7 +4518,36 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
+  },
+  editAttendanceMainBtn: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1.5,
+    borderColor: "#2563EB",
+    borderRadius: 18,
+    paddingVertical: 15,
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 12,
+  },
+  editAttendanceMainBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  cancelEditMainBtn: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelEditMainBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#475569",
   },
   submitBtnInner: {
     flexDirection: "row",
@@ -2303,5 +4564,436 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     textAlign: "center",
     fontWeight: "600",
+  },
+
+  /* Unsaved Markings Leave Guard Modal */
+  modalOverlayCenter: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  unsavedModalCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+  },
+  unsavedModalIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  unsavedModalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0F172A",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  unsavedModalDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#475569",
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  unsavedModalPrimaryBtn: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#2563EB",
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  unsavedModalPrimaryBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  unsavedModalSecondaryBtn: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+    paddingVertical: 13,
+    marginBottom: 8,
+  },
+  unsavedModalSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  unsavedModalDangerBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  unsavedModalDangerBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#EF4444",
+  },
+
+  /* Slide-Up Submit Attendance Bottom Sheet */
+  bottomSheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  bottomSheetBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+  },
+  bottomSheetContainer: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    maxHeight: "88%",
+    paddingBottom: Platform.OS === "ios" ? 28 : 18,
+  },
+  bottomSheetHandleWrap: {
+    alignItems: "center",
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  bottomSheetHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#CBD5E1",
+  },
+  bottomSheetHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  bottomSheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  bottomSheetSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  bottomSheetCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
+  bottomSheetScroll: {
+    maxHeight: 460,
+  },
+  bottomSheetScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+  },
+  sheetSummaryCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    marginBottom: 16,
+  },
+  sheetSummaryCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+  sheetSummaryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "#E2E8F0",
+  },
+  sheetSummaryLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748B",
+    marginBottom: 2,
+  },
+  sheetSummaryVal: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  sheetSummaryValAccent: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#2563EB",
+  },
+  allocationSection: {
+    gap: 12,
+  },
+  allocationSectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  allocationModeList: {
+    gap: 8,
+  },
+  allocationModeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+    padding: 12,
+  },
+  allocationModeCardActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#2563EB",
+  },
+  allocationRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#94A3B8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  allocationRadioOuterActive: {
+    borderColor: "#2563EB",
+  },
+  allocationRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#2563EB",
+  },
+  allocationModeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  allocationModeSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  payorsListBox: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 18,
+    padding: 12,
+    marginTop: 4,
+  },
+  payorsListHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  payorsListHeaderTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  unitToggleWrap: {
+    flexDirection: "row",
+    backgroundColor: "#E2E8F0",
+    borderRadius: 10,
+    padding: 2,
+  },
+  unitToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  unitToggleBtnActive: {
+    backgroundColor: "#2563EB",
+  },
+  unitToggleBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  unitToggleBtnTextActive: {
+    color: "#FFFFFF",
+  },
+  payorOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    borderRadius: 12,
+  },
+  payorOptionRowSelected: {
+    backgroundColor: "#EFF6FF",
+  },
+  payorMiniAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  payorMiniAvatarText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  payorRowName: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  payorRowSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  payorRowAmount: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#2563EB",
+  },
+  customSplitInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    height: 36,
+    minWidth: 88,
+  },
+  customSplitUnitPrefix: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#64748B",
+    marginHorizontal: 2,
+  },
+  customSplitInput: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+    textAlign: "right",
+    paddingVertical: 4,
+    minWidth: 50,
+  },
+  customSplitFooter: {
+    marginTop: 10,
+    paddingTop: 6,
+  },
+  customSplitTotalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  customSplitTotalLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  distributeEquallyBtn: {
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  distributeEquallyBtnText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#2563EB",
+  },
+  customSplitErrorText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#EF4444",
+    marginTop: 4,
+  },
+  payorConfirmInfoBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+    padding: 14,
+  },
+  payorConfirmInfoText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#475569",
+  },
+  bottomSheetFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  sheetKeepEditingBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetKeepEditingBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#475569",
+  },
+  sheetConfirmSubmitBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: "#2563EB",
+  },
+  sheetConfirmSubmitBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 });

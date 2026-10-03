@@ -20,6 +20,9 @@ import { auth } from "../firebase/config";
 import {
   mobileDataService,
   isPayorMember,
+  computeCycleWaterBreakdown,
+  computeFairSplitShareCentavos,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { BILL_CATEGORIES, getCategoryMeta } from "../services/categoryService";
 import { useTheme } from "../context/ThemeContext";
@@ -465,72 +468,42 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
     if (splitMethod === "Equal") {
       if (isWater) {
-        // Water mode: payors pay their own water + water from non-payors
+        // Water mode: payors pay their own water + water from non-payors (honoring custom/specific allocations)
         const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
-        let totalNonPayorWater = 0;
-        const memberDaysMap: Record<string, number> = {};
+        const { membersBreakdown } = computeCycleWaterBreakdown(
+          activeMembers,
+          cycleAttendance,
+          attendanceSubmissions,
+          rate,
+        );
 
-        activeMembers.forEach((m) => {
-          const uid = m.userId || m.memberId;
-          const days = getMemberDays(uid);
-          memberDaysMap[uid] = days;
-          if (!isPayorMember(m)) {
-            totalNonPayorWater += days * rate;
-          }
-        });
-
-        const extraPerPayor =
-          payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
-        const nonPayorNames = activeNonPayors
-          .map((np) => np.displayName || "Non-payor")
-          .join(", ");
-
-        splitDetails = activeMembers.map((m) => {
-          const uid = m.userId || m.memberId;
-          const isPayor = isPayorMember(m);
-          const days = memberDaysMap[uid] || 0;
-          if (isPayor) {
-            const ownCost = days * rate;
-            const payorTotal = ownCost + extraPerPayor;
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: payorTotal,
-              ownWaterCentavos: ownCost,
-              nonPayorWaterCentavos: extraPerPayor,
-              daysPresent: days,
-              rateCentavosPerDay: rate,
-              isExempt: false,
-              note:
-                extraPerPayor > 0
-                  ? `${days} days @ ₱${rate / 100}/day (₱${(ownCost / 100).toFixed(2)}) + non-payor split (₱${(extraPerPayor / 100).toFixed(2)} from ${nonPayorNames})`
-                  : `${days} days present @ ₱${rate / 100}/day`,
-            };
-          } else {
-            return {
-              userId: uid,
-              displayName: m.displayName || "Roommate",
-              shareCentavos: 0,
-              ownWaterCentavos: 0,
-              nonPayorWaterCentavos: 0,
-              daysPresent: days,
-              rateCentavosPerDay: rate,
-              isExempt: true,
-              note: `Exempted (Non-payor) — ${days} days water cost absorbed by payors`,
-            };
-          }
-        });
+        splitDetails = membersBreakdown.map((item) => ({
+          userId: item.userId,
+          displayName: item.displayName,
+          shareCentavos: item.shareCentavos,
+          ownWaterCentavos: item.ownWaterCentavos,
+          nonPayorWaterCentavos: item.nonPayorWaterCentavos,
+          daysPresent: item.daysPresent,
+          rateCentavosPerDay: item.rateCentavosPerDay,
+          isExempt: item.isExempt,
+          note: item.note,
+        }));
       } else {
-        // Standard bills: split strictly across payors only!
-        const shareCentavos = Math.round(amountCents / payorCount);
+        // Standard bills: split strictly across payors only with exact centavo remainder allocation!
         const elecMeterSummary = isElectricityCategory
           ? `${consumedKwh} kWh (${parsedElecPrev} → ${parsedElecCurr} kWh) @ ₱${parsedElecRate.toFixed(2)}/kWh`
           : "";
         splitDetails = activeMembers.map((m) => {
+          const uid = m.userId || m.memberId || m.id || "";
           const isPayor = isPayorMember(m);
           if (isPayor) {
+            const shareCentavos = computeFairSplitShareCentavos(
+              amountCents,
+              activePayors,
+              uid,
+            );
             return {
-              userId: m.userId || m.memberId,
+              userId: uid,
               displayName: m.displayName || "Roommate",
               shareCentavos,
               percentage: Math.round((100 / payorCount) * 10) / 10,
@@ -541,7 +514,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
             };
           } else {
             return {
-              userId: m.userId || m.memberId,
+              userId: uid,
               displayName: m.displayName || "Roommate",
               shareCentavos: 0,
               percentage: 0,
@@ -1760,10 +1733,9 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               Calculated Member Share
             </Text>
             {activeMembers.map((m) => {
+              const uid = m.userId || m.memberId || m.id || "";
               const isPayor = isPayorMember(m);
               const isWater = isWaterCategory;
-              const payorCount = Math.max(1, activePayors.length);
-              const nonPayorCount = activeNonPayors.length;
               const numericAmount =
                 parseFloat(amount.replace(/[^0-9.]/g, "")) || 0;
               const amountCents = Math.round(numericAmount * 100);
@@ -1772,30 +1744,51 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
               let note = "";
               if (!isPayor) {
                 memberShareCents = 0;
-                note = "Exempted (Non-payor)";
+                if (isWater) {
+                  const rate = Number(
+                    waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                  );
+                  const { membersBreakdown } = computeCycleWaterBreakdown(
+                    activeMembers,
+                    cycleAttendance,
+                    attendanceSubmissions,
+                    rate,
+                  );
+                  const npItem = membersBreakdown.find((b) =>
+                    matchesMemberUid(m, b.userId),
+                  );
+                  note =
+                    npItem?.nonPayorAllocationSummary || "Exempted (Non-payor)";
+                } else {
+                  note = "Exempted (Non-payor)";
+                }
               } else if (isWater) {
                 const rate = Number(
                   waterConfig?.rateCentavosPerPersonPerDay ?? 500,
                 );
-                const uid = m.userId || m.memberId;
-                const days = getMemberDays(uid);
-                const ownCost = days * rate;
-                let totalNonPayorWater = 0;
-                activeNonPayors.forEach((np) => {
-                  const npUid = np.userId || np.memberId;
-                  totalNonPayorWater += getMemberDays(npUid) * rate;
-                });
-                const extra =
-                  payorCount > 0
-                    ? Math.round(totalNonPayorWater / payorCount)
-                    : 0;
-                memberShareCents = ownCost + extra;
+                const { membersBreakdown } = computeCycleWaterBreakdown(
+                  activeMembers,
+                  cycleAttendance,
+                  attendanceSubmissions,
+                  rate,
+                );
+                const pItem = membersBreakdown.find((b) =>
+                  matchesMemberUid(m, b.userId),
+                );
+                memberShareCents = pItem?.shareCentavos || 0;
+                const days = pItem?.daysPresent || 0;
+                const ownCost = pItem?.ownWaterCentavos || 0;
+                const extra = pItem?.nonPayorWaterCentavos || 0;
                 note =
                   extra > 0
-                    ? `${days}d own (₱${(ownCost / 100).toFixed(2)}) + ₱${(extra / 100).toFixed(2)} non-payor split`
+                    ? `${days}d own (₱${(ownCost / 100).toFixed(2)}) + ₱${(extra / 100).toFixed(2)} non-payor share`
                     : `${days}d own @ ₱${rate / 100}/day`;
               } else {
-                memberShareCents = Math.round(amountCents / payorCount);
+                memberShareCents = computeFairSplitShareCentavos(
+                  amountCents,
+                  activePayors,
+                  uid,
+                );
                 note = "Equal payor share";
               }
 

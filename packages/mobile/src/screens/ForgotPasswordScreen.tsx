@@ -153,7 +153,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
           <View style={styles.logoContainer}>
             <View style={styles.logoBadge}>
               <Image
-                source={assets.favicon}
+                source={assets.sBlueLogo}
                 style={styles.logoImage}
                 resizeMode="cover"
               />
@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 4,
     marginBottom: 20,
   },
   logoBadge: {
@@ -581,9 +581,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#F8FAFC",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 14,
+    borderRadius: 50,
     paddingHorizontal: 14,
     height: 50,
   },
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
   primaryActionButton: {
     width: "100%",
     backgroundColor: "#2563EB",
-    borderRadius: 14,
+    borderRadius: 50,
     height: 50,
     alignItems: "center",
     justifyContent: "center",
@@ -729,7 +729,7 @@ const styles = StyleSheet.create({
   },
   returnSignInBtn: {
     backgroundColor: "rgba(255, 255, 255, 0.18)",
-    borderRadius: 12,
+    borderRadius: 20,
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderWidth: 1,

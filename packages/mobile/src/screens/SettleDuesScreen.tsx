@@ -17,6 +17,7 @@ import {
   isPayorMember,
   cleanBillTitle,
   isCyclePaymentsLocked,
+  computeFairSplitShareCentavos,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { getCategoryMeta } from "../services/categoryService";
@@ -130,11 +131,30 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
       );
       const mySplitPaid = mySplit?.isPaid === true;
 
+      const isWater = (exp.category || "").toLowerCase().includes("water");
+      const splitPayors = Array.isArray(exp.splitDetails)
+        ? exp.splitDetails.filter((s: any) => !s.isExempt)
+        : [];
+      const splitPayorsSum = splitPayors.reduce(
+        (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+        0,
+      );
+      const isSavedSplitExact =
+        isWater ||
+        (splitPayors.length === payorCount &&
+          splitPayorsSum === exp.amountCents);
+
       const myShareCentavos = !isCurrentUserPayor
         ? 0
-        : mySplit && typeof mySplit.shareCentavos === "number"
+        : isSavedSplitExact &&
+            mySplit &&
+            typeof mySplit.shareCentavos === "number"
           ? mySplit.shareCentavos
-          : Math.round(exp.amountCents / payorCount);
+          : computeFairSplitShareCentavos(
+              exp.amountCents,
+              activePayors,
+              currentUser?.uid,
+            );
 
       const status = isPaid || mySplitPaid ? "PAID" : "UNPAID";
 

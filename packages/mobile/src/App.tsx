@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -7,6 +7,7 @@ import {
   StatusBar,
   Animated,
   Platform,
+  Alert,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -45,11 +46,31 @@ import { mobileDataService } from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
 import { alertService } from "./services/alertService";
 import { CustomAlertModal } from "./components/CustomAlertModal";
+import { AuthPinScreen } from "./screens/AuthPinScreen";
+import { SavedProfileAuthScreen } from "./screens/SavedProfileAuthScreen";
+import { PinSetupModal } from "./components/PinSetupModal";
+import { NewUserPinPromptModal } from "./components/NewUserPinPromptModal";
+import { authPinService, StoredPinUser } from "./services/authPinService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { FloatingMessagesBubble } from "./components/FloatingMessagesBubble";
+import { initAudioUnlock, playMessengerPopChime } from "./utils/soundEffects";
+import { notificationService } from "./services/notificationService";
+import { NotificationBanner } from "./components/NotificationBanner";
 
 // Initialize global alert interceptor to upgrade all Alert.alert dialogs to app-matching UI
 alertService.initAlertPatch();
+// Immediately attach user gesture listeners to unlock Web Audio on first touch (web only)
+if (Platform.OS === "web") {
+  initAudioUnlock();
+}
 
-type RootFlow = "splash" | "onboarding" | "auth" | "main";
+type RootFlow =
+  | "splash"
+  | "onboarding"
+  | "auth"
+  | "saved_profile"
+  | "pin_keypad"
+  | "main";
 type MainTab =
   | "home"
   | "groups"
@@ -60,6 +81,7 @@ type MainTab =
 type OverlayScreen =
   | "none"
   | "notifications"
+  | "messages"
   | "add_expense"
   | "settle_dues"
   | "expense_history"
@@ -230,7 +252,18 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   >("details");
   const [overlayScreen, setOverlayScreen] = useState<OverlayScreen>("none");
   const [selectedExpense, setSelectedExpense] = useState<any>(null);
-  const [currentUser, setCurrentUser] = useState({
+  const [attendanceHasUnsavedChanges, setAttendanceHasUnsavedChanges] =
+    useState<boolean>(false);
+  const [pendingAttendanceLeave, setPendingAttendanceLeave] = useState<
+    (() => void) | null
+  >(null);
+  const [currentUser, setCurrentUser] = useState<{
+    name: string;
+    role: string;
+    email: string;
+    avatar: string;
+    photoURL?: string;
+  }>({
     name: "Resident",
     role: "Member",
     email: "",
@@ -244,6 +277,29 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return cached?.householdId || "";
   });
 
+  const [savedProfileUser, setSavedProfileUser] =
+    useState<StoredPinUser | null>(null);
+  const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">(
+    "signin",
+  );
+  const [showNewUserPinPrompt, setShowNewUserPinPrompt] =
+    useState<boolean>(false);
+  const [showNewUserPinSetupModal, setShowNewUserPinSetupModal] =
+    useState<boolean>(false);
+  const [saveProfilePromptData, setSaveProfilePromptData] = useState<{
+    uid: string;
+    displayName: string;
+    email: string;
+    role: string;
+    hasExistingPin: boolean;
+    isOverride?: boolean;
+    existingSavedUser?: {
+      displayName?: string;
+      email?: string;
+      uid?: string;
+    } | null;
+  } | null>(null);
+
   useEffect(() => {
     const firebaseUser = auth.currentUser;
     if (!firebaseUser?.uid) return;
@@ -255,11 +311,138 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           if (p.householdId) {
             setHouseholdId(p.householdId);
           }
+          const pic = p.profilePicture || p.photoURL;
+          if (pic) {
+            authPinService.cacheUserAvatar(firebaseUser.uid, pic);
+            setSavedProfileUser((prev) => {
+              if (
+                prev &&
+                prev.uid === firebaseUser.uid &&
+                prev.photoURL !== pic
+              ) {
+                return { ...prev, photoURL: pic };
+              }
+              return prev;
+            });
+          }
         }
       },
     );
     return () => unsub();
   }, [rootFlow]);
+
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
+  const [latestUnreadMessage, setLatestUnreadMessage] = useState<{
+    id: string;
+    senderName: string;
+    text: string;
+  } | null>(null);
+
+  const seenMessageIds = useRef<Set<string>>(new Set());
+  const isInitialLoad = useRef(true);
+
+  // Focus messages view when a system push notification is clicked
+  useEffect(() => {
+    notificationService.setOnClickCallback(() => {
+      setOverlayScreen("messages");
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!householdId) {
+      setUnreadMessagesCount(0);
+      setLatestUnreadMessage(null);
+      return;
+    }
+    const currentUid = auth.currentUser?.uid;
+    // Heartbeat update
+    mobileDataService.updateUserHeartbeat(householdId, currentUid);
+    const heartbeatInterval = setInterval(() => {
+      mobileDataService.updateUserHeartbeat(householdId, currentUid);
+    }, 120000);
+
+    const unsub = mobileDataService.listenToHouseholdMessages(
+      householdId,
+      (msgs) => {
+        if (!currentUid) {
+          setUnreadMessagesCount(0);
+          setLatestUnreadMessage(null);
+          return;
+        }
+        const unread = (msgs || []).filter((m: any) => {
+          if (!m || m.senderId === currentUid) return false;
+          if ((m.readBy || []).includes(currentUid)) return false;
+
+          // 1. Group broadcast messages (visible to all household members)
+          const isGroupMsg =
+            m.conversationId === "household_group" ||
+            m.recipientId === "ALL" ||
+            (!m.conversationId && !m.recipientId);
+
+          // 2. Direct 1-on-1 messages (strictly private between sender and recipient)
+          const isDirectToMe =
+            m.recipientId === currentUid ||
+            (m.conversationId &&
+              m.conversationId.startsWith("dm_") &&
+              m.conversationId.includes(currentUid) &&
+              (m.recipientId === currentUid || !m.recipientId));
+
+          return isGroupMsg || isDirectToMe;
+        });
+
+        // Detect newly arrived messages for currentUid after initial data sync
+        if (!isInitialLoad.current && msgs && msgs.length > 0) {
+          const brandNewMsgs = unread.filter(
+            (m: any) => !seenMessageIds.current.has(m.id),
+          );
+          if (brandNewMsgs.length > 0) {
+            playMessengerPopChime();
+            const latest = brandNewMsgs[brandNewMsgs.length - 1];
+            const isGroup =
+              latest.conversationId === "household_group" ||
+              latest.recipientId === "ALL" ||
+              (!latest.conversationId && !latest.recipientId);
+            const sender = (latest.senderName || "Roommate").split(" ")[0];
+
+            // If app is hidden / in background on mobile or web, fire system push notification!
+            if (typeof document !== "undefined" && document.hidden) {
+              notificationService.showNotification({
+                title: isGroup
+                  ? `${sender} in Bills Group`
+                  : `${sender} (Direct Message)`,
+                body: latest.text || "Sent a message",
+                tag: latest.id,
+                data: {
+                  conversationId: latest.conversationId,
+                  messageId: latest.id,
+                },
+              });
+            }
+          }
+        }
+
+        // Store known message IDs
+        seenMessageIds.current = new Set((msgs || []).map((m: any) => m.id));
+        isInitialLoad.current = false;
+
+        setUnreadMessagesCount(unread.length);
+        if (unread.length > 0) {
+          const lastMsg = unread[unread.length - 1];
+          setLatestUnreadMessage({
+            id: lastMsg.id,
+            senderName: (lastMsg.senderName || "Roommate").split(" ")[0],
+            text: lastMsg.text || "Sent a message",
+          });
+        } else {
+          setLatestUnreadMessage(null);
+        }
+      },
+    );
+    return () => {
+      unsub();
+      clearInterval(heartbeatInterval);
+    };
+  }, [householdId, rootFlow]);
 
   const isHostUser = Boolean(
     userProfile?.role === "HOST" ||
@@ -296,21 +479,286 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     }
   }, [currentTab, overlayScreen]);
 
+  const handleSplashFinish = async () => {
+    const savedUser = await authPinService.getSavedDeviceProfile();
+    const firebaseUser = auth.currentUser;
+
+    // Security check: if there is a saved profile on this device, but auth.currentUser belongs to a different account
+    if (savedUser && firebaseUser && firebaseUser.uid !== savedUser.uid) {
+      console.warn(
+        "Mismatched active session on phone with saved profile, signing out guest session:",
+        firebaseUser.email,
+      );
+      try {
+        await auth.signOut();
+      } catch {}
+      mobileDataService.clearCache();
+      setSavedProfileUser(savedUser);
+      setRootFlow("saved_profile");
+      return;
+    }
+
+    if (savedUser) {
+      setSavedProfileUser(savedUser);
+      const isPinEnabled = await authPinService.isPinEnabled(savedUser.uid);
+      if (isPinEnabled) {
+        setRootFlow("saved_profile");
+        return;
+      }
+    }
+
+    if (firebaseUser?.uid) {
+      const isPinEnabled = await authPinService.isPinEnabled(firebaseUser.uid);
+      const isSaved = await authPinService.isDeviceProfileSaved(
+        firebaseUser.uid,
+      );
+      const displayName =
+        firebaseUser.displayName || firebaseUser.email || "Resident";
+      setCurrentUser({
+        name: displayName,
+        role: "MEMBER",
+        email: firebaseUser.email || "",
+        avatar: displayName.charAt(0).toUpperCase(),
+      });
+      if (isPinEnabled && isSaved) {
+        setSavedProfileUser(
+          savedUser || {
+            uid: firebaseUser.uid,
+            displayName,
+            email: firebaseUser.email || "",
+            photoURL: firebaseUser.photoURL || undefined,
+          },
+        );
+        setRootFlow("saved_profile");
+        return;
+      }
+      setRootFlow("main");
+    } else {
+      // Check if there is an explicitly saved profile on this device
+      if (savedUser) {
+        setSavedProfileUser(savedUser);
+        setRootFlow("saved_profile");
+        return;
+      }
+
+      try {
+        const onboardingDone = await AsyncStorage.getItem(
+          "@splitzy_onboarding_completed",
+        );
+        if (onboardingDone === "true") {
+          setRootFlow("auth");
+        } else {
+          setRootFlow("onboarding");
+        }
+      } catch {
+        setRootFlow("onboarding");
+      }
+    }
+  };
+
   if (rootFlow === "splash") {
-    return <SplashScreen onFinish={() => setRootFlow("onboarding")} />;
+    return <SplashScreen onFinish={handleSplashFinish} />;
   }
 
   if (rootFlow === "onboarding") {
-    return <OnboardingScreen onComplete={() => setRootFlow("auth")} />;
+    return (
+      <OnboardingScreen
+        onComplete={async () => {
+          try {
+            await AsyncStorage.setItem("@splitzy_onboarding_completed", "true");
+          } catch {}
+          setRootFlow("auth");
+        }}
+      />
+    );
+  }
+
+  // Dedicated Facebook-style Saved Profile Screen for quick entry
+  if (rootFlow === "saved_profile" && savedProfileUser) {
+    return (
+      <SavedProfileAuthScreen
+        user={savedProfileUser}
+        onContinueWithPin={() => {
+          setRootFlow("pin_keypad");
+        }}
+        onPasswordLoginSuccess={async (user) => {
+          mobileDataService.clearCache();
+          registerForPushNotificationsAsync(user.uid);
+          const displayName = user.displayName || user.email || "Resident";
+          setCurrentUser({
+            name: displayName,
+            role: (user.role || "MEMBER").replace("_", " "),
+            email: user.email,
+            avatar: displayName.charAt(0).toUpperCase(),
+          });
+          try {
+            const profile = await mobileDataService.getUserProfile(user.uid);
+            if (profile) {
+              setUserProfile(profile);
+              if (profile.householdId) {
+                setHouseholdId(profile.householdId);
+              }
+            }
+          } catch (e) {
+            console.warn("Profile fetch after password login notice:", e);
+          }
+          setCurrentTab("home");
+          setOverlayScreen("none");
+          setBillsInitialSubView("overview");
+          setRootFlow("main");
+        }}
+        onUseAnotherProfile={async () => {
+          setSavedProfileUser(null);
+          try {
+            await auth.signOut();
+          } catch (e) {
+            console.warn("Sign out on switch profile notice:", e);
+          }
+          setAuthInitialTab("signin");
+          setRootFlow("auth");
+        }}
+        onCreateNewAccount={async () => {
+          setSavedProfileUser(null);
+          try {
+            await auth.signOut();
+          } catch (e) {
+            console.warn("Sign out on create account notice:", e);
+          }
+          setAuthInitialTab("signup");
+          setRootFlow("auth");
+        }}
+        onProfileRemoved={async () => {
+          setSavedProfileUser(null);
+          try {
+            await auth.signOut();
+          } catch (e) {
+            console.warn("Sign out on profile removal notice:", e);
+          }
+          setAuthInitialTab("signin");
+          setRootFlow("auth");
+        }}
+      />
+    );
+  }
+
+  // 4-Digit PIN Keypad Screen transitioned from Saved Profile
+  if (rootFlow === "pin_keypad" && savedProfileUser) {
+    return (
+      <AuthPinScreen
+        user={{
+          uid: savedProfileUser.uid,
+          displayName: savedProfileUser.displayName,
+          email: savedProfileUser.email,
+          photoURL: savedProfileUser.photoURL,
+        }}
+        onUnlockSuccess={async (enteredPin?: string) => {
+          // 1. If a different user is active in Firebase Auth, force sign out immediately
+          if (
+            auth.currentUser &&
+            auth.currentUser.uid !== savedProfileUser.uid
+          ) {
+            try {
+              await auth.signOut();
+            } catch (e) {
+              console.warn("Sign out mismatched user notice:", e);
+            }
+          }
+          mobileDataService.clearCache();
+
+          // 2. Ensure Firebase Auth session is active and matches the saved user
+          if (auth.currentUser?.uid !== savedProfileUser.uid) {
+            let sessionRestored = false;
+            if (enteredPin) {
+              const result = await authPinService.restoreFirebaseSessionWithPin(
+                savedProfileUser.uid,
+                enteredPin,
+              );
+              if (
+                result.success &&
+                auth.currentUser?.uid === savedProfileUser.uid
+              ) {
+                sessionRestored = true;
+              }
+            }
+
+            if (!sessionRestored) {
+              Alert.alert(
+                "Password Required",
+                `PIN verified! Please sign in once with your password for ${savedProfileUser.displayName || savedProfileUser.email} to authorize instant 1-tap PIN sign-in on this device.`,
+                [
+                  {
+                    text: "Sign In with Password",
+                    onPress: () => {
+                      setRootFlow("saved_profile");
+                    },
+                  },
+                ],
+              );
+              return;
+            }
+          }
+
+          // 3. Strictly use savedProfileUser UID - never fall back to an unverified user
+          const activeUid = savedProfileUser.uid;
+          registerForPushNotificationsAsync(activeUid);
+          const displayName =
+            savedProfileUser.displayName ||
+            savedProfileUser.email ||
+            "Resident";
+          setCurrentUser({
+            name: displayName,
+            role: (savedProfileUser.role || "MEMBER").replace("_", " "),
+            email: savedProfileUser.email,
+            avatar: displayName.charAt(0).toUpperCase(),
+          });
+
+          // 4. Fetch full profile and household ID to guarantee complete dashboard access
+          try {
+            const profile = await mobileDataService.getUserProfile(activeUid);
+            if (profile) {
+              setUserProfile(profile);
+              if (profile.householdId) {
+                setHouseholdId(profile.householdId);
+              }
+            }
+          } catch (e) {
+            console.warn("Profile fetch after PIN unlock notice:", e);
+          }
+
+          setCurrentTab("home");
+          setOverlayScreen("none");
+          setBillsInitialSubView("overview");
+          setRootFlow("main");
+        }}
+        onSwitchAccount={async () => {
+          setSavedProfileUser(null);
+          try {
+            await auth.signOut();
+          } catch (e) {
+            console.warn("Sign out on switch account notice:", e);
+          }
+          setAuthInitialTab("signin");
+          setRootFlow("auth");
+        }}
+        onBack={() => {
+          setRootFlow("saved_profile");
+        }}
+      />
+    );
   }
 
   if (rootFlow === "auth") {
     return (
       <View style={{ flex: 1, backgroundColor: "#2563EB" }}>
         <AuthScreen
-          onLoginSuccess={(user) => {
+          initialTab={authInitialTab}
+          onBackToSavedProfile={
+            savedProfileUser ? () => setRootFlow("saved_profile") : undefined
+          }
+          onLoginSuccess={async (user) => {
             mobileDataService.clearCache();
             registerForPushNotificationsAsync(user.uid);
+
             const displayName = user.displayName || user.email || "Resident";
             setCurrentUser({
               name: displayName,
@@ -324,6 +772,82 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             setCurrentTab("home");
             setOverlayScreen("none");
             setBillsInitialSubView("overview");
+
+            // --- DEVICE CHECK: Finance security (1 saved profile per device rule) ---
+            const existingSavedUser =
+              await authPinService.getSavedDeviceProfile();
+
+            if (existingSavedUser && existingSavedUser.uid === user.uid) {
+              // Current account is ALREADY the saved profile on this device
+              const cachedAvatar = await authPinService.getCachedUserAvatar(
+                user.uid,
+              );
+              const photoURL =
+                (user as any).photoURL ||
+                cachedAvatar ||
+                existingSavedUser.photoURL ||
+                userProfile?.profilePicture ||
+                auth.currentUser?.photoURL ||
+                undefined;
+              if (photoURL) {
+                await authPinService.cacheUserAvatar(user.uid, photoURL);
+              }
+              await authPinService.saveLastPinUser({
+                uid: user.uid,
+                displayName,
+                email: user.email,
+                role: user.role || "PAYOR",
+                photoURL,
+              });
+              setSavedProfileUser({
+                uid: user.uid,
+                displayName,
+                email: user.email,
+                role: user.role || "PAYOR",
+                photoURL,
+              });
+            } else if (
+              existingSavedUser &&
+              existingSavedUser.uid !== user.uid
+            ) {
+              // A DIFFERENT account is already saved on this device!
+              // Since this is a finance app, explicitly ask if they want to override the saved device profile.
+              const hasCloudPin = await authPinService.hasPinConfigured(
+                user.uid,
+              );
+              setSaveProfilePromptData({
+                uid: user.uid,
+                displayName,
+                email: user.email,
+                role: user.role || "PAYOR",
+                hasExistingPin: hasCloudPin,
+                isOverride: true,
+                existingSavedUser,
+              });
+              setShowNewUserPinPrompt(true);
+            } else {
+              // No profile saved on device yet: ask if they want to save profile
+              const shouldPrompt = await authPinService.shouldPromptSaveProfile(
+                user.uid,
+              );
+              if (shouldPrompt) {
+                const hasCloudPin = await authPinService.hasPinConfigured(
+                  user.uid,
+                );
+                setSaveProfilePromptData({
+                  uid: user.uid,
+                  displayName,
+                  email: user.email,
+                  role: user.role || "PAYOR",
+                  hasExistingPin: hasCloudPin,
+                  isOverride: false,
+                  existingSavedUser: null,
+                });
+                setShowNewUserPinPrompt(true);
+              }
+            }
+
+            // Immediately enter the main dashboard directly without any secondary lock
             setRootFlow("main");
           }}
         />
@@ -463,6 +987,36 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return <PrivacyPolicyScreen onBack={() => setOverlayScreen("none")} />;
   }
 
+  if (overlayScreen === "messages") {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar
+          barStyle={colors.statusBar}
+          translucent
+          backgroundColor="transparent"
+        />
+        <MessagesScreen
+          onBack={() => setOverlayScreen("none")}
+          householdId={householdId}
+          currentUser={{
+            ...currentUser,
+            photoURL:
+              userProfile?.profilePicture ||
+              userProfile?.photoURL ||
+              auth.currentUser?.photoURL ||
+              undefined,
+          }}
+          onOpenSettleDues={() => {
+            setOverlayScreen("settle_dues");
+          }}
+          onOpenAddExpense={
+            isHostUser ? () => setOverlayScreen("add_expense") : undefined
+          }
+        />
+      </View>
+    );
+  }
+
   if (overlayScreen === "notifications") {
     return (
       <NotificationsScreen
@@ -534,9 +1088,29 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           />
         );
       case "attendance":
-        return <AttendanceScreen householdId={householdId} />;
+        return (
+          <AttendanceScreen
+            householdId={householdId}
+            onBack={() => setCurrentTab("home")}
+            onUnsavedChangesChange={setAttendanceHasUnsavedChanges}
+            pendingLeaveAction={pendingAttendanceLeave}
+            onClearPendingLeave={() => setPendingAttendanceLeave(null)}
+          />
+        );
       case "messages":
-        return <MessagesScreen />;
+        return (
+          <MessagesScreen
+            onBack={() => setCurrentTab("home")}
+            householdId={householdId}
+            currentUser={currentUser}
+            onOpenSettleDues={() => {
+              setOverlayScreen("settle_dues");
+            }}
+            onOpenAddExpense={
+              isHostUser ? () => setOverlayScreen("add_expense") : undefined
+            }
+          />
+        );
       case "profile":
         return (
           <ProfileScreen
@@ -557,7 +1131,12 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
             onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
             onSignOut={async () => {
-              await auth.signOut();
+              // Full, clean sign out when user chooses Sign Out: completely terminate session
+              try {
+                await auth.signOut();
+              } catch (e) {
+                console.warn("Sign out notice:", e);
+              }
               mobileDataService.clearCache();
               setHouseholdId("");
               setUserProfile(null);
@@ -570,7 +1149,17 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setCurrentTab("home");
               setOverlayScreen("none");
               setBillsInitialSubView("overview");
-              setRootFlow("auth");
+
+              // If a profile is saved on this device, return to Saved Profile screen for 1-tap re-entry
+              const savedUser = await authPinService.getLastPinUser();
+              if (savedUser) {
+                setSavedProfileUser(savedUser);
+                setRootFlow("saved_profile");
+              } else {
+                setSavedProfileUser(null);
+                setAuthInitialTab("signin");
+                setRootFlow("auth");
+              }
             }}
           />
         );
@@ -624,6 +1213,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       <View
         style={[styles.mainContent, { backgroundColor: colors.background }]}
       >
+        {currentTab === "home" && overlayScreen === "none" && (
+          <NotificationBanner />
+        )}
         {renderTabContent()}
       </View>
 
@@ -632,6 +1224,23 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           currentTab={currentTab}
           onSelectTab={(tab) => {
             showNav();
+            if (
+              currentTab === "attendance" &&
+              tab !== "attendance" &&
+              attendanceHasUnsavedChanges
+            ) {
+              setPendingAttendanceLeave(() => () => {
+                setAttendanceHasUnsavedChanges(false);
+                if (tab === "bills") {
+                  setBillsInitialSubView("overview");
+                }
+                if (tab === "groups") {
+                  setManageGroupInitialView("details");
+                }
+                setCurrentTab(tab);
+              });
+              return;
+            }
             if (tab === "bills") {
               setBillsInitialSubView("overview");
             }
@@ -639,6 +1248,157 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setManageGroupInitialView("details");
             }
             setCurrentTab(tab);
+          }}
+        />
+      )}
+
+      {/* Floating draggable messages widget, floating and draggable across the screen */}
+      {currentTab !== "messages" && overlayScreen === "none" && (
+        <FloatingMessagesBubble
+          unreadCount={unreadMessagesCount}
+          latestUnreadMessage={latestUnreadMessage}
+          onPress={() => {
+            setOverlayScreen("messages");
+          }}
+        />
+      )}
+
+      {/* Smooth Save Profile & Quick PIN Prompt Modal (fading/sliding from bottom) */}
+      {auth.currentUser?.uid && (
+        <NewUserPinPromptModal
+          visible={showNewUserPinPrompt}
+          userName={saveProfilePromptData?.displayName || currentUser.name}
+          userEmail={saveProfilePromptData?.email || currentUser.email}
+          hasExistingPin={Boolean(saveProfilePromptData?.hasExistingPin)}
+          isOverride={Boolean(saveProfilePromptData?.isOverride)}
+          existingSavedUser={saveProfilePromptData?.existingSavedUser}
+          onSetUpNow={async () => {
+            setShowNewUserPinPrompt(false);
+            if (!auth.currentUser?.uid) return;
+
+            // If this is an override, first clear the previous user's device profile
+            if (
+              saveProfilePromptData?.isOverride &&
+              saveProfilePromptData?.existingSavedUser?.uid
+            ) {
+              await authPinService.removeDeviceProfile(
+                saveProfilePromptData.existingSavedUser.uid,
+              );
+            }
+
+            const currentUid = auth.currentUser.uid;
+            const displayName =
+              saveProfilePromptData?.displayName || currentUser.name;
+            const email = saveProfilePromptData?.email || currentUser.email;
+            const role = saveProfilePromptData?.role || "PAYOR";
+            const cachedAvatar =
+              await authPinService.getCachedUserAvatar(currentUid);
+            const photoURL =
+              (saveProfilePromptData as any)?.photoURL ||
+              cachedAvatar ||
+              auth.currentUser?.photoURL ||
+              userProfile?.profilePicture ||
+              undefined;
+            if (photoURL) {
+              await authPinService.cacheUserAvatar(currentUid, photoURL);
+            }
+
+            if (saveProfilePromptData?.hasExistingPin) {
+              try {
+                await authPinService.saveProfileAndEnableExistingPin({
+                  uid: currentUid,
+                  displayName,
+                  email,
+                  role,
+                  photoURL,
+                });
+                setSavedProfileUser({
+                  uid: currentUid,
+                  displayName,
+                  email,
+                  role,
+                  photoURL,
+                });
+                alertService.show({
+                  title: saveProfilePromptData?.isOverride
+                    ? "Profile Overridden & Saved"
+                    : "Profile Saved on Device",
+                  message:
+                    "This device is now registered to your account! You can use your 4-digit PIN for quick access anytime.",
+                  type: "success",
+                });
+              } catch {
+                setShowNewUserPinSetupModal(true);
+              }
+            } else {
+              setShowNewUserPinSetupModal(true);
+            }
+          }}
+          onMaybeLater={async () => {
+            setShowNewUserPinPrompt(false);
+            if (!saveProfilePromptData?.isOverride && auth.currentUser?.uid) {
+              await authPinService.dismissNewUserPrompt(auth.currentUser.uid);
+            }
+          }}
+        />
+      )}
+
+      {/* 4-Digit PIN Setup Modal */}
+      {auth.currentUser?.uid && (
+        <PinSetupModal
+          visible={showNewUserPinSetupModal}
+          onClose={async () => {
+            setShowNewUserPinSetupModal(false);
+            // Even if PIN creation modal was closed, save profile for 1-tap quick password sign-in
+            if (auth.currentUser?.uid) {
+              const photoURL =
+                (saveProfilePromptData as any)?.photoURL ||
+                auth.currentUser?.photoURL ||
+                userProfile?.profilePicture ||
+                undefined;
+              await authPinService.saveDeviceProfile({
+                uid: auth.currentUser.uid,
+                displayName:
+                  saveProfilePromptData?.displayName || currentUser.name,
+                email: saveProfilePromptData?.email || currentUser.email,
+                role: saveProfilePromptData?.role || "PAYOR",
+                photoURL,
+              });
+              setSavedProfileUser({
+                uid: auth.currentUser.uid,
+                displayName:
+                  saveProfilePromptData?.displayName || currentUser.name,
+                email: saveProfilePromptData?.email || currentUser.email,
+                role: saveProfilePromptData?.role || "PAYOR",
+                photoURL,
+              });
+            }
+          }}
+          uid={auth.currentUser.uid}
+          isChangeMode={false}
+          onSuccess={async () => {
+            setShowNewUserPinSetupModal(false);
+            if (auth.currentUser?.uid) {
+              const photoURL =
+                (saveProfilePromptData as any)?.photoURL ||
+                auth.currentUser?.photoURL ||
+                userProfile?.profilePicture ||
+                undefined;
+              setSavedProfileUser({
+                uid: auth.currentUser.uid,
+                displayName:
+                  saveProfilePromptData?.displayName || currentUser.name,
+                email: saveProfilePromptData?.email || currentUser.email,
+                role: saveProfilePromptData?.role || "PAYOR",
+                photoURL,
+              });
+            }
+            alertService.show({
+              title: "Profile Saved & PIN Ready",
+              message:
+                "Your 4-digit PIN is active and your profile is saved on this device. You can now use it anytime to easily access your dashboard!",
+              type: "success",
+            });
           }}
         />
       )}

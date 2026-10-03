@@ -17,6 +17,7 @@ import {
   mobileDataService,
   MobilePayment,
   isPayorMember,
+  computeFairSplitShareCentavos,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { useTheme } from "../context/ThemeContext";
@@ -125,10 +126,24 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           }));
 
     const effPayors = sourceMembers.filter((m: any) => isPayorMember(m));
-    const effPayorCount = Math.max(
-      1,
-      effPayors.length > 0 ? effPayors.length : sourceMembers.length,
+    const effectivePayorList = effPayors.length > 0 ? effPayors : sourceMembers;
+    const effPayorCount = Math.max(1, effectivePayorList.length);
+
+    const isWater = (expense.categoryLabel || expense.title || "")
+      .toLowerCase()
+      .includes("water");
+    const populatedPayorSplits = rawSplits.filter((s: any) => !s.isExempt);
+    const rawSplitsSum = populatedPayorSplits.reduce(
+      (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+      0,
     );
+    const hasPopulatedSplits = populatedPayorSplits.some(
+      (s: any) => Number(s.shareCentavos) > 0,
+    );
+    const isSavedSplitExact =
+      isWater ||
+      (populatedPayorSplits.length === effPayorCount &&
+        rawSplitsSum === (expense.amountCents || 0));
 
     const list: ExpensePayorBreakdownItem[] = sourceMembers.map((m: any) => {
       const uid = m.userId || m.memberId || m.id;
@@ -139,11 +154,16 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
       const isExempt = !isPayor || Boolean(splitEntry?.isExempt);
       const shareCentavos = isExempt
         ? 0
-        : splitEntry &&
+        : isSavedSplitExact &&
+            splitEntry &&
             typeof splitEntry.shareCentavos === "number" &&
-            splitEntry.shareCentavos > 0
+            (splitEntry.shareCentavos > 0 || hasPopulatedSplits)
           ? splitEntry.shareCentavos
-          : Math.round((expense.amountCents || 0) / effPayorCount);
+          : computeFairSplitShareCentavos(
+              expense.amountCents || 0,
+              effectivePayorList,
+              uid,
+            );
 
       const percentage = isExempt
         ? 0

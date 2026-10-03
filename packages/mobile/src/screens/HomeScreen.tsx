@@ -24,6 +24,9 @@ import {
   buildRealNotificationsList,
   isNotificationItemUnread,
   isCyclePaymentsLocked,
+  computeCycleWaterBreakdown,
+  computeFairSplitShareCentavos,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -784,34 +787,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             const rate = Number(
               waterConfig?.rateCentavosPerPersonPerDay ?? 500,
             );
-            const myDays = getMemberAttendanceDays(firebaseUser?.uid || "");
-            const ownCost = myDays * rate;
-            const totalNonPayorWater = activeMembersList
-              .filter((mem) => !isPayorMember(mem))
-              .reduce((npSum, npMem) => {
-                const npUid = npMem.userId || npMem.memberId;
-                return npSum + getMemberAttendanceDays(npUid) * rate;
-              }, 0);
-            const extraPerPayor =
-              payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
-            myShareCents = ownCost + extraPerPayor;
+            const { getPayorShareCentavos } = computeCycleWaterBreakdown(
+              activeMembersList,
+              cycleAttendance,
+              attendanceSubmissions,
+              rate,
+              exp.splitDetails,
+            );
+            myShareCents = getPayorShareCentavos(firebaseUser?.uid);
           } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
             myShareCents = waterConfig.fixedPerPersonAmountCentavos || 0;
           } else {
-            myShareCents = Math.round(exp.amountCents / payorCount);
+            myShareCents = computeFairSplitShareCentavos(
+              exp.amountCents,
+              activePayorsList,
+              firebaseUser?.uid,
+            );
           }
         } else {
           const splitPayors = exp.splitDetails
             ? exp.splitDetails.filter((s: any) => !s.isExempt)
             : [];
+          const splitPayorsSum = splitPayors.reduce(
+            (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+            0,
+          );
           const isSplitStale =
-            splitPayors.length > 0 && splitPayors.length !== payorCount;
+            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+            (splitPayors.length > 0 && splitPayorsSum !== exp.amountCents);
           myShareCents =
             !isSplitStale &&
             mySplit &&
             typeof mySplit.shareCentavos === "number"
               ? mySplit.shareCentavos
-              : Math.round(exp.amountCents / payorCount);
+              : computeFairSplitShareCentavos(
+                  exp.amountCents,
+                  activePayorsList,
+                  firebaseUser?.uid,
+                );
         }
       }
 
@@ -964,21 +977,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             const rate = Number(
               waterConfig?.rateCentavosPerPersonPerDay ?? 500,
             );
-            const myDays = getMemberAttendanceDays(firebaseUser?.uid || "");
-            const ownCost = myDays * rate;
-            const totalNonPayorWater = activeMembersList
-              .filter((mem) => !isPayorMember(mem))
-              .reduce((npSum, npMem) => {
-                const npUid = npMem.userId || npMem.memberId;
-                return npSum + getMemberAttendanceDays(npUid) * rate;
-              }, 0);
-            const extraPerPayor =
-              payorCount > 0 ? Math.round(totalNonPayorWater / payorCount) : 0;
-            return sum + ownCost + extraPerPayor;
+            const { getPayorShareCentavos } = computeCycleWaterBreakdown(
+              activeMembersList,
+              cycleAttendance,
+              attendanceSubmissions,
+              rate,
+              e.splitDetails,
+            );
+            return sum + getPayorShareCentavos(firebaseUser?.uid);
           } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
             return sum + (waterConfig.fixedPerPersonAmountCentavos || 0);
           } else {
-            return sum + Math.round(e.amountCents / payorCount);
+            return (
+              sum +
+              computeFairSplitShareCentavos(
+                e.amountCents,
+                activePayorsList,
+                firebaseUser?.uid,
+              )
+            );
           }
         }
 
@@ -987,8 +1004,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               (s: any) => !s.isExempt && s.shareCentavos > 0,
             )
           : [];
+        const splitPayorsSum = splitPayors.reduce(
+          (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+          0,
+        );
         const isSplitStale =
-          splitPayors.length > 0 && splitPayors.length !== payorCount;
+          (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+          (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
         if (
           !isSplitStale &&
           e.splitDetails &&
@@ -1001,7 +1023,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           if (mySplit && typeof mySplit.shareCentavos === "number")
             return sum + mySplit.shareCentavos;
         }
-        return sum + Math.round(e.amountCents / payorCount);
+        return (
+          sum +
+          computeFairSplitShareCentavos(
+            e.amountCents,
+            activePayorsList,
+            firebaseUser?.uid,
+          )
+        );
       }, 0)
     : 0;
 
@@ -1016,7 +1045,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     ? "₱0.00"
     : formatPesos(outstandingCents);
 
-  // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count, recalculate in Firestore
+  // Auto-heal: If an active payor joined and unpaid splits or memberBills are out of sync with current payor count or exact centavo total, recalculate in Firestore
   useEffect(() => {
     if (!householdId || payorCount === 0 || activeCycleExpenses.length === 0)
       return;
@@ -1038,7 +1067,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       const splitPayors = e.splitDetails
         ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
         : [];
-      return splitPayors.length > 0 && splitPayors.length !== payorCount;
+      const splitPayorsSum = splitPayors.reduce(
+        (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+        0,
+      );
+      return (
+        (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+        (splitPayors.length > 0 && splitPayorsSum !== e.amountCents)
+      );
     });
 
     const isMemberBillStale =
@@ -1073,34 +1109,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const getWaterBreakdownForBill = (bill: any) => {
     const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
-    const payors = activeMembersList.filter((m) => isPayorMember(m));
-    const effPayorCount = Math.max(1, payors.length);
+    const { membersBreakdown } = computeCycleWaterBreakdown(
+      activeMembersList,
+      cycleAttendance,
+      attendanceSubmissions,
+      rate,
+      bill?.rawExpense?.splitDetails,
+    );
 
-    let totalNonPayorWater = 0;
-    const memberDaysMap: Record<string, number> = {};
-
-    activeMembersList.forEach((m) => {
-      const uid = m.userId || m.memberId;
-      const days = getMemberAttendanceDays(uid);
-      memberDaysMap[uid] = days;
-      if (!isPayorMember(m)) {
-        totalNonPayorWater += days * rate;
-      }
-    });
-
-    const extraPerPayor = Math.round(totalNonPayorWater / effPayorCount);
-
-    return activeMembersList.map((m) => {
-      const uid = m.userId || m.memberId;
-      const isPayor = isPayorMember(m);
-      const isCurrent = uid === firebaseUser?.uid;
-      const days = memberDaysMap[uid] || 0;
-      const ownCost = days * rate;
-      const totalShare = isPayor ? ownCost + extraPerPayor : 0;
+    return membersBreakdown.map((item) => {
+      const uid = item.userId;
+      const isPayor = item.isPayor;
+      const isCurrent = matchesMemberUid({ userId: uid }, firebaseUser?.uid);
 
       const splitEntry = Array.isArray(bill?.rawExpense?.splitDetails)
-        ? bill.rawExpense.splitDetails.find(
-            (s: any) => s.userId === uid || s.memberId === uid,
+        ? bill.rawExpense.splitDetails.find((s: any) =>
+            matchesMemberUid(s, uid),
           )
         : null;
       const isMemberPaid = isPayor
@@ -1113,13 +1137,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
       return {
         userId: uid,
-        displayName:
-          m.displayName || m.name || (m.role === "HOST" ? "Host" : "Roommate"),
-        role: m.role || (isPayor ? "PAYOR" : "NON_PAYOR"),
-        daysPresent: days,
-        ownWaterCentavos: isPayor ? ownCost : 0,
-        nonPayorAbsorptionCentavos: isPayor ? extraPerPayor : 0,
-        totalShareCentavos: totalShare,
+        displayName: item.displayName,
+        role: item.role,
+        daysPresent: item.daysPresent,
+        rateCentavosPerDay: item.rateCentavosPerDay,
+        ownWaterCentavos: item.ownWaterCentavos,
+        nonPayorAbsorptionCentavos: item.nonPayorWaterCentavos,
+        nonPayorWaterNotes: item.nonPayorWaterNotes,
+        nonPayorAllocationSummary: item.nonPayorAllocationSummary,
+        totalShareCentavos: item.shareCentavos,
         isPaid: isMemberPaid,
         isCurrentUser: isCurrent,
       };
@@ -1393,10 +1419,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           ]}
         >
           <View style={styles.topBar}>
-            <Text style={[styles.logoText, { color: colors.text }]}>
-              Splitzy
-            </Text>
-
+            <View style={styles.brandTitleRow}>
+              <Text style={[styles.splitText, { color: colors.text }]}>
+                Split
+              </Text>
+              <Text
+                style={[styles.zyText, isDark && { color: colors.primary }]}
+              >
+                zy
+              </Text>
+            </View>
             <View style={styles.topBarActions}>
               {/* Quick 3-Mode Theme Toggle (Light -> OLED Dark -> System) */}
               <TouchableOpacity
@@ -2679,12 +2711,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                                           },
                                         ]}
                                       >
-                                        {item.daysPresent} days present ·{" "}
+                                        {item.daysPresent} days present
+                                        {item.role === "NON_PAYOR" &&
+                                        item.daysPresent > 0
+                                          ? ` (₱${((item.daysPresent * (item.rateCentavosPerDay || 500)) / 100).toFixed(2)})`
+                                          : ""}{" "}
+                                        ·{" "}
                                         {item.role === "NON_PAYOR"
-                                          ? "Exempted"
+                                          ? item.nonPayorAllocationSummary ||
+                                            "Exempted"
                                           : `Own: ₱${(item.ownWaterCentavos / 100).toFixed(2)}`}
-                                        {item.nonPayorAbsorptionCentavos > 0 &&
-                                          ` + ₱${(item.nonPayorAbsorptionCentavos / 100).toFixed(2)} non-payor split`}
+                                        {item.role !== "NON_PAYOR" &&
+                                          item.nonPayorAbsorptionCentavos > 0 &&
+                                          (item.nonPayorWaterNotes &&
+                                          item.nonPayorWaterNotes.length > 0
+                                            ? ` + ${item.nonPayorWaterNotes.join(", ")}`
+                                            : ` + ₱${(item.nonPayorAbsorptionCentavos / 100).toFixed(2)} non-payor split`)}
                                       </Text>
                                     </View>
                                     <View style={{ alignItems: "flex-end" }}>
@@ -3115,15 +3157,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 const isPayor = isPayorMember(m);
                 const rawSplits =
                   selectedSettledExpense.rawExpense?.splitDetails || [];
+                const isSettledWater = (selectedSettledExpense.category || "")
+                  .toLowerCase()
+                  .includes("water");
+                const rawSplitsSum = Array.isArray(rawSplits)
+                  ? rawSplits
+                      .filter((s: any) => !s.isExempt)
+                      .reduce(
+                        (acc: number, s: any) =>
+                          acc + (Number(s.shareCentavos) || 0),
+                        0,
+                      )
+                  : 0;
+                const isSettledSplitExact =
+                  isSettledWater ||
+                  rawSplitsSum === (selectedSettledExpense.amountCents || 0);
                 const memberSplit = Array.isArray(rawSplits)
                   ? rawSplits.find((s: any) => s.userId === uid)
                   : null;
                 const shareCents = !isPayor
                   ? 0
-                  : memberSplit && typeof memberSplit.shareCentavos === "number"
+                  : isSettledSplitExact &&
+                      memberSplit &&
+                      typeof memberSplit.shareCentavos === "number"
                     ? memberSplit.shareCentavos
-                    : Math.round(
-                        (selectedSettledExpense.amountCents || 0) / payorCount,
+                    : computeFairSplitShareCentavos(
+                        selectedSettledExpense.amountCents || 0,
+                        activePayorsList,
+                        uid,
                       );
                 const mName =
                   m.displayName ||
@@ -3695,7 +3756,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 6,
   },
-  logoText: {
+  brandTitleRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+  },
+  splitText: {
+    fontSize: 27,
+    fontWeight: "900",
+    color: "#2563EB",
+    letterSpacing: -0.8,
+  },
+  zyText: {
     fontSize: 27,
     fontWeight: "900",
     color: "#2563EB",
