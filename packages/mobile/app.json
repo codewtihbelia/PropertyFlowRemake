@@ -18,6 +18,9 @@
       "bundleIdentifier": "com.splitzy.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "runtimeVersion": {
+        "policy": "appVersion"
       }
     },
     "android": {
@@ -36,8 +39,13 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ]
+      ],
+      "runtimeVersion": "1.0.0"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -80,6 +88,9 @@
       "expo-status-bar",
       "expo-audio",
       "expo-web-browser"
-    ]
+    ],
+    "updates": {
+      "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a"
+    }
   }
 }
