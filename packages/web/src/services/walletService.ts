@@ -189,7 +189,9 @@ export type WalletTransactionType =
   | "debt_settlement"
   | "expense_share"
   | "savings_deposit"
-  | "savings_withdrawal";
+  | "savings_withdrawal"
+  | "expense_simulation"
+  | "card_transfer";
 
 export interface WalletTransaction {
   id: string;
@@ -1075,6 +1077,160 @@ class WebWalletService {
       success: true,
       updatedState: updated,
       message: `Transferred ₱${amount.toLocaleString()} from "${targetPocket.name}" back to your wallet!`,
+    };
+  }
+
+  async simulateCardExpense(
+    userId: string,
+    cardId: string,
+    amount: number,
+    categoryTitle: string,
+    categoryIcon: string,
+    note?: string,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const cardIndex = current.cards.findIndex((c) => c.id === cardId);
+    if (cardIndex === -1) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Selected payment card was not found in your wallet.",
+      };
+    }
+
+    const card = current.cards[cardIndex];
+    const availableBal = card.balance || 0;
+    if (availableBal < amount) {
+      return {
+        success: false,
+        updatedState: current,
+        message: `Insufficient balance on ${card.name}. You have ₱${availableBal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} available, but this expense is ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      };
+    }
+
+    const updatedCards = [...current.cards];
+    updatedCards[cardIndex] = {
+      ...card,
+      balance: Math.max(0, availableBal - amount),
+    };
+
+    const newTotalBalance = updatedCards.reduce(
+      (acc, c) => acc + (c.balance || 0),
+      0,
+    );
+
+    const newTx: WalletTransaction = {
+      id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      type: "expense_simulation",
+      amount,
+      title: categoryTitle,
+      description: note || `Daily simulated expense charged to ${card.name}`,
+      paymentMethodUsed: card.name,
+      referenceId: card.id,
+      timestamp: new Date().toISOString(),
+      status: "completed",
+    };
+
+    const updated: WalletState = {
+      ...current,
+      balance: newTotalBalance,
+      cards: updatedCards,
+      transactions: [newTx, ...current.transactions],
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.persist(userId, updated);
+    return {
+      success: true,
+      updatedState: updated,
+      message: `Charged ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} for ${categoryTitle} from ${card.name}!`,
+    };
+  }
+
+  async transferBetweenCards(
+    userId: string,
+    fromCardId: string,
+    toCardId: string,
+    amount: number,
+    note?: string,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+
+    if (fromCardId === toCardId) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Source card and destination card cannot be the same.",
+      };
+    }
+
+    const fromIndex = current.cards.findIndex((c) => c.id === fromCardId);
+    const toIndex = current.cards.findIndex((c) => c.id === toCardId);
+
+    if (fromIndex === -1 || toIndex === -1) {
+      return {
+        success: false,
+        updatedState: current,
+        message:
+          "One or both selected cards could not be found in your wallet.",
+      };
+    }
+
+    const fromCard = current.cards[fromIndex];
+    const toCard = current.cards[toIndex];
+    const sourceBal = fromCard.balance || 0;
+
+    if (sourceBal < amount) {
+      return {
+        success: false,
+        updatedState: current,
+        message: `Insufficient funds on ${fromCard.name}. Available: ₱${sourceBal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, requested: ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      };
+    }
+
+    const updatedCards = [...current.cards];
+    updatedCards[fromIndex] = {
+      ...fromCard,
+      balance: Math.max(0, sourceBal - amount),
+    };
+    updatedCards[toIndex] = {
+      ...toCard,
+      balance: (toCard.balance || 0) + amount,
+    };
+
+    const newTotalBalance = updatedCards.reduce(
+      (acc, c) => acc + (c.balance || 0),
+      0,
+    );
+
+    const newTx: WalletTransaction = {
+      id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      type: "card_transfer",
+      amount,
+      title: `Transfer: ${fromCard.name} ➔ ${toCard.name}`,
+      description:
+        note && note.trim().length > 0
+          ? note.trim()
+          : `Internal card rebalance from ${fromCard.name} to ${toCard.name}`,
+      paymentMethodUsed: `${fromCard.name} ➔ ${toCard.name}`,
+      referenceId: `${fromCard.id}->${toCard.id}`,
+      timestamp: new Date().toISOString(),
+      status: "completed",
+    };
+
+    const updated: WalletState = {
+      ...current,
+      balance: newTotalBalance,
+      cards: updatedCards,
+      transactions: [newTx, ...current.transactions],
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.persist(userId, updated);
+    return {
+      success: true,
+      updatedState: updated,
+      message: `Transferred ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from ${fromCard.name} to ${toCard.name}!`,
     };
   }
 

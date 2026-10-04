@@ -967,7 +967,12 @@ export function WalletScreen({
 
         {/* 2. Quick Circle Menu Icon Hub */}
         <View style={styles.quickCircleMenuContainer}>
-          <View style={styles.quickCircleGrid}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickCircleScrollContent}
+            style={styles.quickCircleScrollView}
+          >
             <TouchableOpacity
               style={styles.quickCircleItem}
               onPress={() => {
@@ -1170,7 +1175,7 @@ export function WalletScreen({
                 Limits
               </Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
 
         {/* 2.5 Quick Circles: Daily Expense Simulator */}
@@ -1192,9 +1197,9 @@ export function WalletScreen({
                     { color: isDark ? colors.text : "#0F172A" },
                   ]}
                 >
-                  Quick Expense Circles
+                  Quick Expense
                 </Text>
-                <View
+                {/* <View
                   style={[
                     styles.quickExpenseLiveBadge,
                     { backgroundColor: isDark ? "#064E3B" : "#ECFDF5" },
@@ -1209,7 +1214,7 @@ export function WalletScreen({
                   >
                     AUTO-DEDUCT
                   </Text>
-                </View>
+                </View> */}
               </View>
               <Text
                 style={[
@@ -1800,7 +1805,11 @@ export function WalletScreen({
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.pocketsGrid}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.pocketsCarousel}
+          >
             {(wallet?.pockets || []).map((pocket) => {
               const percent = Math.min(
                 100,
@@ -1911,7 +1920,7 @@ export function WalletScreen({
                       }}
                     >
                       <Ionicons name="arrow-up" size={14} color="#2563EB" />
-                      <Text style={styles.pocketBtnText}>+ Stash</Text>
+                      <Text style={styles.pocketBtnText}>Stash</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -1949,7 +1958,44 @@ export function WalletScreen({
                 </View>
               );
             })}
-          </View>
+
+            {/* Add New Goal Shortcut Card */}
+            <TouchableOpacity
+              style={[
+                styles.addPocketPlaceholder,
+                {
+                  borderColor: isDark ? colors.border : "#CBD5E1",
+                  backgroundColor: isDark ? colors.surfaceInset : "#F1F5F966",
+                },
+              ]}
+              onPress={() => setShowAddPocketModal(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.addPocketIconCircle}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={24}
+                  color="#2563EB"
+                />
+              </View>
+              <Text
+                style={[
+                  styles.addCardPlaceholderText,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                New Goal
+              </Text>
+              <Text
+                style={[
+                  styles.addCardPlaceholderSub,
+                  { color: isDark ? colors.textMuted : "#64748B" },
+                ]}
+              >
+                Create pocket
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
         )}
 
         {/* 4. Activity & Transaction Ledger */}
@@ -6406,22 +6452,26 @@ const styles = StyleSheet.create({
   },
   quickCircleMenuContainer: {
     marginVertical: 14,
-    paddingHorizontal: 4,
   },
-  quickCircleGrid: {
+  quickCircleScrollView: {
+    overflow: "visible",
+  },
+  quickCircleScrollContent: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 14,
+    paddingHorizontal: 2,
+    paddingBottom: 2,
   },
   quickCircleItem: {
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
+    width: 68,
   },
   quickCircleBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -6662,22 +6712,38 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
-  pocketsGrid: {
+  pocketsCarousel: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 24,
+    gap: 14,
+    paddingBottom: 16,
+    paddingRight: 10,
   },
   pocketCard: {
-    width: (SCREEN_WIDTH - 52) / 2,
+    width: 220,
+    minHeight: 180,
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    justifyContent: "space-between",
+  },
+  addPocketPlaceholder: {
+    width: 140,
+    minHeight: 180,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 14,
+  },
+  addPocketIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#2563EB15",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
   },
   pocketTopRow: {
     flexDirection: "row",
@@ -6928,6 +6994,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   modalPrimaryBtn: {
+    width: "100%",
     backgroundColor: "#2563EB",
     paddingVertical: 14,
     borderRadius: 16,

@@ -32,6 +32,15 @@ import {
   Radio,
   Copy,
   Check,
+  ArrowLeftRight,
+  Coffee,
+  Utensils,
+  Bus,
+  ShoppingCart,
+  Cookie,
+  Zap,
+  Pill,
+  PlusCircle,
 } from "lucide-react";
 import {
   webWalletService,
@@ -43,6 +52,99 @@ import {
   PHILIPPINE_CARD_PRESETS,
 } from "../../services/walletService";
 import { useAuth } from "../../contexts/AuthContext";
+
+export interface QuickExpensePreset {
+  id: string;
+  title: string;
+  icon:
+    | "coffee"
+    | "utensils"
+    | "bus"
+    | "shopping-cart"
+    | "cookie"
+    | "zap"
+    | "pill"
+    | "custom";
+  amount: number;
+  gradient: [string, string];
+  defaultNote: string;
+  color: string;
+}
+
+export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
+  {
+    id: "coffee",
+    title: "Coffee Break",
+    icon: "coffee",
+    amount: 150,
+    gradient: ["#78350F", "#D97706"],
+    defaultNote: "Morning espresso & pastry",
+    color: "#F59E0B",
+  },
+  {
+    id: "lunch",
+    title: "Lunch Meal",
+    icon: "utensils",
+    amount: 220,
+    gradient: ["#C2410C", "#EA580C"],
+    defaultNote: "Midday meal & drinks",
+    color: "#FB923C",
+  },
+  {
+    id: "commute",
+    title: "Commute Fare",
+    icon: "bus",
+    amount: 65,
+    gradient: ["#0369A1", "#0284C7"],
+    defaultNote: "Jeepney / MRT / Transit ride",
+    color: "#38BDF8",
+  },
+  {
+    id: "grocery",
+    title: "Grocery Run",
+    icon: "shopping-cart",
+    amount: 480,
+    gradient: ["#047857", "#10B981"],
+    defaultNote: "Fresh market & pantry supplies",
+    color: "#34D399",
+  },
+  {
+    id: "merienda",
+    title: "Merienda Snack",
+    icon: "cookie",
+    amount: 95,
+    gradient: ["#B45309", "#F59E0B"],
+    defaultNote: "Afternoon milk tea & snack",
+    color: "#FBBF24",
+  },
+  {
+    id: "utility",
+    title: "Mobile Load / Bills",
+    icon: "zap",
+    amount: 300,
+    gradient: ["#6D28D9", "#8B5CF6"],
+    defaultNote: "Data reload / household utility",
+    color: "#A78BFA",
+  },
+  {
+    id: "pharmacy",
+    title: "Pharmacy / Meds",
+    icon: "pill",
+    amount: 180,
+    gradient: ["#BE123C", "#F43F5E"],
+    defaultNote: "Vitamins & pharmacy essentials",
+    color: "#FB7185",
+  },
+  {
+    id: "custom",
+    title: "Custom Expense",
+    icon: "custom",
+    amount: 100,
+    gradient: ["#1E293B", "#334155"],
+    defaultNote: "Custom daily simulation",
+    color: "#94A3B8",
+  },
+];
 
 interface ClientWalletProps {
   onNavigateToBills?: () => void;
@@ -152,6 +254,26 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   >("deposit");
   const [pocketTransferAmount, setPocketTransferAmount] =
     useState<string>("500");
+
+  // Quick Expense Simulator State
+  const [showExpenseSimModal, setShowExpenseSimModal] =
+    useState<boolean>(false);
+  const [selectedExpensePreset, setSelectedExpensePreset] =
+    useState<QuickExpensePreset | null>(null);
+  const [simCardId, setSimCardId] = useState<string>("");
+  const [simAmount, setSimAmount] = useState<string>("");
+  const [simNote, setSimNote] = useState<string>("");
+  const [activeSimCardId, setActiveSimCardId] = useState<string>("");
+  const [isSimulatingExpense, setIsSimulatingExpense] =
+    useState<boolean>(false);
+
+  // Card-to-Card Transfer State
+  const [showTransferModal, setShowTransferModal] = useState<boolean>(false);
+  const [transferSourceCardId, setTransferSourceCardId] = useState<string>("");
+  const [transferDestCardId, setTransferDestCardId] = useState<string>("");
+  const [transferAmount, setTransferAmount] = useState<string>("");
+  const [transferNote, setTransferNote] = useState<string>("");
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
 
   const [selectedTx, setSelectedTx] = useState<WalletTransaction | null>(null);
   const [txFilter, setTxFilter] = useState<
@@ -388,6 +510,140 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
     }
   };
 
+  const handleOpenTransfer = (preselectedSourceCardId?: string) => {
+    if (!wallet?.cards || wallet.cards.length < 2) {
+      alert(
+        "You need at least 2 linked cards or accounts to transfer money between them. Please link another card first.",
+      );
+      setShowAddCardModal(true);
+      return;
+    }
+    const fromId =
+      preselectedSourceCardId ||
+      wallet.cards.find((c) => c.isDefault)?.id ||
+      wallet.cards[0].id;
+    const toCard = wallet.cards.find((c) => c.id !== fromId) || wallet.cards[0];
+
+    setTransferSourceCardId(fromId);
+    setTransferDestCardId(toCard.id);
+    setTransferAmount("");
+    setTransferNote("");
+    setShowTransferModal(true);
+  };
+
+  const handleExecuteTransfer = async () => {
+    const amt = parseFloat(transferAmount);
+    if (isNaN(amt) || amt <= 0) {
+      alert("Please enter a valid transfer amount greater than ₱0.");
+      return;
+    }
+
+    if (!transferSourceCardId || !transferDestCardId) {
+      alert("Please select both source and destination cards.");
+      return;
+    }
+
+    if (transferSourceCardId === transferDestCardId) {
+      alert("Source and destination cards must be different accounts.");
+      return;
+    }
+
+    const sourceCard = wallet?.cards.find((c) => c.id === transferSourceCardId);
+    if (!sourceCard || (sourceCard.balance || 0) < amt) {
+      alert(
+        `Selected source card only has ₱${(sourceCard?.balance || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} available.`,
+      );
+      return;
+    }
+
+    try {
+      setIsTransferring(true);
+      const res = await webWalletService.transferBetweenCards(
+        userId,
+        transferSourceCardId,
+        transferDestCardId,
+        amt,
+        transferNote,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        setShowTransferModal(false);
+        alert(res.message);
+      } else {
+        alert(res.message);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Could not complete transfer.");
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const handleQuickCirclePress = (preset: QuickExpensePreset) => {
+    if (!wallet?.cards || wallet.cards.length === 0) {
+      alert(
+        "Please link a payment card first before simulating everyday expenses.",
+      );
+      setShowAddCardModal(true);
+      return;
+    }
+
+    setSelectedExpensePreset(preset);
+    setSimAmount(String(preset.amount));
+    setSimNote(preset.defaultNote);
+    const targetCardId =
+      activeSimCardId && wallet.cards.some((c) => c.id === activeSimCardId)
+        ? activeSimCardId
+        : wallet.cards.find((c) => c.isDefault)?.id || wallet.cards[0].id;
+    setSimCardId(targetCardId);
+    setShowExpenseSimModal(true);
+  };
+
+  const handleExecuteSimulatedExpense = async () => {
+    if (!selectedExpensePreset) return;
+    const amt = parseFloat(simAmount);
+    if (isNaN(amt) || amt <= 0) {
+      alert("Please enter a valid expense amount greater than ₱0.");
+      return;
+    }
+
+    const card = wallet?.cards.find((c) => c.id === simCardId);
+    if (!card) {
+      alert("Please select a payment card to deduct the expense from.");
+      return;
+    }
+
+    if ((card.balance || 0) < amt) {
+      alert(
+        `Selected card ${card.name} only has ₱${(card.balance || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} available. Please top up or choose another card.`,
+      );
+      return;
+    }
+
+    try {
+      setIsSimulatingExpense(true);
+      const res = await webWalletService.simulateCardExpense(
+        userId,
+        simCardId,
+        amt,
+        selectedExpensePreset.title,
+        selectedExpensePreset.icon,
+        simNote,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        setShowExpenseSimModal(false);
+        alert(res.message);
+      } else {
+        alert(res.message);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Could not simulate expense.");
+    } finally {
+      setIsSimulatingExpense(false);
+    }
+  };
+
   const balance =
     (wallet?.cards || []).length > 0
       ? (wallet?.cards || []).reduce((sum, c) => sum + (c.balance || 0), 0)
@@ -397,7 +653,12 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
     if (txFilter === "all") return true;
     if (txFilter === "cash_in") return tx.type === "cash_in";
     if (txFilter === "payment")
-      return tx.type === "bill_payment" || tx.type === "debt_settlement";
+      return (
+        tx.type === "bill_payment" ||
+        tx.type === "debt_settlement" ||
+        tx.type === "expense_simulation" ||
+        tx.type === "card_transfer"
+      );
     if (txFilter === "savings")
       return tx.type === "savings_deposit" || tx.type === "savings_withdrawal";
     return true;
@@ -499,7 +760,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
       </div>
 
       {/* 2. Quick Circle Menu Icon Hub */}
-      <div className="grid grid-cols-5 gap-2 sm:gap-4 py-1">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-4 py-1">
         <button
           onClick={() => {
             if (!wallet?.cards || wallet.cards.length === 0) {
@@ -530,6 +791,18 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
           </div>
           <span className="text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200">
             Split
+          </span>
+        </button>
+
+        <button
+          onClick={() => handleOpenTransfer()}
+          className="flex flex-col items-center gap-1.5 p-2 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-all group"
+        >
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-105 shadow-xs transition-transform">
+            <ArrowLeftRight className="w-5 h-5 sm:w-6 sm:h-6" />
+          </div>
+          <span className="text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200">
+            Transfer
           </span>
         </button>
 
@@ -571,6 +844,93 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
             Limits
           </span>
         </button>
+      </div>
+
+      {/* 2.5 Quick Circles: Daily Expense Simulator */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Quick Expense Circles
+              </h2>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                AUTO-DEDUCT
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Simulate everyday routine expenses & auto-deduct directly from
+              linked cards
+            </p>
+          </div>
+
+          {/* Active Card Pill Selector */}
+          {wallet?.cards && wallet.cards.length > 0 && (
+            <button
+              onClick={() => {
+                if (wallet.cards.length <= 1) return;
+                const curId =
+                  activeSimCardId ||
+                  wallet.cards.find((c) => c.isDefault)?.id ||
+                  wallet.cards[0].id;
+                const curIdx = wallet.cards.findIndex((c) => c.id === curId);
+                const nextIdx = (curIdx + 1) % wallet.cards.length;
+                setActiveSimCardId(wallet.cards[nextIdx].id);
+              }}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors w-fit"
+            >
+              <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+              <span>
+                {(() => {
+                  const c =
+                    wallet.cards.find((cd) => cd.id === activeSimCardId) ||
+                    wallet.cards.find((cd) => cd.isDefault) ||
+                    wallet.cards[0];
+                  return `${c.name.split(" ")[0]} · ₱${(c.balance || 0).toLocaleString()}`;
+                })()}
+              </span>
+              {wallet.cards.length > 1 && (
+                <ArrowLeftRight className="w-3 h-3 text-slate-400" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Horizontal Scrollable Quick Circles */}
+        <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1">
+          {QUICK_EXPENSE_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              onClick={() => handleQuickCirclePress(preset)}
+              className="flex flex-col items-center gap-1.5 shrink-0 p-2 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all group"
+            >
+              <div
+                style={{
+                  background: `linear-gradient(135deg, ${preset.gradient[0]}, ${preset.gradient[1]})`,
+                }}
+                className="w-14 h-14 rounded-full flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform"
+              >
+                {preset.icon === "coffee" && <Coffee className="w-6 h-6" />}
+                {preset.icon === "utensils" && <Utensils className="w-6 h-6" />}
+                {preset.icon === "bus" && <Bus className="w-6 h-6" />}
+                {preset.icon === "shopping-cart" && (
+                  <ShoppingCart className="w-6 h-6" />
+                )}
+                {preset.icon === "cookie" && <Cookie className="w-6 h-6" />}
+                {preset.icon === "zap" && <Zap className="w-6 h-6" />}
+                {preset.icon === "pill" && <Pill className="w-6 h-6" />}
+                {preset.icon === "custom" && <PlusCircle className="w-6 h-6" />}
+              </div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {preset.title.split(" ")[0]}
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/40">
+                ₱{preset.amount}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Quick Setup Checklist for Fresh Empty Wallets */}
@@ -775,6 +1135,14 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleOpenTransfer(card.id)}
+                        className="text-[10px] bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded font-semibold text-white transition-colors flex items-center gap-1"
+                        title="Transfer funds from this card"
+                      >
+                        <ArrowLeftRight className="w-2.5 h-2.5" />
+                        <span>Transfer</span>
+                      </button>
                       {!card.isDefault && (
                         <button
                           onClick={() => handleSetDefaultCard(card.id)}
@@ -999,12 +1367,20 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                        isPositive
-                          ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
-                          : "bg-blue-50 dark:bg-blue-950/40 text-blue-600"
+                        tx.type === "expense_simulation"
+                          ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600"
+                          : tx.type === "card_transfer"
+                            ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600"
+                            : isPositive
+                              ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
+                              : "bg-blue-50 dark:bg-blue-950/40 text-blue-600"
                       }`}
                     >
-                      {isPositive ? (
+                      {tx.type === "expense_simulation" ? (
+                        <ShoppingCart className="w-5 h-5" />
+                      ) : tx.type === "card_transfer" ? (
+                        <ArrowLeftRight className="w-5 h-5" />
+                      ) : isPositive ? (
                         <ArrowUpRight className="w-5 h-5" />
                       ) : (
                         <TrendingDown className="w-5 h-5" />
@@ -2407,6 +2783,356 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* QUICK EXPENSE SIMULATION MODAL */}
+      {showExpenseSimModal && selectedExpensePreset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  style={{
+                    background: `linear-gradient(135deg, ${selectedExpensePreset.gradient[0]}, ${selectedExpensePreset.gradient[1]})`,
+                  }}
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-xs"
+                >
+                  {selectedExpensePreset.icon === "coffee" && (
+                    <Coffee className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "utensils" && (
+                    <Utensils className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "bus" && (
+                    <Bus className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "shopping-cart" && (
+                    <ShoppingCart className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "cookie" && (
+                    <Cookie className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "zap" && (
+                    <Zap className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "pill" && (
+                    <Pill className="w-5 h-5" />
+                  )}
+                  {selectedExpensePreset.icon === "custom" && (
+                    <PlusCircle className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Simulate {selectedExpensePreset.title}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Instantly deduct expense from selected payment card
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExpenseSimModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Expense Amount */}
+            <div>
+              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                Expense Amount (₱)
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-400">
+                  ₱
+                </span>
+                <input
+                  type="number"
+                  value={simAmount}
+                  onChange={(e) => setSimAmount(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-extrabold text-xl outline-hidden focus:border-blue-500"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            {/* Card Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                Deduct from Payment Card
+              </label>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {(wallet?.cards || []).map((card) => {
+                  const isSelected = simCardId === card.id;
+                  return (
+                    <div
+                      key={card.id}
+                      onClick={() => setSimCardId(card.id)}
+                      className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-colors ${
+                        isSelected
+                          ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100"
+                          : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-slate-700 dark:text-slate-300 hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold leading-tight">
+                            {card.name}
+                          </p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {card.accountNumber}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-extrabold text-slate-900 dark:text-white tabular-nums block">
+                          ₱{(card.balance || 0).toLocaleString()}
+                        </span>
+                        <span className="text-[9px] text-slate-400 uppercase tracking-wider">
+                          Balance
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Live Preview / Insufficient Callout */}
+            {(() => {
+              const currentCard = wallet?.cards.find((c) => c.id === simCardId);
+              const cardBal = currentCard?.balance || 0;
+              const expenseAmt = parseFloat(simAmount) || 0;
+              const isInsufficient = cardBal < expenseAmt;
+              const balanceAfter = Math.max(0, cardBal - expenseAmt);
+
+              return (
+                <div>
+                  {currentCard && (
+                    <div
+                      className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                        isInsufficient
+                          ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300"
+                          : "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                      }`}
+                    >
+                      {isInsufficient ? (
+                        <>
+                          <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+                          <span>
+                            Insufficient balance on {currentCard.name} (₱
+                            {cardBal.toLocaleString()})
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                          <span>
+                            Balance after deduction: ₱
+                            {balanceAfter.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-3">
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Expense Note (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={simNote}
+                      onChange={(e) => setSimNote(e.target.value)}
+                      placeholder="e.g. Afternoon latte & snack"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-3">
+                    <button
+                      onClick={() => setShowExpenseSimModal(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleExecuteSimulatedExpense}
+                      disabled={
+                        isSimulatingExpense || isInsufficient || expenseAmt <= 0
+                      }
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-sm font-bold shadow-md transition-colors"
+                    >
+                      {isSimulatingExpense
+                        ? "Processing..."
+                        : `Simulate & Deduct ₱${expenseAmt.toLocaleString()}`}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* CARD-TO-CARD TRANSFER MODAL */}
+      {showTransferModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <ArrowLeftRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Transfer Between Cards
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Rebalance funds between linked cards & e-wallets
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Source & Destination Selectors with Swap */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  FROM (SOURCE CARD)
+                </label>
+                <select
+                  value={transferSourceCardId}
+                  onChange={(e) => setTransferSourceCardId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white outline-hidden focus:border-blue-500"
+                >
+                  {(wallet?.cards || []).map((card) => (
+                    <option key={card.id} value={card.id}>
+                      {card.name} (Bal: ₱{(card.balance || 0).toLocaleString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-center -my-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const temp = transferSourceCardId;
+                    setTransferSourceCardId(transferDestCardId);
+                    setTransferDestCardId(temp);
+                  }}
+                  className="p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-600 dark:text-blue-400 transition-colors shadow-xs"
+                  title="Swap source and destination"
+                >
+                  <ArrowLeftRight className="w-4 h-4 rotate-90" />
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  TO (DESTINATION CARD)
+                </label>
+                <select
+                  value={transferDestCardId}
+                  onChange={(e) => setTransferDestCardId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white outline-hidden focus:border-blue-500"
+                >
+                  {(wallet?.cards || []).map((card) => (
+                    <option key={card.id} value={card.id}>
+                      {card.name} (Bal: ₱{(card.balance || 0).toLocaleString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Transfer Amount */}
+            <div>
+              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                Transfer Amount (₱)
+              </label>
+              <div className="grid grid-cols-5 gap-2 mb-2">
+                {[
+                  { label: "₱200", val: "200" },
+                  { label: "₱500", val: "500" },
+                  { label: "₱1,000", val: "1000" },
+                  { label: "₱2,500", val: "2500" },
+                  {
+                    label: "Max",
+                    val: String(
+                      wallet?.cards.find((c) => c.id === transferSourceCardId)
+                        ?.balance || 0,
+                    ),
+                  },
+                ].map((chip, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setTransferAmount(chip.val)}
+                    className="py-1.5 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/40 transition-colors"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-400">
+                  ₱
+                </span>
+                <input
+                  type="number"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-extrabold text-xl outline-hidden focus:border-indigo-500"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            {/* Transfer Note */}
+            <div>
+              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                Transfer Note / Reason (Optional)
+              </label>
+              <input
+                type="text"
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value)}
+                placeholder="e.g. Rebalance for upcoming groceries"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteTransfer}
+                disabled={isTransferring}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold shadow-md transition-colors"
+              >
+                {isTransferring ? "Transferring..." : "Confirm Transfer"}
+              </button>
+            </div>
           </div>
         </div>
       )}
