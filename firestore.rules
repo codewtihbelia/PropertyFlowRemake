@@ -75,6 +75,14 @@ service cloud.firestore {
       match /devices/{deviceId} {
         allow read, create, update, delete: if isUser(userId) || isSuperAdmin();
       }
+
+      match /wallet/{walletId} {
+        allow read, write: if isUser(userId) || isSuperAdmin();
+
+        match /{document=**} {
+          allow read, write: if isUser(userId) || isSuperAdmin();
+        }
+      }
     }
 
     match /hostApplications/{requestId} {

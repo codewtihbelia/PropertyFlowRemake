@@ -842,7 +842,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
                         <Image
                           source={{ uri: method.customIconUrl }}
                           style={styles.methodCustomIcon}
-                          resizeMode="contain"
+                          resizeMode="cover"
                         />
                       </View>
                     ) : (
@@ -2363,7 +2363,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    padding: 3,
   },
   methodCustomIcon: {
     width: "100%",

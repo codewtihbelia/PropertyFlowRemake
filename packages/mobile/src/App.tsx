@@ -26,6 +26,7 @@ import { OnboardingScreen } from "./screens/OnboardingScreen";
 import { AuthScreen } from "./screens/AuthScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { BillsScreen } from "./screens/BillsScreen";
+import { WalletScreen } from "./screens/WalletScreen";
 import { AttendanceScreen } from "./screens/AttendanceScreen";
 import { MessagesScreen } from "./screens/MessagesScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
@@ -83,6 +84,7 @@ type RootFlow =
 type MainTab =
   | "home"
   | "groups"
+  | "wallet"
   | "bills"
   | "attendance"
   | "messages"
@@ -128,6 +130,17 @@ const NAV_ITEMS: NavItemConfig[] = [
       <Ionicons
         name={active ? "people" : "people-outline"}
         size={22}
+        color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
+      />
+    ),
+  },
+  {
+    key: "wallet",
+    label: "Wallet",
+    renderIcon: (active, isDark) => (
+      <Ionicons
+        name={active ? "wallet" : "wallet-outline"}
+        size={20}
         color={active ? "#FFFFFF" : isDark ? "#94A3B8" : "#64748B"}
       />
     ),
@@ -1130,6 +1143,18 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenHostApplication={() => setOverlayScreen("host_application")}
             currentUser={currentUser}
             initialView={manageGroupInitialView}
+          />
+        );
+      case "wallet":
+        return (
+          <WalletScreen
+            userId={userProfile?.uid || auth.currentUser?.uid || "guest"}
+            currentUser={currentUser}
+            onNavigateToBills={() => {
+              setBillsInitialSubView("pay");
+              setCurrentTab("bills");
+            }}
+            onNavigateToSettle={() => setOverlayScreen("settle_dues")}
           />
         );
       case "bills":

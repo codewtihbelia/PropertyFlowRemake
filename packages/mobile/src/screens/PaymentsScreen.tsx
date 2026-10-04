@@ -2255,7 +2255,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                 <Image
                   source={{ uri: activeMethod.customIconUrl }}
                   style={styles.customIconImgSmall}
-                  resizeMode="contain"
+                  resizeMode="cover"
                 />
               </View>
             ) : (
@@ -2383,7 +2383,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                         <Image
                           source={{ uri: m.customIconUrl }}
                           style={styles.customIconImgSmall}
-                          resizeMode="contain"
+                          resizeMode="cover"
                         />
                       </View>
                     ) : (
@@ -2515,7 +2515,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                 <View
                   style={[
                     styles.customIconBadgeSmall,
-                    { width: 32, height: 24, padding: 1 },
+                    { width: 32, height: 24 },
                     isDark && {
                       backgroundColor: colors.surfaceInset,
                       borderColor: colors.border,
@@ -2525,7 +2525,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                   <Image
                     source={{ uri: activeMethod.customIconUrl }}
                     style={styles.customIconImgSmall}
-                    resizeMode="contain"
+                    resizeMode="cover"
                   />
                 </View>
               ) : null}
@@ -3408,7 +3408,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    padding: 2,
   },
   customIconImgSmall: {
     width: "100%",

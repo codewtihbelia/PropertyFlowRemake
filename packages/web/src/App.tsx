@@ -37,6 +37,7 @@ import { ClientBills } from "./views/client/ClientBills";
 import { ClientPayments } from "./views/client/ClientPayments";
 import { ClientAttendance } from "./views/client/ClientAttendance";
 import { ClientProfile } from "./views/client/ClientProfile";
+import { ClientWallet } from "./views/client/ClientWallet";
 
 // Super Admin Views
 import { SuperAdminDashboard } from "./views/admin/SuperAdminDashboard";
@@ -321,6 +322,13 @@ const MainLayout: React.FC = () => {
           return <HostAuditLogs />;
         case "host_settings":
           return <HostSettings />;
+        case "client_wallet":
+          return (
+            <ClientWallet
+              onNavigateToBills={() => setCurrentTab("client_bills")}
+              onNavigateToPayments={() => setCurrentTab("client_payments")}
+            />
+          );
         case "client_bills":
           return (
             <ClientBills onPayClick={() => setCurrentTab("client_payments")} />
@@ -343,6 +351,13 @@ const MainLayout: React.FC = () => {
     switch (currentTab) {
       case "client_host_application":
         return <ClientHostApplication onNavigate={setCurrentTab} />;
+      case "client_wallet":
+        return (
+          <ClientWallet
+            onNavigateToBills={() => setCurrentTab("client_bills")}
+            onNavigateToPayments={() => setCurrentTab("client_payments")}
+          />
+        );
       case "client_bills":
         return (
           <ClientBills onPayClick={() => setCurrentTab("client_payments")} />

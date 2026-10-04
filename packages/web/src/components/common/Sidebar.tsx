@@ -23,6 +23,7 @@ import {
   ArrowLeftRight,
   ShieldCheck,
   Building2,
+  Wallet,
   Plus,
   KeyRound,
   Sun,
@@ -104,6 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: hasGroup ? "Manage Group" : "Create Group",
           icon: hasGroup ? Users : Plus,
         },
+        { id: "client_wallet", label: "Splitzy Wallet", icon: Wallet },
         { id: "host_billing", label: "Billing Cycles & Rates", icon: Receipt },
         { id: "host_attendance", label: "Water Attendance", icon: Droplets },
         {
@@ -131,6 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         label: "Home Dashboard",
         icon: LayoutDashboard,
       },
+      { id: "client_wallet", label: "Splitzy Wallet", icon: Wallet },
       { id: "client_bills", label: "My Bills & Breakdown", icon: Receipt },
       {
         id: "client_payments",

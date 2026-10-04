@@ -39,6 +39,8 @@ import { Ionicons, Feather } from "@expo/vector-icons";
 import { getCategoryMeta } from "../services/categoryService";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useTheme } from "../context/ThemeContext";
+import { walletService } from "../services/walletService";
+import { LinearGradient } from "expo-linear-gradient";
 
 interface HomeScreenProps {
   onNavigate: (tab: string) => void;
@@ -265,6 +267,37 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [readNotificationIds, setReadNotificationIds] = useState<
     Record<string, boolean>
   >(() => mobileDataService.getCachedReadNotifications(firebaseUser?.uid));
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+
+  // Rotating animated border for Splitzy Wallet Quick Widget
+  const walletBorderAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(walletBorderAnim, {
+        toValue: 1,
+        duration: 3500,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [walletBorderAnim]);
+
+  const walletBorderRotate = walletBorderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  useEffect(() => {
+    const uid = firebaseUser?.uid;
+    if (!uid) return;
+    const unsub = walletService.listenToWallet(uid, (w) => {
+      if (w?.balance !== undefined) setWalletBalance(w.balance);
+    });
+    return unsub;
+  }, [firebaseUser?.uid]);
 
   const activeCycle =
     cycles.find((c) => c.status === "ACTIVE" || c.status === "FINALIZED") ||
@@ -1668,6 +1701,85 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Splitzy Wallet Quick Widget with rotating blue-white gradient animation border */}
+            <TouchableOpacity
+              style={styles.walletQuickWidgetContainer}
+              onPress={() => onNavigate("wallet")}
+              activeOpacity={0.88}
+            >
+              {/* Rotating blue-white gradient animated border layer */}
+              <Animated.View
+                style={[
+                  styles.walletRotatingGradientWrap,
+                  {
+                    transform: [{ rotate: walletBorderRotate }],
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <LinearGradient
+                  colors={[
+                    "#0052FF",
+                    "#FFFFFF",
+                    "#38BDF8",
+                    "#002D9C",
+                    "#FFFFFF",
+                    "#2563EB",
+                    "#FFFFFF",
+                    "#0052FF",
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.walletRotatingGradient}
+                />
+              </Animated.View>
+
+              {/* Inner container with theme-responsive background */}
+              <View
+                style={[
+                  styles.walletQuickInner,
+                  {
+                    backgroundColor: isDark ? colors.card : "#FFFFFF",
+                  },
+                ]}
+              >
+                <View style={styles.walletQuickLeft}>
+                  <View style={styles.walletQuickIconWrap}>
+                    <Ionicons name="wallet" size={20} color="#2563EB" />
+                  </View>
+                  <View>
+                    <Text
+                      style={[
+                        styles.walletQuickTitle,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      Splitzy Wallet
+                    </Text>
+                    <Text
+                      style={[
+                        styles.walletQuickAmount,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                    >
+                      ₱
+                      {walletBalance.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.walletQuickActionWrap}>
+                  <Text style={styles.walletQuickActionText}>
+                    Manage & Cards
+                  </Text>
+                  <Feather name="chevron-right" size={16} color="#2563EB" />
+                </View>
+              </View>
+            </TouchableOpacity>
 
             {/* Recent Updates Section */}
             <View style={styles.sectionHeader}>
@@ -4668,6 +4780,86 @@ const styles = StyleSheet.create({
     borderColor: "#DBEAFE",
   },
   activityActionText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  walletQuickWidgetContainer: {
+    position: "relative",
+    borderRadius: 20,
+    padding: 2.5,
+    marginBottom: 16,
+    overflow: "hidden",
+    backgroundColor: "#1D4ED8",
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  walletRotatingGradientWrap: {
+    position: "absolute",
+    width: "450%",
+    height: "450%",
+    top: "-175%",
+    left: "-175%",
+  },
+  walletRotatingGradient: {
+    width: "100%",
+    height: "100%",
+  },
+  walletQuickInner: {
+    position: "relative",
+    zIndex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    borderRadius: 17.5,
+  },
+  walletQuickWidget: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  walletQuickLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  walletQuickIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: "#2563EB15",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  walletQuickTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  walletQuickAmount: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 2,
+    fontVariant: ["tabular-nums"],
+  },
+  walletQuickActionWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#2563EB10",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  walletQuickActionText: {
     fontSize: 11,
     fontWeight: "700",
     color: "#2563EB",
