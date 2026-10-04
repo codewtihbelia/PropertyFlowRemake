@@ -41,7 +41,11 @@ import { PaymentMethodConfigurationScreen } from "./screens/PaymentMethodConfigu
 import { NotificationsScreen } from "./screens/NotificationsScreen";
 import { TermsOfServiceScreen } from "./screens/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "./screens/PrivacyPolicyScreen";
-import { registerForPushNotificationsAsync } from "./services/pushNotificationService";
+import {
+  registerForPushNotificationsAsync,
+  setupNotificationChannelsAsync,
+  setupNotificationResponseListener,
+} from "./services/pushNotificationService";
 import { mobileDataService } from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
 import { alertService } from "./services/alertService";
@@ -56,9 +60,14 @@ import { FloatingMessagesBubble } from "./components/FloatingMessagesBubble";
 import { initAudioUnlock, playMessengerPopChime } from "./utils/soundEffects";
 import { notificationService } from "./services/notificationService";
 import { NotificationBanner } from "./components/NotificationBanner";
+import { updateService } from "./services/updateService";
 
 // Initialize global alert interceptor to upgrade all Alert.alert dialogs to app-matching UI
 alertService.initAlertPatch();
+// Silently check for and stage Over-The-Air updates in the background on app startup
+updateService.initBackgroundUpdateCheck();
+// Configure high-priority Android notification channels (sound, vibration, heads-up popups)
+setupNotificationChannelsAsync();
 // Immediately attach user gesture listeners to unlock Web Audio on first touch (web only)
 if (Platform.OS === "web") {
   initAudioUnlock();
@@ -300,6 +309,31 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     } | null;
   } | null>(null);
 
+  const performCleanSignOut = async () => {
+    try {
+      await auth.signOut();
+    } catch (e) {
+      console.warn("Sign out notice:", e);
+    }
+    // Clean all state, tracking refs & cache immediately
+    mobileDataService.clearCache();
+    setHouseholdId("");
+    setUserProfile(null);
+    setCurrentUser({
+      name: "Resident",
+      role: "Member",
+      email: "",
+      avatar: "R",
+    });
+    setUnreadMessagesCount(0);
+    setLatestUnreadMessage(null);
+    seenMessageIds.current = new Set();
+    isInitialLoad.current = true;
+    setCurrentTab("home");
+    setOverlayScreen("none");
+    setBillsInitialSubView("overview");
+  };
+
   useEffect(() => {
     const firebaseUser = auth.currentUser;
     if (!firebaseUser?.uid) return;
@@ -308,9 +342,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       (p) => {
         if (p) {
           setUserProfile(p);
-          if (p.householdId) {
-            setHouseholdId(p.householdId);
-          }
+          setHouseholdId(p.householdId || "");
           const pic = p.profilePicture || p.photoURL;
           if (pic) {
             authPinService.cacheUserAvatar(firebaseUser.uid, pic);
@@ -325,6 +357,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               return prev;
             });
           }
+        } else {
+          // If no profile exists yet (new signup), ensure householdId is cleanly empty
+          setHouseholdId("");
+          setUserProfile(null);
         }
       },
     );
@@ -341,14 +377,35 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const seenMessageIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
 
-  // Focus messages view when a system push notification is clicked
+  // Focus messages view or group approval when a system push notification is tapped
   useEffect(() => {
     notificationService.setOnClickCallback(() => {
       setOverlayScreen("messages");
     });
+
+    const unsubPush = setupNotificationResponseListener((data) => {
+      if (!data) return;
+      if (data.screen === "messages") {
+        setOverlayScreen("messages");
+      } else if (data.screen === "group_manage") {
+        setCurrentTab("groups");
+        setManageGroupInitialView("details");
+        setOverlayScreen("none");
+      } else if (data.screen === "notifications") {
+        setOverlayScreen("notifications");
+      }
+    });
+
+    return () => {
+      unsubPush();
+    };
   }, []);
 
   useEffect(() => {
+    // Reset seen message tracking whenever the active household changes
+    seenMessageIds.current = new Set();
+    isInitialLoad.current = true;
+
     if (!householdId) {
       setUnreadMessagesCount(0);
       setLatestUnreadMessage(null);
@@ -489,10 +546,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         "Mismatched active session on phone with saved profile, signing out guest session:",
         firebaseUser.email,
       );
-      try {
-        await auth.signOut();
-      } catch {}
-      mobileDataService.clearCache();
+      await performCleanSignOut();
       setSavedProfileUser(savedUser);
       setRootFlow("saved_profile");
       return;
@@ -583,6 +637,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         }}
         onPasswordLoginSuccess={async (user) => {
           mobileDataService.clearCache();
+          seenMessageIds.current = new Set();
+          isInitialLoad.current = true;
+          setUnreadMessagesCount(0);
+          setLatestUnreadMessage(null);
+          setHouseholdId("");
+          setUserProfile(null);
+
           registerForPushNotificationsAsync(user.uid);
           const displayName = user.displayName || user.email || "Resident";
           setCurrentUser({
@@ -595,9 +656,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             const profile = await mobileDataService.getUserProfile(user.uid);
             if (profile) {
               setUserProfile(profile);
-              if (profile.householdId) {
-                setHouseholdId(profile.householdId);
-              }
+              setHouseholdId(profile.householdId || "");
             }
           } catch (e) {
             console.warn("Profile fetch after password login notice:", e);
@@ -609,31 +668,19 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         }}
         onUseAnotherProfile={async () => {
           setSavedProfileUser(null);
-          try {
-            await auth.signOut();
-          } catch (e) {
-            console.warn("Sign out on switch profile notice:", e);
-          }
+          await performCleanSignOut();
           setAuthInitialTab("signin");
           setRootFlow("auth");
         }}
         onCreateNewAccount={async () => {
           setSavedProfileUser(null);
-          try {
-            await auth.signOut();
-          } catch (e) {
-            console.warn("Sign out on create account notice:", e);
-          }
+          await performCleanSignOut();
           setAuthInitialTab("signup");
           setRootFlow("auth");
         }}
         onProfileRemoved={async () => {
           setSavedProfileUser(null);
-          try {
-            await auth.signOut();
-          } catch (e) {
-            console.warn("Sign out on profile removal notice:", e);
-          }
+          await performCleanSignOut();
           setAuthInitialTab("signin");
           setRootFlow("auth");
         }}
@@ -652,18 +699,21 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           photoURL: savedProfileUser.photoURL,
         }}
         onUnlockSuccess={async (enteredPin?: string) => {
-          // 1. If a different user is active in Firebase Auth, force sign out immediately
+          // 1. If a different user is active in Firebase Auth, force clean sign out immediately
           if (
             auth.currentUser &&
             auth.currentUser.uid !== savedProfileUser.uid
           ) {
-            try {
-              await auth.signOut();
-            } catch (e) {
-              console.warn("Sign out mismatched user notice:", e);
-            }
+            await performCleanSignOut();
+          } else {
+            mobileDataService.clearCache();
+            seenMessageIds.current = new Set();
+            isInitialLoad.current = true;
+            setUnreadMessagesCount(0);
+            setLatestUnreadMessage(null);
+            setHouseholdId("");
+            setUserProfile(null);
           }
-          mobileDataService.clearCache();
 
           // 2. Ensure Firebase Auth session is active and matches the saved user
           if (auth.currentUser?.uid !== savedProfileUser.uid) {
@@ -717,9 +767,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             const profile = await mobileDataService.getUserProfile(activeUid);
             if (profile) {
               setUserProfile(profile);
-              if (profile.householdId) {
-                setHouseholdId(profile.householdId);
-              }
+              setHouseholdId(profile.householdId || "");
             }
           } catch (e) {
             console.warn("Profile fetch after PIN unlock notice:", e);
@@ -732,11 +780,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         }}
         onSwitchAccount={async () => {
           setSavedProfileUser(null);
-          try {
-            await auth.signOut();
-          } catch (e) {
-            console.warn("Sign out on switch account notice:", e);
-          }
+          await performCleanSignOut();
           setAuthInitialTab("signin");
           setRootFlow("auth");
         }}
@@ -757,6 +801,11 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           }
           onLoginSuccess={async (user) => {
             mobileDataService.clearCache();
+            seenMessageIds.current = new Set();
+            isInitialLoad.current = true;
+            setUnreadMessagesCount(0);
+            setLatestUnreadMessage(null);
+
             registerForPushNotificationsAsync(user.uid);
 
             const displayName = user.displayName || user.email || "Resident";
@@ -765,10 +814,15 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               role: (user.role || "MEMBER").replace("_", " "),
               email: user.email,
               avatar: displayName.charAt(0).toUpperCase(),
+              photoURL: user.photoURL,
             });
-            if ((user as any).householdId) {
-              setHouseholdId((user as any).householdId);
+
+            // Set householdId from user (or empty string if new user!)
+            setHouseholdId(user.householdId || "");
+            if (!user.householdId) {
+              setUserProfile(null);
             }
+
             setCurrentTab("home");
             setOverlayScreen("none");
             setBillsInitialSubView("overview");
@@ -1131,27 +1185,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
             onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
             onSignOut={async () => {
-              // Full, clean sign out when user chooses Sign Out: completely terminate session
-              try {
-                await auth.signOut();
-              } catch (e) {
-                console.warn("Sign out notice:", e);
-              }
-              mobileDataService.clearCache();
-              setHouseholdId("");
-              setUserProfile(null);
-              setCurrentUser({
-                name: "Resident",
-                role: "Member",
-                email: "",
-                avatar: "R",
-              });
-              setCurrentTab("home");
-              setOverlayScreen("none");
-              setBillsInitialSubView("overview");
+              const savedUser = await authPinService.getLastPinUser();
+              await performCleanSignOut();
 
               // If a profile is saved on this device, return to Saved Profile screen for 1-tap re-entry
-              const savedUser = await authPinService.getLastPinUser();
               if (savedUser) {
                 setSavedProfileUser(savedUser);
                 setRootFlow("saved_profile");

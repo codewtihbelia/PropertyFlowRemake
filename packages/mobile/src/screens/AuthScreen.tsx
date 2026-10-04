@@ -32,7 +32,15 @@ import { assets } from "../../assets/assets";
 import { Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { BlurView } from "expo-blur";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { authPinService, StoredPinUser } from "../services/authPinService";
+
+// Complete any pending browser auth session callbacks immediately
+if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
+  WebBrowser.maybeCompleteAuthSession();
+}
 import { AuthPinScreen } from "./AuthPinScreen";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { ForgotPasswordScreen } from "./ForgotPasswordScreen";
@@ -48,6 +56,8 @@ interface AuthScreenProps {
     email: string;
     role?: string;
     isNewSignup?: boolean;
+    householdId?: string;
+    photoURL?: string;
   }) => void;
   initialTab?: "signin" | "signup";
   onBackToSavedProfile?: () => void;
@@ -144,6 +154,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             ? "HOST"
             : existingProfile?.role || fallbackRole;
 
+      const householdId = existingProfile?.householdId || "";
+      const photoURL =
+        fbUser.photoURL ||
+        existingProfile?.profilePicture ||
+        existingProfile?.photoURL ||
+        undefined;
+
       // Non-blocking sync to cloud so dashboard navigation is immediate
       mobileDataService
         .syncUserProfile({
@@ -151,6 +168,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           displayName,
           email: fbUser.email || email.trim(),
           role: userRole,
+          householdId,
         })
         .catch((e) => console.warn("Background syncUserProfile warning:", e));
 
@@ -165,6 +183,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         email: fbUser.email || email.trim(),
         role: userRole,
         isNewSignup,
+        householdId,
+        photoURL,
       });
     } catch (err) {
       console.warn("completeLogin fallback warning:", err);
@@ -175,6 +195,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         email: fbUser.email || email.trim(),
         role: fallbackRole,
         isNewSignup,
+        householdId: "",
+        photoURL: fbUser.photoURL || undefined,
       });
     }
   };
@@ -256,60 +278,198 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     setGoogleLoading(true);
+    let linkingSub: any = null;
+    let isHandled = false;
+    let loginCompleted = false;
+
     try {
-      const AuthSession = require("expo-auth-session");
-      const WebBrowser = require("expo-web-browser");
-      if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
-        WebBrowser.maybeCompleteAuthSession();
+      // Clean up any stale or lingering browser authentication sessions
+      if (typeof WebBrowser.dismissAuthSession === "function") {
+        try {
+          await WebBrowser.dismissAuthSession();
+        } catch {}
       }
-      // Note: For browser-based OAuth endpoints (expo-auth-session), Google requires a Web Client ID.
-      // Passing an Android-specific client ID to accounts.google.com/o/oauth2/v2/auth triggers Error 400: invalid_request.
+
+      const AuthSession = require("expo-auth-session");
+
+      // For browser-based OAuth endpoints, Google requires a Web Client ID.
       const clientId =
         googleWebClientId ||
         (Platform.OS === "android" ? googleAndroidClientId : googleIosClientId);
 
-      // Use the registered redirect URI matching Google Cloud Console:
-      // Google Cloud has 'https://auth.expo.io/@splitzy01/splitzy-mobile' registered
-      const configuredRedirectUri =
-        process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI?.trim();
-      const redirectUri =
-        configuredRedirectUri ||
-        (Platform.OS === "web"
-          ? AuthSession.makeRedirectUri()
-          : "https://auth.expo.io/@splitzy01/splitzy-mobile");
+      // Detect whether we are running inside the Expo Go sandbox vs a standalone build
+      const isExpoGo =
+        Constants.appOwnership === "expo" ||
+        Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
-      const discovery = {
-        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenEndpoint: "https://oauth2.googleapis.com/token",
-        revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-      };
-      const request = new AuthSession.AuthRequest({
-        clientId: clientId!,
-        scopes: ["openid", "profile", "email"],
-        redirectUri,
-        responseType: AuthSession.ResponseType.IdToken,
-        usePKCE: false,
-        extraParams: {
-          nonce: Math.random().toString(36).substring(2, 12),
-          prompt: "select_account",
-        },
+      // Determine returnUrl dynamically based on runtime environment
+      let returnUrl: string;
+      if (Platform.OS === "web") {
+        returnUrl = AuthSession.makeRedirectUri();
+      } else if (isExpoGo) {
+        // In Expo Go sandbox, makeRedirectUri() yields the exp:// URL recognized by Expo Go
+        returnUrl = AuthSession.makeRedirectUri();
+      } else {
+        // In standalone APK build, use custom scheme splitzy://
+        returnUrl = AuthSession.makeRedirectUri({
+          scheme: "splitzy",
+          path: "oauthredirect",
+        });
+        if (returnUrl === "splitzy://" || returnUrl === "splitzy:/") {
+          returnUrl = "splitzy://oauthredirect";
+        }
+      }
+
+      // Proxy redirect URI registered in Google Cloud Console
+      const proxyRedirectUri =
+        process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI?.trim() ||
+        "https://auth.expo.io/@splitzy01/splitzy-mobile";
+
+      const redirectUri = Platform.OS === "web" ? returnUrl : proxyRedirectUri;
+
+      const nonce = Math.random().toString(36).substring(2, 12);
+      const state = Math.random().toString(36).substring(2, 12);
+
+      const googleParams = new URLSearchParams({
+        client_id: clientId!,
+        redirect_uri: redirectUri,
+        response_type: "id_token",
+        scope: "openid profile email",
+        nonce,
+        state,
+        prompt: "select_account",
       });
-      const result = await request.promptAsync(discovery);
-      if (result.type !== "success") return;
+      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${googleParams.toString()}`;
 
-      const idToken = result.params?.id_token;
-      if (!idToken) throw new Error("Google did not return an ID token.");
+      // On native mobile, route through the proxy /start endpoint
+      const startUrl =
+        Platform.OS === "web"
+          ? googleAuthUrl
+          : `${proxyRedirectUri}/start?authUrl=${encodeURIComponent(googleAuthUrl)}&returnUrl=${encodeURIComponent(returnUrl)}`;
 
-      const credential = GoogleAuthProvider.credential(idToken);
-      const userCredential = await signInWithCredential(auth, credential);
-      await completeLogin(userCredential.user, "PAYOR");
+      // One-flight executor to process redirect callback and auto-close browser tab immediately
+      const processAuthRedirectUrl = async (urlToParse: string) => {
+        if (isHandled || !urlToParse) return;
+        isHandled = true;
+        setGoogleLoading(true);
+
+        try {
+          // Auto-close the in-app browser overlay immediately upon account callback
+          if (typeof WebBrowser.dismissAuthSession === "function") {
+            try {
+              await WebBrowser.dismissAuthSession();
+            } catch {}
+          }
+
+          const hashIndex = urlToParse.indexOf("#");
+          const queryIndex = urlToParse.indexOf("?");
+
+          const paramsString =
+            hashIndex !== -1
+              ? urlToParse.substring(hashIndex + 1)
+              : queryIndex !== -1
+                ? urlToParse.substring(queryIndex + 1)
+                : "";
+
+          const params = new URLSearchParams(paramsString);
+
+          if (params.get("errorCode") === "cookies-disabled") {
+            throw new Error(
+              "Cookies appear to be disabled in your mobile browser. Please enable cookies in your browser settings to complete Google Sign-In, or use Email & Password.",
+            );
+          }
+
+          const idToken = params.get("id_token");
+          if (!idToken) {
+            throw new Error(
+              "Google authentication completed, but no ID token was received.",
+            );
+          }
+
+          const credential = GoogleAuthProvider.credential(idToken);
+          const userCredential = await signInWithCredential(auth, credential);
+          loginCompleted = true;
+          await completeLogin(userCredential.user, "PAYOR");
+        } catch (err: any) {
+          loginCompleted = false;
+          setGoogleLoading(false);
+          Alert.alert(
+            "Google Sign-In Failed",
+            err.message || "Unable to sign in with Google.",
+          );
+        }
+      };
+
+      // Real-time deep-link intent listener: catches the callback instant before Chrome locks up
+      linkingSub = Linking.addEventListener("url", async (event) => {
+        if (
+          event?.url &&
+          (event.url.includes("id_token") ||
+            event.url.includes("oauthredirect") ||
+            event.url.includes("auth.expo.io"))
+        ) {
+          try {
+            await processAuthRedirectUrl(event.url);
+          } catch (err: any) {
+            Alert.alert(
+              "Google Sign-In Failed",
+              err.message || "Unable to sign in with Google.",
+            );
+          }
+        }
+      });
+
+      // Launch in-app browser with styled toolbar
+      const result = await WebBrowser.openAuthSessionAsync(
+        startUrl,
+        returnUrl,
+        {
+          showInRecents: false,
+          createTask: false,
+          preferEphemeralSession: Platform.OS === "ios",
+          toolbarColor: "#2563EB",
+          secondaryToolbarColor: "#1D4ED8",
+          enableBarCollapsing: true,
+          showTitle: false,
+        },
+      );
+
+      if (result.type === "success" && result.url) {
+        await processAuthRedirectUrl(result.url);
+      } else if (!isHandled) {
+        // Fallback: Check if deep-link intent URL was received during resume
+        const initialUrl = await Linking.getInitialURL();
+        if (
+          initialUrl &&
+          (initialUrl.includes("id_token") ||
+            initialUrl.includes("oauthredirect"))
+        ) {
+          await processAuthRedirectUrl(initialUrl);
+        } else {
+          // User genuinely closed the browser without choosing an account
+          setGoogleLoading(false);
+        }
+      }
     } catch (err: any) {
       Alert.alert(
         "Google Sign-In Failed",
         err.message || "Unable to sign in with Google.",
       );
-    } finally {
       setGoogleLoading(false);
+    } finally {
+      if (linkingSub) {
+        try {
+          linkingSub.remove();
+        } catch {}
+      }
+      if (typeof WebBrowser.dismissAuthSession === "function") {
+        try {
+          await WebBrowser.dismissAuthSession();
+        } catch {}
+      }
+      if (!isHandled && !loginCompleted) {
+        setGoogleLoading(false);
+      }
     }
   };
 
@@ -774,10 +934,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               activeOpacity={0.88}
             >
               {googleLoading ? (
-                <ActivityIndicator
-                  color={isDark ? "#FFFFFF" : "#0F172A"}
-                  size="small"
-                />
+                <View style={styles.socialButtonInner}>
+                  <ActivityIndicator
+                    color="#2563EB"
+                    size="small"
+                    style={{ marginRight: 10 }}
+                  />
+                  <Text
+                    style={[
+                      styles.socialButtonTextDark,
+                      isDark && { color: colors.text },
+                      { fontWeight: "700" },
+                    ]}
+                  >
+                    Signing in with Google...
+                  </Text>
+                </View>
               ) : (
                 <View style={styles.socialButtonInner}>
                   <View style={styles.googleGContainer}>

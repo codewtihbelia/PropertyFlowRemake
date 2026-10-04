@@ -229,6 +229,12 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
     if (!isProfileLoaded) return;
 
     if (!resolvedHouseholdId) {
+      setExpenses([]);
+      setPayments([]);
+      setCycles([]);
+      setMembers([]);
+      setCycleAttendance([]);
+      setHousehold(null);
       setLoading(false);
       return;
     }

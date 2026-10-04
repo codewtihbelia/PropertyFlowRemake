@@ -19,5 +19,10 @@
     "@react-native/babel-plugin-codegen": "^0.86.3",
     "@react-native/codegen": "^0.86.3",
     "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "expo-blur": "^57.0.3",
+    "expo-media-library": "~57.0.5",
+    "react-native-view-shot": "5.1.0"
   }
 }

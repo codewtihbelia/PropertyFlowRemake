@@ -1,6 +1,18 @@
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, LogBox } from "react-native";
 import { registerRootComponent } from "expo";
+import * as WebBrowser from "expo-web-browser";
+
+// Ignore expected Expo Go SDK 53 remote notifications deprecation warnings
+LogBox.ignoreLogs([
+  "Android Push notifications (remote notifications) functionality provided by expo-notifications was removed from Expo Go",
+  "expo-notifications: Android Push notifications",
+]);
+
+// Complete any pending browser auth sessions immediately on app launch/resume
+if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
+  WebBrowser.maybeCompleteAuthSession();
+}
 
 // Install early global JS error guard so non-fatal startup warnings never crash the native process
 const globalAny = globalThis;
@@ -10,6 +22,11 @@ if (
 ) {
   const defaultHandler = globalAny.ErrorUtils.getGlobalHandler();
   globalAny.ErrorUtils.setGlobalHandler((error, isFatal) => {
+    const errorMsg = String(error?.message || error || "");
+    // Prevent Expo SDK 53 remote notification limitation from triggering RedBox dialog
+    if (errorMsg.includes("removed from Expo Go")) {
+      return;
+    }
     console.warn(
       "[GlobalErrorGuard] Caught error (fatal=" + Boolean(isFatal) + "):",
       error,

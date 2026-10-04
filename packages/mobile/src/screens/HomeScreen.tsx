@@ -430,6 +430,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setCycles([]);
       setMembers([]);
       setPayments([]);
+      setMemberBills([]);
+      setCycleAttendance([]);
       setInitialLoading(false);
       return;
     }

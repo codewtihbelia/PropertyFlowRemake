@@ -19,6 +19,7 @@ import { updateProfile as updateAuthProfile } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { formatPesos } from "@propertyflow/shared";
 import { db, auth, functions } from "../firebase/config";
+import { pushDispatchService } from "./pushDispatchService";
 export {
   uploadImageToCloudinaryMobile,
   uploadImageToCloudinary,
@@ -1479,6 +1480,7 @@ export const mobileDataService = {
     _cachedHousehold = null;
     _cachedReadNotificationIdsByUser = {};
     _syncedCloudNotifIds.clear();
+    _readNotificationSubscribers.clear();
   },
   async submitHostApplication(data: {
     userId: string;
@@ -1664,6 +1666,8 @@ export const mobileDataService = {
     displayName: string;
     email: string;
     role?: string;
+    householdId?: string;
+    photoURL?: string;
   }): Promise<void> {
     const userRef = doc(db, "users", user.uid);
     const snap = await getDoc(userRef);
@@ -1677,6 +1681,11 @@ export const mobileDataService = {
           ? "HOST"
           : existing.role || user.role || "PAYOR";
 
+    const resolvedHouseholdId =
+      existing.householdId !== undefined
+        ? existing.householdId
+        : user.householdId || undefined;
+
     await setDoc(
       userRef,
       sanitizeData({
@@ -1686,7 +1695,7 @@ export const mobileDataService = {
         email: user.email,
         role: preservedRole,
         accountStatus: existing.accountStatus || "ACTIVE",
-        householdId: existing.householdId,
+        householdId: resolvedHouseholdId,
         hostApplicationStatus: existing.hostApplicationStatus,
         hostApplicationId: existing.hostApplicationId,
         createdDate: existing.createdDate || new Date().toISOString(),
@@ -2426,6 +2435,66 @@ export const mobileDataService = {
         { merge: true },
       );
 
+      // 3. Dispatch in-app notification & instant high-priority push alert to the Host
+      const hostId = targetHh.hostId;
+      const hhName =
+        targetHh.householdName || targetHh.apartmentName || "your group";
+      if (hostId) {
+        try {
+          const notifId = `notif_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          await setDoc(
+            doc(db, "notifications", notifId),
+            sanitizeData({
+              id: notifId,
+              notificationId: notifId,
+              recipientId: hostId,
+              userId: hostId,
+              householdId: hhId,
+              title: "New Member Request",
+              message: `${displayName} requested to join ${hhName}. Tap to review and approve.`,
+              body: `${displayName} requested to join ${hhName}. Tap to review and approve.`,
+              type: "JOIN_REQUEST",
+              category: "group_invite",
+              status: "UNREAD",
+              read: false,
+              readStatus: false,
+              createdAt: nowIso,
+              timestamp: nowIso,
+              createdTimestamp: nowIso,
+              relatedEntityId: user.uid,
+              data: {
+                type: "join_request",
+                applicantUid: user.uid,
+                applicantName: displayName,
+                householdId: hhId,
+              },
+            }),
+            { merge: true },
+          );
+
+          // Deliver high-priority push notification straight to host's phone (with sound & heads-up banner)
+          pushDispatchService
+            .sendJoinRequestPushToHost({
+              hostId,
+              householdId: hhId,
+              householdName: hhName,
+              applicantName: displayName,
+              applicantUid: user.uid,
+            })
+            .catch((pushErr) => {
+              console.warn(
+                "[Firebase Mobile] Host push notification dispatch deferred:",
+                pushErr,
+              );
+            });
+        } catch (notifErr) {
+          console.warn(
+            "[Firebase Mobile] Could not write host notification doc:",
+            notifErr,
+          );
+        }
+      }
+
       return { success: true, household: targetHh, isPendingApproval: true };
     } catch (err: any) {
       console.error("[Firebase] joinHouseholdByCode error:", err);
@@ -2503,6 +2572,19 @@ export const mobileDataService = {
             ).catch(() => {});
           }),
         );
+      } catch {}
+
+      // Notify the approved member via instant push notification
+      try {
+        const hhName =
+          hhData?.householdName || hhData?.apartmentName || "Household";
+        pushDispatchService
+          .sendJoinDecisionPushToApplicant({
+            applicantUid: memberId,
+            householdName: hhName,
+            approved: true,
+          })
+          .catch(() => {});
       } catch {}
 
       return true;
@@ -3100,6 +3182,24 @@ export const mobileDataService = {
           uErr,
         );
       }
+
+      // Notify the applicant via push notification
+      try {
+        const hhSnap = await getDoc(doc(db, "households", householdId));
+        const hhName =
+          hhSnap.data()?.householdName ||
+          hhSnap.data()?.apartmentName ||
+          "Household";
+        pushDispatchService
+          .sendJoinDecisionPushToApplicant({
+            applicantUid: memberId,
+            householdName: hhName,
+            approved: false,
+            rejectionReason: reason || "Declined by host",
+          })
+          .catch(() => {});
+      } catch {}
+
       return true;
     } catch (err) {
       console.error("[rejectJoinRequest Mobile] Error:", err);
@@ -5939,6 +6039,25 @@ export const mobileDataService = {
       doc(db, `households/${householdId}/messages`, msgId),
       sanitizeData(newDoc),
     );
+
+    // Real-time Push Notification dispatch to recipient / active roommates
+    // Delivers heads-up banner with sound & vibration even when app is closed
+    pushDispatchService
+      .sendHouseholdMessagePush({
+        householdId,
+        senderId: message.senderId,
+        senderName: message.senderName || "Roommate",
+        text: message.text || "Sent a message",
+        messageId: msgId,
+        recipientId: message.recipientId || null,
+      })
+      .catch((pushErr) => {
+        console.warn(
+          "[Firestore Mobile] Message push dispatch deferred:",
+          pushErr,
+        );
+      });
+
     return msgId;
   },
 
