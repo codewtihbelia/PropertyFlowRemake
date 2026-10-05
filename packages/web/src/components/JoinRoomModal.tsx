@@ -20,7 +20,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { joinHouseholdByCode } = useHousehold();
+  const { joinHousehold } = useHousehold();
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +40,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
     setError(null);
     setSuccessMsg(null);
 
-    const res = await joinHouseholdByCode(cleanCode);
+    const res = await joinHousehold(cleanCode);
     setLoading(false);
 
     if (res.success) {

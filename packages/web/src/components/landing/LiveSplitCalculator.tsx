@@ -1,19 +1,19 @@
 import React, { useState, useMemo } from "react";
-import { 
-  Calculator, 
-  Users, 
-  Droplets, 
-  Zap, 
-  Wifi, 
-  Home, 
-  ShoppingBag, 
-  Check, 
-  Copy, 
-  Sparkles, 
+import {
+  Calculator,
+  Users,
+  Droplets,
+  Zap,
+  Wifi,
+  Home,
+  ShoppingBag,
+  Check,
+  Copy,
+  Sparkles,
   RotateCcw,
   ArrowRight,
   TrendingDown,
-  Info
+  Info,
 } from "lucide-react";
 import { formatPesos } from "@propertyflow/shared";
 
@@ -37,9 +37,27 @@ export const LiveSplitCalculator: React.FC = () => {
       internet: 1899,
       supplies: 1200,
       roommates: [
-        { id: "1", name: "Alex Cruz", roomName: "Master (En-suite)", daysPresent: 30, fixedRentPesos: 14000 },
-        { id: "2", name: "Sarah Lim", roomName: "Bedroom 2", daysPresent: 18, fixedRentPesos: 11000 }, // away 12 days
-        { id: "3", name: "Daniel Tan", roomName: "Bedroom 3", daysPresent: 30, fixedRentPesos: 11000 },
+        {
+          id: "1",
+          name: "Alex Cruz",
+          roomName: "Master (En-suite)",
+          daysPresent: 30,
+          fixedRentPesos: 14000,
+        },
+        {
+          id: "2",
+          name: "Sarah Lim",
+          roomName: "Bedroom 2",
+          daysPresent: 18,
+          fixedRentPesos: 11000,
+        }, // away 12 days
+        {
+          id: "3",
+          name: "Daniel Tan",
+          roomName: "Bedroom 3",
+          daysPresent: 30,
+          fixedRentPesos: 11000,
+        },
       ],
     },
     {
@@ -82,9 +100,27 @@ export const LiveSplitCalculator: React.FC = () => {
   const [copied, setCopied] = useState(false);
 
   const [roommates, setRoommates] = useState<RoommateInput[]>([
-    { id: "1", name: "Alex Cruz", roomName: "Master (En-suite)", daysPresent: 30, fixedRentPesos: 14000 },
-    { id: "2", name: "Sarah Lim", roomName: "Bedroom 2", daysPresent: 18, fixedRentPesos: 11000 },
-    { id: "3", name: "Daniel Tan", roomName: "Bedroom 3", daysPresent: 30, fixedRentPesos: 11000 },
+    {
+      id: "1",
+      name: "Alex Cruz",
+      roomName: "Master (En-suite)",
+      daysPresent: 30,
+      fixedRentPesos: 14000,
+    },
+    {
+      id: "2",
+      name: "Sarah Lim",
+      roomName: "Bedroom 2",
+      daysPresent: 18,
+      fixedRentPesos: 11000,
+    },
+    {
+      id: "3",
+      name: "Daniel Tan",
+      roomName: "Bedroom 3",
+      daysPresent: 30,
+      fixedRentPesos: 11000,
+    },
   ]);
 
   const loadPreset = (presetId: string) => {
@@ -102,7 +138,11 @@ export const LiveSplitCalculator: React.FC = () => {
 
   const handleDaysChange = (id: string, days: number) => {
     setRoommates((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, daysPresent: Math.max(0, Math.min(30, days)) } : r))
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, daysPresent: Math.max(0, Math.min(30, days)) }
+          : r,
+      ),
     );
   };
 
@@ -136,14 +176,25 @@ export const LiveSplitCalculator: React.FC = () => {
     const totalWaterCents = Math.round(water * 100);
     const totalInternetCents = Math.round(internet * 100);
     const totalSuppliesCents = Math.round(supplies * 100);
-    const grandTotalCents = totalRentCents + totalElecCents + totalWaterCents + totalInternetCents + totalSuppliesCents;
+    const grandTotalCents =
+      totalRentCents +
+      totalElecCents +
+      totalWaterCents +
+      totalInternetCents +
+      totalSuppliesCents;
 
     // Fixed Utilities (Internet & Supplies) split equally
-    const fixedUtilCentsPerPerson = Math.floor((totalInternetCents + totalSuppliesCents) / numMembers);
-    const fixedRemainder = (totalInternetCents + totalSuppliesCents) % numMembers;
+    const fixedUtilCentsPerPerson = Math.floor(
+      (totalInternetCents + totalSuppliesCents) / numMembers,
+    );
+    const fixedRemainder =
+      (totalInternetCents + totalSuppliesCents) % numMembers;
 
     // Variable Utilities (Water & Electricity) split based on days present
-    const totalPersonDays = roommates.reduce((acc, r) => acc + r.daysPresent, 0);
+    const totalPersonDays = roommates.reduce(
+      (acc, r) => acc + r.daysPresent,
+      0,
+    );
     const variablePoolCents = totalElecCents + totalWaterCents;
 
     // Rent calculation
@@ -156,7 +207,10 @@ export const LiveSplitCalculator: React.FC = () => {
       });
     } else {
       // Use fixed rent if available, or normalize
-      const sumDeclared = roommates.reduce((acc, r) => acc + (r.fixedRentPesos || 0), 0);
+      const sumDeclared = roommates.reduce(
+        (acc, r) => acc + (r.fixedRentPesos || 0),
+        0,
+      );
       if (sumDeclared > 0) {
         roommates.forEach((r) => {
           const ratio = (r.fixedRentPesos || 0) / sumDeclared;
@@ -172,17 +226,22 @@ export const LiveSplitCalculator: React.FC = () => {
 
     // Allocate variable utility shares based on actual attendance
     const items = roommates.map((r, idx) => {
-      const fixedShare = fixedUtilCentsPerPerson + (idx < fixedRemainder ? 1 : 0);
-      
+      const fixedShare =
+        fixedUtilCentsPerPerson + (idx < fixedRemainder ? 1 : 0);
+
       let variableShare = 0;
       if (totalPersonDays > 0) {
-        variableShare = Math.round((r.daysPresent / totalPersonDays) * variablePoolCents);
+        variableShare = Math.round(
+          (r.daysPresent / totalPersonDays) * variablePoolCents,
+        );
       } else {
         variableShare = Math.round(variablePoolCents / numMembers);
       }
 
       // Normal full-stay benchmark for utility
-      const fullStayBenchmark = Math.round((30 / (30 * numMembers)) * variablePoolCents);
+      const fullStayBenchmark = Math.round(
+        (30 / (30 * numMembers)) * variablePoolCents,
+      );
       const absenceSavingCents = Math.max(0, fullStayBenchmark - variableShare);
 
       const rRentCents = rentCentsMap[r.id] || 0;
@@ -210,14 +269,16 @@ export const LiveSplitCalculator: React.FC = () => {
   const handleCopySummary = () => {
     const lines = [
       `🏠 PropertyFlow / Splitzy Bill Summary`,
-      `Total Invoice: ${formatPesos(splitResults.grandTotalCents)}`,
+      `Total Invoice: ${formatPesos(splitResults.grandTotalCents || 0)}`,
       `Rent: ₱${rent.toLocaleString()} | Electricity: ₱${electricity.toLocaleString()} | Water: ₱${water.toLocaleString()}`,
       `Internet: ₱${internet.toLocaleString()} | Supplies: ₱${supplies.toLocaleString()}`,
       `----------------------------------------`,
       ...splitResults.items.map(
         (i) =>
           `• ${i.name} (${i.roomName}): ${formatPesos(i.totalDueCents)} [${i.daysPresent}/30 days]` +
-          (i.absenceSavingCents > 0 ? ` (Saved ${formatPesos(i.absenceSavingCents)} via absence)` : "")
+          (i.absenceSavingCents > 0
+            ? ` (Saved ${formatPesos(i.absenceSavingCents)} via absence)`
+            : ""),
       ),
       `----------------------------------------`,
       `Calculated with Splitzy Centavo Precision Engine`,
@@ -228,9 +289,11 @@ export const LiveSplitCalculator: React.FC = () => {
   };
 
   return (
-    <section id="calculator" className="py-16 md:py-24 bg-slate-50 border-b border-slate-200/80">
+    <section
+      id="calculator"
+      className="py-16 md:py-24 bg-slate-50 border-b border-slate-200/80"
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
         {/* Section Title */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs font-bold uppercase tracking-wider border border-brand-200">
@@ -242,7 +305,9 @@ export const LiveSplitCalculator: React.FC = () => {
             <span className="text-brand-600">In Action Right Now</span>
           </h2>
           <p className="text-slate-600 text-base sm:text-lg">
-            Adjust utility bills, toggle days away, and watch how PropertyFlow dynamically recalculates each roommate's fair share without rounding errors.
+            Adjust utility bills, toggle days away, and watch how PropertyFlow
+            dynamically recalculates each roommate's fair share without rounding
+            errors.
           </p>
         </div>
 
@@ -268,10 +333,8 @@ export const LiveSplitCalculator: React.FC = () => {
 
         {/* Calculator Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          
           {/* Left Panel: Inputs (Bills & Roommates) */}
           <div className="lg:col-span-6 space-y-6">
-            
             {/* Box 1: Household Bills */}
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -280,14 +343,20 @@ export const LiveSplitCalculator: React.FC = () => {
                     <Home className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900">Monthly Household Invoices</h3>
-                    <p className="text-xs text-slate-500">Enter amounts in Philippine Pesos (₱)</p>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Monthly Household Invoices
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Enter amounts in Philippine Pesos (₱)
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="text-xs font-semibold text-slate-500">Total Invoices:</span>
+                  <span className="text-xs font-semibold text-slate-500">
+                    Total Invoices:
+                  </span>
                   <p className="text-base font-black text-slate-900">
-                    {formatPesos(splitResults.grandTotalCents)}
+                    {formatPesos(splitResults.grandTotalCents || 0)}
                   </p>
                 </div>
               </div>
@@ -295,80 +364,102 @@ export const LiveSplitCalculator: React.FC = () => {
               {/* 2-Column Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Home className="w-3.5 h-3.5 text-slate-400" />
                     <span>Total Rent</span>
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₱</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₱
+                    </span>
                     <input
                       type="number"
                       value={rent}
-                      onChange={(e) => setRent(Math.max(0, Number(e.target.value)))}
+                      onChange={(e) =>
+                        setRent(Math.max(0, Number(e.target.value)))
+                      }
                       className="w-full pl-8 pr-3 py-2 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-brand-500 focus:outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Zap className="w-3.5 h-3.5 text-amber-500" />
                     <span>Electricity (Power)</span>
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₱</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₱
+                    </span>
                     <input
                       type="number"
                       value={electricity}
-                      onChange={(e) => setElectricity(Math.max(0, Number(e.target.value)))}
+                      onChange={(e) =>
+                        setElectricity(Math.max(0, Number(e.target.value)))
+                      }
                       className="w-full pl-8 pr-3 py-2 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-brand-500 focus:outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Droplets className="w-3.5 h-3.5 text-blue-500" />
                     <span>Water (Attendance-Weighted)</span>
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₱</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₱
+                    </span>
                     <input
                       type="number"
                       value={water}
-                      onChange={(e) => setWater(Math.max(0, Number(e.target.value)))}
+                      onChange={(e) =>
+                        setWater(Math.max(0, Number(e.target.value)))
+                      }
                       className="w-full pl-8 pr-3 py-2 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-brand-500 focus:outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <Wifi className="w-3.5 h-3.5 text-indigo-500" />
                     <span>High-Speed WiFi / Internet</span>
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₱</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₱
+                    </span>
                     <input
                       type="number"
                       value={internet}
-                      onChange={(e) => setInternet(Math.max(0, Number(e.target.value)))}
+                      onChange={(e) =>
+                        setInternet(Math.max(0, Number(e.target.value)))
+                      }
                       className="w-full pl-8 pr-3 py-2 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-brand-500 focus:outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <ShoppingBag className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Shared Supplies (Water gallons, laundry, essentials)</span>
+                    <span>
+                      Shared Supplies (Water gallons, laundry, essentials)
+                    </span>
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₱</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₱
+                    </span>
                     <input
                       type="number"
                       value={supplies}
-                      onChange={(e) => setSupplies(Math.max(0, Number(e.target.value)))}
+                      onChange={(e) =>
+                        setSupplies(Math.max(0, Number(e.target.value)))
+                      }
                       className="w-full pl-8 pr-3 py-2 text-sm font-semibold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-brand-500 focus:outline-hidden"
                     />
                   </div>
@@ -377,7 +468,9 @@ export const LiveSplitCalculator: React.FC = () => {
 
               {/* Rent split toggle */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                <span className="text-xs font-semibold text-slate-600">Equal Rent Split for all rooms?</span>
+                <span className="text-xs font-semibold text-slate-600">
+                  Equal Rent Split for all rooms?
+                </span>
                 <button
                   type="button"
                   onClick={() => setUseEqualRent(!useEqualRent)}
@@ -400,8 +493,12 @@ export const LiveSplitCalculator: React.FC = () => {
                     <Users className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900">Roommate Attendance & Stays</h3>
-                    <p className="text-xs text-slate-500">Slide to test absence discounts (days present / 30)</p>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Roommate Attendance & Stays
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Slide to test absence discounts (days present / 30)
+                    </p>
                   </div>
                 </div>
                 <button
@@ -415,18 +512,27 @@ export const LiveSplitCalculator: React.FC = () => {
 
               <div className="space-y-4">
                 {roommates.map((r, i) => (
-                  <div key={r.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+                  <div
+                    key={r.id}
+                    className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2"
+                  >
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-sm font-bold text-slate-900">{r.name}</span>
-                        <span className="text-xs text-slate-500 ml-2">({r.roomName})</span>
+                        <span className="text-sm font-bold text-slate-900">
+                          {r.name}
+                        </span>
+                        <span className="text-xs text-slate-500 ml-2">
+                          ({r.roomName})
+                        </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                          r.daysPresent === 30 
-                            ? "bg-emerald-100 text-emerald-800" 
-                            : "bg-amber-100 text-amber-800"
-                        }`}>
+                        <span
+                          className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                            r.daysPresent === 30
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
                           {r.daysPresent} / 30 days present
                         </span>
                         {roommates.length > 2 && (
@@ -445,7 +551,11 @@ export const LiveSplitCalculator: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex justify-between text-[10px] text-slate-500 font-medium">
                         <span>0 days (Away whole month)</span>
-                        <span>{30 - r.daysPresent > 0 ? `${30 - r.daysPresent} days away on trip` : "Full month stay"}</span>
+                        <span>
+                          {30 - r.daysPresent > 0
+                            ? `${30 - r.daysPresent} days away on trip`
+                            : "Full month stay"}
+                        </span>
                         <span>30 days (Full)</span>
                       </div>
                       <input
@@ -453,7 +563,9 @@ export const LiveSplitCalculator: React.FC = () => {
                         min="0"
                         max="30"
                         value={r.daysPresent}
-                        onChange={(e) => handleDaysChange(r.id, Number(e.target.value))}
+                        onChange={(e) =>
+                          handleDaysChange(r.id, Number(e.target.value))
+                        }
                         className="w-full accent-brand-600 cursor-pointer h-2 bg-slate-200 rounded-lg"
                       />
                     </div>
@@ -461,35 +573,45 @@ export const LiveSplitCalculator: React.FC = () => {
                 ))}
               </div>
             </div>
-
           </div>
 
           {/* Right Panel: Calculated Fair Output & Visual Breakdown */}
           <div className="lg:col-span-6 space-y-6">
-            
             <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-7 shadow-xl space-y-6 border border-slate-800">
-              
               {/* Header */}
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div>
                   <span className="text-[11px] font-bold text-brand-400 uppercase tracking-wider">
                     Computed Output
                   </span>
-                  <h3 className="text-xl font-bold text-white">Individual Fair Shares</h3>
+                  <h3 className="text-xl font-bold text-white">
+                    Individual Fair Shares
+                  </h3>
                 </div>
                 <button
                   onClick={handleCopySummary}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-300 border border-slate-700 transition-colors"
                 >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? "Copied to Clipboard!" : "Copy Summary"}</span>
+                  {copied ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {copied ? "Copied to Clipboard!" : "Copy Summary"}
+                  </span>
                 </button>
               </div>
 
               {/* Roommate Shares Table */}
               <div className="space-y-3">
                 {splitResults.items.map((item) => {
-                  const percentOfTotal = ((item.totalDueCents / splitResults.grandTotalCents) * 100).toFixed(1);
+                  const percentOfTotal = splitResults.grandTotalCents
+                    ? (
+                        (item.totalDueCents / splitResults.grandTotalCents) *
+                        100
+                      ).toFixed(1)
+                    : "0.0";
                   return (
                     <div
                       key={item.id}
@@ -498,8 +620,12 @@ export const LiveSplitCalculator: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-white">{item.name}</span>
-                            <span className="text-xs text-slate-400">({item.roomName})</span>
+                            <span className="text-sm font-bold text-white">
+                              {item.name}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              ({item.roomName})
+                            </span>
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[11px] text-slate-400">
@@ -526,7 +652,12 @@ export const LiveSplitCalculator: React.FC = () => {
                       {/* Micro visual breakdown bar */}
                       <div className="pt-2 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-300">
                         <span>Rent: {formatPesos(item.rentCents)}</span>
-                        <span>Utilities: {formatPesos(item.fixedUtilCents + item.variableUtilCents)}</span>
+                        <span>
+                          Utilities:{" "}
+                          {formatPesos(
+                            item.fixedUtilCents + item.variableUtilCents,
+                          )}
+                        </span>
                       </div>
                     </div>
                   );
@@ -537,19 +668,19 @@ export const LiveSplitCalculator: React.FC = () => {
               <div className="p-3.5 rounded-xl bg-brand-950/60 border border-brand-800/60 flex items-start gap-3">
                 <Sparkles className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-300 space-y-1">
-                  <p className="font-bold text-white">Centavo Accuracy Guarantee</p>
+                  <p className="font-bold text-white">
+                    Centavo Accuracy Guarantee
+                  </p>
                   <p>
-                    All values are stored as integers (cents). The sum of all individual splits mathematically equals 100% of the original invoice with zero rounding loss.
+                    All values are stored as integers (cents). The sum of all
+                    individual splits mathematically equals 100% of the original
+                    invoice with zero rounding loss.
                   </p>
                 </div>
               </div>
-
             </div>
-
           </div>
-
         </div>
-
       </div>
     </section>
   );

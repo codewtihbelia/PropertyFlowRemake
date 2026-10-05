@@ -23,6 +23,8 @@ import {
   WalletTransaction,
   CardProviderType,
   PHILIPPINE_CARD_PRESETS,
+  CashAutomationRule,
+  DEFAULT_CASH_RULES,
 } from "../services/walletService";
 import { auth } from "../firebase/config";
 
@@ -69,7 +71,7 @@ export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
   {
     id: "grocery",
     title: "Grocery Run",
-    icon: "cart",
+    icon: "basket",
     amount: 480,
     gradient: ["#047857", "#10B981"],
     defaultNote: "Fresh market & pantry supplies",
@@ -112,6 +114,293 @@ export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
     color: "#94A3B8",
   },
 ];
+
+export interface SemanticExpenseInput {
+  title?: string;
+  note?: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  type?: string;
+  amount?: number;
+  [key: string]: any;
+}
+
+export type AppWalletTransaction = WalletTransaction & {
+  note?: string;
+  icon?: string;
+  category?: string;
+};
+
+// Intersection ensures note, category, icon, title, and description are ALWAYS recognized by TypeScript
+// on unions of SemanticExpenseInput | Partial<WalletTransaction> | WalletTransaction
+export type SemanticTxInput = (
+  | SemanticExpenseInput
+  | Partial<WalletTransaction>
+  | Partial<AppWalletTransaction>
+  | Record<string, any>
+) & {
+  note?: string;
+  category?: string;
+  icon?: string;
+  title?: string;
+  description?: string;
+};
+
+export function getExpenseSemanticIconMobile(tx?: SemanticTxInput | null): {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  bg: string;
+} {
+  const presetIconMap: Record<
+    string,
+    { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }
+  > = {
+    coffee: { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" },
+    cafe: { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" },
+    lunch: { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" },
+    restaurant: { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" },
+    commute: { icon: "bus", color: "#38BDF8", bg: "#38BDF818" },
+    bus: { icon: "bus", color: "#38BDF8", bg: "#38BDF818" },
+    grocery: { icon: "basket", color: "#34D399", bg: "#34D39918" },
+    basket: { icon: "basket", color: "#34D399", bg: "#34D39918" },
+    cart: { icon: "basket", color: "#34D399", bg: "#34D39918" },
+    merienda: { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" },
+    "fast-food": { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" },
+    utility: { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" },
+    flash: { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" },
+    pharmacy: { icon: "medkit", color: "#FB7185", bg: "#FB718518" },
+    medkit: { icon: "medkit", color: "#FB7185", bg: "#FB718518" },
+    cash: { icon: "cash", color: "#10B981", bg: "#10B98118" },
+  };
+
+  const safeTx = (tx || {}) as SemanticTxInput;
+  const rawTitle = safeTx.title || "";
+  const rawNote = safeTx.note || "";
+  const rawDescription = safeTx.description || "";
+  const rawCategory = safeTx.category || "";
+  const rawText =
+    `${rawTitle} ${rawNote} ${rawDescription} ${rawCategory}`.toLowerCase();
+
+  // 1. Drinks, Coffee, Milk Tea & Beverages
+  if (
+    /(coffee|cafe|espresso|latte|cappuccino|americano|mocha|tea|boba|milktea|milk tea|starbucks|dunkin|drink|beverage|juice|smoothie|frap|chatime|coco|macao|gong cha|tiger sugar|matcha)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" };
+  }
+  // 2. Meals, Fast Food & Dining Out
+  if (
+    /(lunch|dinner|breakfast|meal|food|restaurant|karinderya|carinderia|jollibee|mcdo|mcdonald|burger|ramen|kfc|inasal|chowking|pares|silog|tapsilog|sinigang|adobo|eat|dining|resto|buffet|kbbq|samgyup|bbq|shawarma|chooks|mang inasal)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" };
+  }
+  // 3. Pizza & Italian
+  if (/(pizza|yellow cab|shakey|domino|pizza hut)/.test(rawText)) {
+    return { icon: "pizza", color: "#EA580C", bg: "#EA580C18" };
+  }
+  // 4. Merienda & Bakery Snacks
+  if (
+    /(merienda|snack|bakery|bread|pan de sal|pandesal|pastry|donut|cake|dessert|cookie|chips|ice cream|candy|waffle|goldilocks|red ribbon)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" };
+  }
+  // 5. Ridesharing, Fuel & Personal Vehicle
+  if (
+    /(grab|taxi|cab|angkas|joyride|maxim|car|gas|fuel|petrol|toll|parking|diesel|drive|petron|shell|caltex)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "car", color: "#0284C7", bg: "#0284C718" };
+  }
+  // 6. Commute & Public Transit
+  if (
+    /(commute|fare|jeep|jeepney|trike|tricycle|bus|mrt|lrt|train|transit|subway|ride|travel)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "bus", color: "#38BDF8", bg: "#38BDF818" };
+  }
+  // 7. Flights & Vacation Travel
+  if (
+    /(flight|airplane|travel|vacation|airline|airport|cebu pacific|philippine airlines|airasia|hotel|airbnb|resort)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "airplane", color: "#3B82F6", bg: "#3B82F618" };
+  }
+  // 8. Supermarket, Fresh Market & Pantry
+  if (
+    /(grocery|groceries|market|palengke|supermarket|puregold|robinsons|sm market|sari-sari|convenience|7-eleven|ministop|alfamart|store|pantry|supplies|soap|shampoo|landers|snr|s&r)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "basket", color: "#34D399", bg: "#34D39918" };
+  }
+  // 9. Laundry & Fabric Care
+  if (
+    /(laundry|labada|wash|dry clean|dryclean|detergent|downy|ariel|surf|tide|cleaners)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "shirt", color: "#0EA5E9", bg: "#0EA5E918" };
+  }
+  // 10. Pharmacy, Health & Medical
+  if (
+    /(pharmacy|meds|medicine|drug|mercury|watsons|generics|doctor|clinic|hospital|dental|dentist|health|vitamin|pill|bandage|biogesic|neozep|paracetamol|theraflu)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "medkit", color: "#FB7185", bg: "#FB718518" };
+  }
+  // 11. Power, Electricity & Prepaid Load
+  if (
+    /(utility|utilities|bill|load|data|electric|meralco|power|prepaid|postpaid)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" };
+  }
+  // 12. Water Services
+  if (/(water|maynilad|manila water|prime water)/.test(rawText)) {
+    return { icon: "water", color: "#06B6D4", bg: "#06B6D418" };
+  }
+  // 13. Internet & Telecom
+  if (
+    /(internet|wifi|fiber|pldt|globe|smart|converge|dito|telco)/.test(rawText)
+  ) {
+    return { icon: "wifi", color: "#8B5CF6", bg: "#8B5CF618" };
+  }
+  // 14. Cinema & Streaming
+  if (/(movie|cinema|netflix|theater|film|disney|hbo|youtube)/.test(rawText)) {
+    return { icon: "film", color: "#E11D48", bg: "#E11D4818" };
+  }
+  // 15. Gaming & Digital Entertainment
+  if (
+    /(game|gaming|steam|playstation|xbox|nintendo|esports|valorant|genshin|mlbb|mobile legends)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "game-controller", color: "#6366F1", bg: "#6366F118" };
+  }
+  // 16. Music & Audio Streaming
+  if (/(spotify|music|concert|song|audio|apple music)/.test(rawText)) {
+    return { icon: "musical-notes", color: "#10B981", bg: "#10B98118" };
+  }
+  // 17. Gym, Sports & Fitness
+  if (
+    /(gym|workout|fitness|crossfit|boxing|yoga|anytime fitness|gold gym|pilates|sports|badminton|basketball)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "fitness", color: "#F43F5E", bg: "#F43F5E18" };
+  }
+  // 18. Grooming, Salon & Personal Care
+  if (
+    /(haircut|salon|barber|barbershop|beauty|spa|wax|massage|nails)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "cut", color: "#EC4899", bg: "#EC489918" };
+  }
+  // 19. School, Books & Education
+  if (
+    /(school|book|tuition|course|study|exam|stationery|pen|paper|class|supplies|national bookstore)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "book", color: "#3B82F6", bg: "#3B82F618" };
+  }
+  // 20. Tech, Gadgets & Hardware
+  if (
+    /(tech|gadget|phone|iphone|android|laptop|macbook|ipad|tablet|charger|cable|earbuds|airpods|headphone|mouse|keyboard|monitor|electronics)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "hardware-chip", color: "#6366F1", bg: "#6366F118" };
+  }
+  // 21. Celebrations & Gifts
+  if (
+    /(gift|regalo|present|party|birthday|anniversary|celebration|christmas|balloon)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "gift", color: "#EC4899", bg: "#EC489918" };
+  }
+  // 22. Tools & Repair
+  if (
+    /(tool|tools|repair|hardware|hammer|drill|plumbing|paint|screws|fix|maintenance)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "construct", color: "#F59E0B", bg: "#F59E0B18" };
+  }
+  // 23. Subscriptions & Association Dues
+  if (
+    /(subscription|sub|hoa|dues|condo dues|association|membership|fee|insurance)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "card", color: "#8B5CF6", bg: "#8B5CF618" };
+  }
+  // 24. Apparel & Lifestyle Shopping
+  if (
+    /(shopping|clothes|shirt|pants|shoes|sneakers|shopee|lazada|shein|tiktok|apparel|fashion|zara|uniqlo|h&m)/.test(
+      rawText,
+    )
+  ) {
+    return { icon: "pricetag", color: "#F472B6", bg: "#F472B618" };
+  }
+  // 25. Pets & Veterinary Care
+  if (/(pet|vet|dog|cat|animal|puppy|kitten)/.test(rawText)) {
+    return { icon: "paw", color: "#F59E0B", bg: "#F59E0B18" };
+  }
+  // 26. Rent, Home & Accommodation
+  if (/(rent|room|apartment|condo|house|home|stay|dorm)/.test(rawText)) {
+    return { icon: "home", color: "#14B8A6", bg: "#14B8A618" };
+  }
+  // 27. Cash & Allowances
+  if (/(cash|allowance|petty|tender|atm|change|withdrawal)/.test(rawText)) {
+    return { icon: "cash", color: "#10B981", bg: "#10B98118" };
+  }
+
+  // Preset key fallback (ignoring generic 'cart', 'custom', 'add-circle' so title takes precedence)
+  const txIcon = safeTx.icon;
+  if (
+    txIcon &&
+    !["cart", "custom", "add-circle"].includes(txIcon) &&
+    presetIconMap[txIcon]
+  ) {
+    return presetIconMap[txIcon];
+  }
+
+  // Diversified lifestyle fallbacks (NEVER defaulting to cart or bag)
+  const fallbacks: {
+    icon: keyof typeof Ionicons.glyphMap;
+    color: string;
+    bg: string;
+  }[] = [
+    { icon: "sparkles", color: "#EC4899", bg: "#EC489918" },
+    { icon: "pricetag", color: "#8B5CF6", bg: "#8B5CF618" },
+    { icon: "compass", color: "#14B8A6", bg: "#14B8A618" },
+    { icon: "bookmark", color: "#06B6D4", bg: "#06B6D418" },
+    { icon: "wallet", color: "#10B981", bg: "#10B98118" },
+    { icon: "heart", color: "#F43F5E", bg: "#F43F5E18" },
+    { icon: "gift", color: "#F59E0B", bg: "#F59E0B18" },
+    { icon: "cube", color: "#3B82F6", bg: "#3B82F618" },
+    { icon: "ribbon", color: "#8B5CF6", bg: "#8B5CF618" },
+    { icon: "shield-checkmark", color: "#0284C7", bg: "#0284C718" },
+  ];
+  const charCodeSum = (tx?.title || "expense")
+    .split("")
+    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return fallbacks[charCodeSum % fallbacks.length];
+}
 
 interface WalletScreenProps {
   userId?: string;
@@ -231,8 +520,30 @@ export function WalletScreen({
   >("deposit");
   const [pocketTransferAmount, setPocketTransferAmount] =
     useState<string>("500");
+  const [pocketSelectedCardId, setPocketSelectedCardId] = useState<string>("");
 
-  const [selectedTx, setSelectedTx] = useState<WalletTransaction | null>(null);
+  // Cash on Hand & Finance Automation State
+  const [cashRules, setCashRules] =
+    useState<CashAutomationRule[]>(DEFAULT_CASH_RULES);
+  const [showCashAutomationModal, setShowCashAutomationModal] =
+    useState<boolean>(false);
+  const [showCashExpenseModal, setShowCashExpenseModal] =
+    useState<boolean>(false);
+  const [selectedCashCardId, setSelectedCashCardId] = useState<string>("");
+  const [cashExpenseAmount, setCashExpenseAmount] = useState<string>("35");
+  const [cashExpenseTitle, setCashExpenseTitle] = useState<string>(
+    "Jeepney / Tricycle Fare",
+  );
+  const [cashExpenseCategory, setCashExpenseCategory] =
+    useState<string>("Commute");
+  const [isExecutingCashAuto, setIsExecutingCashAuto] =
+    useState<boolean>(false);
+  const [isRecordingCashExpense, setIsRecordingCashExpense] =
+    useState<boolean>(false);
+
+  const [selectedTx, setSelectedTx] = useState<AppWalletTransaction | null>(
+    null,
+  );
   const [txFilter, setTxFilter] = useState<
     "all" | "cash_in" | "payment" | "savings"
   >("all");
@@ -245,6 +556,7 @@ export function WalletScreen({
   const [simCardId, setSimCardId] = useState<string>("");
   const [simAmount, setSimAmount] = useState<string>("");
   const [simNote, setSimNote] = useState<string>("");
+  const [customExpenseTitle, setCustomExpenseTitle] = useState<string>("");
   const [activeSimCardId, setActiveSimCardId] = useState<string>("");
   const [isSimulatingExpense, setIsSimulatingExpense] =
     useState<boolean>(false);
@@ -550,6 +862,7 @@ export function WalletScreen({
         currentUid,
         selectedPocket.id,
         num,
+        pocketSelectedCardId || undefined,
       );
       if (result.success) {
         setWallet(result.updatedState);
@@ -563,6 +876,7 @@ export function WalletScreen({
         currentUid,
         selectedPocket.id,
         num,
+        pocketSelectedCardId || undefined,
       );
       if (result.success) {
         setWallet(result.updatedState);
@@ -572,6 +886,140 @@ export function WalletScreen({
         Alert.alert("Action Failed", result.message);
       }
     }
+  };
+
+  const handleOpenCashExpense = (cashCardId?: string) => {
+    const cashCard =
+      wallet?.cards.find((c) =>
+        cashCardId ? c.id === cashCardId : c.type === "cash",
+      ) || wallet?.cards[0];
+
+    if (!cashCard) {
+      Alert.alert(
+        "No Payment Card",
+        "Please link a card or add Cash on Hand first.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Add Cash Card",
+            onPress: () => {
+              setNewCardType("cash");
+              setNewCardName("Cash on Hand");
+              setNewCardNumber("SN-2026-PH-CASH");
+              setShowAddCardModal(true);
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setSelectedCashCardId(cashCard.id);
+    setCashExpenseTitle("Jeepney / Tricycle Fare");
+    setCashExpenseAmount("25");
+    setCashExpenseCategory("Commute");
+    setShowCashExpenseModal(true);
+  };
+
+  const handleOpenCashAutomation = (cashCardId?: string) => {
+    const cashCard =
+      wallet?.cards.find((c) =>
+        cashCardId ? c.id === cashCardId : c.type === "cash",
+      ) || wallet?.cards[0];
+
+    if (!cashCard) {
+      Alert.alert(
+        "Cash on Hand Needed",
+        "To automate cash expenses and finance cash on hand, please add a Cash Card first.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Add Cash Card",
+            onPress: () => {
+              setNewCardType("cash");
+              setNewCardName("Cash on Hand");
+              setNewCardNumber("SN-2026-PH-CASH");
+              setShowAddCardModal(true);
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setSelectedCashCardId(cashCard.id);
+    setShowCashAutomationModal(true);
+  };
+
+  const handleExecuteCashExpense = async () => {
+    if (!selectedCashCardId) return;
+    const amt = parseFloat(cashExpenseAmount);
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid expense amount.");
+      return;
+    }
+
+    setIsRecordingCashExpense(true);
+    try {
+      const res = await walletService.recordCashExpense(
+        currentUid,
+        selectedCashCardId,
+        amt,
+        cashExpenseTitle.trim() || "Cash Expense",
+        cashExpenseCategory,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        setShowCashExpenseModal(false);
+        Alert.alert("Cash Expense Recorded", res.message);
+      } else {
+        Alert.alert("Recording Failed", res.message);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not record cash expense.");
+    } finally {
+      setIsRecordingCashExpense(false);
+    }
+  };
+
+  const handleRunCashAutoExpenses = async () => {
+    const cashCard =
+      wallet?.cards.find((c) => c.id === selectedCashCardId) ||
+      wallet?.cards.find((c) => c.type === "cash") ||
+      wallet?.cards[0];
+
+    if (!cashCard) {
+      Alert.alert("Error", "No Cash on Hand card found.");
+      return;
+    }
+
+    setIsExecutingCashAuto(true);
+    try {
+      const res = await walletService.runAutomatedCashExpenses(
+        currentUid,
+        cashCard.id,
+        cashRules,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        Alert.alert("⚡ Cash Automation Complete", res.message);
+      } else {
+        Alert.alert("Automation Paused", res.message);
+      }
+    } catch (e: any) {
+      Alert.alert(
+        "Error",
+        e?.message || "Could not run automated cash expenses.",
+      );
+    } finally {
+      setIsExecutingCashAuto(false);
+    }
+  };
+
+  const handleToggleCashRule = (ruleId: string) => {
+    setCashRules((prev) =>
+      prev.map((r) => (r.id === ruleId ? { ...r, enabled: !r.enabled } : r)),
+    );
   };
 
   const handleOpenTransfer = (preselectedSourceCardId?: string) => {
@@ -687,6 +1135,9 @@ export function WalletScreen({
     setSelectedExpensePreset(preset);
     setSimAmount(String(preset.amount));
     setSimNote(preset.defaultNote);
+    setCustomExpenseTitle(
+      preset.id === "custom" ? "Custom Expense" : preset.title,
+    );
     const targetCardId =
       activeSimCardId && wallet.cards.some((c) => c.id === activeSimCardId)
         ? activeSimCardId
@@ -728,14 +1179,29 @@ export function WalletScreen({
       return;
     }
 
+    const finalTitle =
+      selectedExpensePreset.id === "custom" && customExpenseTitle.trim()
+        ? customExpenseTitle.trim()
+        : selectedExpensePreset.title;
+    const finalIcon =
+      selectedExpensePreset.id === "custom"
+        ? getExpenseSemanticIconMobile({
+            title: finalTitle,
+            note: simNote,
+            type: "expense_simulation",
+          }).icon
+        : selectedExpensePreset.icon === "cart"
+          ? "basket"
+          : selectedExpensePreset.icon;
+
     try {
       setIsSimulatingExpense(true);
       const res = await walletService.simulateCardExpense(
         currentUid,
         simCardId,
         amt,
-        selectedExpensePreset.title,
-        selectedExpensePreset.icon,
+        finalTitle,
+        finalIcon,
         simNote,
       );
       if (res.success) {
@@ -784,7 +1250,8 @@ export function WalletScreen({
         tx.type === "bill_payment" ||
         tx.type === "debt_settlement" ||
         tx.type === "expense_simulation" ||
-        tx.type === "card_transfer"
+        tx.type === "card_transfer" ||
+        tx.type === "cash_expense"
       );
     if (txFilter === "savings")
       return tx.type === "savings_deposit" || tx.type === "savings_withdrawal";
@@ -1175,6 +1642,66 @@ export function WalletScreen({
                 Limits
               </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickCircleItem}
+              onPress={() => handleOpenCashExpense()}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.quickCircleBtn,
+                  {
+                    backgroundColor: isDark ? "#064E3B" : "#ECFDF5",
+                    borderColor: isDark ? "#059669" : "#A7F3D0",
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="cash-multiple"
+                  size={20}
+                  color={isDark ? "#34D399" : "#059669"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.quickCircleLabel,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Cash Spend
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickCircleItem}
+              onPress={() => handleOpenCashAutomation()}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.quickCircleBtn,
+                  {
+                    backgroundColor: isDark ? "#065F46" : "#F0FDF4",
+                    borderColor: isDark ? "#10B981" : "#BBF7D0",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="flash-outline"
+                  size={20}
+                  color={isDark ? "#6EE7B7" : "#10B981"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.quickCircleLabel,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Cash Auto
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
 
@@ -1197,24 +1724,8 @@ export function WalletScreen({
                     { color: isDark ? colors.text : "#0F172A" },
                   ]}
                 >
-                  Quick Expense
+                  Quick Expenses
                 </Text>
-                {/* <View
-                  style={[
-                    styles.quickExpenseLiveBadge,
-                    { backgroundColor: isDark ? "#064E3B" : "#ECFDF5" },
-                  ]}
-                >
-                  <View style={styles.quickExpensePulseDot} />
-                  <Text
-                    style={[
-                      styles.quickExpenseLiveBadgeText,
-                      { color: isDark ? "#34D399" : "#059669" },
-                    ]}
-                  >
-                    AUTO-DEDUCT
-                  </Text>
-                </View> */}
               </View>
               <Text
                 style={[
@@ -1411,7 +1922,7 @@ export function WalletScreen({
                       ]}
                     >
                       Add funds via GCash, Maya, or bank transfer for split
-                      payments.
+                      payments.h
                     </Text>
                   </View>
                   <Ionicons
@@ -1587,6 +2098,132 @@ export function WalletScreen({
                 PHILIPPINE_CARD_PRESETS.custom;
               const isGCash = card.type === "gcash";
               const isMaya = card.type === "maya";
+              const isCash = card.type === "cash";
+
+              if (isCash) {
+                return (
+                  <TouchableOpacity
+                    key={card.id}
+                    onPress={() => handleCardPress(card)}
+                    activeOpacity={0.88}
+                  >
+                    <LinearGradient
+                      colors={["#022C22", "#064E3B", "#065F46"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[styles.cardItem, styles.cashCardItem]}
+                    >
+                      {/* Subtle watermark background seal */}
+                      <View style={styles.cashWatermarkWrap}>
+                        <MaterialCommunityIcons
+                          name="shield-check"
+                          size={110}
+                          color="rgba(255, 255, 255, 0.04)"
+                        />
+                      </View>
+
+                      {/* Top Row: Central Bank seal / Brand & Badges */}
+                      <View style={styles.cardItemTop}>
+                        <View
+                          style={{
+                            width: "100%",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 6,
+                          }}
+                        >
+                          <View style={styles.cashTenderBadge}>
+                            <Text style={styles.cashTenderText}>
+                              Cash on hand
+                            </Text>
+                          </View>
+                          {card.isDefault && (
+                            <View style={styles.cardDefaultBadge}>
+                              <Text style={styles.cardDefaultText}>
+                                PRIMARY
+                              </Text>
+                            </View>
+                          )}
+                          <TouchableOpacity
+                            style={styles.cardTrashBtn}
+                            onPress={() => handlePromptDeleteCard(card)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel={`Delete ${card.name}`}
+                          >
+                            <Ionicons
+                              name="trash-outline"
+                              size={14}
+                              color="#FFFFFF"
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* Balance display */}
+                      <View style={styles.cardBalanceRow}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 5,
+                          }}
+                        >
+                          <View style={styles.cashAutoLiveDot} />
+
+                          <Text style={styles.cashBalanceLabel}>
+                            Available Balance
+                          </Text>
+                        </View>
+                        <Text style={styles.cashBalanceAmount}>
+                          {hideBalance
+                            ? "₱ ••••••"
+                            : `₱${(card.balance || 0).toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}`}
+                        </Text>
+                      </View>
+
+                      {/* Bottom Row: Custodian & Serial */}
+                      <View style={styles.cardItemBottom}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.cardHolderLabel}>CUSTODIAN</Text>
+                          <Text style={styles.cardHolderName} numberOfLines={1}>
+                            {card.cardholderName ||
+                              currentUser?.name ||
+                              "Cash Custodian"}
+                          </Text>
+                        </View>
+
+                        <View style={styles.cardRightMeta}>
+                          <Text style={styles.cashSerialText}>
+                            {card.accountNumber || "SN • 2026-PH-CASH"}
+                          </Text>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                              justifyContent: "flex-end",
+                              marginTop: 2,
+                            }}
+                          >
+                            <MaterialCommunityIcons
+                              name="cash-multiple"
+                              size={12}
+                              color="#6EE7B7"
+                            />
+                            <Text style={styles.cashSubBadgeText}>
+                              Peso Notes • BSP
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                );
+              }
 
               return (
                 <TouchableOpacity
@@ -1808,6 +2445,7 @@ export function WalletScreen({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            style={styles.pocketsScrollView}
             contentContainerStyle={styles.pocketsCarousel}
           >
             {(wallet?.pockets || []).map((pocket) => {
@@ -1916,6 +2554,11 @@ export function WalletScreen({
                       onPress={() => {
                         setSelectedPocket(pocket);
                         setPocketActionType("deposit");
+                        setPocketSelectedCardId(
+                          wallet?.cards.find((c) => c.isDefault)?.id ||
+                            wallet?.cards[0]?.id ||
+                            "",
+                        );
                         setShowPocketActionModal(true);
                       }}
                     >
@@ -1937,6 +2580,11 @@ export function WalletScreen({
                       onPress={() => {
                         setSelectedPocket(pocket);
                         setPocketActionType("withdraw");
+                        setPocketSelectedCardId(
+                          wallet?.cards.find((c) => c.isDefault)?.id ||
+                            wallet?.cards[0]?.id ||
+                            "",
+                        );
                         setShowPocketActionModal(true);
                       }}
                     >
@@ -2126,47 +2774,67 @@ export function WalletScreen({
                   onPress={() => setSelectedTx(tx)}
                   activeOpacity={0.7}
                 >
-                  <View
-                    style={[
-                      styles.txIconWrap,
-                      {
-                        backgroundColor:
-                          tx.type === "expense_simulation"
-                            ? "#F59E0B18"
-                            : tx.type === "card_transfer"
-                              ? "#6366F118"
-                              : isPositive
-                                ? "#10B98118"
-                                : "#2563EB18",
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={
-                        tx.type === "cash_in"
-                          ? "arrow-down-circle"
-                          : tx.type === "bill_payment"
-                            ? "receipt"
-                            : tx.type === "debt_settlement"
-                              ? "swap-horizontal"
-                              : tx.type === "expense_simulation"
-                                ? "cart-outline"
-                                : tx.type === "card_transfer"
+                  {(() => {
+                    const isExpense =
+                      tx.type === "expense_simulation" ||
+                      tx.type === "cash_expense";
+
+                    if (isExpense) {
+                      const iconData = getExpenseSemanticIconMobile(tx);
+                      return (
+                        <View
+                          style={[
+                            styles.txIconWrap,
+                            { backgroundColor: iconData.bg },
+                          ]}
+                        >
+                          <Ionicons
+                            name={iconData.icon}
+                            size={20}
+                            color={iconData.color}
+                          />
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <View
+                        style={[
+                          styles.txIconWrap,
+                          {
+                            backgroundColor:
+                              tx.type === "card_transfer"
+                                ? "#6366F118"
+                                : isPositive
+                                  ? "#10B98118"
+                                  : "#2563EB18",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            tx.type === "cash_in"
+                              ? "arrow-down-circle"
+                              : tx.type === "bill_payment"
+                                ? "receipt"
+                                : tx.type === "debt_settlement"
                                   ? "swap-horizontal"
-                                  : "shield-checkmark"
-                      }
-                      size={20}
-                      color={
-                        tx.type === "expense_simulation"
-                          ? "#F59E0B"
-                          : tx.type === "card_transfer"
-                            ? "#6366F1"
-                            : isPositive
-                              ? "#10B981"
-                              : "#2563EB"
-                      }
-                    />
-                  </View>
+                                  : tx.type === "card_transfer"
+                                    ? "swap-horizontal"
+                                    : "shield-checkmark"
+                          }
+                          size={20}
+                          color={
+                            tx.type === "card_transfer"
+                              ? "#6366F1"
+                              : isPositive
+                                ? "#10B981"
+                                : "#2563EB"
+                          }
+                        />
+                      </View>
+                    );
+                  })()}
 
                   <View style={styles.txInfoCol}>
                     <Text
@@ -2185,6 +2853,9 @@ export function WalletScreen({
                       ]}
                       numberOfLines={1}
                     >
+                      {(tx as AppWalletTransaction).note
+                        ? `${(tx as AppWalletTransaction).note} · `
+                        : ""}
                       {tx.paymentMethodUsed} ·{" "}
                       {new Date(tx.timestamp).toLocaleDateString("en-US", {
                         month: "short",
@@ -2746,18 +3417,22 @@ export function WalletScreen({
                     {/* Card Visual Banner Preview */}
                     <LinearGradient
                       colors={
-                        selectedCardDetail.colorGradient || preset.gradient
+                        selectedCardDetail.type === "cash"
+                          ? ["#022C22", "#064E3B", "#065F46"]
+                          : selectedCardDetail.colorGradient || preset.gradient
                       }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={styles.cardDetailBanner}
                     >
                       <View style={styles.cardDetailBannerTop}>
-                        <View style={styles.cardBrandBadge}>
-                          <Text style={styles.cardBrandName}>
-                            {preset?.name || selectedCardDetail.name}
-                          </Text>
-                        </View>
+                        {selectedCardDetail.type === "cash" && (
+                          <View style={styles.cashTenderBadge}>
+                            <Text style={styles.cashTenderText}>
+                              Cash On Hand
+                            </Text>
+                          </View>
+                        )}
                         <View
                           style={{
                             flexDirection: "row",
@@ -2773,14 +3448,24 @@ export function WalletScreen({
                             </View>
                           )}
                           <Text style={styles.cardNetworkBadge}>
-                            {preset?.network || (isGCash ? "QR Ph" : "Visa")}
+                            {selectedCardDetail.type === "cash"
+                              ? "Cash • BSP"
+                              : preset?.network || (isGCash ? "QR Ph" : "Visa")}
                           </Text>
                         </View>
                       </View>
 
                       <View style={{ marginVertical: 8 }}>
-                        <Text style={styles.cardBalanceLabel}>
-                          CARD BALANCE
+                        <Text
+                          style={
+                            selectedCardDetail.type === "cash"
+                              ? styles.cashBalanceLabel
+                              : styles.cardBalanceLabel
+                          }
+                        >
+                          {selectedCardDetail.type === "cash"
+                            ? "AVAILABLE BALANCE"
+                            : "CARD BALANCE"}
                         </Text>
                         <Text style={styles.cardBalanceAmount}>
                           {hideBalance
@@ -2796,12 +3481,24 @@ export function WalletScreen({
 
                       <View style={styles.cardItemBottom}>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.cardHolderLabel}>CARDHOLDER</Text>
+                          <Text style={styles.cardHolderLabel}>
+                            {selectedCardDetail.type === "cash"
+                              ? "CUSTODIAN"
+                              : "CARDHOLDER"}
+                          </Text>
                           <Text style={styles.cardHolderName} numberOfLines={1}>
-                            {selectedCardDetail.cardholderName}
+                            {selectedCardDetail.cardholderName ||
+                              currentUser?.name ||
+                              "Cash Custodian"}
                           </Text>
                         </View>
-                        <Text style={styles.cardNumberText}>
+                        <Text
+                          style={
+                            selectedCardDetail.type === "cash"
+                              ? styles.cashSerialText
+                              : styles.cardNumberText
+                          }
+                        >
                           {selectedCardDetail.accountNumber}
                         </Text>
                       </View>
@@ -2809,6 +3506,126 @@ export function WalletScreen({
 
                     {/* Actions Section */}
                     <View style={{ marginVertical: 14, gap: 10 }}>
+                      {selectedCardDetail.type === "cash" && (
+                        <View style={{ gap: 8 }}>
+                          <TouchableOpacity
+                            style={[
+                              styles.cardDetailActionRow,
+                              {
+                                backgroundColor: isDark
+                                  ? "#064E3B30"
+                                  : "#ECFDF5",
+                                borderColor: isDark ? "#047857" : "#A7F3D0",
+                              },
+                            ]}
+                            onPress={() => {
+                              setShowCardDetailModal(false);
+                              handleOpenCashExpense(selectedCardDetail.id);
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <View
+                              style={[
+                                styles.cardDetailActionIconWrap,
+                                { backgroundColor: "#05966920" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="flash"
+                                size={18}
+                                color="#059669"
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[
+                                  styles.cardDetailActionTitle,
+                                  { color: isDark ? colors.text : "#065F46" },
+                                ]}
+                              >
+                                Log Cash Spent (Cash on Hand)
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.cardDetailActionSub,
+                                  {
+                                    color: isDark
+                                      ? colors.textMuted
+                                      : "#047857",
+                                  },
+                                ]}
+                              >
+                                Quick-record daily commute, food, and petty
+                                expenses
+                              </Text>
+                            </View>
+                            <Ionicons
+                              name="chevron-forward"
+                              size={16}
+                              color={isDark ? colors.textMuted : "#059669"}
+                            />
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.cardDetailActionRow,
+                              {
+                                backgroundColor: isDark
+                                  ? colors.surfaceInset
+                                  : "#F0FDF4",
+                                borderColor: isDark ? colors.border : "#BBF7D0",
+                              },
+                            ]}
+                            onPress={() => {
+                              setShowCardDetailModal(false);
+                              handleOpenCashAutomation(selectedCardDetail.id);
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <View
+                              style={[
+                                styles.cardDetailActionIconWrap,
+                                { backgroundColor: "#10B98120" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="sparkles"
+                                size={18}
+                                color="#10B981"
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[
+                                  styles.cardDetailActionTitle,
+                                  { color: isDark ? colors.text : "#0F172A" },
+                                ]}
+                              >
+                                Cash Expense Automation Suite
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.cardDetailActionSub,
+                                  {
+                                    color: isDark
+                                      ? colors.textMuted
+                                      : "#64748B",
+                                  },
+                                ]}
+                              >
+                                Daily recurring commute & allowance
+                                auto-deductions
+                              </Text>
+                            </View>
+                            <Ionicons
+                              name="chevron-forward"
+                              size={16}
+                              color={isDark ? colors.textMuted : "#94A3B8"}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
                       {!selectedCardDetail.isDefault && (
                         <TouchableOpacity
                           style={[
@@ -2923,7 +3740,7 @@ export function WalletScreen({
                               { color: isDark ? colors.text : "#0F172A" },
                             ]}
                           >
-                            Send Funds
+                            Send
                           </Text>
                         </TouchableOpacity>
 
@@ -2987,7 +3804,7 @@ export function WalletScreen({
                               { color: isDark ? colors.text : "#0F172A" },
                             ]}
                           >
-                            Account No.
+                            Acct No.
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -3114,7 +3931,16 @@ export function WalletScreen({
                         style={styles.simModalIconWrap}
                       >
                         <Ionicons
-                          name={selectedExpensePreset.icon}
+                          name={
+                            selectedExpensePreset.id === "custom" &&
+                            customExpenseTitle.trim()
+                              ? getExpenseSemanticIconMobile({
+                                  title: customExpenseTitle,
+                                  note: simNote,
+                                  type: "expense_simulation",
+                                }).icon
+                              : selectedExpensePreset.icon
+                          }
                           size={26}
                           color="#FFFFFF"
                         />
@@ -3129,7 +3955,10 @@ export function WalletScreen({
                             },
                           ]}
                         >
-                          {selectedExpensePreset.title}
+                          {selectedExpensePreset.id === "custom" &&
+                          customExpenseTitle.trim()
+                            ? customExpenseTitle.trim()
+                            : selectedExpensePreset.title}
                         </Text>
                         <Text
                           style={[
@@ -3141,6 +3970,40 @@ export function WalletScreen({
                         </Text>
                       </View>
                     </View>
+
+                    {/* Custom Expense Name Input when Custom Preset Selected */}
+                    {selectedExpensePreset.id === "custom" && (
+                      <View style={{ marginTop: 10 }}>
+                        <Text
+                          style={[
+                            styles.inputLabel,
+                            {
+                              color: isDark ? colors.textSecondary : "#475569",
+                            },
+                          ]}
+                        >
+                          Custom Expense Name / For What
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.modalTextInput,
+                            {
+                              backgroundColor: isDark
+                                ? colors.surfaceInset
+                                : "#F8FAFC",
+                              borderColor: isDark ? colors.border : "#CBD5E1",
+                              color: isDark ? colors.text : "#0F172A",
+                            },
+                          ]}
+                          value={customExpenseTitle}
+                          onChangeText={setCustomExpenseTitle}
+                          placeholder="e.g. Milk Tea, Dinner with friends, GrabCar, Gym"
+                          placeholderTextColor={
+                            isDark ? colors.textMuted : "#94A3B8"
+                          }
+                        />
+                      </View>
+                    )}
 
                     {/* Expense Amount Input */}
                     <Text
@@ -3428,11 +4291,17 @@ export function WalletScreen({
                         <ActivityIndicator size="small" color="#FFFFFF" />
                       ) : (
                         <Text style={styles.modalPrimaryBtnText}>
-                          Simulate & Deduct ₱
-                          {expenseAmt.toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {isInsufficient && expenseAmt > 0
+                            ? `Insufficient Balance on ${currentCard?.name || "Card"}`
+                            : expenseAmt <= 0
+                              ? "Enter Expense Amount"
+                              : `Simulate & Deduct ₱${expenseAmt.toLocaleString(
+                                  "en-US",
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  },
+                                )}`}
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -3929,11 +4798,19 @@ export function WalletScreen({
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <Text style={styles.modalPrimaryBtnText}>
-                        Confirm Transfer ₱
-                        {transferAmt.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {isSameCard
+                          ? "Select Different Accounts"
+                          : isInsufficient && transferAmt > 0
+                            ? `Insufficient Balance on ${sourceCard?.name || "Card"}`
+                            : transferAmt <= 0
+                              ? "Enter Transfer Amount"
+                              : `Confirm Transfer ₱${transferAmt.toLocaleString(
+                                  "en-US",
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  },
+                                )}`}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -3949,6 +4826,641 @@ export function WalletScreen({
                       ]}
                     >
                       Cancel
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL 2.8: Quick Cash Expense Logger */}
+      <Modal
+        visible={showCashExpenseModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCashExpenseModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowCashExpenseModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+                borderColor: isDark ? colors.border : "transparent",
+                borderWidth: isDark ? 1 : 0,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.modalHandle,
+                isDark && { backgroundColor: colors.textMuted },
+              ]}
+            />
+
+            {(() => {
+              const cashCard =
+                wallet?.cards.find((c) => c.id === selectedCashCardId) ||
+                wallet?.cards.find((c) => c.type === "cash") ||
+                wallet?.cards[0];
+              const cashBal = cashCard?.balance || 0;
+              const expenseAmt = parseFloat(cashExpenseAmount) || 0;
+              const isInsufficient = cashBal < expenseAmt;
+
+              return (
+                <View>
+                  <View style={styles.simModalHeaderRow}>
+                    <View
+                      style={[
+                        styles.simModalIconWrap,
+                        { backgroundColor: "#065F46" },
+                      ]}
+                    >
+                      <Ionicons name="cash" size={24} color="#34D399" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.modalTitle,
+                          {
+                            color: isDark ? colors.text : "#0F172A",
+                            marginBottom: 2,
+                          },
+                        ]}
+                      >
+                        Record Cash Expense
+                      </Text>
+                      <Text
+                        style={[
+                          styles.simModalSub,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Deduct directly from physical Cash on Hand
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Cash Card Source Pill */}
+                  {cashCard && (
+                    <View
+                      style={[
+                        styles.cashSourcePill,
+                        {
+                          backgroundColor: isDark ? "#064E3B30" : "#ECFDF5",
+                          borderColor: isDark ? "#047857" : "#A7F3D0",
+                        },
+                      ]}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Ionicons
+                          name="wallet-outline"
+                          size={16}
+                          color="#059669"
+                        />
+                        <Text
+                          style={[
+                            styles.cashSourcePillTitle,
+                            { color: isDark ? "#6EE7B7" : "#065F46" },
+                          ]}
+                        >
+                          {cashCard.name}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.cashSourcePillBal,
+                          { color: isDark ? "#A7F3D0" : "#047857" },
+                        ]}
+                      >
+                        ₱{cashBal.toLocaleString()} available
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Amount Input */}
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: isDark ? colors.textSecondary : "#475569",
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    Cash Amount (₱)
+                  </Text>
+                  <View
+                    style={[
+                      styles.simAmountInputRow,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.simAmountCurrency, { color: "#059669" }]}
+                    >
+                      ₱
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.simAmountTextInput,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                      value={cashExpenseAmount}
+                      onChangeText={setCashExpenseAmount}
+                      keyboardType="numeric"
+                      placeholder="0.00"
+                      placeholderTextColor={
+                        isDark ? colors.textMuted : "#94A3B8"
+                      }
+                    />
+                  </View>
+
+                  {/* Philippine Cash Quick Presets */}
+                  <View style={styles.simChipRow}>
+                    {[
+                      {
+                        label: "₱20 Jeep",
+                        val: 20,
+                        desc: "Jeepney Fare",
+                        cat: "Commute",
+                      },
+                      {
+                        label: "₱35 Sari-sari",
+                        val: 35,
+                        desc: "Sari-sari Store Snack",
+                        cat: "Snack",
+                      },
+                      {
+                        label: "₱50 Trike",
+                        val: 50,
+                        desc: "Tricycle / Parking",
+                        cat: "Commute",
+                      },
+                      {
+                        label: "₱85 Lunch",
+                        val: 85,
+                        desc: "Karinderya Meal",
+                        cat: "Food",
+                      },
+                      {
+                        label: "₱250 Market",
+                        val: 250,
+                        desc: "Palengke Supplies",
+                        cat: "Groceries",
+                      },
+                    ].map((p, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[
+                          styles.simChipBtn,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#ECFDF5",
+                            borderColor: isDark ? colors.border : "#A7F3D0",
+                          },
+                        ]}
+                        onPress={() => {
+                          setCashExpenseAmount(String(p.val));
+                          setCashExpenseTitle(p.desc);
+                          setCashExpenseCategory(p.cat);
+                        }}
+                      >
+                        <Text
+                          style={[styles.simChipBtnText, { color: "#059669" }]}
+                        >
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {/* Expense Description */}
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: isDark ? colors.textSecondary : "#475569",
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    Expense Title / For What
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.modalTextInput,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                        color: isDark ? colors.text : "#0F172A",
+                      },
+                    ]}
+                    value={cashExpenseTitle}
+                    onChangeText={setCashExpenseTitle}
+                    placeholder="e.g. Jeepney fare, Karinderya lunch, snacks"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  />
+
+                  {/* Live Impact Preview */}
+                  <View
+                    style={[
+                      styles.simPreviewCallout,
+                      {
+                        backgroundColor: isInsufficient
+                          ? isDark
+                            ? "#450A0A30"
+                            : "#FEF2F2"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F0FDF4",
+                        borderColor: isInsufficient
+                          ? "#EF4444"
+                          : isDark
+                            ? colors.border
+                            : "#BBF7D0",
+                        marginTop: 10,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={isInsufficient ? "alert-circle" : "cash-outline"}
+                      size={18}
+                      color={isInsufficient ? "#EF4444" : "#10B981"}
+                    />
+                    <Text
+                      style={[
+                        styles.simPreviewText,
+                        {
+                          color: isInsufficient
+                            ? "#EF4444"
+                            : isDark
+                              ? colors.text
+                              : "#15803D",
+                        },
+                      ]}
+                    >
+                      {isInsufficient
+                        ? `Insufficient cash on hand (₱${cashBal.toLocaleString()} available)`
+                        : `Cash on hand after expense: ₱${Math.max(0, cashBal - expenseAmt).toLocaleString()}`}
+                    </Text>
+                  </View>
+
+                  {/* Confirm Button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      { backgroundColor: "#059669", marginTop: 14 },
+                      (isInsufficient || expenseAmt <= 0) && {
+                        backgroundColor: "#94A3B8",
+                      },
+                    ]}
+                    onPress={handleExecuteCashExpense}
+                    disabled={
+                      isRecordingCashExpense ||
+                      isInsufficient ||
+                      expenseAmt <= 0
+                    }
+                    activeOpacity={0.8}
+                  >
+                    {isRecordingCashExpense ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalPrimaryBtnText}>
+                        Log ₱{expenseAmt.toLocaleString()} Cash Spent
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={() => setShowCashExpenseModal(false)}
+                  >
+                    <Text
+                      style={[
+                        styles.modalCancelBtnText,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL 2.9: Cash Finance & Expense Automation Suite */}
+      <Modal
+        visible={showCashAutomationModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCashAutomationModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowCashAutomationModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+                borderColor: isDark ? colors.border : "transparent",
+                borderWidth: isDark ? 1 : 0,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.modalHandle,
+                isDark && { backgroundColor: colors.textMuted },
+              ]}
+            />
+
+            {(() => {
+              const cashCard =
+                wallet?.cards.find((c) => c.id === selectedCashCardId) ||
+                wallet?.cards.find((c) => c.type === "cash") ||
+                wallet?.cards[0];
+              const cashBal = cashCard?.balance || 0;
+              const activeRules = cashRules.filter(
+                (r) => r.enabled && r.amount > 0,
+              );
+              const totalDailyAuto = activeRules.reduce(
+                (sum, r) => sum + r.amount,
+                0,
+              );
+              const isInsufficient = cashBal < totalDailyAuto;
+
+              return (
+                <View>
+                  <View style={styles.simModalHeaderRow}>
+                    <View
+                      style={[
+                        styles.simModalIconWrap,
+                        { backgroundColor: "#064E3B" },
+                      ]}
+                    >
+                      <Ionicons name="sparkles" size={24} color="#34D399" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.modalTitle,
+                          {
+                            color: isDark ? colors.text : "#0F172A",
+                            marginBottom: 2,
+                          },
+                        ]}
+                      >
+                        Automate Cash Expenses
+                      </Text>
+                      <Text
+                        style={[
+                          styles.simModalSub,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Auto-finance and schedule physical cash expenditures
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Cash Health & Denominations Card */}
+                  <LinearGradient
+                    colors={["#064E3B", "#065F46"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.cashAutoHealthCard}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={styles.cashAutoHealthLabel}>
+                        CURRENT CASH ON HAND
+                      </Text>
+                      <View style={styles.cashAutoLiveDot} />
+                    </View>
+                    <Text style={styles.cashAutoHealthAmount}>
+                      ₱
+                      {cashBal.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                    <View style={styles.cashAutoHealthFooter}>
+                      <Text style={styles.cashAutoHealthFooterText}>
+                        Estimated: ₱1,000s, ₱500s, ₱100s & Coins
+                      </Text>
+                      <Text style={styles.cashAutoHealthBurn}>
+                        ₱{totalDailyAuto}/day active burn
+                      </Text>
+                    </View>
+                  </LinearGradient>
+
+                  {/* Configured Automation Rules */}
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: isDark ? colors.textSecondary : "#475569",
+                        marginTop: 14,
+                        marginBottom: 6,
+                      },
+                    ]}
+                  >
+                    Daily Cash Expense Rules
+                  </Text>
+
+                  <View style={{ gap: 8 }}>
+                    {cashRules.map((rule) => (
+                      <View
+                        key={rule.id}
+                        style={[
+                          styles.cashRuleItem,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#F8FAFC",
+                            borderColor: rule.enabled
+                              ? isDark
+                                ? "#047857"
+                                : "#A7F3D0"
+                              : isDark
+                                ? colors.border
+                                : "#E2E8F0",
+                          },
+                        ]}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <Ionicons
+                              name={
+                                rule.category === "commute"
+                                  ? "bus-outline"
+                                  : rule.category === "food"
+                                    ? "restaurant-outline"
+                                    : "storefront-outline"
+                              }
+                              size={16}
+                              color={rule.enabled ? "#059669" : "#94A3B8"}
+                            />
+                            <Text
+                              style={[
+                                styles.cashRuleTitle,
+                                {
+                                  color: rule.enabled
+                                    ? isDark
+                                      ? colors.text
+                                      : "#0F172A"
+                                    : colors.textMuted,
+                                },
+                              ]}
+                            >
+                              {rule.title}
+                            </Text>
+                          </View>
+                          <Text
+                            style={[
+                              styles.cashRuleSub,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            ₱{rule.amount} / day • {rule.frequency}
+                          </Text>
+                        </View>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.cashRuleToggleBtn,
+                            rule.enabled
+                              ? { backgroundColor: "#059669" }
+                              : {
+                                  backgroundColor: isDark
+                                    ? colors.border
+                                    : "#CBD5E1",
+                                },
+                          ]}
+                          onPress={() => handleToggleCashRule(rule.id)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.cashRuleToggleText}>
+                            {rule.enabled ? "ACTIVE" : "PAUSED"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* 1-Tap Execute Today's Auto Cash Burn */}
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      { backgroundColor: "#059669", marginTop: 14 },
+                      (isInsufficient || totalDailyAuto <= 0) && {
+                        backgroundColor: "#94A3B8",
+                      },
+                    ]}
+                    onPress={handleRunCashAutoExpenses}
+                    disabled={
+                      isExecutingCashAuto ||
+                      isInsufficient ||
+                      totalDailyAuto <= 0
+                    }
+                    activeOpacity={0.8}
+                  >
+                    {isExecutingCashAuto ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Ionicons name="flash" size={18} color="#FFFFFF" />
+                        <Text style={styles.modalPrimaryBtnText}>
+                          Run Today's Auto Cash (₱{totalDailyAuto})
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Replenish Cash Action */}
+                  <TouchableOpacity
+                    style={[
+                      styles.cashReplenishBtn,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#EFF6FF",
+                        borderColor: isDark ? colors.border : "#BFDBFE",
+                      },
+                    ]}
+                    onPress={() => {
+                      setShowCashAutomationModal(false);
+                      handleOpenTransfer(undefined);
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons
+                      name="arrow-down-circle"
+                      size={18}
+                      color="#2563EB"
+                    />
+                    <Text style={styles.cashReplenishBtnText}>
+                      Replenish Cash on Hand from Linked Bank Card
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={() => setShowCashAutomationModal(false)}
+                  >
+                    <Text
+                      style={[
+                        styles.modalCancelBtnText,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      Done
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -4260,17 +5772,248 @@ export function WalletScreen({
               />
             </View>
 
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={handlePocketTransfer}
-              activeOpacity={0.8}
+            {/* Select Card to Deduct From (when stashing) or Withdraw To (when withdrawing) */}
+            <Text
+              style={[
+                styles.inputLabel,
+                {
+                  color: isDark ? colors.textSecondary : "#475569",
+                  marginTop: 14,
+                  marginBottom: 6,
+                },
+              ]}
             >
-              <Text style={styles.modalPrimaryBtnText}>
-                Confirm{" "}
-                {pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱
-                {parseFloat(pocketTransferAmount || "0").toLocaleString()}
-              </Text>
-            </TouchableOpacity>
+              {pocketActionType === "deposit"
+                ? "Deduct From Configured Card"
+                : "Withdraw To Configured Card"}
+            </Text>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+            >
+              {(wallet?.cards || []).map((c) => {
+                const isSelected =
+                  (pocketSelectedCardId ||
+                    wallet?.cards.find((x) => x.isDefault)?.id ||
+                    wallet?.cards[0]?.id) === c.id;
+                const preset =
+                  PHILIPPINE_CARD_PRESETS[c.type] ||
+                  PHILIPPINE_CARD_PRESETS.custom;
+                const isCashCard = c.type === "cash";
+
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.pocketCardOption,
+                      isSelected
+                        ? {
+                            borderColor: isCashCard ? "#059669" : "#2563EB",
+                            backgroundColor: isDark
+                              ? isCashCard
+                                ? "#064E3B40"
+                                : "#1E3A8A35"
+                              : isCashCard
+                                ? "#ECFDF5"
+                                : "#EFF6FF",
+                          }
+                        : {
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#FFFFFF",
+                          },
+                    ]}
+                    onPress={() => setPocketSelectedCardId(c.id)}
+                    activeOpacity={0.75}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        marginBottom: 3,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: preset?.gradient[0] || "#2563EB",
+                        }}
+                      />
+                      <Text
+                        style={[
+                          styles.pocketCardOptionName,
+                          {
+                            color: isSelected
+                              ? isCashCard
+                                ? "#059669"
+                                : "#2563EB"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                            fontWeight: isSelected ? "700" : "600",
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {c.name}
+                      </Text>
+                      {c.isDefault && (
+                        <View style={styles.cardDefaultMiniBadge}>
+                          <Text style={styles.cardDefaultMiniText}>
+                            PRIMARY
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.pocketCardOptionAccount,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      {c.accountNumber}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.pocketCardOptionBal,
+                        {
+                          color: isSelected
+                            ? isCashCard
+                              ? "#047857"
+                              : "#1D4ED8"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                        },
+                      ]}
+                    >
+                      ₱
+                      {(c.balance || 0).toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Live Impact Preview */}
+            {(() => {
+              const activeCard =
+                wallet?.cards.find(
+                  (c) =>
+                    c.id ===
+                    (pocketSelectedCardId ||
+                      wallet?.cards.find((x) => x.isDefault)?.id ||
+                      wallet?.cards[0]?.id),
+                ) || wallet?.cards[0];
+              const num = parseFloat(pocketTransferAmount) || 0;
+              const cardBal = activeCard?.balance || 0;
+              const isInsufficient =
+                pocketActionType === "deposit" && cardBal < num;
+
+              if (!activeCard) return null;
+
+              return (
+                <View
+                  style={[
+                    styles.pocketPreviewBox,
+                    {
+                      backgroundColor: isInsufficient
+                        ? isDark
+                          ? "#450A0A30"
+                          : "#FEF2F2"
+                        : isDark
+                          ? colors.surfaceInset
+                          : "#F0FDF4",
+                      borderColor: isInsufficient
+                        ? "#EF4444"
+                        : isDark
+                          ? colors.border
+                          : "#BBF7D0",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      isInsufficient ? "alert-circle" : "information-circle"
+                    }
+                    size={16}
+                    color={isInsufficient ? "#EF4444" : "#10B981"}
+                  />
+                  <Text
+                    style={[
+                      styles.pocketPreviewText,
+                      {
+                        color: isInsufficient
+                          ? "#EF4444"
+                          : isDark
+                            ? colors.text
+                            : "#15803D",
+                      },
+                    ]}
+                  >
+                    {pocketActionType === "deposit"
+                      ? isInsufficient
+                        ? `Insufficient balance on ${activeCard.name} (₱${cardBal.toLocaleString()} available)`
+                        : `After saving: ${activeCard.name} balance will be ₱${Math.max(0, cardBal - num).toLocaleString()}`
+                      : `After withdrawal: ${activeCard.name} balance will be ₱${(cardBal + num).toLocaleString()}`}
+                  </Text>
+                </View>
+              );
+            })()}
+
+            {(() => {
+              const activeCard =
+                wallet?.cards.find(
+                  (c) =>
+                    c.id ===
+                    (pocketSelectedCardId ||
+                      wallet?.cards.find((x) => x.isDefault)?.id ||
+                      wallet?.cards[0]?.id),
+                ) || wallet?.cards[0];
+              const num = parseFloat(pocketTransferAmount) || 0;
+              const cardBal = activeCard?.balance || 0;
+              const isInsufficient =
+                pocketActionType === "deposit"
+                  ? cardBal < num
+                  : (selectedPocket?.currentAmount || 0) < num;
+
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.modalPrimaryBtn,
+                    (isInsufficient || num <= 0) && {
+                      backgroundColor: "#94A3B8",
+                    },
+                  ]}
+                  disabled={isInsufficient || num <= 0}
+                  onPress={handlePocketTransfer}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modalPrimaryBtnText}>
+                    {isInsufficient && num > 0
+                      ? `Insufficient Balance on ${pocketActionType === "deposit" ? activeCard?.name || "Card" : selectedPocket?.name || "Pocket"}`
+                      : num <= 0
+                        ? "Enter Amount"
+                        : `Confirm ${pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱${num.toLocaleString(
+                            "en-US",
+                            {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            },
+                          )}`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })()}
 
             <TouchableOpacity
               style={styles.modalCancelBtn}
@@ -4318,9 +6061,39 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-            <View style={styles.receiptTopCircle}>
-              <Ionicons name="checkmark-circle" size={48} color="#10B981" />
-            </View>
+            {(() => {
+              const isExpense =
+                selectedTx?.type === "expense_simulation" ||
+                selectedTx?.type === "cash_expense";
+              if (isExpense && selectedTx) {
+                const iconData = getExpenseSemanticIconMobile(selectedTx);
+                return (
+                  <View
+                    style={[
+                      styles.receiptTopCircle,
+                      {
+                        backgroundColor: iconData.bg,
+                        padding: 14,
+                        borderRadius: 36,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={iconData.icon}
+                      size={36}
+                      color={iconData.color}
+                    />
+                  </View>
+                );
+              }
+              return (
+                <View style={styles.receiptTopCircle}>
+                  <Ionicons name="checkmark-circle" size={48} color="#10B981" />
+                </View>
+              );
+            })()}
 
             <Text
               style={[
@@ -4328,11 +6101,106 @@ export function WalletScreen({
                 { color: isDark ? colors.text : "#0F172A" },
               ]}
             >
-              Payment Receipt
+              {selectedTx?.type === "expense_simulation" ||
+              selectedTx?.type === "cash_expense"
+                ? "Expense Receipt"
+                : "Payment Receipt"}
             </Text>
             <Text style={styles.receiptAmount}>
               ₱{selectedTx?.amount.toLocaleString()}
             </Text>
+
+            {/* Prominent Expense Note Box */}
+            {(() => {
+              const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                (p: QuickExpensePreset) =>
+                  p.title.toLowerCase() === selectedTx?.title?.toLowerCase() ||
+                  p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
+              );
+              const fallbackNote =
+                matchedPreset?.defaultNote ||
+                selectedTx?.description?.trim() ||
+                (selectedTx?.type === "expense_simulation"
+                  ? `Daily simulated expense for ${selectedTx?.title}`
+                  : selectedTx?.title || "Daily transaction record");
+              const hasCustomNote = Boolean(selectedTx?.note?.trim());
+              const displayExpenseNote = hasCustomNote
+                ? selectedTx?.note?.trim()
+                : fallbackNote;
+
+              return (
+                <View
+                  style={[
+                    styles.receiptNoteCard,
+                    {
+                      backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                      borderColor: isDark ? colors.border : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Ionicons
+                        name="document-text"
+                        size={14}
+                        color="#2563EB"
+                      />
+                      <Text
+                        style={[
+                          styles.receiptNoteLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        EXPENSE NOTE
+                      </Text>
+                    </View>
+                    {!hasCustomNote && (
+                      <View
+                        style={{
+                          backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
+                          paddingHorizontal: 7,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: "700",
+                            color: "#2563EB",
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          Preset Fallback
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      styles.receiptNoteValue,
+                      { color: isDark ? colors.text : "#0F172A" },
+                    ]}
+                  >
+                    {displayExpenseNote}
+                  </Text>
+                </View>
+              );
+            })()}
 
             <View
               style={[
@@ -4357,6 +6225,69 @@ export function WalletScreen({
                 ]}
               >
                 {selectedTx?.title}
+              </Text>
+            </View>
+
+            {Boolean(
+              selectedTx?.category ||
+              selectedTx?.type === "expense_simulation" ||
+              selectedTx?.type === "cash_expense",
+            ) && (
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Category
+                </Text>
+                <Text
+                  style={[
+                    styles.receiptValue,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                >
+                  {selectedTx?.category ||
+                    (selectedTx?.type === "expense_simulation"
+                      ? "Daily Expense"
+                      : "Cash on Hand")}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.receiptRow}>
+              <Text
+                style={[
+                  styles.receiptLabel,
+                  { color: isDark ? colors.textMuted : "#64748B" },
+                ]}
+              >
+                Expense Note
+              </Text>
+              <Text
+                style={[
+                  styles.receiptValue,
+                  { color: isDark ? colors.text : "#0F172A", maxWidth: "60%" },
+                ]}
+                numberOfLines={3}
+              >
+                {(() => {
+                  const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                    (p: QuickExpensePreset) =>
+                      p.title.toLowerCase() ===
+                        selectedTx?.title?.toLowerCase() ||
+                      p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
+                  );
+                  return (
+                    selectedTx?.note?.trim() ||
+                    matchedPreset?.defaultNote ||
+                    selectedTx?.description?.trim() ||
+                    (selectedTx?.type === "expense_simulation"
+                      ? `Daily simulated expense for ${selectedTx?.title}`
+                      : selectedTx?.title || "Daily transaction record")
+                  );
+                })()}
               </Text>
             </View>
 
@@ -4784,16 +6715,80 @@ export function WalletScreen({
               />
             </View>
 
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={handleSendMoney}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="paper-plane" size={18} color="#FFFFFF" />
-              <Text style={styles.modalPrimaryBtnText}>
-                Send ₱{parseFloat(sendAmount || "0").toLocaleString()} Now
-              </Text>
-            </TouchableOpacity>
+            {(() => {
+              const fundingCard =
+                wallet?.cards.find((c) => c.id === sendSelectedCardId) ||
+                wallet?.cards[0];
+              const fundingBal = fundingCard?.balance || 0;
+              const sendVal = parseFloat(sendAmount) || 0;
+              const isSendInsufficient = fundingBal < sendVal;
+
+              return (
+                <View style={{ width: "100%", marginTop: 8 }}>
+                  {fundingCard && isSendInsufficient && sendVal > 0 && (
+                    <View
+                      style={[
+                        styles.simPreviewCallout,
+                        {
+                          backgroundColor: isDark ? "#450A0A30" : "#FEF2F2",
+                          borderColor: "#EF4444",
+                          marginBottom: 12,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="alert-circle" size={18} color="#EF4444" />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.simPreviewText, { color: "#EF4444" }]}
+                        >
+                          Insufficient balance on {fundingCard.name}. Available:
+                          ₱{fundingBal.toLocaleString()} (Short by ₱
+                          {(sendVal - fundingBal).toLocaleString()}).
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      (isSendInsufficient ||
+                        sendVal <= 0 ||
+                        !sendRecipient.trim()) && {
+                        backgroundColor: "#94A3B8",
+                      },
+                    ]}
+                    disabled={
+                      isSendInsufficient ||
+                      sendVal <= 0 ||
+                      !sendRecipient.trim()
+                    }
+                    onPress={handleSendMoney}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name={
+                        isSendInsufficient && sendVal > 0
+                          ? "alert-circle"
+                          : "paper-plane"
+                      }
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.modalPrimaryBtnText}>
+                      {isSendInsufficient && sendVal > 0
+                        ? `Insufficient Balance on ${fundingCard?.name || "Card"}`
+                        : sendVal <= 0
+                          ? "Enter Amount"
+                          : `Send ₱${sendVal.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} Now`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
 
             <TouchableOpacity
               style={styles.modalCancelBtn}
@@ -5133,30 +7128,79 @@ export function WalletScreen({
               )}
             </View>
 
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={() => {
-                if (!isQrScanned) {
-                  setIsQrScanned(true);
-                } else {
-                  setShowScanQrModal(false);
-                  Alert.alert(
-                    "QR Ph Payment Completed",
-                    "₱650.00 transferred successfully to Roommate WiFi Split via your default card!",
-                  );
-                }
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={isQrScanned ? "checkmark" : "camera"}
-                size={18}
-                color="#FFFFFF"
-              />
-              <Text style={styles.modalPrimaryBtnText}>
-                {isQrScanned ? "Confirm & Pay ₱650.00" : "Simulate QR Ph Scan"}
-              </Text>
-            </TouchableOpacity>
+            {(() => {
+              const defaultCard =
+                wallet?.cards.find((c) => c.isDefault) || wallet?.cards[0];
+              const isQrInsufficient =
+                isQrScanned && (defaultCard?.balance || 0) < 650;
+
+              return (
+                <View style={{ width: "100%" }}>
+                  {isQrInsufficient && defaultCard && (
+                    <View
+                      style={[
+                        styles.simPreviewCallout,
+                        {
+                          backgroundColor: isDark ? "#450A0A30" : "#FEF2F2",
+                          borderColor: "#EF4444",
+                          marginBottom: 10,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="alert-circle" size={18} color="#EF4444" />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.simPreviewText, { color: "#EF4444" }]}
+                        >
+                          Insufficient balance on {defaultCard.name} (₱
+                          {(defaultCard.balance || 0).toLocaleString()}{" "}
+                          available). Top up or rebalance funds to pay ₱650.00.
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      isQrInsufficient && { backgroundColor: "#94A3B8" },
+                    ]}
+                    disabled={isQrInsufficient}
+                    onPress={() => {
+                      if (!isQrScanned) {
+                        setIsQrScanned(true);
+                      } else {
+                        setShowScanQrModal(false);
+                        Alert.alert(
+                          "QR Ph Payment Completed",
+                          `₱650.00 transferred successfully to Roommate WiFi Split via ${defaultCard?.name || "your card"}!`,
+                        );
+                      }
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name={
+                        isQrInsufficient
+                          ? "alert-circle"
+                          : isQrScanned
+                            ? "checkmark"
+                            : "camera"
+                      }
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.modalPrimaryBtnText}>
+                      {isQrInsufficient
+                        ? "Insufficient Balance"
+                        : isQrScanned
+                          ? "Confirm & Pay ₱650.00"
+                          : "Simulate QR Ph Scan"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
 
             <TouchableOpacity
               style={styles.modalCancelBtn}
@@ -6164,7 +8208,7 @@ export function WalletScreen({
                         color="#FFFFFF"
                       />
                       <Text style={styles.walkthroughActionPrimaryText}>
-                        + Cash In First Balance
+                        Cash In First Balance
                       </Text>
                     </TouchableOpacity>
 
@@ -6188,7 +8232,7 @@ export function WalletScreen({
                           { color: isDark ? colors.text : "#0F172A" },
                         ]}
                       >
-                        + Add a Payment Card
+                        Add a Payment Card
                       </Text>
                     </TouchableOpacity>
 
@@ -6216,7 +8260,7 @@ export function WalletScreen({
                           { color: isDark ? colors.text : "#0F172A" },
                         ]}
                       >
-                        + Create a Savings Pocket
+                        Create a Savings Pocket
                       </Text>
                     </TouchableOpacity>
 
@@ -6452,6 +8496,7 @@ const styles = StyleSheet.create({
   },
   quickCircleMenuContainer: {
     marginVertical: 14,
+    marginHorizontal: -20,
   },
   quickCircleScrollView: {
     overflow: "visible",
@@ -6460,13 +8505,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    paddingHorizontal: 2,
-    paddingBottom: 2,
+    paddingHorizontal: 20,
+    paddingBottom: 4,
   },
   quickCircleItem: {
     alignItems: "center",
     justifyContent: "center",
-    width: 68,
+    width: 72,
   },
   quickCircleBtn: {
     width: 56,
@@ -6712,23 +8757,27 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
   },
+  pocketsScrollView: {
+    marginHorizontal: -20,
+    overflow: "visible",
+  },
   pocketsCarousel: {
     flexDirection: "row",
     gap: 14,
+    paddingHorizontal: 20,
     paddingBottom: 16,
-    paddingRight: 10,
   },
   pocketCard: {
-    width: 220,
-    minHeight: 180,
+    width: 260,
+    minHeight: 184,
     borderRadius: 18,
-    padding: 14,
+    padding: 16,
     borderWidth: 1,
     justifyContent: "space-between",
   },
   addPocketPlaceholder: {
-    width: 140,
-    minHeight: 180,
+    width: 150,
+    minHeight: 184,
     borderRadius: 18,
     borderWidth: 2,
     borderStyle: "dashed",
@@ -6995,10 +9044,13 @@ const styles = StyleSheet.create({
   },
   modalPrimaryBtn: {
     width: "100%",
+    flexDirection: "row",
     backgroundColor: "#2563EB",
     paddingVertical: 14,
     borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
     marginTop: 8,
     shadowColor: "#2563EB",
     shadowOffset: { width: 0, height: 4 },
@@ -7133,6 +9185,24 @@ const styles = StyleSheet.create({
   receiptValue: {
     fontSize: 12,
     fontWeight: "700",
+  },
+  receiptNoteCard: {
+    width: "100%",
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+  },
+  receiptNoteLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  receiptNoteValue: {
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+    marginTop: 2,
   },
   headerRightActions: {
     flexDirection: "row",
@@ -7767,5 +9837,221 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginTop: 12,
+  },
+
+  // Bespoke Cash Card Styles
+  cardRightMeta: {
+    alignItems: "flex-end",
+  },
+  cashCardItem: {
+    overflow: "hidden",
+    position: "relative",
+  },
+  cashWatermarkWrap: {
+    position: "absolute",
+    right: -18,
+    bottom: -22,
+    zIndex: 0,
+    pointerEvents: "none",
+  },
+  cashBrandBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(5, 150, 105, 0.35)",
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(52, 211, 153, 0.4)",
+  },
+  cashBrandText: {
+    color: "#E6FFFA",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+  },
+  cashTenderBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  cashTenderText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  cashBalanceLabel: {
+    color: "#A7F3D0",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
+  cashBalanceAmount: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "800",
+    marginTop: 2,
+    letterSpacing: 0.5,
+  },
+  cashAutoLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#34D399",
+  },
+  cashAutoLiveText: {
+    color: "#6EE7B7",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  cashSerialText: {
+    color: "#D1FAE5",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  cashSubBadgeText: {
+    color: "#A7F3D0",
+    fontSize: 9,
+    fontWeight: "600",
+  },
+
+  // Pocket Card Options Deck
+  pocketCardOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    minWidth: 130,
+  },
+  pocketCardOptionName: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  pocketCardOptionAccount: {
+    fontSize: 10,
+    marginBottom: 2,
+  },
+  pocketCardOptionBal: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  pocketPreviewBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 10,
+  },
+  pocketPreviewText: {
+    fontSize: 11,
+    fontWeight: "600",
+    flex: 1,
+  },
+
+  // Cash Modals
+  cashSourcePill: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 6,
+  },
+  cashSourcePillTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  cashSourcePillBal: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  cashAutoHealthCard: {
+    padding: 14,
+    borderRadius: 16,
+    marginTop: 4,
+  },
+  cashAutoHealthLabel: {
+    color: "#A7F3D0",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  cashAutoHealthAmount: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+    marginVertical: 4,
+  },
+  cashAutoHealthFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.15)",
+    paddingTop: 6,
+    marginTop: 4,
+  },
+  cashAutoHealthFooterText: {
+    color: "#D1FAE5",
+    fontSize: 10,
+  },
+  cashAutoHealthBurn: {
+    color: "#FDE047",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  cashRuleItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  cashRuleTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  cashRuleSub: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  cashRuleToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  cashRuleToggleText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  cashReplenishBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+  },
+  cashReplenishBtnText: {
+    color: "#2563EB",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

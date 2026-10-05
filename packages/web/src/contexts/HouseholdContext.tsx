@@ -32,6 +32,9 @@ interface HouseholdContextType {
   joinHousehold: (
     codeOrId: string,
   ) => Promise<{ success: boolean; isPending?: boolean; error?: string }>;
+  joinHouseholdByCode?: (
+    codeOrId: string,
+  ) => Promise<{ success: boolean; isPending?: boolean; error?: string }>;
   updateHousehold: (updates: Partial<Household>) => Promise<void>;
   inviteMember: (
     email: string,
@@ -621,6 +624,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({
         activeCycle,
         createHousehold,
         joinHousehold,
+        joinHouseholdByCode: joinHousehold,
         updateHousehold,
         inviteMember,
         changeMemberRole,

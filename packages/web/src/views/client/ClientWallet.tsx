@@ -41,6 +41,19 @@ import {
   Zap,
   Pill,
   PlusCircle,
+  Banknote,
+  Car,
+  Film,
+  Dumbbell,
+  Scissors,
+  BookOpen,
+  Heart,
+  Tag,
+  Bookmark,
+  Compass,
+  Gift,
+  ShoppingBag,
+  FileText,
 } from "lucide-react";
 import {
   webWalletService,
@@ -50,6 +63,8 @@ import {
   WalletTransaction,
   CardProviderType,
   PHILIPPINE_CARD_PRESETS,
+  CashAutomationRule,
+  DEFAULT_CASH_RULES,
 } from "../../services/walletService";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -64,7 +79,8 @@ export interface QuickExpensePreset {
     | "cookie"
     | "zap"
     | "pill"
-    | "custom";
+    | "custom"
+    | "grocery";
   amount: number;
   gradient: [string, string];
   defaultNote: string;
@@ -102,7 +118,7 @@ export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
   {
     id: "grocery",
     title: "Grocery Run",
-    icon: "shopping-cart",
+    icon: "grocery",
     amount: 480,
     gradient: ["#047857", "#10B981"],
     defaultNote: "Fresh market & pantry supplies",
@@ -145,6 +161,410 @@ export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
     color: "#94A3B8",
   },
 ];
+
+export interface SemanticExpenseInputWeb {
+  title?: string;
+  note?: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  type?: string;
+  amount?: number;
+  [key: string]: any;
+}
+
+export type SemanticTxInputWeb = (
+  | SemanticExpenseInputWeb
+  | Partial<WalletTransaction>
+  | Record<string, any>
+) & {
+  note?: string;
+  category?: string;
+  icon?: string;
+  title?: string;
+  description?: string;
+};
+
+export function getExpenseSemanticIconWeb(tx?: SemanticTxInputWeb | null): {
+  iconNode: (className?: string) => React.ReactNode;
+  iconKey: string;
+  color: string;
+  bg: string;
+} {
+  const safeTx = (tx || {}) as SemanticTxInputWeb;
+  const rawTitle = safeTx.title || "";
+  const rawNote = safeTx.note || "";
+  const rawDescription = safeTx.description || "";
+  const rawCategory = safeTx.category || "";
+  const rawText =
+    `${rawTitle} ${rawNote} ${rawDescription} ${rawCategory}`.toLowerCase();
+
+  // 1. Drinks & Coffee
+  if (
+    /(coffee|cafe|espresso|latte|cappuccino|americano|mocha|tea|boba|milktea|milk tea|starbucks|dunkin|drink|beverage|juice|smoothie|frap|chatime|coco|macao|gong cha|tiger sugar|matcha)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Coffee className={c} />,
+      iconKey: "coffee",
+      color: "text-amber-600",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    };
+  }
+  // 2. Meals, Fast Food & Dining
+  if (
+    /(lunch|dinner|breakfast|meal|food|restaurant|karinderya|carinderia|jollibee|mcdo|mcdonald|burger|ramen|kfc|inasal|chowking|pares|silog|tapsilog|sinigang|adobo|eat|dining|resto|buffet|kbbq|samgyup|bbq|shawarma|chooks|mang inasal)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Utensils className={c} />,
+      iconKey: "utensils",
+      color: "text-orange-600",
+      bg: "bg-orange-50 dark:bg-orange-950/40",
+    };
+  }
+  // 3. Pizza
+  if (/(pizza|yellow cab|shakey|domino|pizza hut)/.test(rawText)) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Utensils className={c} />,
+      iconKey: "pizza",
+      color: "text-orange-600",
+      bg: "bg-orange-50 dark:bg-orange-950/40",
+    };
+  }
+  // 4. Merienda & Bakery Snacks
+  if (
+    /(merienda|snack|bakery|bread|pan de sal|pandesal|pastry|donut|cake|dessert|cookie|chips|ice cream|candy|waffle|goldilocks|red ribbon)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Cookie className={c} />,
+      iconKey: "cookie",
+      color: "text-amber-500",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    };
+  }
+  // 5. Ridesharing, Fuel & Personal Vehicle
+  if (
+    /(grab|taxi|cab|angkas|joyride|maxim|car|gas|fuel|petrol|toll|parking|diesel|drive|petron|shell|caltex)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Car className={c} />,
+      iconKey: "car",
+      color: "text-sky-600",
+      bg: "bg-sky-50 dark:bg-sky-950/40",
+    };
+  }
+  // 6. Commute & Transit
+  if (
+    /(commute|fare|jeep|jeepney|trike|tricycle|bus|mrt|lrt|train|transit|subway|ride|travel)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Bus className={c} />,
+      iconKey: "bus",
+      color: "text-sky-500",
+      bg: "bg-sky-50 dark:bg-sky-950/40",
+    };
+  }
+  // 7. Flights & Vacation
+  if (
+    /(flight|airplane|travel|vacation|airline|airport|cebu pacific|philippine airlines|airasia|hotel|airbnb|resort)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Plane className={c} />,
+      iconKey: "plane",
+      color: "text-blue-600",
+      bg: "bg-blue-50 dark:bg-blue-950/40",
+    };
+  }
+  // 8. Supermarket, Fresh Market & Pantry
+  if (
+    /(grocery|groceries|market|palengke|supermarket|puregold|robinsons|sm market|sari-sari|convenience|7-eleven|ministop|alfamart|store|pantry|supplies|soap|shampoo|landers|snr|s&r)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <ShoppingBag className={c} />,
+      iconKey: "grocery",
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    };
+  }
+  // 9. Pharmacy & Meds
+  if (
+    /(pharmacy|meds|medicine|drug|mercury|watsons|generics|doctor|clinic|hospital|dental|dentist|health|vitamin|pill|bandage|biogesic|neozep|paracetamol|theraflu)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Pill className={c} />,
+      iconKey: "pill",
+      color: "text-rose-600",
+      bg: "bg-rose-50 dark:bg-rose-950/40",
+    };
+  }
+  // 10. Utilities & Load
+  if (
+    /(utility|utilities|bill|load|data|electric|meralco|power|prepaid|postpaid)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Zap className={c} />,
+      iconKey: "zap",
+      color: "text-purple-600",
+      bg: "bg-purple-50 dark:bg-purple-950/40",
+    };
+  }
+  // 11. Internet & Telecom
+  if (
+    /(internet|wifi|fiber|pldt|globe|smart|converge|dito|telco)/.test(rawText)
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Radio className={c} />,
+      iconKey: "wifi",
+      color: "text-indigo-600",
+      bg: "bg-indigo-50 dark:bg-indigo-950/40",
+    };
+  }
+  // 12. Cinema & Entertainment
+  if (/(movie|cinema|netflix|theater|film|disney|hbo|youtube)/.test(rawText)) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Film className={c} />,
+      iconKey: "film",
+      color: "text-rose-500",
+      bg: "bg-rose-50 dark:bg-rose-950/40",
+    };
+  }
+  // 13. Gaming
+  if (
+    /(game|gaming|steam|playstation|xbox|nintendo|esports|valorant|genshin|mlbb|mobile legends)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Cpu className={c} />,
+      iconKey: "game",
+      color: "text-indigo-500",
+      bg: "bg-indigo-50 dark:bg-indigo-950/40",
+    };
+  }
+  // 14. Gym & Fitness
+  if (
+    /(gym|workout|fitness|crossfit|boxing|yoga|anytime fitness|gold gym|pilates|sports|badminton|basketball)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Dumbbell className={c} />,
+      iconKey: "fitness",
+      color: "text-red-500",
+      bg: "bg-red-50 dark:bg-red-950/40",
+    };
+  }
+  // 15. Grooming & Care
+  if (
+    /(haircut|salon|barber|barbershop|beauty|spa|wax|massage|nails)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Scissors className={c} />,
+      iconKey: "salon",
+      color: "text-pink-500",
+      bg: "bg-pink-50 dark:bg-pink-950/40",
+    };
+  }
+  // 16. School & Books
+  if (
+    /(school|book|tuition|course|study|exam|stationery|pen|paper|class|supplies|national bookstore)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <BookOpen className={c} />,
+      iconKey: "book",
+      color: "text-blue-500",
+      bg: "bg-blue-50 dark:bg-blue-950/40",
+    };
+  }
+  // 17. Shopping & Apparel
+  if (
+    /(shopping|clothes|shirt|pants|shoes|sneakers|shopee|lazada|shein|tiktok|apparel|fashion|zara|uniqlo|h&m)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Tag className={c} />,
+      iconKey: "shopping",
+      color: "text-pink-600",
+      bg: "bg-pink-50 dark:bg-pink-950/40",
+    };
+  }
+  // 18. Celebrations & Gifts
+  if (
+    /(gift|regalo|present|party|birthday|anniversary|celebration|christmas|balloon)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Gift className={c} />,
+      iconKey: "gift",
+      color: "text-pink-500",
+      bg: "bg-pink-50 dark:bg-pink-950/40",
+    };
+  }
+  // 19. Tech & Electronics
+  if (
+    /(tech|gadget|phone|iphone|android|laptop|macbook|ipad|tablet|charger|cable|earbuds|airpods|headphone|mouse|keyboard|monitor|electronics)/.test(
+      rawText,
+    )
+  ) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Cpu className={c} />,
+      iconKey: "tech",
+      color: "text-indigo-600",
+      bg: "bg-indigo-50 dark:bg-indigo-950/40",
+    };
+  }
+  // 20. Pets
+  if (/(pet|vet|dog|cat|animal|puppy|kitten)/.test(rawText)) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Heart className={c} />,
+      iconKey: "pet",
+      color: "text-amber-600",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    };
+  }
+  // 21. Home & Accommodation
+  if (/(rent|room|apartment|condo|house|home|stay|dorm)/.test(rawText)) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Home className={c} />,
+      iconKey: "home",
+      color: "text-teal-600",
+      bg: "bg-teal-50 dark:bg-teal-950/40",
+    };
+  }
+  // 22. Cash & Allowances
+  if (/(cash|allowance|petty|tender|atm|change|withdrawal)/.test(rawText)) {
+    return {
+      iconNode: (c = "w-5 h-5") => <Banknote className={c} />,
+      iconKey: "cash",
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    };
+  }
+
+  // Preset fallbacks
+  if (tx?.icon === "coffee")
+    return {
+      iconNode: (c = "w-5 h-5") => <Coffee className={c} />,
+      iconKey: "coffee",
+      color: "text-amber-600",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    };
+  if (tx?.icon === "utensils")
+    return {
+      iconNode: (c = "w-5 h-5") => <Utensils className={c} />,
+      iconKey: "utensils",
+      color: "text-orange-600",
+      bg: "bg-orange-50 dark:bg-orange-950/40",
+    };
+  if (tx?.icon === "bus")
+    return {
+      iconNode: (c = "w-5 h-5") => <Bus className={c} />,
+      iconKey: "bus",
+      color: "text-sky-500",
+      bg: "bg-sky-50 dark:bg-sky-950/40",
+    };
+  if (tx?.icon === "grocery" || tx?.icon === "shopping-cart")
+    return {
+      iconNode: (c = "w-5 h-5") => <ShoppingBag className={c} />,
+      iconKey: "grocery",
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    };
+  if (tx?.icon === "cookie")
+    return {
+      iconNode: (c = "w-5 h-5") => <Cookie className={c} />,
+      iconKey: "cookie",
+      color: "text-amber-500",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    };
+  if (tx?.icon === "zap")
+    return {
+      iconNode: (c = "w-5 h-5") => <Zap className={c} />,
+      iconKey: "zap",
+      color: "text-purple-600",
+      bg: "bg-purple-50 dark:bg-purple-950/40",
+    };
+  if (tx?.icon === "pill")
+    return {
+      iconNode: (c = "w-5 h-5") => <Pill className={c} />,
+      iconKey: "pill",
+      color: "text-rose-600",
+      bg: "bg-rose-50 dark:bg-rose-950/40",
+    };
+
+  // Diversified rotating lifestyle fallbacks (NEVER cart/bag)
+  const fallbacks = [
+    {
+      iconNode: (c = "w-5 h-5") => <Sparkles className={c} />,
+      iconKey: "sparkles",
+      color: "text-pink-600",
+      bg: "bg-pink-50 dark:bg-pink-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Tag className={c} />,
+      iconKey: "tag",
+      color: "text-purple-600",
+      bg: "bg-purple-50 dark:bg-purple-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Compass className={c} />,
+      iconKey: "compass",
+      color: "text-teal-600",
+      bg: "bg-teal-50 dark:bg-teal-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Bookmark className={c} />,
+      iconKey: "bookmark",
+      color: "text-cyan-600",
+      bg: "bg-cyan-50 dark:bg-cyan-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Wallet className={c} />,
+      iconKey: "wallet",
+      color: "text-emerald-600",
+      bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Heart className={c} />,
+      iconKey: "heart",
+      color: "text-rose-600",
+      bg: "bg-rose-50 dark:bg-rose-950/40",
+    },
+    {
+      iconNode: (c = "w-5 h-5") => <Gift className={c} />,
+      iconKey: "gift",
+      color: "text-amber-600",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    },
+  ];
+  const charCodeSum = (tx?.title || "expense")
+    .split("")
+    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return fallbacks[charCodeSum % fallbacks.length];
+}
 
 interface ClientWalletProps {
   onNavigateToBills?: () => void;
@@ -254,6 +674,26 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   >("deposit");
   const [pocketTransferAmount, setPocketTransferAmount] =
     useState<string>("500");
+  const [pocketSelectedCardId, setPocketSelectedCardId] = useState<string>("");
+
+  // Cash on Hand & Finance Automation State
+  const [cashRules, setCashRules] =
+    useState<CashAutomationRule[]>(DEFAULT_CASH_RULES);
+  const [showCashAutomationModal, setShowCashAutomationModal] =
+    useState<boolean>(false);
+  const [showCashExpenseModal, setShowCashExpenseModal] =
+    useState<boolean>(false);
+  const [selectedCashCardId, setSelectedCashCardId] = useState<string>("");
+  const [cashExpenseAmount, setCashExpenseAmount] = useState<string>("35");
+  const [cashExpenseTitle, setCashExpenseTitle] = useState<string>(
+    "Jeepney / Tricycle Fare",
+  );
+  const [cashExpenseCategory, setCashExpenseCategory] =
+    useState<string>("Commute");
+  const [isExecutingCashAuto, setIsExecutingCashAuto] =
+    useState<boolean>(false);
+  const [isRecordingCashExpense, setIsRecordingCashExpense] =
+    useState<boolean>(false);
 
   // Quick Expense Simulator State
   const [showExpenseSimModal, setShowExpenseSimModal] =
@@ -263,6 +703,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   const [simCardId, setSimCardId] = useState<string>("");
   const [simAmount, setSimAmount] = useState<string>("");
   const [simNote, setSimNote] = useState<string>("");
+  const [customExpenseTitle, setCustomExpenseTitle] = useState<string>("");
   const [activeSimCardId, setActiveSimCardId] = useState<string>("");
   const [isSimulatingExpense, setIsSimulatingExpense] =
     useState<boolean>(false);
@@ -488,6 +929,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
         userId,
         selectedPocket.id,
         num,
+        pocketSelectedCardId || undefined,
       );
       if (res.success) {
         setWallet(res.updatedState);
@@ -500,6 +942,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
         userId,
         selectedPocket.id,
         num,
+        pocketSelectedCardId || undefined,
       );
       if (res.success) {
         setWallet(res.updatedState);
@@ -508,6 +951,111 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
         alert(res.message);
       }
     }
+  };
+
+  const handleOpenCashExpense = (cashCardId?: string) => {
+    const cashCard =
+      wallet?.cards.find((c) =>
+        cashCardId ? c.id === cashCardId : c.type === "cash",
+      ) || wallet?.cards[0];
+
+    if (!cashCard) {
+      alert("Please link a card or add Cash on Hand first.");
+      setShowAddCardModal(true);
+      return;
+    }
+
+    setSelectedCashCardId(cashCard.id);
+    setCashExpenseTitle("Jeepney / Tricycle Fare");
+    setCashExpenseAmount("25");
+    setCashExpenseCategory("Commute");
+    setShowCashExpenseModal(true);
+  };
+
+  const handleOpenCashAutomation = (cashCardId?: string) => {
+    const cashCard =
+      wallet?.cards.find((c) =>
+        cashCardId ? c.id === cashCardId : c.type === "cash",
+      ) || wallet?.cards[0];
+
+    if (!cashCard) {
+      alert(
+        "To automate cash expenses and finance cash on hand, please add a Cash Card first.",
+      );
+      setShowAddCardModal(true);
+      return;
+    }
+
+    setSelectedCashCardId(cashCard.id);
+    setShowCashAutomationModal(true);
+  };
+
+  const handleExecuteCashExpense = async () => {
+    if (!selectedCashCardId) return;
+    const amt = parseFloat(cashExpenseAmount);
+    if (isNaN(amt) || amt <= 0) {
+      alert("Please enter a valid expense amount.");
+      return;
+    }
+
+    setIsRecordingCashExpense(true);
+    try {
+      const res = await webWalletService.recordCashExpense(
+        userId,
+        selectedCashCardId,
+        amt,
+        cashExpenseTitle.trim() || "Cash Expense",
+        cashExpenseCategory,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        setShowCashExpenseModal(false);
+        alert(res.message);
+      } else {
+        alert(res.message);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Could not record cash expense.");
+    } finally {
+      setIsRecordingCashExpense(false);
+    }
+  };
+
+  const handleRunCashAutoExpenses = async () => {
+    const cashCard =
+      wallet?.cards.find((c) => c.id === selectedCashCardId) ||
+      wallet?.cards.find((c) => c.type === "cash") ||
+      wallet?.cards[0];
+
+    if (!cashCard) {
+      alert("No Cash on Hand card found.");
+      return;
+    }
+
+    setIsExecutingCashAuto(true);
+    try {
+      const res = await webWalletService.runAutomatedCashExpenses(
+        userId,
+        cashCard.id,
+        cashRules,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        alert(res.message);
+      } else {
+        alert(res.message);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Could not run automated cash expenses.");
+    } finally {
+      setIsExecutingCashAuto(false);
+    }
+  };
+
+  const handleToggleCashRule = (ruleId: string) => {
+    setCashRules((prev) =>
+      prev.map((r) => (r.id === ruleId ? { ...r, enabled: !r.enabled } : r)),
+    );
   };
 
   const handleOpenTransfer = (preselectedSourceCardId?: string) => {
@@ -591,6 +1139,9 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
     setSelectedExpensePreset(preset);
     setSimAmount(String(preset.amount));
     setSimNote(preset.defaultNote);
+    setCustomExpenseTitle(
+      preset.id === "custom" ? "Custom Expense" : preset.title,
+    );
     const targetCardId =
       activeSimCardId && wallet.cards.some((c) => c.id === activeSimCardId)
         ? activeSimCardId
@@ -620,14 +1171,27 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
       return;
     }
 
+    const finalTitle =
+      selectedExpensePreset.id === "custom" && customExpenseTitle.trim()
+        ? customExpenseTitle.trim()
+        : selectedExpensePreset.title;
+    const finalIcon =
+      selectedExpensePreset.id === "custom"
+        ? getExpenseSemanticIconWeb({
+            title: finalTitle,
+            note: simNote,
+            type: "expense_simulation",
+          }).iconKey
+        : selectedExpensePreset.icon;
+
     try {
       setIsSimulatingExpense(true);
       const res = await webWalletService.simulateCardExpense(
         userId,
         simCardId,
         amt,
-        selectedExpensePreset.title,
-        selectedExpensePreset.icon,
+        finalTitle,
+        finalIcon,
         simNote,
       );
       if (res.success) {
@@ -914,8 +1478,9 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 {preset.icon === "coffee" && <Coffee className="w-6 h-6" />}
                 {preset.icon === "utensils" && <Utensils className="w-6 h-6" />}
                 {preset.icon === "bus" && <Bus className="w-6 h-6" />}
-                {preset.icon === "shopping-cart" && (
-                  <ShoppingCart className="w-6 h-6" />
+                {(preset.icon === "grocery" ||
+                  preset.icon === "shopping-cart") && (
+                  <ShoppingBag className="w-6 h-6" />
                 )}
                 {preset.icon === "cookie" && <Cookie className="w-6 h-6" />}
                 {preset.icon === "zap" && <Zap className="w-6 h-6" />}
@@ -1067,6 +1632,117 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 PHILIPPINE_CARD_PRESETS.custom;
               const isGCash = card.type === "gcash";
               const isMaya = card.type === "maya";
+              const isCash = card.type === "cash";
+
+              if (isCash) {
+                return (
+                  <div
+                    key={card.id}
+                    style={{
+                      background:
+                        "linear-gradient(135deg, #022C22 0%, #064E3B 50%, #047857 100%)",
+                    }}
+                    className="relative rounded-2xl p-5 text-white shadow-md flex flex-col justify-between h-56 border border-emerald-500/20 transition-transform hover:scale-[1.01] overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-1 rounded-md flex items-center gap-1.5">
+                        <Banknote className="w-3.5 h-3.5 text-emerald-400" />
+                        CASH ON HAND
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-white/15 text-emerald-100 border border-white/20 px-2 py-0.5 rounded">
+                          LEGAL TENDER
+                        </span>
+                        {card.isDefault && (
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500 text-white px-2 py-0.5 rounded">
+                            Primary
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handlePromptDeleteCard(card)}
+                          className="p-1 rounded-md bg-black/20 hover:bg-red-600 text-white/80 hover:text-white transition-colors"
+                          title={`Remove ${card.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Cash Balance Display */}
+                    <div className="my-1.5 bg-black/30 backdrop-blur-xs px-3 py-2 rounded-xl border border-emerald-500/20">
+                      <div className="flex items-center justify-between">
+                        <span className="block text-[9px] uppercase tracking-wider text-emerald-200 font-bold">
+                          AVAILABLE CASH TENDER
+                        </span>
+                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          <span>AUTO-SYNC</span>
+                        </div>
+                      </div>
+                      <span className="text-xl font-extrabold tracking-tight tabular-nums text-white block mt-0.5">
+                        {hideBalance
+                          ? "₱ ••••••"
+                          : `₱${(card.balance || 0).toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`}
+                      </span>
+                    </div>
+
+                    {/* Banknote Serial row */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-5 rounded bg-emerald-800/80 border border-emerald-600/40 flex items-center justify-center">
+                          <Banknote className="w-3.5 h-3.5 text-emerald-300" />
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-200/90 uppercase tracking-wider">
+                          Peso Notes • Central Bank
+                        </span>
+                      </div>
+                      <p className="font-mono text-base font-bold tracking-widest tabular-nums text-emerald-100">
+                        {card.accountNumber || "SN • 2026-PH-CASH"}
+                      </p>
+                    </div>
+
+                    {/* Bottom row: Custodian & Transfer */}
+                    <div className="flex items-end justify-between text-xs text-white/80 pt-1">
+                      <div>
+                        <span className="block text-[8px] uppercase tracking-wider text-emerald-200/60">
+                          Custodian
+                        </span>
+                        <span className="font-semibold text-white truncate max-w-[120px] block text-xs">
+                          {card.cardholderName || "Cash Custodian"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenTransfer(card.id)}
+                          className="text-[10px] bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded font-semibold text-white transition-colors flex items-center gap-1"
+                          title="Transfer / Replenish Cash"
+                        >
+                          <ArrowLeftRight className="w-2.5 h-2.5" />
+                          <span>Transfer</span>
+                        </button>
+                        {!card.isDefault && (
+                          <button
+                            onClick={() => handleSetDefaultCard(card.id)}
+                            className="text-[10px] bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded font-semibold text-white transition-colors"
+                          >
+                            Make Primary
+                          </button>
+                        )}
+                        <div className="text-right">
+                          <span className="block text-[10px] font-extrabold tracking-wider text-emerald-200">
+                            Cash • BSP
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -1289,6 +1965,10 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                       onClick={() => {
                         setSelectedPocket(pocket);
                         setPocketActionType("deposit");
+                        const defaultCard =
+                          wallet?.cards.find((c) => c.isDefault) ||
+                          wallet?.cards[0];
+                        setPocketSelectedCardId(defaultCard?.id || "");
                         setShowPocketActionModal(true);
                       }}
                       className="flex-1 py-1.5 px-3 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold transition-colors"
@@ -1300,6 +1980,10 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                       onClick={() => {
                         setSelectedPocket(pocket);
                         setPocketActionType("withdraw");
+                        const defaultCard =
+                          wallet?.cards.find((c) => c.isDefault) ||
+                          wallet?.cards[0];
+                        setPocketSelectedCardId(defaultCard?.id || "");
                         setShowPocketActionModal(true);
                       }}
                       className="flex-1 py-1.5 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition-colors"
@@ -1365,27 +2049,38 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                   className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                        tx.type === "expense_simulation"
-                          ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600"
-                          : tx.type === "card_transfer"
-                            ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600"
-                            : isPositive
-                              ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
-                              : "bg-blue-50 dark:bg-blue-950/40 text-blue-600"
-                      }`}
-                    >
-                      {tx.type === "expense_simulation" ? (
-                        <ShoppingCart className="w-5 h-5" />
-                      ) : tx.type === "card_transfer" ? (
-                        <ArrowLeftRight className="w-5 h-5" />
-                      ) : isPositive ? (
-                        <ArrowUpRight className="w-5 h-5" />
-                      ) : (
-                        <TrendingDown className="w-5 h-5" />
-                      )}
-                    </div>
+                    {(() => {
+                      if (tx.type === "expense_simulation") {
+                        const iconData = getExpenseSemanticIconWeb(tx);
+                        return (
+                          <div
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconData.bg} ${iconData.color}`}
+                          >
+                            {iconData.iconNode("w-5 h-5")}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            tx.type === "card_transfer"
+                              ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600"
+                              : isPositive
+                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
+                                : "bg-blue-50 dark:bg-blue-950/40 text-blue-600"
+                          }`}
+                        >
+                          {tx.type === "card_transfer" ? (
+                            <ArrowLeftRight className="w-5 h-5" />
+                          ) : isPositive ? (
+                            <ArrowUpRight className="w-5 h-5" />
+                          ) : (
+                            <TrendingDown className="w-5 h-5" />
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     <div>
                       <h4 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -1799,130 +2494,162 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
       )}
 
       {/* QUICK CIRCLE MODAL 1: Send Money to Roommate */}
-      {showSendMoneyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Send Money to Roommate
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Instant transfer from your linked card
-                </p>
-              </div>
-              <button
-                onClick={() => setShowSendMoneyModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {showSendMoneyModal &&
+        (() => {
+          const fundingCard =
+            wallet?.cards.find(
+              (c) => c.id === (sendSelectedCardId || wallet?.cards[0]?.id),
+            ) || wallet?.cards?.[0];
+          const fundingBal = fundingCard?.balance || 0;
+          const sendVal = parseFloat(sendAmount) || 0;
+          const isSendInsufficient = fundingBal < sendVal;
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Recipient Name / Phone
-                </label>
-                <input
-                  type="text"
-                  value={sendRecipient}
-                  onChange={(e) => setSendRecipient(e.target.value)}
-                  placeholder="e.g. Alex Chen or 0917 ••• 1234"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Amount (₱)
-                </label>
-                <div className="grid grid-cols-4 gap-2 mb-2">
-                  {["200", "500", "1000", "2500"].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setSendAmount(preset)}
-                      className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                        sendAmount === preset
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                      }`}
-                    >
-                      ₱{preset}
-                    </button>
-                  ))}
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                      Send Money to Roommate
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Instant transfer from your linked card
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowSendMoneyModal(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <input
-                  type="number"
-                  value={sendAmount}
-                  onChange={(e) => setSendAmount(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-base font-bold outline-hidden focus:border-blue-500"
-                />
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Source Card / Account
-                </label>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                  {(wallet?.cards || []).map((c) => {
-                    const isSelected =
-                      (sendSelectedCardId || wallet?.cards[0]?.id) === c.id;
-                    return (
-                      <div
-                        key={c.id}
-                        onClick={() => setSendSelectedCardId(c.id)}
-                        className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer text-xs ${
-                          isSelected
-                            ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 font-bold"
-                            : "border-slate-200 dark:border-slate-800"
-                        }`}
-                      >
-                        <span>
-                          {c.name} ({c.accountNumber})
-                        </span>
-                        <span className="tabular-nums">
-                          ₱{(c.balance || 0).toLocaleString()}
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Recipient Name / Phone
+                    </label>
+                    <input
+                      type="text"
+                      value={sendRecipient}
+                      onChange={(e) => setSendRecipient(e.target.value)}
+                      placeholder="e.g. Alex Chen or 0917 ••• 1234"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Amount (₱)
+                    </label>
+                    <div className="grid grid-cols-4 gap-2 mb-2">
+                      {["200", "500", "1000", "2500"].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setSendAmount(preset)}
+                          className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            sendAmount === preset
+                              ? "bg-blue-600 text-white"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                          }`}
+                        >
+                          ₱{preset}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="number"
+                      value={sendAmount}
+                      onChange={(e) => setSendAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-base font-bold outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Source Card / Account
+                    </label>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {(wallet?.cards || []).map((c) => {
+                        const isSelected =
+                          (sendSelectedCardId || wallet?.cards[0]?.id) === c.id;
+                        return (
+                          <div
+                            key={c.id}
+                            onClick={() => setSendSelectedCardId(c.id)}
+                            className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer text-xs ${
+                              isSelected
+                                ? "border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 font-bold"
+                                : "border-slate-200 dark:border-slate-800"
+                            }`}
+                          >
+                            <span>
+                              {c.name} ({c.accountNumber})
+                            </span>
+                            <span className="tabular-nums">
+                              ₱{(c.balance || 0).toLocaleString()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Note / Purpose (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={sendNote}
+                      onChange={(e) => setSendNote(e.target.value)}
+                      placeholder="e.g. Share for pizza, internet fee"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Insufficient Balance Callout */}
+                {fundingCard && isSendInsufficient && sendVal > 0 && (
+                  <div className="p-3 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span className="font-medium">
+                      Insufficient balance on {fundingCard.name}. Available: ₱
+                      {fundingBal.toLocaleString()} (Short by ₱
+                      {(sendVal - fundingBal).toLocaleString()}).
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setShowSendMoneyModal(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendMoney}
+                    disabled={
+                      isSendInsufficient ||
+                      sendVal <= 0 ||
+                      !sendRecipient.trim()
+                    }
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-sm font-bold shadow-md transition-colors"
+                  >
+                    {isSendInsufficient && sendVal > 0
+                      ? `Insufficient Balance on ${fundingCard?.name || "Card"}`
+                      : sendVal <= 0
+                        ? "Enter Amount"
+                        : `Send ₱${sendVal.toLocaleString()} Now`}
+                  </button>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Note / Purpose (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={sendNote}
-                  onChange={(e) => setSendNote(e.target.value)}
-                  placeholder="e.g. Share for pizza, internet fee"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500"
-                />
-              </div>
             </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setShowSendMoneyModal(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendMoney}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-md transition-colors"
-              >
-                Confirm Transfer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
 
       {/* QUICK CIRCLE MODAL 2: Request Split */}
       {showRequestSplitModal && (
@@ -2348,6 +3075,110 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
               />
             </div>
 
+            {/* Select Configured Card to Deduct From or Withdraw To */}
+            <div className="space-y-1.5 pt-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                {pocketActionType === "deposit"
+                  ? "Deduct From Configured Card"
+                  : "Withdraw To Configured Card"}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                {(wallet?.cards || []).map((c) => {
+                  const isSelected =
+                    (pocketSelectedCardId ||
+                      wallet?.cards.find((x) => x.isDefault)?.id ||
+                      wallet?.cards[0]?.id) === c.id;
+                  const isCashCard = c.type === "cash";
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setPocketSelectedCardId(c.id)}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        isSelected
+                          ? isCashCard
+                            ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-100 ring-2 ring-emerald-500/20"
+                            : "border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-950 dark:text-blue-100 ring-2 ring-blue-600/20"
+                          : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-800/60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold truncate max-w-[120px]">
+                          {c.name}
+                        </span>
+                        {c.isDefault && (
+                          <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                            Primary
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-[11px]">
+                        <span className="text-slate-400 font-mono text-[10px]">
+                          {c.accountNumber}
+                        </span>
+                        <span
+                          className={`font-bold tabular-nums ${
+                            isSelected
+                              ? isCashCard
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : "text-blue-700 dark:text-blue-300"
+                              : "text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          ₱
+                          {(c.balance || 0).toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Impact Preview */}
+            {(() => {
+              const activeCard =
+                wallet?.cards.find(
+                  (c) =>
+                    c.id ===
+                    (pocketSelectedCardId ||
+                      wallet?.cards.find((x) => x.isDefault)?.id ||
+                      wallet?.cards[0]?.id),
+                ) || wallet?.cards[0];
+              const num = parseFloat(pocketTransferAmount) || 0;
+              const cardBal = activeCard?.balance || 0;
+              const isInsufficient =
+                pocketActionType === "deposit" && cardBal < num;
+
+              if (!activeCard) return null;
+
+              return (
+                <div
+                  className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 ${
+                    isInsufficient
+                      ? "border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+                      : "border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  }`}
+                >
+                  {isInsufficient ? (
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                  )}
+                  <span className="font-medium">
+                    {pocketActionType === "deposit"
+                      ? isInsufficient
+                        ? `Insufficient balance on ${activeCard.name} (₱${cardBal.toLocaleString()} available)`
+                        : `After saving: ${activeCard.name} balance will be ₱${Math.max(0, cardBal - num).toLocaleString()}`
+                      : `After withdrawal: ${activeCard.name} balance will be ₱${(cardBal + num).toLocaleString()}`}
+                  </span>
+                </div>
+              );
+            })()}
+
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setShowPocketActionModal(false)}
@@ -2357,11 +3188,44 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
               </button>
               <button
                 onClick={handlePocketTransfer}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-md transition-colors"
+                disabled={(() => {
+                  const activeCard =
+                    wallet?.cards.find(
+                      (c) =>
+                        c.id ===
+                        (pocketSelectedCardId ||
+                          wallet?.cards.find((x) => x.isDefault)?.id ||
+                          wallet?.cards[0]?.id),
+                    ) || wallet?.cards[0];
+                  const num = parseFloat(pocketTransferAmount) || 0;
+                  const isInsufficient =
+                    pocketActionType === "deposit"
+                      ? (activeCard?.balance || 0) < num
+                      : (selectedPocket?.currentAmount || 0) < num;
+                  return isInsufficient || num <= 0;
+                })()}
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-sm font-bold shadow-md transition-colors"
               >
-                {pocketActionType === "deposit"
-                  ? "Confirm Stash"
-                  : "Confirm Withdraw"}
+                {(() => {
+                  const activeCard =
+                    wallet?.cards.find(
+                      (c) =>
+                        c.id ===
+                        (pocketSelectedCardId ||
+                          wallet?.cards.find((x) => x.isDefault)?.id ||
+                          wallet?.cards[0]?.id),
+                    ) || wallet?.cards[0];
+                  const num = parseFloat(pocketTransferAmount) || 0;
+                  const isInsufficient =
+                    pocketActionType === "deposit"
+                      ? (activeCard?.balance || 0) < num
+                      : (selectedPocket?.currentAmount || 0) < num;
+                  if (isInsufficient && num > 0) return "Insufficient Balance";
+                  if (num <= 0) return "Enter Amount";
+                  return pocketActionType === "deposit"
+                    ? "Confirm Stash"
+                    : "Confirm Withdraw";
+                })()}
               </button>
             </div>
           </div>
@@ -2396,6 +3260,44 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
               </span>
             </div>
 
+            {/* Prominent Expense Note Box */}
+            {(() => {
+              const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                (p) =>
+                  p.title.toLowerCase() === selectedTx.title?.toLowerCase() ||
+                  p.id.toLowerCase() === selectedTx.title?.toLowerCase(),
+              );
+              const fallbackNote =
+                matchedPreset?.defaultNote ||
+                selectedTx.description?.trim() ||
+                (selectedTx.type === "expense_simulation"
+                  ? `Daily simulated expense for ${selectedTx.title}`
+                  : selectedTx.title || "Daily transaction record");
+              const hasCustomNote = Boolean(selectedTx.note?.trim());
+              const displayExpenseNote = hasCustomNote
+                ? selectedTx.note?.trim()
+                : fallbackNote;
+
+              return (
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-left">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-bold text-[10px] uppercase tracking-wider">
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Expense Note</span>
+                    </div>
+                    {!hasCustomNote && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100/70 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300">
+                        Preset Fallback
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-800 dark:text-slate-200 font-medium break-words leading-relaxed">
+                    {displayExpenseNote}
+                  </p>
+                </div>
+              );
+            })()}
+
             <div className="space-y-2 text-xs divide-y divide-slate-100 dark:divide-slate-800">
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-500">Transaction ID</span>
@@ -2407,6 +3309,27 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 <span className="text-slate-500">Channel / Card</span>
                 <span className="font-semibold text-slate-900 dark:text-white">
                   {selectedTx.paymentMethodUsed}
+                </span>
+              </div>
+              <div className="flex justify-between py-1.5">
+                <span className="text-slate-500">Expense Note</span>
+                <span className="text-slate-900 dark:text-white font-medium text-right max-w-[200px] break-words">
+                  {(() => {
+                    const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                      (p) =>
+                        p.title.toLowerCase() ===
+                          selectedTx.title?.toLowerCase() ||
+                        p.id.toLowerCase() === selectedTx.title?.toLowerCase(),
+                    );
+                    return (
+                      selectedTx.note?.trim() ||
+                      matchedPreset?.defaultNote ||
+                      selectedTx.description?.trim() ||
+                      (selectedTx.type === "expense_simulation"
+                        ? `Daily simulated expense for ${selectedTx.title}`
+                        : selectedTx.title || "Daily transaction record")
+                    );
+                  })()}
                 </span>
               </div>
               <div className="flex justify-between py-1.5">
@@ -2799,34 +3722,49 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                   }}
                   className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-xs"
                 >
-                  {selectedExpensePreset.icon === "coffee" && (
-                    <Coffee className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "utensils" && (
-                    <Utensils className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "bus" && (
-                    <Bus className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "shopping-cart" && (
-                    <ShoppingCart className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "cookie" && (
-                    <Cookie className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "zap" && (
-                    <Zap className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "pill" && (
-                    <Pill className="w-5 h-5" />
-                  )}
-                  {selectedExpensePreset.icon === "custom" && (
-                    <PlusCircle className="w-5 h-5" />
+                  {selectedExpensePreset.id === "custom" &&
+                  customExpenseTitle.trim() ? (
+                    getExpenseSemanticIconWeb({
+                      title: customExpenseTitle,
+                      note: simNote,
+                      type: "expense_simulation",
+                    }).iconNode("w-5 h-5")
+                  ) : (
+                    <>
+                      {selectedExpensePreset.icon === "coffee" && (
+                        <Coffee className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "utensils" && (
+                        <Utensils className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "bus" && (
+                        <Bus className="w-5 h-5" />
+                      )}
+                      {(selectedExpensePreset.icon === "grocery" ||
+                        selectedExpensePreset.icon === "shopping-cart") && (
+                        <ShoppingBag className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "cookie" && (
+                        <Cookie className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "zap" && (
+                        <Zap className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "pill" && (
+                        <Pill className="w-5 h-5" />
+                      )}
+                      {selectedExpensePreset.icon === "custom" && (
+                        <PlusCircle className="w-5 h-5" />
+                      )}
+                    </>
                   )}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Simulate {selectedExpensePreset.title}
+                    {selectedExpensePreset.id === "custom" &&
+                    customExpenseTitle.trim()
+                      ? customExpenseTitle.trim()
+                      : `Simulate ${selectedExpensePreset.title}`}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     Instantly deduct expense from selected payment card
@@ -2840,6 +3778,22 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Custom Expense Name Input when Custom Preset Selected */}
+            {selectedExpensePreset.id === "custom" && (
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Custom Expense Name / Purpose
+                </label>
+                <input
+                  type="text"
+                  value={customExpenseTitle}
+                  onChange={(e) => setCustomExpenseTitle(e.target.value)}
+                  placeholder="e.g. Milk Tea, Dinner with friends, GrabCar, Gym"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-hidden focus:border-blue-500 font-medium"
+                />
+              </div>
+            )}
 
             {/* Expense Amount */}
             <div>
@@ -2973,7 +3927,11 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                     >
                       {isSimulatingExpense
                         ? "Processing..."
-                        : `Simulate & Deduct ₱${expenseAmt.toLocaleString()}`}
+                        : isInsufficient && expenseAmt > 0
+                          ? `Insufficient Balance on ${currentCard?.name || "Card"}`
+                          : expenseAmt <= 0
+                            ? "Enter Expense Amount"
+                            : `Simulate & Deduct ₱${expenseAmt.toLocaleString()}`}
                     </button>
                   </div>
                 </div>
@@ -3118,21 +4076,75 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
               />
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setShowTransferModal(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExecuteTransfer}
-                disabled={isTransferring}
-                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-bold shadow-md transition-colors"
-              >
-                {isTransferring ? "Transferring..." : "Confirm Transfer"}
-              </button>
-            </div>
+            {(() => {
+              const sourceCard = wallet?.cards.find(
+                (c) => c.id === transferSourceCardId,
+              );
+              const destCard = wallet?.cards.find(
+                (c) => c.id === transferDestCardId,
+              );
+              const sourceBal = sourceCard?.balance || 0;
+              const destBal = destCard?.balance || 0;
+              const transferAmt = parseFloat(transferAmount) || 0;
+              const isInsufficient = sourceBal < transferAmt;
+              const isSameCard = transferSourceCardId === transferDestCardId;
+
+              return (
+                <div className="space-y-3 pt-1">
+                  {sourceCard && (
+                    <div
+                      className={`p-3 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                        isInsufficient || isSameCard
+                          ? "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300"
+                          : "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300"
+                      }`}
+                    >
+                      {isInsufficient || isSameCard ? (
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      )}
+                      <span>
+                        {isSameCard
+                          ? "Source and destination cards must be different accounts."
+                          : isInsufficient
+                            ? `Insufficient balance on ${sourceCard.name}. Available: ₱${sourceBal.toLocaleString()} (Short by ₱${(transferAmt - sourceBal).toLocaleString()}).`
+                            : `${sourceCard.name}: ₱${Math.max(0, sourceBal - transferAmt).toLocaleString()} ➔ ${destCard?.name || "Destination"}: ₱${(destBal + transferAmt).toLocaleString()}`}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => setShowTransferModal(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleExecuteTransfer}
+                      disabled={
+                        isTransferring ||
+                        isInsufficient ||
+                        isSameCard ||
+                        transferAmt <= 0
+                      }
+                      className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white text-sm font-bold shadow-md transition-colors"
+                    >
+                      {isTransferring
+                        ? "Transferring..."
+                        : isSameCard
+                          ? "Select Different Cards"
+                          : isInsufficient && transferAmt > 0
+                            ? `Insufficient Balance on ${sourceCard?.name || "Card"}`
+                            : transferAmt <= 0
+                              ? "Enter Transfer Amount"
+                              : `Confirm Transfer ₱${transferAmt.toLocaleString()}`}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

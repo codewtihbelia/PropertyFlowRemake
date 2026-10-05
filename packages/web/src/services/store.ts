@@ -17,7 +17,7 @@ import {
   SupportTicket,
   AppVersion,
   AuditLog,
-} from '@propertyflow/shared';
+} from "@propertyflow/shared";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -27,7 +27,7 @@ function notifyListeners() {
     try {
       fn();
     } catch (e) {
-      console.error('[Store] Listener error:', e);
+      console.error("[Store] Listener error:", e);
     }
   });
 }
@@ -82,15 +82,15 @@ export function emptyAppState(): AppState {
     supportTickets: [],
     appVersions: [],
     auditLogs: [],
-    currentUserId: '',
-    currentHouseholdId: '',
+    currentUserId: "",
+    currentHouseholdId: "",
   };
 }
 
 let memoryState: AppState = emptyAppState();
 
 try {
-  localStorage.removeItem('propertyflow_state_v1');
+  localStorage.removeItem("propertyflow_state_v1");
 } catch {
   // Ignore browsers that block localStorage.
 }
@@ -109,3 +109,5 @@ export function resetCloudCache(): AppState {
   notifyListeners();
   return memoryState;
 }
+
+export const resetToDefaultSeed = resetCloudCache;
