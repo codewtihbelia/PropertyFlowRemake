@@ -2,6 +2,7 @@ import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
 
 export type CardProviderType =
+  | "cash"
   | "gcash"
   | "maya"
   | "bpi"
@@ -21,7 +22,7 @@ export interface CardProviderConfig {
   type: CardProviderType;
   name: string;
   shortCode: string;
-  network: "Visa" | "Mastercard" | "BancNet" | "QR Ph" | "InstaPay";
+  network: "Visa" | "Mastercard" | "BancNet" | "QR Ph" | "InstaPay" | "Cash";
   gradient: [string, string];
   accentColor: string;
   isEWallet: boolean;
@@ -31,6 +32,15 @@ export const PHILIPPINE_CARD_PRESETS: Record<
   CardProviderType,
   CardProviderConfig
 > = {
+  cash: {
+    type: "cash",
+    name: "Cash on Hand",
+    shortCode: "CASH",
+    network: "Cash",
+    gradient: ["#064E3B", "#059669"],
+    accentColor: "#34D399",
+    isEWallet: false,
+  },
   gcash: {
     type: "gcash",
     name: "GCash Wallet",
@@ -191,7 +201,44 @@ export type WalletTransactionType =
   | "savings_deposit"
   | "savings_withdrawal"
   | "expense_simulation"
-  | "card_transfer";
+  | "card_transfer"
+  | "cash_expense";
+
+export interface CashAutomationRule {
+  id: string;
+  title: string;
+  amount: number;
+  category: "commute" | "food" | "groceries" | "snack" | "other";
+  enabled: boolean;
+  frequency: "daily" | "weekdays" | "custom";
+}
+
+export const DEFAULT_CASH_RULES: CashAutomationRule[] = [
+  {
+    id: "rule_commute",
+    title: "Daily Commute & Fare (Jeepney/Tricycle)",
+    amount: 50,
+    category: "commute",
+    enabled: true,
+    frequency: "weekdays",
+  },
+  {
+    id: "rule_lunch",
+    title: "Daily Karinderya / Lunch Cash",
+    amount: 120,
+    category: "food",
+    enabled: true,
+    frequency: "daily",
+  },
+  {
+    id: "rule_sarisari",
+    title: "Sari-sari Store Snacks & Drinks",
+    amount: 45,
+    category: "snack",
+    enabled: true,
+    frequency: "daily",
+  },
+];
 
 export interface WalletTransaction {
   id: string;
@@ -203,6 +250,9 @@ export interface WalletTransaction {
   referenceId?: string;
   timestamp: string;
   status: "completed" | "pending";
+  note?: string;
+  icon?: string;
+  category?: string;
 }
 
 export interface WalletState {
@@ -280,7 +330,7 @@ function sanitizeForFirestore<T>(val: T): T {
   return val;
 }
 
-class WebWalletService {
+export class WebWalletService {
   private userDocRef(userId: string) {
     return doc(db, "users", userId);
   }
@@ -947,16 +997,9 @@ class WebWalletService {
     userId: string,
     pocketId: string,
     amount: number,
+    sourceCardId?: string,
   ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
     const current = await this.getWallet(userId);
-    if (current.balance < amount) {
-      return {
-        success: false,
-        updatedState: current,
-        message: `Insufficient wallet balance to stash ₱${amount.toLocaleString()}. Please cash in first.`,
-      };
-    }
-
     const targetPocket = current.pockets.find((p) => p.id === pocketId);
     if (!targetPocket) {
       return {
@@ -966,23 +1009,59 @@ class WebWalletService {
       };
     }
 
+    let updatedCards = current.cards;
+    let paymentMethodName = "Splitzy Wallet";
+
+    if (sourceCardId) {
+      const sourceCard = current.cards.find((c) => c.id === sourceCardId);
+      if (!sourceCard) {
+        return {
+          success: false,
+          updatedState: current,
+          message: "Selected payment card was not found.",
+        };
+      }
+      const cardBal = sourceCard.balance || 0;
+      if (cardBal < amount) {
+        return {
+          success: false,
+          updatedState: current,
+          message: `Insufficient balance on ${sourceCard.name} (₱${cardBal.toLocaleString()} available, needed ₱${amount.toLocaleString()}).`,
+        };
+      }
+      updatedCards = current.cards.map((c) =>
+        c.id === sourceCardId
+          ? { ...c, balance: Math.max(0, (c.balance || 0) - amount) }
+          : c,
+      );
+      paymentMethodName = sourceCard.name;
+    } else {
+      if (current.balance < amount) {
+        return {
+          success: false,
+          updatedState: current,
+          message: `Insufficient wallet balance to stash ₱${amount.toLocaleString()}. Please cash in first.`,
+        };
+      }
+      updatedCards = this.deductFromCards(current.cards, amount);
+    }
+
     const updatedPockets = current.pockets.map((p) =>
       p.id === pocketId ? { ...p, currentAmount: p.currentAmount + amount } : p,
     );
 
-    const updatedCards = this.deductFromCards(current.cards, amount);
     const newBalance =
       updatedCards.length > 0
         ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
-        : current.balance - amount;
+        : Math.max(0, current.balance - amount);
 
     const newTx: WalletTransaction = {
       id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
       type: "savings_deposit",
       amount,
       title: `Saved to ${targetPocket.name}`,
-      description: `Transferred ₱${amount.toLocaleString()} into savings pocket`,
-      paymentMethodUsed: "Splitzy Wallet",
+      description: `Deducted from ${paymentMethodName} into "${targetPocket.name}"`,
+      paymentMethodUsed: paymentMethodName,
       referenceId: pocketId,
       timestamp: new Date().toISOString(),
       status: "completed",
@@ -1001,7 +1080,7 @@ class WebWalletService {
     return {
       success: true,
       updatedState: updated,
-      message: `Stashed ₱${amount.toLocaleString()} into "${targetPocket.name}"!`,
+      message: `Stashed ₱${amount.toLocaleString()} into "${targetPocket.name}" from ${paymentMethodName}!`,
     };
   }
 
@@ -1009,6 +1088,7 @@ class WebWalletService {
     userId: string,
     pocketId: string,
     amount: number,
+    targetCardId?: string,
   ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
     const current = await this.getWallet(userId);
     const targetPocket = current.pockets.find((p) => p.id === pocketId);
@@ -1036,11 +1116,22 @@ class WebWalletService {
     );
 
     let updatedCards = current.cards;
-    if (updatedCards.length > 0) {
+    let targetCardName = "Splitzy Wallet";
+
+    if (targetCardId && updatedCards.some((c) => c.id === targetCardId)) {
+      const chosen = updatedCards.find((c) => c.id === targetCardId)!;
+      targetCardName = chosen.name;
+      updatedCards = updatedCards.map((c) =>
+        c.id === targetCardId
+          ? { ...c, balance: (c.balance || 0) + amount }
+          : c,
+      );
+    } else if (updatedCards.length > 0) {
       const defaultIdx = Math.max(
         0,
         updatedCards.findIndex((c) => c.isDefault),
       );
+      targetCardName = updatedCards[defaultIdx].name;
       updatedCards = updatedCards.map((c, i) =>
         i === defaultIdx ? { ...c, balance: (c.balance || 0) + amount } : c,
       );
@@ -1056,8 +1147,8 @@ class WebWalletService {
       type: "savings_withdrawal",
       amount,
       title: `Withdrawn from ${targetPocket.name}`,
-      description: `Transferred ₱${amount.toLocaleString()} back to main balance`,
-      paymentMethodUsed: "Savings Pocket",
+      description: `Transferred ₱${amount.toLocaleString()} into ${targetCardName}`,
+      paymentMethodUsed: targetCardName,
       referenceId: pocketId,
       timestamp: new Date().toISOString(),
       status: "completed",
@@ -1076,7 +1167,7 @@ class WebWalletService {
     return {
       success: true,
       updatedState: updated,
-      message: `Transferred ₱${amount.toLocaleString()} from "${targetPocket.name}" back to your wallet!`,
+      message: `Transferred ₱${amount.toLocaleString()} from "${targetPocket.name}" to ${targetCardName}!`,
     };
   }
 
@@ -1129,6 +1220,9 @@ class WebWalletService {
       referenceId: card.id,
       timestamp: new Date().toISOString(),
       status: "completed",
+      note: note?.trim() || undefined,
+      icon: categoryIcon || undefined,
+      category: categoryTitle,
     };
 
     const updated: WalletState = {
@@ -1232,6 +1326,192 @@ class WebWalletService {
       updatedState: updated,
       message: `Transferred ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from ${fromCard.name} to ${toCard.name}!`,
     };
+  }
+
+  async recordCashExpense(
+    userId: string,
+    cashCardId: string,
+    amount: number,
+    title: string,
+    category: string = "Cash Expense",
+    note?: string,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const cardIndex = current.cards.findIndex((c) => c.id === cashCardId);
+
+    if (cardIndex === -1) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Cash on Hand card was not found.",
+      };
+    }
+
+    const cashCard = current.cards[cardIndex];
+    const currentBal = cashCard.balance || 0;
+
+    if (currentBal < amount) {
+      return {
+        success: false,
+        updatedState: current,
+        message: `Insufficient cash on hand. Available: ₱${currentBal.toLocaleString()}, requested: ₱${amount.toLocaleString()}.`,
+      };
+    }
+
+    const updatedCards = [...current.cards];
+    updatedCards[cardIndex] = {
+      ...cashCard,
+      balance: Math.max(0, currentBal - amount),
+    };
+
+    const newBalance = updatedCards.reduce(
+      (acc, c) => acc + (c.balance || 0),
+      0,
+    );
+
+    const newTx: WalletTransaction = {
+      id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      type: "cash_expense",
+      amount,
+      title,
+      description: note || `Cash spent for ${category} • Cash on Hand`,
+      paymentMethodUsed: cashCard.name,
+      referenceId: cashCard.id,
+      timestamp: new Date().toISOString(),
+      status: "completed",
+      note: note?.trim() || undefined,
+      icon: "cash",
+      category,
+    };
+
+    const updated: WalletState = {
+      ...current,
+      balance: newBalance,
+      cards: updatedCards,
+      transactions: [newTx, ...current.transactions],
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.persist(userId, updated);
+    return {
+      success: true,
+      updatedState: updated,
+      message: `Recorded ₱${amount.toLocaleString()} cash expense for "${title}"!`,
+    };
+  }
+
+  async runAutomatedCashExpenses(
+    userId: string,
+    cashCardId: string,
+    rules: CashAutomationRule[],
+  ): Promise<{
+    success: boolean;
+    updatedState: WalletState;
+    executedCount: number;
+    totalAmount: number;
+    message: string;
+  }> {
+    const current = await this.getWallet(userId);
+    const cardIndex = current.cards.findIndex((c) => c.id === cashCardId);
+
+    if (cardIndex === -1) {
+      return {
+        success: false,
+        updatedState: current,
+        executedCount: 0,
+        totalAmount: 0,
+        message: "Cash on Hand card was not found.",
+      };
+    }
+
+    const activeRules = rules.filter((r) => r.enabled && r.amount > 0);
+    if (activeRules.length === 0) {
+      return {
+        success: false,
+        updatedState: current,
+        executedCount: 0,
+        totalAmount: 0,
+        message: "No active cash automation rules configured.",
+      };
+    }
+
+    const totalNeeded = activeRules.reduce((acc, r) => acc + r.amount, 0);
+    const cashCard = current.cards[cardIndex];
+    const currentBal = cashCard.balance || 0;
+
+    if (currentBal < totalNeeded) {
+      return {
+        success: false,
+        updatedState: current,
+        executedCount: 0,
+        totalAmount: 0,
+        message: `Insufficient cash on hand to run auto-expenses (₱${currentBal.toLocaleString()} available, ₱${totalNeeded.toLocaleString()} needed). Please replenish cash first.`,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const newTxs: WalletTransaction[] = activeRules.map((rule) => ({
+      id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      type: "cash_expense",
+      amount: rule.amount,
+      title: `⚡ Auto: ${rule.title}`,
+      description: `Automated daily ${rule.category} cash expense deducted from Cash on Hand`,
+      paymentMethodUsed: cashCard.name,
+      referenceId: rule.id,
+      timestamp: now,
+      status: "completed",
+      note: rule.title,
+      category: rule.category,
+      icon:
+        rule.category === "commute"
+          ? "bus"
+          : rule.category === "food"
+            ? "restaurant"
+            : "cash",
+    }));
+
+    const updatedCards = [...current.cards];
+    updatedCards[cardIndex] = {
+      ...cashCard,
+      balance: Math.max(0, currentBal - totalNeeded),
+    };
+
+    const newBalance = updatedCards.reduce(
+      (acc, c) => acc + (c.balance || 0),
+      0,
+    );
+
+    const updated: WalletState = {
+      ...current,
+      balance: newBalance,
+      cards: updatedCards,
+      transactions: [...newTxs, ...current.transactions],
+      updatedAt: now,
+    };
+
+    await this.persist(userId, updated);
+    return {
+      success: true,
+      updatedState: updated,
+      executedCount: activeRules.length,
+      totalAmount: totalNeeded,
+      message: `Automated ${activeRules.length} daily cash expenses totaling ₱${totalNeeded.toLocaleString()} successfully!`,
+    };
+  }
+
+  async replenishCashFromCard(
+    userId: string,
+    cashCardId: string,
+    sourceCardId: string,
+    amount: number,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    return this.transferBetweenCards(
+      userId,
+      sourceCardId,
+      cashCardId,
+      amount,
+      "ATM Cash Withdrawal / Replenish Cash on Hand",
+    );
   }
 
   private async persist(userId: string, state: WalletState) {

@@ -173,9 +173,16 @@ export interface SemanticExpenseInputWeb {
   [key: string]: any;
 }
 
+export type AppWalletTransactionWeb = WalletTransaction & {
+  note?: string;
+  icon?: string;
+  category?: string;
+};
+
 export type SemanticTxInputWeb = (
   | SemanticExpenseInputWeb
   | Partial<WalletTransaction>
+  | Partial<AppWalletTransactionWeb>
   | Record<string, any>
 ) & {
   note?: string;
@@ -716,7 +723,9 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   const [transferNote, setTransferNote] = useState<string>("");
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
 
-  const [selectedTx, setSelectedTx] = useState<WalletTransaction | null>(null);
+  const [selectedTx, setSelectedTx] = useState<AppWalletTransactionWeb | null>(
+    null,
+  );
   const [txFilter, setTxFilter] = useState<
     "all" | "cash_in" | "payment" | "savings"
   >("all");
@@ -925,7 +934,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
     }
 
     if (pocketActionType === "deposit") {
-      const res = await webWalletService.depositToPocket(
+      const res = await (webWalletService as any).depositToPocket(
         userId,
         selectedPocket.id,
         num,
@@ -938,7 +947,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
         alert(res.message);
       }
     } else {
-      const res = await webWalletService.withdrawFromPocket(
+      const res = await (webWalletService as any).withdrawFromPocket(
         userId,
         selectedPocket.id,
         num,
@@ -956,7 +965,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   const handleOpenCashExpense = (cashCardId?: string) => {
     const cashCard =
       wallet?.cards.find((c) =>
-        cashCardId ? c.id === cashCardId : c.type === "cash",
+        cashCardId ? c.id === cashCardId : (c.type as any) === "cash",
       ) || wallet?.cards[0];
 
     if (!cashCard) {
@@ -975,7 +984,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   const handleOpenCashAutomation = (cashCardId?: string) => {
     const cashCard =
       wallet?.cards.find((c) =>
-        cashCardId ? c.id === cashCardId : c.type === "cash",
+        cashCardId ? c.id === cashCardId : (c.type as any) === "cash",
       ) || wallet?.cards[0];
 
     if (!cashCard) {
@@ -1000,7 +1009,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
 
     setIsRecordingCashExpense(true);
     try {
-      const res = await webWalletService.recordCashExpense(
+      const res = await (webWalletService as any).recordCashExpense(
         userId,
         selectedCashCardId,
         amt,
@@ -1024,7 +1033,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
   const handleRunCashAutoExpenses = async () => {
     const cashCard =
       wallet?.cards.find((c) => c.id === selectedCashCardId) ||
-      wallet?.cards.find((c) => c.type === "cash") ||
+      wallet?.cards.find((c) => (c.type as any) === "cash") ||
       wallet?.cards[0];
 
     if (!cashCard) {
@@ -1034,7 +1043,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
 
     setIsExecutingCashAuto(true);
     try {
-      const res = await webWalletService.runAutomatedCashExpenses(
+      const res = await (webWalletService as any).runAutomatedCashExpenses(
         userId,
         cashCard.id,
         cashRules,
@@ -1632,7 +1641,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 PHILIPPINE_CARD_PRESETS.custom;
               const isGCash = card.type === "gcash";
               const isMaya = card.type === "maya";
-              const isCash = card.type === "cash";
+              const isCash = (card.type as any) === "cash";
 
               if (isCash) {
                 return (
@@ -3088,7 +3097,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                     (pocketSelectedCardId ||
                       wallet?.cards.find((x) => x.isDefault)?.id ||
                       wallet?.cards[0]?.id) === c.id;
-                  const isCashCard = c.type === "cash";
+                  const isCashCard = (c.type as any) === "cash";
                   return (
                     <button
                       key={c.id}
@@ -3273,9 +3282,11 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                 (selectedTx.type === "expense_simulation"
                   ? `Daily simulated expense for ${selectedTx.title}`
                   : selectedTx.title || "Daily transaction record");
-              const hasCustomNote = Boolean(selectedTx.note?.trim());
+              const hasCustomNote = Boolean(
+                ((selectedTx as any)?.note || "")?.trim(),
+              );
               const displayExpenseNote = hasCustomNote
-                ? selectedTx.note?.trim()
+                ? ((selectedTx as any)?.note || "")?.trim()
                 : fallbackNote;
 
               return (
@@ -3322,7 +3333,7 @@ export const ClientWallet: React.FC<ClientWalletProps> = ({
                         p.id.toLowerCase() === selectedTx.title?.toLowerCase(),
                     );
                     return (
-                      selectedTx.note?.trim() ||
+                      ((selectedTx as any)?.note || "")?.trim() ||
                       matchedPreset?.defaultNote ||
                       selectedTx.description?.trim() ||
                       (selectedTx.type === "expense_simulation"

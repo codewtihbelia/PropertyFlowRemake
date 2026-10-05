@@ -3707,6 +3707,24 @@ export const mobileDataService = {
           ).catch(() => {});
         }),
       );
+
+      // Dispatch high-priority OS-level push notification so roommates get a lock-screen alert even when their app is closed
+      pushDispatchService
+        .sendNewBillPush({
+          householdId: expense.householdId,
+          householdName: hhName,
+          payerId: expense.payerId || auth.currentUser?.uid || "",
+          payerName: payer,
+          billTitle: cleanTitle,
+          amountCents: expense.amountCents,
+          expenseId: id,
+          recipientUserIds: recipientIds.filter(
+            (uid) => uid !== (expense.payerId || auth.currentUser?.uid),
+          ),
+        })
+        .catch((pushErr) => {
+          console.warn("[addExpense Mobile] Push dispatch deferred:", pushErr);
+        });
     } catch {}
 
     return id;

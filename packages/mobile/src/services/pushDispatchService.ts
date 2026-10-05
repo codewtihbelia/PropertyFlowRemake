@@ -165,9 +165,16 @@ class PushDispatchService {
         targetUserIds = membersSnap.docs
           .map((d) => {
             const data = d.data();
-            return data.userId || data.memberId || d.id;
+            return (
+              data.userId ||
+              (data.memberId && !data.memberId.startsWith("mem_")
+                ? data.memberId
+                : null)
+            );
           })
-          .filter((uid) => uid && uid !== params.senderId);
+          .filter((uid): uid is string =>
+            Boolean(uid && uid !== params.senderId),
+          );
       }
 
       if (targetUserIds.length === 0) return;
@@ -195,6 +202,70 @@ class PushDispatchService {
       });
     } catch (err) {
       console.warn("[PushDispatch] Error sending household message push:", err);
+    }
+  }
+
+  /**
+   * Dispatches a high-priority push notification to all household members
+   * when a new bill or expense is added.
+   * Delivers to the lock screen / notification shade even when the app is closed.
+   */
+  public async sendNewBillPush(params: {
+    householdId: string;
+    householdName?: string;
+    payerId: string;
+    payerName: string;
+    billTitle: string;
+    amountCents: number;
+    expenseId: string;
+    recipientUserIds?: string[];
+  }): Promise<void> {
+    try {
+      let targetUserIds = params.recipientUserIds || [];
+
+      if (targetUserIds.length === 0) {
+        const membersSnap = await getDocs(
+          collection(db, `households/${params.householdId}/members`),
+        );
+        targetUserIds = membersSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return (
+              data.userId ||
+              (data.memberId && !data.memberId.startsWith("mem_")
+                ? data.memberId
+                : null)
+            );
+          })
+          .filter((uid): uid is string =>
+            Boolean(uid && uid !== params.payerId),
+          );
+      }
+
+      if (targetUserIds.length === 0) return;
+
+      const tokens = await this.getPushTokensForUsers(targetUserIds);
+      if (tokens.length === 0) return;
+
+      const groupLabel = params.householdName || "Household";
+      const pesos = (params.amountCents / 100).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      await this.sendPushToTokens(tokens, {
+        title: `Splitzy • New Bill in ${groupLabel}`,
+        body: `${params.payerName} added ₱${pesos} for "${params.billTitle}". Tap to check your split.`,
+        data: {
+          screen: "billing",
+          householdId: params.householdId,
+          expenseId: params.expenseId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending new bill push:", err);
     }
   }
 

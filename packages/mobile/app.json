@@ -35,11 +35,8 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.splitzy.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
@@ -91,6 +88,7 @@
     ],
     "updates": {
       "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a"
-    }
+    },
+    "owner": "splitzy01"
   }
 }
