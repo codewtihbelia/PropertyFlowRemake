@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Platform,
   KeyboardAvoidingView,
+  Keyboard,
   Alert,
   StatusBar,
   ActivityIndicator,
@@ -233,6 +234,41 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [chatInputText, setChatInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const messageScrollRef = useRef<ScrollView>(null);
+
+  // Messenger-style tap to reveal message timestamp and seen status
+  const [toggledMessageIds, setToggledMessageIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => {
+        setIsKeyboardOpen(true);
+        setTimeout(() => {
+          messageScrollRef.current?.scrollToEnd({ animated: true });
+        }, 60);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setIsKeyboardOpen(false);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const handleToggleMessage = (msgId: string) => {
+    setToggledMessageIds((prev) => ({
+      ...prev,
+      [msgId]: !prev[msgId],
+    }));
+  };
 
   // Modals
   const [showRequestSplitModal, setShowRequestSplitModal] = useState(false);
@@ -1071,12 +1107,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         {/* Message Feed */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
           <ScrollView
             ref={messageScrollRef}
             style={styles.chatScrollList}
             contentContainerStyle={styles.chatScrollContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => {
               messageScrollRef.current?.scrollToEnd({ animated: true });
@@ -1160,14 +1198,49 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                         })
                   : null;
 
+                const isExpanded = !!toggledMessageIds[msg.id];
+
                 if (msg.isMe) {
+                  const otherReaders = (msg.readBy || []).filter(
+                    (uid) => uid !== currentUid && uid !== `mem_${currentUid}`,
+                  );
+                  const isSeen =
+                    otherReaders.length > 0 ||
+                    (activeThread.type === "direct" &&
+                      activeThread.targetUserId &&
+                      (msg.readBy || []).includes(activeThread.targetUserId));
+
+                  let seenLabel = "· Sent";
+                  if (isSeen) {
+                    if (activeThread.type === "direct") {
+                      seenLabel = `· Seen by ${activeThread.name.split(" ")[0]}`;
+                    } else {
+                      const readerNames = otherReaders
+                        .map((uid) => {
+                          const m = memberAvatarMap.get(uid);
+                          return m ? m.name.split(" ")[0] : null;
+                        })
+                        .filter(Boolean) as string[];
+
+                      if (readerNames.length === 1) {
+                        seenLabel = `· Seen by ${readerNames[0]}`;
+                      } else if (readerNames.length > 1) {
+                        seenLabel = `· Seen by ${readerNames[0]} and ${readerNames.length - 1} other${readerNames.length - 1 > 1 ? "s" : ""}`;
+                      } else {
+                        seenLabel = "· Seen";
+                      }
+                    }
+                  }
+
                   return (
                     <View
                       key={msg.id}
                       style={[styles.msgBubbleRow, styles.msgRowMe]}
                     >
                       {/* Speech bubble */}
-                      <View
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => handleToggleMessage(msg.id)}
                         style={[styles.speechBubble, styles.speechBubbleMe]}
                       >
                         <Text
@@ -1248,16 +1321,29 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                             </Text>
                           </View>
                         )}
+                      </TouchableOpacity>
 
-                        <Text
-                          style={[
-                            styles.speechBubbleTime,
-                            styles.speechBubbleTimeMe,
-                          ]}
-                        >
-                          {msg.time}
-                        </Text>
-                      </View>
+                      {/* Messenger-style tapped Time & Seen indicator */}
+                      {isExpanded && (
+                        <View style={styles.msgStatusRowMe}>
+                          <Text
+                            style={[
+                              styles.msgStatusText,
+                              isDark && { color: "#94A3B8" },
+                            ]}
+                          >
+                            {msg.time}{" "}
+                            <Text
+                              style={[
+                                styles.msgStatusSeenBadge,
+                                isSeen && { color: "#2563EB" },
+                              ]}
+                            >
+                              {seenLabel}
+                            </Text>
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   );
                 }
@@ -1302,7 +1388,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       </View>
 
                       {/* Speech bubble */}
-                      <View
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => handleToggleMessage(msg.id)}
                         style={[
                           styles.speechBubble,
                           styles.speechBubbleThem,
@@ -1389,17 +1477,22 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                             </Text>
                           </View>
                         )}
+                      </TouchableOpacity>
+                    </View>
 
+                    {/* Messenger-style tapped Time indicator for incoming message */}
+                    {isExpanded && (
+                      <View style={styles.msgStatusRowThem}>
                         <Text
                           style={[
-                            styles.speechBubbleTime,
-                            { color: isDark ? "#94A3B8" : "#94A3B8" },
+                            styles.msgStatusText,
+                            isDark && { color: "#94A3B8" },
                           ]}
                         >
                           {msg.time}
                         </Text>
                       </View>
-                    </View>
+                    )}
                   </View>
                 );
               })
@@ -1411,7 +1504,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             style={[
               styles.capsuleInputOuterContainer,
               {
-                paddingBottom: bottomInset,
+                paddingBottom: isKeyboardOpen ? 8 : Math.max(bottomInset, 10),
                 backgroundColor: isDark ? "#181A20" : "#FFFFFF",
                 borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "#F1F5F9",
               },
@@ -3866,6 +3959,28 @@ const styles = StyleSheet.create({
   msgEmbedShare: {
     fontSize: 10.5,
     marginTop: 2,
+  },
+  msgStatusRowMe: {
+    marginTop: 3,
+    marginBottom: 4,
+    marginRight: 4,
+    alignItems: "flex-end",
+  },
+  msgStatusRowThem: {
+    marginTop: 3,
+    marginBottom: 4,
+    marginLeft: 42,
+    alignItems: "flex-start",
+  },
+  msgStatusText: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  msgStatusSeenBadge: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
   },
 
   /* GENEROUS SAFE PADDED BOTTOM CAPSULE INPUT */

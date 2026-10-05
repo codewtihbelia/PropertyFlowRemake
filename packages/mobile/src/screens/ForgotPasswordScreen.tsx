@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ScrollView,
+  KeyboardAvoidingView,
   Alert,
   ActivityIndicator,
   Image,
@@ -87,149 +88,251 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="light" hidden={true} />
+        <NavigationBar style="light" hidden={false} />
       )}
-      <ScrollView
-        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { backgroundColor: bottomBgColor },
-        ]}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View
-          style={[
-            styles.topWhiteBleed,
-            isDark && { backgroundColor: colors.background },
+        <ScrollView
+          style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { backgroundColor: bottomBgColor, paddingBottom: 60 },
           ]}
-        />
-        {/* Top Section */}
-        <View
-          style={[
-            styles.topSection,
-            {
-              paddingTop:
-                Math.max(
-                  insets.top,
-                  Platform.OS === "android"
-                    ? StatusBar.currentHeight || 24
-                    : 20,
-                ) + 12,
-            },
-            isDark && { backgroundColor: colors.background },
-          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          {/* Header Navigation */}
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={onBack}
-            activeOpacity={0.7}
+          <View
+            style={[
+              styles.topWhiteBleed,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          />
+          {/* Top Section */}
+          <View
+            style={[
+              styles.topSection,
+              {
+                paddingTop:
+                  Math.max(
+                    insets.top,
+                    Platform.OS === "android"
+                      ? StatusBar.currentHeight || 24
+                      : 20,
+                  ) + 12,
+              },
+              isDark && { backgroundColor: colors.background },
+            ]}
           >
-            <View
-              style={[
-                styles.backButtonIconCircle,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                },
-              ]}
+            {/* Header Navigation */}
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={onBack}
+              activeOpacity={0.7}
             >
-              <Feather
-                name="chevron-left"
-                size={20}
-                color={isDark ? colors.text : "#0F172A"}
-              />
-            </View>
-            <Text
-              style={[styles.backButtonText, isDark && { color: colors.text }]}
-            >
-              Back
-            </Text>
-          </TouchableOpacity>
-
-          {/* Logo Badge */}
-          <View style={styles.logoContainer}>
-            <View style={styles.logoBadge}>
-              <Image
-                source={assets.sBlueLogo}
-                style={styles.logoImage}
-                resizeMode="cover"
-              />
-            </View>
-            <View style={styles.brandTitleRow}>
-              <Text
-                style={[styles.splitText, isDark && { color: colors.text }]}
-              >
-                Split
-              </Text>
-              <Text
-                style={[styles.zyText, isDark && { color: colors.primary }]}
-              >
-                zy
-              </Text>
-            </View>
-          </View>
-
-          {!isSent ? (
-            <>
-              <Text
-                style={[styles.mainTitle, isDark && { color: colors.text }]}
-              >
-                Forgot Password?
-              </Text>
-              <Text
+              <View
                 style={[
-                  styles.description,
-                  isDark && { color: colors.textSecondary },
+                  styles.backButtonIconCircle,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
                 ]}
               >
-                Don't worry! Enter the email associated with your Splitzy
-                account and we'll send you a password recovery link.
+                <Feather
+                  name="chevron-left"
+                  size={20}
+                  color={isDark ? colors.text : "#0F172A"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.backButtonText,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Back
               </Text>
+            </TouchableOpacity>
 
-              <View style={styles.formArea}>
-                <View style={styles.fieldGroup}>
+            {/* Logo Badge */}
+            <View style={styles.logoContainer}>
+              <View style={styles.logoBadge}>
+                <Image
+                  source={assets.sBlueLogo}
+                  style={styles.logoImage}
+                  resizeMode="cover"
+                />
+              </View>
+              <View style={styles.brandTitleRow}>
+                <Text
+                  style={[styles.splitText, isDark && { color: colors.text }]}
+                >
+                  Split
+                </Text>
+                <Text
+                  style={[styles.zyText, isDark && { color: colors.primary }]}
+                >
+                  zy
+                </Text>
+              </View>
+            </View>
+
+            {!isSent ? (
+              <>
+                <Text
+                  style={[styles.mainTitle, isDark && { color: colors.text }]}
+                >
+                  Forgot Password?
+                </Text>
+                <Text
+                  style={[
+                    styles.description,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  Don't worry! Enter the email associated with your Splitzy
+                  account and we'll send you a password recovery link.
+                </Text>
+
+                <View style={styles.formArea}>
+                  <View style={styles.fieldGroup}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Email Address
+                    </Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        isDark && {
+                          backgroundColor: colors.surfaceInset,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="mail"
+                        size={18}
+                        color={isDark ? colors.textMuted : "#94A3B8"}
+                        style={styles.vectorIcon}
+                      />
+                      <TextInput
+                        style={[
+                          styles.textInput,
+                          isDark && { color: colors.text },
+                        ]}
+                        placeholder="e.g. rommel.belia@example.com"
+                        placeholderTextColor={
+                          isDark ? colors.textMuted : "#94A3B8"
+                        }
+                        value={email}
+                        onChangeText={setEmail}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        autoFocus
+                      />
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.primaryActionButton,
+                      isDark && {
+                        backgroundColor: colors.primary,
+                        shadowColor: colors.primary,
+                      },
+                      loading && styles.primaryActionDisabled,
+                    ]}
+                    onPress={handleSendReset}
+                    disabled={loading}
+                    activeOpacity={0.88}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <View style={styles.buttonLabelWithArrow}>
+                        <Text style={styles.primaryActionButtonText}>
+                          Send Reset Link
+                        </Text>
+                        <Feather name="send" size={16} color="#FFFFFF" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <View style={styles.successCard}>
+                <View
+                  style={[
+                    styles.successIconCircle,
+                    isDark && {
+                      backgroundColor: "rgba(59, 130, 246, 0.16)",
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="mail-unread-outline"
+                    size={36}
+                    color={isDark ? colors.accent : "#0F172A"}
+                  />
+                </View>
+
+                <Text
+                  style={[
+                    styles.successTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Check Your Inbox
+                </Text>
+                <Text
+                  style={[
+                    styles.successSubtitle,
+                    isDark && { color: colors.textSecondary },
+                  ]}
+                >
+                  We've sent a password reset link to:{"\n"}
                   <Text
                     style={[
-                      styles.inputLabel,
-                      isDark && { color: colors.textSecondary },
+                      styles.emailHighlight,
+                      isDark && { color: colors.text },
                     ]}
                   >
-                    Email Address
+                    {email.trim()}
                   </Text>
-                  <View
-                    style={[
-                      styles.inputWrapper,
-                      isDark && {
-                        backgroundColor: colors.surfaceInset,
-                        borderColor: colors.border,
-                      },
-                    ]}
+                </Text>
+
+                <View
+                  style={[
+                    styles.infoTipBox,
+                    isDark && {
+                      backgroundColor: "rgba(16, 185, 129, 0.14)",
+                      borderColor: "rgba(16, 185, 129, 0.3)",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={18}
+                    color={isDark ? "#34D399" : "#2563EB"}
+                    style={{ marginTop: 2 }}
+                  />
+                  <Text
+                    style={[styles.infoTipText, isDark && { color: "#34D399" }]}
                   >
-                    <Feather
-                      name="mail"
-                      size={18}
-                      color={isDark ? colors.textMuted : "#94A3B8"}
-                      style={styles.vectorIcon}
-                    />
-                    <TextInput
-                      style={[
-                        styles.textInput,
-                        isDark && { color: colors.text },
-                      ]}
-                      placeholder="e.g. rommel.belia@example.com"
-                      placeholderTextColor={
-                        isDark ? colors.textMuted : "#94A3B8"
-                      }
-                      value={email}
-                      onChangeText={setEmail}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      autoFocus
-                    />
-                  </View>
+                    Click the link inside the email to choose a new password. If
+                    you don't see it within a minute, please check your spam
+                    folder.
+                  </Text>
                 </View>
 
                 <TouchableOpacity
@@ -239,215 +342,129 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                       backgroundColor: colors.primary,
                       shadowColor: colors.primary,
                     },
-                    loading && styles.primaryActionDisabled,
                   ]}
-                  onPress={handleSendReset}
-                  disabled={loading}
+                  onPress={onBack}
                   activeOpacity={0.88}
                 >
-                  {loading ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
-                  ) : (
-                    <View style={styles.buttonLabelWithArrow}>
-                      <Text style={styles.primaryActionButtonText}>
-                        Send Reset Link
-                      </Text>
-                      <Feather name="send" size={16} color="#FFFFFF" />
-                    </View>
-                  )}
+                  <View style={styles.buttonLabelWithArrow}>
+                    <Text style={styles.primaryActionButtonText}>
+                      Back to Sign In
+                    </Text>
+                    <Feather name="arrow-right" size={16} color="#FFFFFF" />
+                  </View>
                 </TouchableOpacity>
-              </View>
-            </>
-          ) : (
-            <View style={styles.successCard}>
-              <View
-                style={[
-                  styles.successIconCircle,
-                  isDark && {
-                    backgroundColor: "rgba(59, 130, 246, 0.16)",
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="mail-unread-outline"
-                  size={36}
-                  color={isDark ? colors.accent : "#0F172A"}
-                />
-              </View>
 
-              <Text
-                style={[styles.successTitle, isDark && { color: colors.text }]}
+                <View style={styles.resendArea}>
+                  <Text
+                    style={[
+                      styles.resendPrompt,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Didn't receive the email?{" "}
+                  </Text>
+                  {countdown > 0 ? (
+                    <Text
+                      style={[
+                        styles.countdownText,
+                        isDark && { color: colors.textMuted },
+                      ]}
+                    >
+                      Resend in {countdown}s
+                    </Text>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleSendReset}
+                      disabled={loading}
+                    >
+                      <Text
+                        style={[
+                          styles.resendLink,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        Resend Email
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Bottom Section with S-Curve wave */}
+          <View
+            style={[
+              styles.bottomCurvedContainer,
+              { backgroundColor: bottomBgColor },
+            ]}
+          >
+            <View
+              style={[
+                styles.waveWrapper,
+                isDark && { backgroundColor: colors.background },
+              ]}
+            >
+              <Svg
+                width="100%"
+                height={52}
+                viewBox="0 0 375 52"
+                preserveAspectRatio="none"
+                style={styles.svgWave}
               >
-                Check Your Inbox
+                <Path
+                  d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
+                  fill={bottomBgColor}
+                />
+              </Svg>
+            </View>
+
+            <View
+              style={[
+                styles.bottomBlueContent,
+                {
+                  backgroundColor: bottomBgColor,
+                  paddingBottom: Math.max(insets.bottom + 20, 36),
+                },
+              ]}
+            >
+              <Text style={styles.bottomNeedHelpText}>
+                Need help signing in?
               </Text>
               <Text
                 style={[
-                  styles.successSubtitle,
-                  isDark && { color: colors.textSecondary },
+                  styles.bottomHelpSubtext,
+                  isDark && { color: "rgba(255, 255, 255, 0.7)" },
                 ]}
               >
-                We've sent a password reset link to:{"\n"}
-                <Text
-                  style={[
-                    styles.emailHighlight,
-                    isDark && { color: colors.text },
-                  ]}
-                >
-                  {email.trim()}
-                </Text>
+                Contact your apartment host or Splitzy support for identity
+                verification.
               </Text>
-
-              <View
-                style={[
-                  styles.infoTipBox,
-                  isDark && {
-                    backgroundColor: "rgba(16, 185, 129, 0.14)",
-                    borderColor: "rgba(16, 185, 129, 0.3)",
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="information-circle-outline"
-                  size={18}
-                  color={isDark ? "#34D399" : "#2563EB"}
-                  style={{ marginTop: 2 }}
-                />
-                <Text
-                  style={[styles.infoTipText, isDark && { color: "#34D399" }]}
-                >
-                  Click the link inside the email to choose a new password. If
-                  you don't see it within a minute, please check your spam
-                  folder.
-                </Text>
-              </View>
 
               <TouchableOpacity
                 style={[
-                  styles.primaryActionButton,
+                  styles.returnSignInBtn,
                   isDark && {
-                    backgroundColor: colors.primary,
-                    shadowColor: colors.primary,
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                    borderColor: "rgba(255, 255, 255, 0.18)",
                   },
                 ]}
                 onPress={onBack}
-                activeOpacity={0.88}
+                activeOpacity={0.8}
               >
-                <View style={styles.buttonLabelWithArrow}>
-                  <Text style={styles.primaryActionButtonText}>
-                    Back to Sign In
-                  </Text>
-                  <Feather name="arrow-right" size={16} color="#FFFFFF" />
-                </View>
-              </TouchableOpacity>
-
-              <View style={styles.resendArea}>
-                <Text
-                  style={[
-                    styles.resendPrompt,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  Didn't receive the email?{" "}
+                <Text style={styles.returnSignInBtnText}>
+                  Return to Sign In
                 </Text>
-                {countdown > 0 ? (
-                  <Text
-                    style={[
-                      styles.countdownText,
-                      isDark && { color: colors.textMuted },
-                    ]}
-                  >
-                    Resend in {countdown}s
-                  </Text>
-                ) : (
-                  <TouchableOpacity
-                    onPress={handleSendReset}
-                    disabled={loading}
-                  >
-                    <Text
-                      style={[
-                        styles.resendLink,
-                        isDark && { color: colors.accent },
-                      ]}
-                    >
-                      Resend Email
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
-
-        {/* Bottom Section with S-Curve wave */}
-        <View
-          style={[
-            styles.bottomCurvedContainer,
-            { backgroundColor: bottomBgColor },
-          ]}
-        >
-          <View
-            style={[
-              styles.waveWrapper,
-              isDark && { backgroundColor: colors.background },
-            ]}
-          >
-            <Svg
-              width="100%"
-              height={52}
-              viewBox="0 0 375 52"
-              preserveAspectRatio="none"
-              style={styles.svgWave}
-            >
-              <Path
-                d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill={bottomBgColor}
-              />
-            </Svg>
           </View>
 
+          {/* Bottom bleed ensures full solid extension on scroll */}
           <View
-            style={[
-              styles.bottomBlueContent,
-              {
-                backgroundColor: bottomBgColor,
-                paddingBottom: Math.max(insets.bottom + 20, 36),
-              },
-            ]}
-          >
-            <Text style={styles.bottomNeedHelpText}>Need help signing in?</Text>
-            <Text
-              style={[
-                styles.bottomHelpSubtext,
-                isDark && { color: "rgba(255, 255, 255, 0.7)" },
-              ]}
-            >
-              Contact your apartment host or Splitzy support for identity
-              verification.
-            </Text>
-
-            <TouchableOpacity
-              style={[
-                styles.returnSignInBtn,
-                isDark && {
-                  backgroundColor: "rgba(255, 255, 255, 0.08)",
-                  borderColor: "rgba(255, 255, 255, 0.18)",
-                },
-              ]}
-              onPress={onBack}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.returnSignInBtnText}>Return to Sign In</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Bottom bleed ensures full solid extension on scroll */}
-        <View
-          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
-        />
-      </ScrollView>
+            style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
       <View

@@ -6,6 +6,7 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  KeyboardAvoidingView,
   Alert,
   ActivityIndicator,
   Modal,
@@ -271,176 +272,113 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        {loading ? (
-          <UniversalSkeleton type="form" />
-        ) : isAlreadyHost ? (
-          /* State 1: Already Host */
-          <View
-            style={[
-              styles.cardSuccess,
-              isDark && {
-                backgroundColor: "rgba(5, 150, 105, 0.15)",
-                borderColor: "rgba(5, 150, 105, 0.35)",
-              },
-            ]}
-          >
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.successIconWrap,
-                  isDark && { backgroundColor: "rgba(5, 150, 105, 0.25)" },
-                ]}
-              >
-                <Ionicons name="checkmark-circle" size={26} color="#059669" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.cardSuccessTitle,
-                    isDark && { color: "#6EE7B7" },
-                  ]}
-                >
-                  Verified Host Admin
-                </Text>
-                <Text
-                  style={[
-                    styles.cardSuccessSubtitle,
-                    isDark && { color: "#A7F3D0" },
-                  ]}
-                >
-                  You already possess Host Administrator privileges to create
-                  roommate groups, manage utility splits, and verify member
-                  attendance.
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : application?.status === "PENDING" ? (
-          /* State 2: Under Review */
-          <View
-            style={[
-              styles.cardPending,
-              isDark && {
-                backgroundColor: colors.card,
-                borderColor: "rgba(217, 119, 6, 0.4)",
-              },
-            ]}
-          >
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.pendingIconWrap,
-                  isDark && { backgroundColor: "rgba(217, 119, 6, 0.2)" },
-                ]}
-              >
-                <Ionicons name="time" size={24} color="#D97706" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.cardPendingTitle,
-                    isDark && { color: "#FCD34D" },
-                  ]}
-                >
-                  Application Under Review
-                </Text>
-                <Text
-                  style={[
-                    styles.cardPendingSubtitle,
-                    isDark && { color: "#FBBF24" },
-                  ]}
-                >
-                  Submitted on{" "}
-                  {new Date(
-                    application.createdAt ||
-                      application.submittedAt ||
-                      Date.now(),
-                  ).toLocaleDateString()}
-                </Text>
-              </View>
-            </View>
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {loading ? (
+            <UniversalSkeleton type="form" />
+          ) : isAlreadyHost ? (
+            /* State 1: Already Host */
             <View
               style={[
-                styles.pendingDetailsBox,
+                styles.cardSuccess,
                 isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderColor: colors.border,
+                  backgroundColor: "rgba(5, 150, 105, 0.15)",
+                  borderColor: "rgba(5, 150, 105, 0.35)",
                 },
               ]}
             >
-              <View style={styles.detailRow}>
-                <Text
+              <View style={styles.statusRow}>
+                <View
                   style={[
-                    styles.detailLabel,
-                    isDark && { color: colors.textSecondary },
+                    styles.successIconWrap,
+                    isDark && { backgroundColor: "rgba(5, 150, 105, 0.25)" },
                   ]}
                 >
-                  Full Name
-                </Text>
-                <Text
-                  style={[styles.detailValue, isDark && { color: colors.text }]}
-                >
-                  {application.applicantName || "Not provided"}
-                </Text>
+                  <Ionicons name="checkmark-circle" size={26} color="#059669" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.cardSuccessTitle,
+                      isDark && { color: "#6EE7B7" },
+                    ]}
+                  >
+                    Verified Host Admin
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardSuccessSubtitle,
+                      isDark && { color: "#A7F3D0" },
+                    ]}
+                  >
+                    You already possess Host Administrator privileges to create
+                    roommate groups, manage utility splits, and verify member
+                    attendance.
+                  </Text>
+                </View>
               </View>
-              <View style={styles.detailRow}>
-                <Text
+            </View>
+          ) : application?.status === "PENDING" ? (
+            /* State 2: Under Review */
+            <View
+              style={[
+                styles.cardPending,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: "rgba(217, 119, 6, 0.4)",
+                },
+              ]}
+            >
+              <View style={styles.statusRow}>
+                <View
                   style={[
-                    styles.detailLabel,
-                    isDark && { color: colors.textSecondary },
+                    styles.pendingIconWrap,
+                    isDark && { backgroundColor: "rgba(217, 119, 6, 0.2)" },
                   ]}
                 >
-                  Contact Number
-                </Text>
-                <Text
-                  style={[styles.detailValue, isDark && { color: colors.text }]}
-                >
-                  {application.phoneNumber ||
-                    application.applicantPhone ||
-                    "Not provided"}
-                </Text>
+                  <Ionicons name="time" size={24} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.cardPendingTitle,
+                      isDark && { color: "#FCD34D" },
+                    ]}
+                  >
+                    Application Under Review
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardPendingSubtitle,
+                      isDark && { color: "#FBBF24" },
+                    ]}
+                  >
+                    Submitted on{" "}
+                    {new Date(
+                      application.createdAt ||
+                        application.submittedAt ||
+                        Date.now(),
+                    ).toLocaleDateString()}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.detailRow}>
-                <Text
-                  style={[
-                    styles.detailLabel,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  Property Address
-                </Text>
-                <Text
-                  style={[styles.detailValue, isDark && { color: colors.text }]}
-                >
-                  {application.propertyAddress}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text
-                  style={[
-                    styles.detailLabel,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  Host Management Type
-                </Text>
-                <Text
-                  style={[
-                    styles.detailValue,
-                    {
-                      color: isDark ? colors.primary : "#2563EB",
-                      fontWeight: "700",
-                    },
-                  ]}
-                >
-                  {application.managementType}
-                </Text>
-              </View>
-              {application.roommateGroupName ? (
+              <View
+                style={[
+                  styles.pendingDetailsBox,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.detailRow}>
                   <Text
                     style={[
@@ -448,7 +386,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.textSecondary },
                     ]}
                   >
-                    Roommate Group
+                    Full Name
                   </Text>
                   <Text
                     style={[
@@ -456,11 +394,9 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.text },
                     ]}
                   >
-                    {application.roommateGroupName}
+                    {application.applicantName || "Not provided"}
                   </Text>
                 </View>
-              ) : null}
-              {application.unitOrRoom ? (
                 <View style={styles.detailRow}>
                   <Text
                     style={[
@@ -468,7 +404,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.textSecondary },
                     ]}
                   >
-                    Unit, Apt or Floor
+                    Contact Number
                   </Text>
                   <Text
                     style={[
@@ -476,12 +412,11 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.text },
                     ]}
                   >
-                    {application.unitOrRoom}
+                    {application.phoneNumber ||
+                      application.applicantPhone ||
+                      "Not provided"}
                   </Text>
                 </View>
-              ) : null}
-              {application.estimatedMonthlyBills ||
-              application.monthlyRentOrShare ? (
                 <View style={styles.detailRow}>
                   <Text
                     style={[
@@ -489,779 +424,877 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.textSecondary },
                     ]}
                   >
-                    Est. Monthly Bills
+                    Property Address
+                  </Text>
+                  <Text
+                    style={[
+                      styles.detailValue,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {application.propertyAddress}
+                  </Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text
+                    style={[
+                      styles.detailLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Host Management Type
                   </Text>
                   <Text
                     style={[
                       styles.detailValue,
                       {
-                        color: isDark ? "#34D399" : "#059669",
+                        color: isDark ? colors.primary : "#2563EB",
                         fontWeight: "700",
                       },
                     ]}
                   >
-                    ₱
-                    {application.estimatedMonthlyBills ||
-                      application.monthlyRentOrShare}
+                    {application.managementType}
                   </Text>
                 </View>
-              ) : null}
-            </View>
-            <View
-              style={[
-                styles.pendingNotice,
-                isDark && {
-                  backgroundColor: "rgba(217, 119, 6, 0.15)",
-                  borderColor: "rgba(217, 119, 6, 0.3)",
-                },
-              ]}
-            >
-              <Ionicons
-                name="shield-checkmark"
-                size={16}
-                color={isDark ? "#FCD34D" : "#B45309"}
-              />
-              <Text
+                {application.roommateGroupName ? (
+                  <View style={styles.detailRow}>
+                    <Text
+                      style={[
+                        styles.detailLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Roommate Group
+                    </Text>
+                    <Text
+                      style={[
+                        styles.detailValue,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      {application.roommateGroupName}
+                    </Text>
+                  </View>
+                ) : null}
+                {application.unitOrRoom ? (
+                  <View style={styles.detailRow}>
+                    <Text
+                      style={[
+                        styles.detailLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Unit, Apt or Floor
+                    </Text>
+                    <Text
+                      style={[
+                        styles.detailValue,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      {application.unitOrRoom}
+                    </Text>
+                  </View>
+                ) : null}
+                {application.estimatedMonthlyBills ||
+                application.monthlyRentOrShare ? (
+                  <View style={styles.detailRow}>
+                    <Text
+                      style={[
+                        styles.detailLabel,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Est. Monthly Bills
+                    </Text>
+                    <Text
+                      style={[
+                        styles.detailValue,
+                        {
+                          color: isDark ? "#34D399" : "#059669",
+                          fontWeight: "700",
+                        },
+                      ]}
+                    >
+                      ₱
+                      {application.estimatedMonthlyBills ||
+                        application.monthlyRentOrShare}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <View
                 style={[
-                  styles.pendingNoticeText,
-                  isDark && { color: "#FDE68A" },
+                  styles.pendingNotice,
+                  isDark && {
+                    backgroundColor: "rgba(217, 119, 6, 0.15)",
+                    borderColor: "rgba(217, 119, 6, 0.3)",
+                  },
                 ]}
               >
-                Super Administrators review host requests to protect group
-                billing. You will be notified once approved.
-              </Text>
+                <Ionicons
+                  name="shield-checkmark"
+                  size={16}
+                  color={isDark ? "#FCD34D" : "#B45309"}
+                />
+                <Text
+                  style={[
+                    styles.pendingNoticeText,
+                    isDark && { color: "#FDE68A" },
+                  ]}
+                >
+                  Super Administrators review host requests to protect group
+                  billing. You will be notified once approved.
+                </Text>
+              </View>
             </View>
-          </View>
-        ) : (
-          /* State 3: Requested UI Layout */
-          <View style={styles.contentWrap}>
-            {/* Blue Hero Card Banner */}
-            <View
-              style={[
-                styles.heroCard,
-                isDark && {
-                  borderWidth: 1,
-                  borderColor: "rgba(255, 255, 255, 0.15)",
-                },
-              ]}
-            >
-              <View style={styles.heroTopRow}>
-                <View style={styles.verifiedBadge}>
-                  <View style={styles.greenPulseDot} />
-                  <Text style={styles.verifiedBadgeText}>
-                    VERIFIED HOST PROGRAM
-                  </Text>
+          ) : (
+            /* State 3: Requested UI Layout */
+            <View style={styles.contentWrap}>
+              {/* Blue Hero Card Banner */}
+              <View
+                style={[
+                  styles.heroCard,
+                  isDark && {
+                    borderWidth: 1,
+                    borderColor: "rgba(255, 255, 255, 0.15)",
+                  },
+                ]}
+              >
+                <View style={styles.heroTopRow}>
+                  <View style={styles.verifiedBadge}>
+                    <View style={styles.greenPulseDot} />
+                    <Text style={styles.verifiedBadgeText}>
+                      VERIFIED HOST PROGRAM
+                    </Text>
+                  </View>
+                  <View style={styles.heroIconBox}>
+                    <MaterialCommunityIcons
+                      name="office-building-outline"
+                      size={22}
+                      color="#FFFFFF"
+                    />
+                  </View>
                 </View>
-                <View style={styles.heroIconBox}>
-                  <MaterialCommunityIcons
-                    name="office-building-outline"
-                    size={22}
-                    color="#FFFFFF"
-                  />
-                </View>
+
+                <Text style={styles.heroTitle}>
+                  Become an Apartment{"\n"}Lead Host
+                </Text>
+                <Text style={styles.heroSubtitle}>
+                  Manage roommate utility cycles, automate bill splits, and
+                  collect payments seamlessly.
+                </Text>
               </View>
 
-              <Text style={styles.heroTitle}>
-                Become an Apartment{"\n"}Lead Host
-              </Text>
-              <Text style={styles.heroSubtitle}>
-                Manage roommate utility cycles, automate bill splits, and
-                collect payments seamlessly.
-              </Text>
-            </View>
-
-            {/* Stepper Progress Bar */}
-            <View
-              style={[
-                styles.stepperContainer,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              {/* Step 1 */}
-              <TouchableOpacity
-                style={styles.stepItem}
-                onPress={() => setActiveStep(1)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.stepCircle,
-                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-                    activeStep === 1 && styles.stepCircleActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stepCircleText,
-                      isDark && { color: colors.textSecondary },
-                      activeStep === 1 && styles.stepCircleTextActive,
-                    ]}
-                  >
-                    1
-                  </Text>
-                </View>
-                <View style={styles.stepTextCol}>
-                  <Text
-                    style={[
-                      styles.stepLabel,
-                      isDark && { color: colors.textMuted },
-                      activeStep === 1 && [
-                        styles.stepLabelActive,
-                        isDark && { color: colors.text },
-                      ],
-                    ]}
-                  >
-                    Property &{"\n"}Terms
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Connecting Line 1 */}
+              {/* Stepper Progress Bar */}
               <View
                 style={[
-                  styles.stepConnector,
-                  isDark && { backgroundColor: colors.border },
-                ]}
-              />
-
-              {/* Step 2 */}
-              <TouchableOpacity
-                style={styles.stepItem}
-                onPress={() => setActiveStep(2)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.stepCircle,
-                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-                    activeStep === 2 && styles.stepCircleActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stepCircleText,
-                      isDark && { color: colors.textSecondary },
-                      activeStep === 2 && styles.stepCircleTextActive,
-                    ]}
-                  >
-                    2
-                  </Text>
-                </View>
-                <View style={styles.stepTextCol}>
-                  <Text
-                    style={[
-                      styles.stepLabel,
-                      isDark && { color: colors.textMuted },
-                      activeStep === 2 && [
-                        styles.stepLabelActive,
-                        isDark && { color: colors.text },
-                      ],
-                    ]}
-                  >
-                    KYC &{"\n"}Payout
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Connecting Line 2 */}
-              <View
-                style={[
-                  styles.stepConnector,
-                  isDark && { backgroundColor: colors.border },
-                ]}
-              />
-
-              {/* Step 3 */}
-              <TouchableOpacity
-                style={styles.stepItem}
-                onPress={() => setActiveStep(3)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.stepCircle,
-                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-                    activeStep === 3 && styles.stepCircleActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stepCircleText,
-                      isDark && { color: colors.textSecondary },
-                      activeStep === 3 && styles.stepCircleTextActive,
-                    ]}
-                  >
-                    3
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* 1. Full Name */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Full Name <Text style={styles.requiredStar}>*</Text>
-              </Text>
-              <View
-                style={[
-                  styles.inputWithIcon,
+                  styles.stepperContainer,
                   isDark && {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
                   },
                 ]}
               >
-                <Feather
-                  name="user"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={{ marginRight: 10 }}
-                />
-                <TextInput
-                  style={[
-                    styles.textInputStyle,
-                    isDark && { color: colors.text },
-                  ]}
-                  value={applicantName}
-                  onChangeText={setApplicantName}
-                  placeholder="e.g. Juan dela Cruz"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                />
-              </View>
-            </View>
+                {/* Step 1 */}
+                <TouchableOpacity
+                  style={styles.stepItem}
+                  onPress={() => setActiveStep(1)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                      activeStep === 1 && styles.stepCircleActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stepCircleText,
+                        isDark && { color: colors.textSecondary },
+                        activeStep === 1 && styles.stepCircleTextActive,
+                      ]}
+                    >
+                      1
+                    </Text>
+                  </View>
+                  <View style={styles.stepTextCol}>
+                    <Text
+                      style={[
+                        styles.stepLabel,
+                        isDark && { color: colors.textMuted },
+                        activeStep === 1 && [
+                          styles.stepLabelActive,
+                          isDark && { color: colors.text },
+                        ],
+                      ]}
+                    >
+                      Property &{"\n"}Terms
+                    </Text>
+                  </View>
+                </TouchableOpacity>
 
-            {/* 2. Contact Number */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Contact Number <Text style={styles.requiredStar}>*</Text>
-              </Text>
-              <View
-                style={[
-                  styles.inputWithIcon,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Feather
-                  name="phone"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={{ marginRight: 10 }}
-                />
-                <TextInput
+                {/* Connecting Line 1 */}
+                <View
                   style={[
-                    styles.textInputStyle,
-                    isDark && { color: colors.text },
+                    styles.stepConnector,
+                    isDark && { backgroundColor: colors.border },
                   ]}
-                  value={phoneNumber}
-                  onChangeText={setPhoneNumber}
-                  placeholder="e.g. +63 917 123 4567"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  keyboardType="phone-pad"
                 />
-              </View>
-            </View>
 
-            {/* 3. Select Roommate Group (Optional) + Empty State */}
-            <View style={styles.formFieldBlock}>
-              <View style={styles.labelRow}>
+                {/* Step 2 */}
+                <TouchableOpacity
+                  style={styles.stepItem}
+                  onPress={() => setActiveStep(2)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                      activeStep === 2 && styles.stepCircleActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stepCircleText,
+                        isDark && { color: colors.textSecondary },
+                        activeStep === 2 && styles.stepCircleTextActive,
+                      ]}
+                    >
+                      2
+                    </Text>
+                  </View>
+                  <View style={styles.stepTextCol}>
+                    <Text
+                      style={[
+                        styles.stepLabel,
+                        isDark && { color: colors.textMuted },
+                        activeStep === 2 && [
+                          styles.stepLabelActive,
+                          isDark && { color: colors.text },
+                        ],
+                      ]}
+                    >
+                      KYC &{"\n"}Payout
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Connecting Line 2 */}
+                <View
+                  style={[
+                    styles.stepConnector,
+                    isDark && { backgroundColor: colors.border },
+                  ]}
+                />
+
+                {/* Step 3 */}
+                <TouchableOpacity
+                  style={styles.stepItem}
+                  onPress={() => setActiveStep(3)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                      activeStep === 3 && styles.stepCircleActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stepCircleText,
+                        isDark && { color: colors.textSecondary },
+                        activeStep === 3 && styles.stepCircleTextActive,
+                      ]}
+                    >
+                      3
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {/* 1. Full Name */}
+              <View style={styles.formFieldBlock}>
                 <Text
                   style={[
                     styles.fieldHeaderLabel,
                     isDark && { color: colors.text },
                   ]}
                 >
-                  Select Roommate Group
+                  Full Name <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <View
                   style={[
-                    styles.optionalBadge,
-                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.optionalBadgeText,
-                      isDark && { color: colors.textSecondary },
-                    ]}
-                  >
-                    Optional
-                  </Text>
-                </View>
-              </View>
-
-              {households.length === 0 ? (
-                /* Empty State: No groups created yet */
-                <View
-                  style={[
-                    styles.emptyGroupCard,
+                    styles.inputWithIcon,
                     isDark && {
                       backgroundColor: colors.card,
                       borderColor: colors.border,
                     },
                   ]}
                 >
-                  <View
+                  <Feather
+                    name="user"
+                    size={17}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                    style={{ marginRight: 10 }}
+                  />
+                  <TextInput
                     style={[
-                      styles.emptyIconCircle,
-                      isDark && {
-                        backgroundColor: "rgba(255, 255, 255, 0.08)",
-                      },
+                      styles.textInputStyle,
+                      isDark && { color: colors.text },
                     ]}
-                  >
-                    <Feather
-                      name="users"
-                      size={20}
-                      color={isDark ? colors.textSecondary : "#64748B"}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.emptyGroupTitle,
-                        isDark && { color: colors.text },
-                      ]}
-                    >
-                      No Roommate Groups Available
-                    </Text>
-                    <Text
-                      style={[
-                        styles.emptyGroupSubtitle,
-                        isDark && { color: colors.textSecondary },
-                      ]}
-                    >
-                      Non-hosts cannot create groups yet. You can submit without
-                      a group and create your household once approved as a Host.
-                    </Text>
-                  </View>
+                    value={applicantName}
+                    onChangeText={setApplicantName}
+                    placeholder="e.g. Juan dela Cruz"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  />
                 </View>
-              ) : (
-                /* Horizontal Scrollable or Card list of existing groups */
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.groupCardsScroll}
-                >
-                  {households.map((hh, idx) => {
-                    const hhId = hh.householdId || hh.id;
-                    const isSelected = selectedGroupId === hhId;
-                    const membersCount = Array.isArray(hh.members)
-                      ? hh.members.length
-                      : typeof hh.memberCount === "number"
-                        ? hh.memberCount
-                        : 1;
-                    const groupTitle =
-                      hh.householdName || hh.apartmentName || "Roommate Group";
-                    const subtitle = hh.unit
-                      ? `Unit ${hh.unit} • ${membersCount} Members`
-                      : `${membersCount} Members`;
-
-                    return (
-                      <TouchableOpacity
-                        key={hhId}
-                        style={[
-                          styles.groupCard,
-                          isSelected
-                            ? styles.groupCardSelected
-                            : [
-                                styles.groupCardUnselected,
-                                isDark && {
-                                  backgroundColor: colors.card,
-                                  borderColor: colors.border,
-                                },
-                              ],
-                        ]}
-                        onPress={() => handleSelectGroup(hh)}
-                        activeOpacity={0.88}
-                      >
-                        <View style={styles.groupCardTop}>
-                          <Text
-                            style={[
-                              styles.groupTagText,
-                              isSelected
-                                ? styles.groupTagTextSelected
-                                : [
-                                    styles.groupTagTextUnselected,
-                                    isDark && { color: colors.textMuted },
-                                  ],
-                            ]}
-                          >
-                            {idx === 0 ? "Primary Group" : "Available Group"}
-                          </Text>
-                          {isSelected ? (
-                            <View style={styles.checkCircleFilled}>
-                              <Ionicons
-                                name="checkmark"
-                                size={13}
-                                color="#2563EB"
-                              />
-                            </View>
-                          ) : (
-                            <View
-                              style={[
-                                styles.radioOutline,
-                                isDark && { borderColor: colors.border },
-                              ]}
-                            />
-                          )}
-                        </View>
-
-                        <Text
-                          style={[
-                            styles.groupCardTitle,
-                            isSelected
-                              ? styles.groupCardTitleSelected
-                              : [
-                                  styles.groupCardTitleUnselected,
-                                  isDark && { color: colors.text },
-                                ],
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {groupTitle}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.groupCardSub,
-                            isSelected
-                              ? styles.groupCardSubSelected
-                              : [
-                                  styles.groupCardSubUnselected,
-                                  isDark && { color: colors.textSecondary },
-                                ],
-                          ]}
-                        >
-                          {subtitle}
-                        </Text>
-
-                        <View style={styles.avatarRow}>
-                          <View style={styles.avatarStack}>
-                            {[0, 1, 2]
-                              .slice(0, Math.min(membersCount, 3))
-                              .map((mIdx) => (
-                                <View
-                                  key={mIdx}
-                                  style={[
-                                    styles.avatarCircle,
-                                    {
-                                      backgroundColor:
-                                        AVATAR_COLORS[
-                                          (idx + mIdx) % AVATAR_COLORS.length
-                                        ],
-                                      left: mIdx * 14,
-                                      zIndex: 3 - mIdx,
-                                    },
-                                    isDark && {
-                                      borderColor: isSelected
-                                        ? "#2563EB"
-                                        : colors.card,
-                                    },
-                                  ]}
-                                >
-                                  <Text style={styles.avatarInitials}>
-                                    {groupTitle.substring(0, 1).toUpperCase()}
-                                    {mIdx + 1}
-                                  </Text>
-                                </View>
-                              ))}
-                          </View>
-                          {membersCount > 3 && (
-                            <Text
-                              style={[
-                                styles.moreCountText,
-                                isSelected
-                                  ? styles.moreCountTextSelected
-                                  : [
-                                      styles.moreCountTextUnselected,
-                                      isDark && { color: colors.textSecondary },
-                                    ],
-                              ]}
-                            >
-                              +{membersCount - 3} more
-                            </Text>
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-
-            {/* 4. Property Address */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Property Address <Text style={styles.requiredStar}>*</Text>
-              </Text>
-              <View
-                style={[
-                  styles.inputWithIcon,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Feather
-                  name="map-pin"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={{ marginRight: 10 }}
-                />
-                <TextInput
-                  style={[
-                    styles.textInputStyle,
-                    isDark && { color: colors.text },
-                  ]}
-                  value={propertyAddress}
-                  onChangeText={setPropertyAddress}
-                  placeholder="e.g. 452 Greenfield St, Unit 402, Metro Manila"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                />
               </View>
-            </View>
 
-            {/* 5. Host Management Type with dropdowns */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Host Management Type <Text style={styles.requiredStar}>*</Text>
-              </Text>
-              <TouchableOpacity
-                style={[
-                  styles.inputWithIcon,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-                onPress={() => setShowManagementModal(true)}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    styles.selectInputText,
-                    isDark && { color: colors.text },
-                    !managementType && {
-                      color: isDark ? colors.textMuted : "#94A3B8",
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {managementType ||
-                    "Select your property management designation"}
-                </Text>
-                <Feather
-                  name="chevron-down"
-                  size={18}
-                  color={isDark ? colors.textSecondary : "#64748B"}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* 6. Unit, Apt or Floor (Optional) */}
-            <View style={styles.formFieldBlock}>
-              <View style={styles.labelRow}>
+              {/* 2. Contact Number */}
+              <View style={styles.formFieldBlock}>
                 <Text
                   style={[
                     styles.fieldHeaderLabel,
                     isDark && { color: colors.text },
                   ]}
                 >
-                  Unit, Apt or Floor
+                  Contact Number <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <View
                   style={[
-                    styles.optionalBadge,
-                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                    styles.inputWithIcon,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="phone"
+                    size={17}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                    style={{ marginRight: 10 }}
+                  />
+                  <TextInput
+                    style={[
+                      styles.textInputStyle,
+                      isDark && { color: colors.text },
+                    ]}
+                    value={phoneNumber}
+                    onChangeText={setPhoneNumber}
+                    placeholder="e.g. +63 917 123 4567"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    keyboardType="phone-pad"
+                  />
+                </View>
+              </View>
+
+              {/* 3. Select Roommate Group (Optional) + Empty State */}
+              <View style={styles.formFieldBlock}>
+                <View style={styles.labelRow}>
+                  <Text
+                    style={[
+                      styles.fieldHeaderLabel,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Select Roommate Group
+                  </Text>
+                  <View
+                    style={[
+                      styles.optionalBadge,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionalBadgeText,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Optional
+                    </Text>
+                  </View>
+                </View>
+
+                {households.length === 0 ? (
+                  /* Empty State: No groups created yet */
+                  <View
+                    style={[
+                      styles.emptyGroupCard,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.emptyIconCircle,
+                        isDark && {
+                          backgroundColor: "rgba(255, 255, 255, 0.08)",
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="users"
+                        size={20}
+                        color={isDark ? colors.textSecondary : "#64748B"}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.emptyGroupTitle,
+                          isDark && { color: colors.text },
+                        ]}
+                      >
+                        No Roommate Groups Available
+                      </Text>
+                      <Text
+                        style={[
+                          styles.emptyGroupSubtitle,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        Non-hosts cannot create groups yet. You can submit
+                        without a group and create your household once approved
+                        as a Host.
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  /* Horizontal Scrollable or Card list of existing groups */
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.groupCardsScroll}
+                  >
+                    {households.map((hh, idx) => {
+                      const hhId = hh.householdId || hh.id;
+                      const isSelected = selectedGroupId === hhId;
+                      const membersCount = Array.isArray(hh.members)
+                        ? hh.members.length
+                        : typeof hh.memberCount === "number"
+                          ? hh.memberCount
+                          : 1;
+                      const groupTitle =
+                        hh.householdName ||
+                        hh.apartmentName ||
+                        "Roommate Group";
+                      const subtitle = hh.unit
+                        ? `Unit ${hh.unit} • ${membersCount} Members`
+                        : `${membersCount} Members`;
+
+                      return (
+                        <TouchableOpacity
+                          key={hhId}
+                          style={[
+                            styles.groupCard,
+                            isSelected
+                              ? styles.groupCardSelected
+                              : [
+                                  styles.groupCardUnselected,
+                                  isDark && {
+                                    backgroundColor: colors.card,
+                                    borderColor: colors.border,
+                                  },
+                                ],
+                          ]}
+                          onPress={() => handleSelectGroup(hh)}
+                          activeOpacity={0.88}
+                        >
+                          <View style={styles.groupCardTop}>
+                            <Text
+                              style={[
+                                styles.groupTagText,
+                                isSelected
+                                  ? styles.groupTagTextSelected
+                                  : [
+                                      styles.groupTagTextUnselected,
+                                      isDark && { color: colors.textMuted },
+                                    ],
+                              ]}
+                            >
+                              {idx === 0 ? "Primary Group" : "Available Group"}
+                            </Text>
+                            {isSelected ? (
+                              <View style={styles.checkCircleFilled}>
+                                <Ionicons
+                                  name="checkmark"
+                                  size={13}
+                                  color="#2563EB"
+                                />
+                              </View>
+                            ) : (
+                              <View
+                                style={[
+                                  styles.radioOutline,
+                                  isDark && { borderColor: colors.border },
+                                ]}
+                              />
+                            )}
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.groupCardTitle,
+                              isSelected
+                                ? styles.groupCardTitleSelected
+                                : [
+                                    styles.groupCardTitleUnselected,
+                                    isDark && { color: colors.text },
+                                  ],
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {groupTitle}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.groupCardSub,
+                              isSelected
+                                ? styles.groupCardSubSelected
+                                : [
+                                    styles.groupCardSubUnselected,
+                                    isDark && { color: colors.textSecondary },
+                                  ],
+                            ]}
+                          >
+                            {subtitle}
+                          </Text>
+
+                          <View style={styles.avatarRow}>
+                            <View style={styles.avatarStack}>
+                              {[0, 1, 2]
+                                .slice(0, Math.min(membersCount, 3))
+                                .map((mIdx) => (
+                                  <View
+                                    key={mIdx}
+                                    style={[
+                                      styles.avatarCircle,
+                                      {
+                                        backgroundColor:
+                                          AVATAR_COLORS[
+                                            (idx + mIdx) % AVATAR_COLORS.length
+                                          ],
+                                        left: mIdx * 14,
+                                        zIndex: 3 - mIdx,
+                                      },
+                                      isDark && {
+                                        borderColor: isSelected
+                                          ? "#2563EB"
+                                          : colors.card,
+                                      },
+                                    ]}
+                                  >
+                                    <Text style={styles.avatarInitials}>
+                                      {groupTitle.substring(0, 1).toUpperCase()}
+                                      {mIdx + 1}
+                                    </Text>
+                                  </View>
+                                ))}
+                            </View>
+                            {membersCount > 3 && (
+                              <Text
+                                style={[
+                                  styles.moreCountText,
+                                  isSelected
+                                    ? styles.moreCountTextSelected
+                                    : [
+                                        styles.moreCountTextUnselected,
+                                        isDark && {
+                                          color: colors.textSecondary,
+                                        },
+                                      ],
+                                ]}
+                              >
+                                +{membersCount - 3} more
+                              </Text>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+
+              {/* 4. Property Address */}
+              <View style={styles.formFieldBlock}>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Property Address <Text style={styles.requiredStar}>*</Text>
+                </Text>
+                <View
+                  style={[
+                    styles.inputWithIcon,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="map-pin"
+                    size={17}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                    style={{ marginRight: 10 }}
+                  />
+                  <TextInput
+                    style={[
+                      styles.textInputStyle,
+                      isDark && { color: colors.text },
+                    ]}
+                    value={propertyAddress}
+                    onChangeText={setPropertyAddress}
+                    placeholder="e.g. 452 Greenfield St, Unit 402, Metro Manila"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  />
+                </View>
+              </View>
+
+              {/* 5. Host Management Type with dropdowns */}
+              <View style={styles.formFieldBlock}>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Host Management Type{" "}
+                  <Text style={styles.requiredStar}>*</Text>
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.inputWithIcon,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => setShowManagementModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.selectInputText,
+                      isDark && { color: colors.text },
+                      !managementType && {
+                        color: isDark ? colors.textMuted : "#94A3B8",
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {managementType ||
+                      "Select your property management designation"}
+                  </Text>
+                  <Feather
+                    name="chevron-down"
+                    size={18}
+                    color={isDark ? colors.textSecondary : "#64748B"}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {/* 6. Unit, Apt or Floor (Optional) */}
+              <View style={styles.formFieldBlock}>
+                <View style={styles.labelRow}>
+                  <Text
+                    style={[
+                      styles.fieldHeaderLabel,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Unit, Apt or Floor
+                  </Text>
+                  <View
+                    style={[
+                      styles.optionalBadge,
+                      isDark && {
+                        backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionalBadgeText,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      Optional
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={[
+                    styles.inputWithIcon,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="home"
+                    size={17}
+                    color={isDark ? colors.textMuted : "#94A3B8"}
+                    style={{ marginRight: 10 }}
+                  />
+                  <TextInput
+                    style={[
+                      styles.textInputStyle,
+                      isDark && { color: colors.text },
+                    ]}
+                    value={unitOrRoom}
+                    onChangeText={setUnitOrRoom}
+                    placeholder="e.g. Unit 402, 4th Floor"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  />
+                </View>
+              </View>
+
+              {/* 7. Est Monthly Bills */}
+              <View style={styles.formFieldBlock}>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Est. Monthly Bills
+                </Text>
+                <View
+                  style={[
+                    styles.inputWithIcon,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
                   ]}
                 >
                   <Text
                     style={[
-                      styles.optionalBadgeText,
-                      isDark && { color: colors.textSecondary },
+                      styles.currencyPrefix,
+                      isDark && { color: "#34D399" },
                     ]}
                   >
-                    Optional
+                    ₱
                   </Text>
+                  <TextInput
+                    style={[
+                      styles.textInputStyle,
+                      isDark && { color: colors.text },
+                    ]}
+                    value={monthlyRentOrShare}
+                    onChangeText={setMonthlyRentOrShare}
+                    placeholder="e.g. 15000"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    keyboardType="numeric"
+                  />
                 </View>
               </View>
-              <View
-                style={[
-                  styles.inputWithIcon,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Feather
-                  name="home"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={{ marginRight: 10 }}
-                />
-                <TextInput
-                  style={[
-                    styles.textInputStyle,
-                    isDark && { color: colors.text },
-                  ]}
-                  value={unitOrRoom}
-                  onChangeText={setUnitOrRoom}
-                  placeholder="e.g. Unit 402, 4th Floor"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                />
-              </View>
-            </View>
 
-            {/* 7. Est Monthly Bills */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Est. Monthly Bills
-              </Text>
-              <View
-                style={[
-                  styles.inputWithIcon,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
+              {/* 8. Why do you want to become a host */}
+              <View style={styles.formFieldBlock}>
                 <Text
                   style={[
-                    styles.currencyPrefix,
-                    isDark && { color: "#34D399" },
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
                   ]}
                 >
-                  ₱
+                  Why do you want to become a host{" "}
+                  <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <TextInput
                   style={[
                     styles.textInputStyle,
-                    isDark && { color: colors.text },
+                    styles.textAreaInput,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
                   ]}
-                  value={monthlyRentOrShare}
-                  onChangeText={setMonthlyRentOrShare}
-                  placeholder="e.g. 15000"
+                  value={reasonForApplying}
+                  onChangeText={setReasonForApplying}
+                  placeholder="Explain why you want to become a host (e.g. I am the primary leaseholder and organize utility splits and water attendance for roommates)..."
                   placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  keyboardType="numeric"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
                 />
               </View>
-            </View>
 
-            {/* 8. Why do you want to become a host */}
-            <View style={styles.formFieldBlock}>
-              <Text
+              {/* 9. Property Experience */}
+              <View style={styles.formFieldBlock}>
+                <Text
+                  style={[
+                    styles.fieldHeaderLabel,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Property Experience
+                </Text>
+                <TextInput
+                  style={[
+                    styles.textInputStyle,
+                    styles.textAreaInput,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
+                  ]}
+                  value={experience}
+                  onChangeText={setExperience}
+                  placeholder="Describe your prior experience managing leases, collecting utility shares, or hosting shared accommodations..."
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Action Bar / Submit Button */}
+              <TouchableOpacity
                 style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
+                  styles.primaryActionBtn,
+                  submitting && styles.btnDisabled,
                 ]}
+                onPress={handleSubmit}
+                disabled={submitting}
+                activeOpacity={0.88}
               >
-                Why do you want to become a host{" "}
-                <Text style={styles.requiredStar}>*</Text>
-              </Text>
-              <TextInput
-                style={[
-                  styles.textInputStyle,
-                  styles.textAreaInput,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                    color: colors.text,
-                  },
-                ]}
-                value={reasonForApplying}
-                onChangeText={setReasonForApplying}
-                placeholder="Explain why you want to become a host (e.g. I am the primary leaseholder and organize utility splits and water attendance for roommates)..."
-                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <View style={styles.btnContent}>
+                    <Text style={styles.btnText}>Submit Host Application</Text>
+                    <Feather name="arrow-right" size={18} color="#FFFFFF" />
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
-
-            {/* 9. Property Experience */}
-            <View style={styles.formFieldBlock}>
-              <Text
-                style={[
-                  styles.fieldHeaderLabel,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Property Experience
-              </Text>
-              <TextInput
-                style={[
-                  styles.textInputStyle,
-                  styles.textAreaInput,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                    color: colors.text,
-                  },
-                ]}
-                value={experience}
-                onChangeText={setExperience}
-                placeholder="Describe your prior experience managing leases, collecting utility shares, or hosting shared accommodations..."
-                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
-
-            {/* Action Bar / Submit Button */}
-            <TouchableOpacity
-              style={[
-                styles.primaryActionBtn,
-                submitting && styles.btnDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={submitting}
-              activeOpacity={0.88}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <View style={styles.btnContent}>
-                  <Text style={styles.btnText}>Submit Host Application</Text>
-                  <Feather name="arrow-right" size={18} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Modal: Host Management Type Dropdown */}
       <SmoothBottomSheetModal

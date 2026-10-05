@@ -132,7 +132,7 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
       statusBarTranslucent
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.keyboardContainer}
       >
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>

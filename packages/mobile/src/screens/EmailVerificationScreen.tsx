@@ -153,7 +153,7 @@ export const EmailVerificationScreen: React.FC<
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="light" hidden={true} />
+        <NavigationBar style="light" hidden={false} />
       )}
       <ScrollView
         style={[styles.scrollView, { backgroundColor: bottomBgColor }]}

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ScrollView,
+  KeyboardAvoidingView,
   Alert,
   ActivityIndicator,
   useWindowDimensions,
@@ -582,116 +583,167 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         translucent={true}
       />
       {Platform.OS === "android" && (
-        <NavigationBar style="light" hidden={true} />
+        <NavigationBar style="light" hidden={false} />
       )}
-      <ScrollView
-        style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { backgroundColor: bottomBgColor },
-        ]}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        {/* Top bleed ensures no blue sliver on drag */}
-        <View
-          style={[
-            styles.topWhiteBleed,
-            isDark && { backgroundColor: colors.background },
+        <ScrollView
+          style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { backgroundColor: bottomBgColor, paddingBottom: 60 },
           ]}
-        />
-
-        {/* ================= TOP / UPPER SECTION ================= */}
-        <View
-          style={[
-            styles.topSection,
-            {
-              paddingTop:
-                Math.max(
-                  insets.top,
-                  Platform.OS === "android"
-                    ? StatusBar.currentHeight || 24
-                    : 20,
-                ) + 16,
-            },
-            isDark && { backgroundColor: colors.background },
-          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          {/* Top Bar with Brand and Theme Toggle */}
-          <View style={styles.topBarRow}>
-            {onBackToSavedProfile ? (
+          {/* Top bleed ensures no blue sliver on drag */}
+          <View
+            style={[
+              styles.topWhiteBleed,
+              isDark && { backgroundColor: colors.background },
+            ]}
+          />
+
+          {/* ================= TOP / UPPER SECTION ================= */}
+          <View
+            style={[
+              styles.topSection,
+              {
+                paddingTop:
+                  Math.max(
+                    insets.top,
+                    Platform.OS === "android"
+                      ? StatusBar.currentHeight || 24
+                      : 20,
+                  ) + 16,
+              },
+              isDark && { backgroundColor: colors.background },
+            ]}
+          >
+            {/* Top Bar with Brand and Theme Toggle */}
+            <View style={styles.topBarRow}>
+              {onBackToSavedProfile ? (
+                <TouchableOpacity
+                  style={styles.backToSavedBtn}
+                  onPress={onBackToSavedProfile}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Back to saved profile"
+                >
+                  <Feather
+                    name="arrow-left"
+                    size={20}
+                    color={isDark ? colors.text : "#0F172A"}
+                  />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.topBarSpacer} />
+              )}
+
+              {/* Logo Badge */}
+              <View style={styles.logoContainer}>
+                <View style={styles.logoBadge}>
+                  <Image
+                    source={assets.sBlueLogo}
+                    style={styles.logoImage}
+                    resizeMode="cover"
+                  />
+                </View>
+
+                {/* App Title */}
+                <View style={styles.brandTitleRow}>
+                  <Text
+                    style={[styles.splitText, isDark && { color: colors.text }]}
+                  >
+                    Split
+                  </Text>
+                  <Text
+                    style={[styles.zyText, isDark && { color: colors.primary }]}
+                  >
+                    zy
+                  </Text>
+                </View>
+              </View>
+
+              {/* Theme Toggle Button */}
               <TouchableOpacity
-                style={styles.backToSavedBtn}
-                onPress={onBackToSavedProfile}
+                style={[
+                  styles.themeToggleBtn,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={toggleTheme}
                 activeOpacity={0.7}
-                accessibilityLabel="Back to saved profile"
+                accessibilityLabel="Toggle Theme"
               >
                 <Feather
-                  name="arrow-left"
-                  size={20}
-                  color={isDark ? colors.text : "#0F172A"}
+                  name={isDark ? "sun" : "moon"}
+                  size={18}
+                  color={isDark ? "#F59E0B" : "#64748B"}
                 />
               </TouchableOpacity>
-            ) : (
-              <View style={styles.topBarSpacer} />
-            )}
-
-            {/* Logo Badge */}
-            <View style={styles.logoContainer}>
-              <View style={styles.logoBadge}>
-                <Image
-                  source={assets.sBlueLogo}
-                  style={styles.logoImage}
-                  resizeMode="cover"
-                />
-              </View>
-
-              {/* App Title */}
-              <View style={styles.brandTitleRow}>
-                <Text
-                  style={[styles.splitText, isDark && { color: colors.text }]}
-                >
-                  Split
-                </Text>
-                <Text
-                  style={[styles.zyText, isDark && { color: colors.primary }]}
-                >
-                  zy
-                </Text>
-              </View>
             </View>
 
-            {/* Theme Toggle Button */}
-            <TouchableOpacity
+            {/* Tagline */}
+            <Text
               style={[
-                styles.themeToggleBtn,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                },
+                styles.tagline,
+                isDark && { color: colors.textSecondary },
               ]}
-              onPress={toggleTheme}
-              activeOpacity={0.7}
-              accessibilityLabel="Toggle Theme"
             >
-              <Feather
-                name={isDark ? "sun" : "moon"}
-                size={18}
-                color={isDark ? "#F59E0B" : "#64748B"}
-              />
-            </TouchableOpacity>
-          </View>
+              Manage, split bills, and track group expenses{"\n"}effortlessly.
+            </Text>
 
-          {/* Tagline */}
-          <Text
-            style={[styles.tagline, isDark && { color: colors.textSecondary }]}
-          >
-            Manage, split bills, and track group expenses{"\n"}effortlessly.
-          </Text>
+            {/* Form Fields */}
+            <View style={styles.formArea}>
+              {activeTab === "signup" && (
+                <View style={styles.fieldGroup}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Full Name
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name="user"
+                      size={17}
+                      color={isDark ? colors.textMuted : "#94A3B8"}
+                      style={styles.vectorIcon}
+                    />
+                    <TextInput
+                      style={[
+                        styles.textInput,
+                        isDark && { color: colors.text },
+                      ]}
+                      placeholder="Rommel Belia"
+                      placeholderTextColor={
+                        isDark ? colors.textMuted : "#94A3B8"
+                      }
+                      value={name}
+                      onChangeText={setName}
+                      autoCapitalize="words"
+                    />
+                  </View>
+                </View>
+              )}
 
-          {/* Form Fields */}
-          <View style={styles.formArea}>
-            {activeTab === "signup" && (
+              {/* Email Address */}
               <View style={styles.fieldGroup}>
                 <Text
                   style={[
@@ -699,7 +751,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     isDark && { color: colors.textSecondary },
                   ]}
                 >
-                  Full Name
+                  Email Address
                 </Text>
                 <View
                   style={[
@@ -711,348 +763,312 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   ]}
                 >
                   <Feather
-                    name="user"
+                    name="mail"
                     size={17}
                     color={isDark ? colors.textMuted : "#94A3B8"}
                     style={styles.vectorIcon}
                   />
                   <TextInput
                     style={[styles.textInput, isDark && { color: colors.text }]}
-                    placeholder="Rommel Belia"
+                    placeholder="rommel.belia@example.com"
                     placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                    value={name}
-                    onChangeText={setName}
-                    autoCapitalize="words"
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
                   />
                 </View>
               </View>
-            )}
 
-            {/* Email Address */}
-            <View style={styles.fieldGroup}>
-              <Text
-                style={[
-                  styles.inputLabel,
-                  isDark && { color: colors.textSecondary },
-                ]}
-              >
-                Email Address
-              </Text>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  isDark && {
-                    backgroundColor: colors.surfaceInset,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Feather
-                  name="mail"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={styles.vectorIcon}
-                />
-                <TextInput
-                  style={[styles.textInput, isDark && { color: colors.text }]}
-                  placeholder="rommel.belia@example.com"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-              </View>
-            </View>
-
-            {/* Password */}
-            <View style={styles.fieldGroup}>
-              <View style={styles.passwordLabelRow}>
-                <Text
-                  style={[
-                    styles.inputLabel,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  Password
-                </Text>
-                {activeTab === "signin" && (
-                  <TouchableOpacity
-                    onPress={() => setAuthView("forgot_password")}
-                    activeOpacity={0.7}
+              {/* Password */}
+              <View style={styles.fieldGroup}>
+                <View style={styles.passwordLabelRow}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
                   >
-                    <Text
-                      style={[
-                        styles.forgotPasswordText,
-                        isDark && { color: colors.accent },
-                      ]}
+                    Password
+                  </Text>
+                  {activeTab === "signin" && (
+                    <TouchableOpacity
+                      onPress={() => setAuthView("forgot_password")}
+                      activeOpacity={0.7}
                     >
-                      Forgot Password?
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+                      <Text
+                        style={[
+                          styles.forgotPasswordText,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        Forgot Password?
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-              <View
-                style={[
-                  styles.inputWrapper,
-                  isDark && {
-                    backgroundColor: colors.surfaceInset,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Feather
-                  name="lock"
-                  size={17}
-                  color={isDark ? colors.textMuted : "#94A3B8"}
-                  style={styles.vectorIcon}
-                />
-                <TextInput
-                  style={[styles.textInput, isDark && { color: colors.text }]}
-                  placeholder="Enter password"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  secureTextEntry={!showPassword}
-                  value={password}
-                  onChangeText={setPassword}
-                />
-                <TouchableOpacity
-                  style={styles.eyeToggleBtn}
-                  onPress={() => setShowPassword(!showPassword)}
-                  activeOpacity={0.6}
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                    },
+                  ]}
                 >
                   <Feather
-                    name={showPassword ? "eye" : "eye-off"}
+                    name="lock"
                     size={17}
                     color={isDark ? colors.textMuted : "#94A3B8"}
+                    style={styles.vectorIcon}
                   />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Primary Action Button ("Sign In ->" or "Sign Up ->") */}
-            <TouchableOpacity
-              style={[
-                styles.primaryActionButton,
-                isDark && {
-                  backgroundColor: colors.primary,
-                  shadowColor: colors.primary,
-                },
-                (loading || googleLoading) && styles.primaryActionDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={loading || googleLoading}
-              activeOpacity={0.88}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <View style={styles.buttonLabelWithArrow}>
-                  <Text style={styles.primaryActionButtonText}>
-                    {activeTab === "signin" ? "Sign In" : "Sign Up"}
-                  </Text>
-                  <Feather name="arrow-right" size={17} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ================= BOTTOM SECTION WITH FLUID WAVY TOP ================= */}
-        <View
-          style={[
-            styles.bottomCurvedContainer,
-            { backgroundColor: bottomBgColor },
-          ]}
-        >
-          {/* Fluid S-Curve SVG Wave */}
-          <View
-            style={[
-              styles.waveWrapper,
-              isDark && { backgroundColor: colors.background },
-            ]}
-          >
-            <Svg
-              width="100%"
-              height={52}
-              viewBox="0 0 375 52"
-              preserveAspectRatio="none"
-              style={styles.svgWave}
-            >
-              <Path
-                d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
-                fill={bottomBgColor}
-              />
-            </Svg>
-          </View>
-
-          <View
-            style={[
-              styles.bottomBlueContent,
-              {
-                backgroundColor: bottomBgColor,
-                paddingBottom: Math.max(insets.bottom + 36, 56),
-              },
-            ]}
-          >
-            {/* Divider "OR CONTINUE WITH" */}
-            <View style={styles.orDividerContainer}>
-              <View
-                style={[
-                  styles.orDividerLine,
-                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.orDividerText,
-                  isDark && { color: "rgba(255, 255, 255, 0.65)" },
-                ]}
-              >
-                OR CONTINUE WITH
-              </Text>
-              <View
-                style={[
-                  styles.orDividerLine,
-                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
-                ]}
-              />
-            </View>
-
-            {/* Google Auth Button */}
-            <TouchableOpacity
-              style={[
-                styles.socialButtonWhite,
-                isDark && {
-                  backgroundColor: colors.cardElevated,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={handleGoogleSignIn}
-              disabled={loading || googleLoading}
-              activeOpacity={0.88}
-            >
-              {googleLoading ? (
-                <View style={styles.socialButtonInner}>
-                  <ActivityIndicator
-                    color="#2563EB"
-                    size="small"
-                    style={{ marginRight: 10 }}
+                  <TextInput
+                    style={[styles.textInput, isDark && { color: colors.text }]}
+                    placeholder="Enter password"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
                   />
-                  <Text
-                    style={[
-                      styles.socialButtonTextDark,
-                      isDark && { color: colors.text },
-                      { fontWeight: "700" },
-                    ]}
+                  <TouchableOpacity
+                    style={styles.eyeToggleBtn}
+                    onPress={() => setShowPassword(!showPassword)}
+                    activeOpacity={0.6}
                   >
-                    Signing in with Google...
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.socialButtonInner}>
-                  <View style={styles.googleGContainer}>
-                    <Image
-                      source={assets.google}
-                      style={styles.googleLogo}
-                      resizeMode="cover"
+                    <Feather
+                      name={showPassword ? "eye" : "eye-off"}
+                      size={17}
+                      color={isDark ? colors.textMuted : "#94A3B8"}
                     />
-                  </View>
-                  <Text
-                    style={[
-                      styles.socialButtonTextDark,
-                      isDark && { color: colors.text },
-                    ]}
-                  >
-                    Continue with Google
-                  </Text>
+                  </TouchableOpacity>
                 </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Apple Auth Button */}
-            <TouchableOpacity
-              style={[
-                styles.socialButtonBlack,
-                isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={handleAppleSignIn}
-              activeOpacity={0.88}
-            >
-              <View style={styles.socialButtonInner}>
-                <Ionicons name="logo-apple" size={22} color="#FFFFFF" />
-                <Text style={styles.socialButtonTextLight}>
-                  Continue with Apple
-                </Text>
               </View>
-            </TouchableOpacity>
 
-            {/* Terms & Privacy Notice */}
-            <Text
-              style={[
-                styles.termsText,
-                isDark && { color: "rgba(255, 255, 255, 0.65)" },
-              ]}
-            >
-              By continuing, you agree to Splitzy's{" "}
-              <Text
-                style={[styles.termsLink, isDark && { color: colors.text }]}
-                onPress={() => setAuthView("terms_of_service")}
-                suppressHighlighting={false}
-              >
-                Terms of Service
-              </Text>{" "}
-              and{" "}
-              <Text
-                style={[styles.termsLink, isDark && { color: colors.text }]}
-                onPress={() => setAuthView("privacy_policy")}
-                suppressHighlighting={false}
-              >
-                Privacy Policy
-              </Text>
-              .
-            </Text>
-
-            {/* Switch Mode Prompt: "Don't have an account? Sign up" */}
-            <View style={styles.switchModePrompt}>
-              <Text
-                style={[
-                  styles.switchModeLead,
-                  isDark && { color: "rgba(255, 255, 255, 0.8)" },
-                ]}
-              >
-                {activeTab === "signin"
-                  ? "Don't have an account? "
-                  : "Already have an account? "}
-              </Text>
+              {/* Primary Action Button ("Sign In ->" or "Sign Up ->") */}
               <TouchableOpacity
-                onPress={() =>
-                  setActiveTab(activeTab === "signin" ? "signup" : "signin")
-                }
+                style={[
+                  styles.primaryActionButton,
+                  isDark && {
+                    backgroundColor: colors.primary,
+                    shadowColor: colors.primary,
+                  },
+                  (loading || googleLoading) && styles.primaryActionDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={loading || googleLoading}
+                activeOpacity={0.88}
               >
-                <Text
-                  style={[
-                    styles.switchModeLink,
-                    isDark && { color: colors.accent },
-                  ]}
-                >
-                  {activeTab === "signin" ? "Sign up" : "Sign in"}
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <View style={styles.buttonLabelWithArrow}>
+                    <Text style={styles.primaryActionButtonText}>
+                      {activeTab === "signin" ? "Sign In" : "Sign Up"}
+                    </Text>
+                    <Feather name="arrow-right" size={17} color="#FFFFFF" />
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
           </View>
-        </View>
 
-        {/* Bottom bleed ensures full solid extension on scroll */}
-        <View
-          style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
-        />
-      </ScrollView>
+          {/* ================= BOTTOM SECTION WITH FLUID WAVY TOP ================= */}
+          <View
+            style={[
+              styles.bottomCurvedContainer,
+              { backgroundColor: bottomBgColor },
+            ]}
+          >
+            {/* Fluid S-Curve SVG Wave */}
+            <View
+              style={[
+                styles.waveWrapper,
+                isDark && { backgroundColor: colors.background },
+              ]}
+            >
+              <Svg
+                width="100%"
+                height={52}
+                viewBox="0 0 375 52"
+                preserveAspectRatio="none"
+                style={styles.svgWave}
+              >
+                <Path
+                  d="M-2,24 C45,4 110,2 185,20 C255,38 320,30 377,8 L377,54 L-2,54 Z"
+                  fill={bottomBgColor}
+                />
+              </Svg>
+            </View>
+
+            <View
+              style={[
+                styles.bottomBlueContent,
+                {
+                  backgroundColor: bottomBgColor,
+                  paddingBottom: Math.max(insets.bottom + 36, 56),
+                },
+              ]}
+            >
+              {/* Divider "OR CONTINUE WITH" */}
+              <View style={styles.orDividerContainer}>
+                <View
+                  style={[
+                    styles.orDividerLine,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.orDividerText,
+                    isDark && { color: "rgba(255, 255, 255, 0.65)" },
+                  ]}
+                >
+                  OR CONTINUE WITH
+                </Text>
+                <View
+                  style={[
+                    styles.orDividerLine,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.12)" },
+                  ]}
+                />
+              </View>
+
+              {/* Google Auth Button */}
+              <TouchableOpacity
+                style={[
+                  styles.socialButtonWhite,
+                  isDark && {
+                    backgroundColor: colors.cardElevated,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={handleGoogleSignIn}
+                disabled={loading || googleLoading}
+                activeOpacity={0.88}
+              >
+                {googleLoading ? (
+                  <View style={styles.socialButtonInner}>
+                    <ActivityIndicator
+                      color="#2563EB"
+                      size="small"
+                      style={{ marginRight: 10 }}
+                    />
+                    <Text
+                      style={[
+                        styles.socialButtonTextDark,
+                        isDark && { color: colors.text },
+                        { fontWeight: "700" },
+                      ]}
+                    >
+                      Signing in with Google...
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.socialButtonInner}>
+                    <View style={styles.googleGContainer}>
+                      <Image
+                        source={assets.google}
+                        style={styles.googleLogo}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.socialButtonTextDark,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      Continue with Google
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Apple Auth Button */}
+              <TouchableOpacity
+                style={[
+                  styles.socialButtonBlack,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={handleAppleSignIn}
+                activeOpacity={0.88}
+              >
+                <View style={styles.socialButtonInner}>
+                  <Ionicons name="logo-apple" size={22} color="#FFFFFF" />
+                  <Text style={styles.socialButtonTextLight}>
+                    Continue with Apple
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Terms & Privacy Notice */}
+              <Text
+                style={[
+                  styles.termsText,
+                  isDark && { color: "rgba(255, 255, 255, 0.65)" },
+                ]}
+              >
+                By continuing, you agree to Splitzy's{" "}
+                <Text
+                  style={[styles.termsLink, isDark && { color: colors.text }]}
+                  onPress={() => setAuthView("terms_of_service")}
+                  suppressHighlighting={false}
+                >
+                  Terms of Service
+                </Text>{" "}
+                and{" "}
+                <Text
+                  style={[styles.termsLink, isDark && { color: colors.text }]}
+                  onPress={() => setAuthView("privacy_policy")}
+                  suppressHighlighting={false}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
+
+              {/* Switch Mode Prompt: "Don't have an account? Sign up" */}
+              <View style={styles.switchModePrompt}>
+                <Text
+                  style={[
+                    styles.switchModeLead,
+                    isDark && { color: "rgba(255, 255, 255, 0.8)" },
+                  ]}
+                >
+                  {activeTab === "signin"
+                    ? "Don't have an account? "
+                    : "Already have an account? "}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    setActiveTab(activeTab === "signin" ? "signup" : "signin")
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.switchModeLink,
+                      isDark && { color: colors.accent },
+                    ]}
+                  >
+                    {activeTab === "signin" ? "Sign up" : "Sign in"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          {/* Bottom bleed ensures full solid extension on scroll */}
+          <View
+            style={[styles.bottomBlueBleed, { backgroundColor: bottomBgColor }]}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Fixed bottom full-bleed overlay to ensure no navigation bar gap can ever appear */}
       <View

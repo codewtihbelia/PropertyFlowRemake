@@ -532,7 +532,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           // Light #F8FAFC background at bottom: dark navigation icons
           NavigationBar.setStyle("light");
         }
-        NavigationBar.setHidden(true);
+        NavigationBar.setHidden(false);
       } catch {
         // Fallback safely in environments without native nav bar control
       }
@@ -542,7 +542,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   useEffect(() => {
     if (Platform.OS === "android") {
       try {
-        NavigationBar.setHidden(true);
+        NavigationBar.setHidden(false);
       } catch {
         // Fallback safely
       }

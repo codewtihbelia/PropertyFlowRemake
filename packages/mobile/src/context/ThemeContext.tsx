@@ -223,7 +223,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     if (Platform.OS === "android") {
       try {
         NavigationBar.setStyle(isDark ? "light" : "dark");
-        NavigationBar.setHidden(true);
+        NavigationBar.setHidden(false);
       } catch {
         // Ignore
       }

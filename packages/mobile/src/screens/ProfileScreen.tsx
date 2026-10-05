@@ -2222,8 +2222,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           style={{ maxHeight: 480 }}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 16 }}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 60 }}
         >
           {/* Photo Avatar In Modal */}
           <View

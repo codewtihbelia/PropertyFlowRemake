@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Image,
   Platform,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
@@ -1971,153 +1972,167 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
-              Group Name
-            </Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  color: colors.text,
-                },
-              ]}
-              value={groupNameInput}
-              onChangeText={setGroupNameInput}
-              placeholder="e.g. Sunshine Residence Unit 4B"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-            />
-          </View>
-
-          <View style={[styles.inputGroup, { marginTop: 24 }]}>
-            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
-              Add Roommates
-            </Text>
-            {addedMembers.map((m) => (
-              <View
-                key={m.id}
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: 60 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.inputGroup}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Group Name
+              </Text>
+              <TextInput
                 style={[
-                  styles.addedMemberRow,
+                  styles.textInput,
                   isDark && {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
+                    color: colors.text,
                   },
                 ]}
+                value={groupNameInput}
+                onChangeText={setGroupNameInput}
+                placeholder="e.g. Sunshine Residence Unit 4B"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+              />
+            </View>
+
+            <View style={[styles.inputGroup, { marginTop: 24 }]}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
               >
+                Add Roommates
+              </Text>
+              {addedMembers.map((m) => (
                 <View
+                  key={m.id}
                   style={[
-                    styles.memberSmallAvatar,
+                    styles.addedMemberRow,
                     isDark && {
-                      backgroundColor: "rgba(59, 130, 246, 0.2)",
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
                     },
                   ]}
                 >
-                  <Text
+                  <View
                     style={[
-                      styles.memberSmallAvatarText,
-                      isDark && { color: colors.accent },
+                      styles.memberSmallAvatar,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.2)",
+                      },
                     ]}
                   >
-                    {m.name.charAt(0).toUpperCase()}
+                    <Text
+                      style={[
+                        styles.memberSmallAvatarText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      {m.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.addedMemberName,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {m.name}
                   </Text>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setAddedMembers(
+                        addedMembers.filter((item) => item.id !== m.id),
+                      )
+                    }
+                  >
+                    <Feather
+                      name="x"
+                      size={18}
+                      color={isDark ? colors.textMuted : "#94A3B8"}
+                    />
+                  </TouchableOpacity>
                 </View>
-                <Text
+              ))}
+
+              <View style={styles.inviteInputRow}>
+                <View
                   style={[
-                    styles.addedMemberName,
-                    isDark && { color: colors.text },
+                    styles.inviteInnerBox,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
                   ]}
                 >
-                  {m.name}
-                </Text>
-                <TouchableOpacity
-                  onPress={() =>
-                    setAddedMembers(
-                      addedMembers.filter((item) => item.id !== m.id),
-                    )
-                  }
-                >
-                  <Feather
-                    name="x"
-                    size={18}
-                    color={isDark ? colors.textMuted : "#94A3B8"}
+                  <TextInput
+                    style={[
+                      styles.inviteTextInput,
+                      isDark && { color: colors.text },
+                    ]}
+                    placeholder="Enter Name or Phone"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    value={newMemberInput}
+                    onChangeText={setNewMemberInput}
                   />
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.inviteBtn,
+                    isDark && { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => {
+                    if (newMemberInput.trim()) {
+                      setAddedMembers([
+                        ...addedMembers,
+                        { id: `m_${Date.now()}`, name: newMemberInput.trim() },
+                      ]);
+                      setNewMemberInput("");
+                    }
+                  }}
+                >
+                  <Text style={styles.inviteBtnText}>Add</Text>
                 </TouchableOpacity>
               </View>
-            ))}
-
-            <View style={styles.inviteInputRow}>
-              <View
-                style={[
-                  styles.inviteInnerBox,
-                  isDark && {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <TextInput
-                  style={[
-                    styles.inviteTextInput,
-                    isDark && { color: colors.text },
-                  ]}
-                  placeholder="Enter Name or Phone"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  value={newMemberInput}
-                  onChangeText={setNewMemberInput}
-                />
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.inviteBtn,
-                  isDark && { backgroundColor: colors.primary },
-                ]}
-                onPress={() => {
-                  if (newMemberInput.trim()) {
-                    setAddedMembers([
-                      ...addedMembers,
-                      { id: `m_${Date.now()}`, name: newMemberInput.trim() },
-                    ]);
-                    setNewMemberInput("");
-                  }
-                }}
-              >
-                <Text style={styles.inviteBtnText}>Add</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
 
-        <View
-          style={[
-            styles.bottomBar,
-            isDark && {
-              backgroundColor: colors.surface,
-              borderTopWidth: 1,
-              borderTopColor: colors.border,
-            },
-          ]}
-        >
-          <TouchableOpacity
+          <View
             style={[
-              styles.primaryPillBtn,
-              isDark && { backgroundColor: colors.primary },
+              styles.bottomBar,
+              isDark && {
+                backgroundColor: colors.surface,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              },
             ]}
-            onPress={handleCreateGroup}
-            disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryPillBtnText}>Continue</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[
+                styles.primaryPillBtn,
+                isDark && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleCreateGroup}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryPillBtnText}>Continue</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     );
   }
@@ -2170,44 +2185,59 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         </View>
 
-        <View style={[styles.scrollContent, { flex: 1 }]}>
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
-              Household Code or Link
-            </Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  color: colors.text,
-                },
-              ]}
-              value={joinLinkInput}
-              onChangeText={setJoinLinkInput}
-              placeholder="e.g. PF-402 or hh_..."
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              autoCapitalize="characters"
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.primaryPillBtn,
-              { marginTop: 24 },
-              isDark && { backgroundColor: colors.primary },
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        >
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: 60 },
             ]}
-            onPress={handleJoinGroup}
-            disabled={loading}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryPillBtnText}>Join Group</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+            <View style={styles.inputGroup}>
+              <Text
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
+              >
+                Household Code or Link
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  isDark && {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                value={joinLinkInput}
+                onChangeText={setJoinLinkInput}
+                placeholder="e.g. PF-402 or hh_..."
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.primaryPillBtn,
+                { marginTop: 24 },
+                isDark && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleJoinGroup}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryPillBtnText}>Join Group</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     );
   }
@@ -2276,204 +2306,219 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
-          <View style={styles.inputGroup}>
-            <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
-              Apartment / Group Name
-            </Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                isDark && {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  color: colors.text,
-                },
-              ]}
-              value={editGroupName}
-              onChangeText={setEditGroupName}
-              placeholder="Group or Apartment Name"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-            />
-          </View>
-
-          <View style={[styles.sectionRow, { marginTop: 28 }]}>
-            <Text
-              style={[styles.sectionHeading, isDark && { color: colors.text }]}
-            >
-              Participants ({participants.length})
-            </Text>
-            <TouchableOpacity onPress={() => setShowInviteModal(true)}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: 60 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.inputGroup}>
               <Text
-                style={[
-                  styles.sectionActionText,
-                  isDark && { color: colors.accent },
-                ]}
+                style={[styles.inputLabel, isDark && { color: colors.text }]}
               >
-                + Invite
+                Apartment / Group Name
               </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.participantsList}>
-            {participants.map((p) => (
-              <View
-                key={p.id}
+              <TextInput
                 style={[
-                  styles.participantCard,
+                  styles.textInput,
                   isDark && {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
+                    color: colors.text,
                   },
                 ]}
+                value={editGroupName}
+                onChangeText={setEditGroupName}
+                placeholder="Group or Apartment Name"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+              />
+            </View>
+
+            <View style={[styles.sectionRow, { marginTop: 28 }]}>
+              <Text
+                style={[
+                  styles.sectionHeading,
+                  isDark && { color: colors.text },
+                ]}
               >
-                <View style={styles.participantRow}>
-                  <View
-                    style={[
-                      styles.participantAvatar,
-                      isDark && { backgroundColor: colors.surfaceInset },
-                    ]}
-                  >
-                    {p.profilePicture ? (
-                      <Image
-                        source={{ uri: p.profilePicture }}
-                        style={styles.participantAvatarImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.participantAvatarText,
-                          isDark && { color: colors.text },
-                        ]}
-                      >
-                        {p.avatar}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
+                Participants ({participants.length})
+              </Text>
+              <TouchableOpacity onPress={() => setShowInviteModal(true)}>
+                <Text
+                  style={[
+                    styles.sectionActionText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  + Invite
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.participantsList}>
+              {participants.map((p) => (
+                <View
+                  key={p.id}
+                  style={[
+                    styles.participantCard,
+                    isDark && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.participantRow}>
                     <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.participantName,
-                          isDark && { color: colors.text },
-                        ]}
-                      >
-                        {p.name}
-                      </Text>
-                      {p.role === "HOST" ? (
-                        <View style={styles.hostBadge}>
-                          <Text style={styles.hostBadgeText}>HOST</Text>
-                        </View>
-                      ) : p.role === "NON_PAYOR" ? (
-                        <View style={styles.nonPayorBadge}>
-                          <Text style={styles.nonPayorBadgeText}>
-                            NON-PAYOR
-                          </Text>
-                        </View>
-                      ) : (
-                        <View style={styles.payorBadge}>
-                          <Text style={styles.payorBadgeText}>PAYOR</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text
                       style={[
-                        styles.participantRoleTag,
-                        isDark && { color: colors.textSecondary },
+                        styles.participantAvatar,
+                        isDark && { backgroundColor: colors.surfaceInset },
                       ]}
                     >
-                      {p.role === "HOST"
-                        ? "Host Administrator"
-                        : p.role === "NON_PAYOR"
-                          ? "Non-Payor (Exempt)"
-                          : "Payor (Active Split)"}
-                    </Text>
-                  </View>
-                  {p.role !== "HOST" && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <TouchableOpacity
-                        style={[
-                          styles.editModeToggleRoleBtn,
-                          isDark && {
-                            backgroundColor: colors.surfaceInset,
-                            borderWidth: 1,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                        onPress={() => handleToggleMemberRole(p)}
+                      {p.profilePicture ? (
+                        <Image
+                          source={{ uri: p.profilePicture }}
+                          style={styles.participantAvatarImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.participantAvatarText,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {p.avatar}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
                       >
                         <Text
                           style={[
-                            styles.editModeToggleRoleText,
-                            isDark && { color: colors.accent },
+                            styles.participantName,
+                            isDark && { color: colors.text },
                           ]}
                         >
-                          {p.role === "NON_PAYOR"
-                            ? "Make Payor"
-                            : "Make Non-Payor"}
+                          {p.name}
                         </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
+                        {p.role === "HOST" ? (
+                          <View style={styles.hostBadge}>
+                            <Text style={styles.hostBadgeText}>HOST</Text>
+                          </View>
+                        ) : p.role === "NON_PAYOR" ? (
+                          <View style={styles.nonPayorBadge}>
+                            <Text style={styles.nonPayorBadgeText}>
+                              NON-PAYOR
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.payorBadge}>
+                            <Text style={styles.payorBadgeText}>PAYOR</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
                         style={[
-                          styles.deleteParticipantBtn,
-                          isDark && {
-                            backgroundColor: "rgba(239, 68, 68, 0.15)",
-                            borderWidth: 1,
-                            borderColor: "rgba(239, 68, 68, 0.3)",
-                          },
+                          styles.participantRoleTag,
+                          isDark && { color: colors.textSecondary },
                         ]}
-                        onPress={() => handleRemoveMember(p)}
                       >
-                        <Feather
-                          name="trash-2"
-                          size={18}
-                          color={isDark ? colors.danger : "#EF4444"}
-                        />
-                      </TouchableOpacity>
+                        {p.role === "HOST"
+                          ? "Host Administrator"
+                          : p.role === "NON_PAYOR"
+                            ? "Non-Payor (Exempt)"
+                            : "Payor (Active Split)"}
+                      </Text>
                     </View>
-                  )}
+                    {p.role !== "HOST" && (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <TouchableOpacity
+                          style={[
+                            styles.editModeToggleRoleBtn,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderWidth: 1,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                          onPress={() => handleToggleMemberRole(p)}
+                        >
+                          <Text
+                            style={[
+                              styles.editModeToggleRoleText,
+                              isDark && { color: colors.accent },
+                            ]}
+                          >
+                            {p.role === "NON_PAYOR"
+                              ? "Make Payor"
+                              : "Make Non-Payor"}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.deleteParticipantBtn,
+                            isDark && {
+                              backgroundColor: "rgba(239, 68, 68, 0.15)",
+                              borderWidth: 1,
+                              borderColor: "rgba(239, 68, 68, 0.3)",
+                            },
+                          ]}
+                          onPress={() => handleRemoveMember(p)}
+                        >
+                          <Feather
+                            name="trash-2"
+                            size={18}
+                            color={isDark ? colors.danger : "#EF4444"}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
+              ))}
+            </View>
+          </ScrollView>
 
-        <View
-          style={[
-            styles.bottomBar,
-            isDark && {
-              backgroundColor: colors.surface,
-              borderTopWidth: 1,
-              borderTopColor: colors.border,
-            },
-          ]}
-        >
-          <TouchableOpacity
+          <View
             style={[
-              styles.primaryPillBtn,
-              isDark && { backgroundColor: colors.primary },
+              styles.bottomBar,
+              isDark && {
+                backgroundColor: colors.surface,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              },
             ]}
-            onPress={handleUpdateGroup}
           >
-            <Text style={styles.primaryPillBtnText}>Update Group</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[
+                styles.primaryPillBtn,
+                isDark && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleUpdateGroup}
+            >
+              <Text style={styles.primaryPillBtnText}>Update Group</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
 
         {renderMenuModal()}
         {renderInviteModal()}
@@ -2761,6 +2806,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {/* Top Group Selector Pills - Exactly matching user image */}

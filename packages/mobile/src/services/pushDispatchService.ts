@@ -40,13 +40,23 @@ class PushDispatchService {
   public async getPushTokensForUsers(userIds: string[]): Promise<string[]> {
     if (!userIds || userIds.length === 0) return [];
 
-    const uniqueUids = Array.from(new Set(userIds.filter(Boolean)));
+    const uniqueUids = Array.from(
+      new Set(
+        userIds
+          .map((u) =>
+            String(u || "")
+              .replace(/^mem_/, "")
+              .trim(),
+          )
+          .filter(Boolean),
+      ),
+    );
     const tokenSet = new Set<string>();
 
     await Promise.all(
       uniqueUids.map(async (uid) => {
+        // 1. Check user document directly
         try {
-          // 1. Check user document directly
           const userDoc = await getDoc(doc(db, "users", uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
@@ -61,8 +71,12 @@ class PushDispatchService {
               }
             }
           }
+        } catch (err) {
+          // Direct user doc read error handled gracefully
+        }
 
-          // 2. Check devices subcollection: users/{uid}/devices
+        // 2. Check devices subcollection: users/{uid}/devices
+        try {
           const devSnap = await getDocs(collection(db, `users/${uid}/devices`));
           for (const d of devSnap.docs) {
             const devData = d.data();
@@ -71,10 +85,7 @@ class PushDispatchService {
             }
           }
         } catch (err) {
-          console.warn(
-            `[PushDispatch] Failed to fetch tokens for user ${uid}:`,
-            err,
-          );
+          // Devices subcollection read error handled gracefully
         }
       }),
     );
@@ -165,12 +176,8 @@ class PushDispatchService {
         targetUserIds = membersSnap.docs
           .map((d) => {
             const data = d.data();
-            return (
-              data.userId ||
-              (data.memberId && !data.memberId.startsWith("mem_")
-                ? data.memberId
-                : null)
-            );
+            const raw = data.userId || data.memberId;
+            return raw ? String(raw).replace(/^mem_/, "").trim() : null;
           })
           .filter((uid): uid is string =>
             Boolean(uid && uid !== params.senderId),
@@ -221,7 +228,13 @@ class PushDispatchService {
     recipientUserIds?: string[];
   }): Promise<void> {
     try {
-      let targetUserIds = params.recipientUserIds || [];
+      let targetUserIds = (params.recipientUserIds || [])
+        .map((u) =>
+          String(u || "")
+            .replace(/^mem_/, "")
+            .trim(),
+        )
+        .filter(Boolean);
 
       if (targetUserIds.length === 0) {
         const membersSnap = await getDocs(
@@ -230,12 +243,8 @@ class PushDispatchService {
         targetUserIds = membersSnap.docs
           .map((d) => {
             const data = d.data();
-            return (
-              data.userId ||
-              (data.memberId && !data.memberId.startsWith("mem_")
-                ? data.memberId
-                : null)
-            );
+            const raw = data.userId || data.memberId;
+            return raw ? String(raw).replace(/^mem_/, "").trim() : null;
           })
           .filter((uid): uid is string =>
             Boolean(uid && uid !== params.payerId),
@@ -346,6 +355,128 @@ class PushDispatchService {
       });
     } catch (err) {
       console.warn("[PushDispatch] Error sending join decision push:", err);
+    }
+  }
+
+  /**
+   * Dispatches a high-priority push notification to the host when a resident submits a payment.
+   */
+  public async sendPaymentSubmittedPush(params: {
+    hostId: string;
+    payerName: string;
+    amountCentavos: number;
+    paymentMethod: string;
+    householdName?: string;
+    paymentId: string;
+  }): Promise<void> {
+    try {
+      if (!params.hostId) return;
+
+      const tokens = await this.getPushTokensForUsers([params.hostId]);
+      if (tokens.length === 0) return;
+
+      const pesos = (params.amountCentavos / 100).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const groupLabel = params.householdName || "Household";
+
+      await this.sendPushToTokens(tokens, {
+        title: `Splitzy • New Payment in ${groupLabel}`,
+        body: `${params.payerName} submitted a payment of ₱${pesos} via ${params.paymentMethod}. Tap to view receipt and verify.`,
+        data: {
+          screen: "payments",
+          paymentId: params.paymentId,
+          hostId: params.hostId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending payment submitted push:", err);
+    }
+  }
+
+  /**
+   * Dispatches a push notification to a payor when the host verifies or rejects their payment.
+   */
+  public async sendPaymentDecisionPush(params: {
+    payerId: string;
+    approved: boolean;
+    amountCentavos: number;
+    paymentMethod: string;
+    rejectionReason?: string | null;
+    householdName?: string;
+    paymentId: string;
+  }): Promise<void> {
+    try {
+      if (!params.payerId) return;
+
+      const tokens = await this.getPushTokensForUsers([params.payerId]);
+      if (tokens.length === 0) return;
+
+      const pesos = (params.amountCentavos / 100).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+      const title = params.approved
+        ? "Splitzy • Payment Approved! 🎉"
+        : "Splitzy • Payment Update";
+
+      const body = params.approved
+        ? `Your payment of ₱${pesos} via ${params.paymentMethod} has been approved by your Host.`
+        : `Your payment of ₱${pesos} was declined${
+            params.rejectionReason
+              ? `: "${params.rejectionReason}"`
+              : ". Please verify reference details."
+          }`;
+
+      await this.sendPushToTokens(tokens, {
+        title,
+        body,
+        data: {
+          screen: "payments",
+          paymentId: params.paymentId,
+          approved: params.approved,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending payment decision push:", err);
+    }
+  }
+
+  /**
+   * Universal notification dispatcher that delivers a push alert to any set of recipients.
+   */
+  public async sendGenericNotificationPush(params: {
+    recipientUserIds: string[];
+    title: string;
+    body: string;
+    data?: Record<string, any>;
+    channelId?: string;
+  }): Promise<void> {
+    try {
+      if (!params.recipientUserIds || params.recipientUserIds.length === 0)
+        return;
+
+      const tokens = await this.getPushTokensForUsers(params.recipientUserIds);
+      if (tokens.length === 0) return;
+
+      await this.sendPushToTokens(tokens, {
+        title: params.title,
+        body: params.body,
+        data: params.data || {},
+        channelId: params.channelId || "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Error sending generic notification push:",
+        err,
+      );
     }
   }
 }

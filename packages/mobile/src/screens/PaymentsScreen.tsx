@@ -15,6 +15,7 @@ import {
   Share,
   Keyboard,
   NativeModules,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -2176,346 +2177,86 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
         </View>
       </View>
 
-      <ScrollView
-        key="payment-form-scroll"
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        <Text style={[styles.title, { color: colors.text }]}>Settle Dues</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Settle your roommate share with payment proof
-        </Text>
-
-        <View
-          style={[
-            styles.dueCard,
-            {
-              backgroundColor: isDark ? colors.card : "#EFF6FF",
-              borderColor: isDark ? colors.border : "#DBEAFE",
-            },
-          ]}
+        <ScrollView
+          key="payment-form-scroll"
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
         >
-          <Text
-            style={[styles.dueLabel, { color: isDark ? "#60A5FA" : "#1E40AF" }]}
-          >
-            Current Outstanding Dues
+          <Text style={[styles.title, { color: colors.text }]}>
+            Settle Dues
           </Text>
-          <Text
-            style={[
-              styles.dueAmount,
-              { color: isDark ? colors.text : "#1E3A8A" },
-            ]}
-          >
-            {formatPesos(liveOutstandingCentavos)}
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            Settle your roommate share with payment proof
           </Text>
-          <Text
-            style={[
-              styles.dueNote,
-              { color: isDark ? colors.textSecondary : "#3B82F6" },
-            ]}
-          >
-            {activeCycle
-              ? `${activeCycle.name || "Active billing cycle"} from Firebase`
-              : "No active Firebase billing cycle found"}
-          </Text>
-        </View>
 
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Payment Method
-        </Text>
-
-        {/* Dropdown Style Payment Method Selector */}
-        <View style={styles.dropdownContainer}>
-          <TouchableOpacity
+          <View
             style={[
-              styles.dropdownTrigger,
-              showMethodDropdown && styles.dropdownTriggerOpen,
+              styles.dueCard,
               {
-                backgroundColor: colors.card,
-                borderColor: showMethodDropdown
-                  ? colors.primary
-                  : colors.border,
+                backgroundColor: isDark ? colors.card : "#EFF6FF",
+                borderColor: isDark ? colors.border : "#DBEAFE",
               },
             ]}
-            onPress={() => setShowMethodDropdown(!showMethodDropdown)}
-            activeOpacity={0.8}
           >
-            {activeMethod.customIconUrl ? (
-              <View
-                style={[
-                  styles.customIconBadgeSmall,
-                  isDark && {
-                    backgroundColor: colors.surfaceInset,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Image
-                  source={{ uri: activeMethod.customIconUrl }}
-                  style={styles.customIconImgSmall}
-                  resizeMode="cover"
-                />
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.methodIconBadgeSmall,
-                  {
-                    backgroundColor: getMethodBadge(activeMethod.type).bgColor,
-                  },
-                ]}
-              >
-                <Feather
-                  name={getMethodBadge(activeMethod.type).icon as any}
-                  size={16}
-                  color={getMethodBadge(activeMethod.type).color}
-                />
-              </View>
-            )}
-
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text
-                style={[styles.dropdownSelectedTitle, { color: colors.text }]}
-              >
-                {activeMethod.name}
-              </Text>
-              <Text
-                style={[
-                  styles.dropdownSelectedSubtitle,
-                  { color: colors.textSecondary },
-                ]}
-                numberOfLines={1}
-              >
-                {activeMethod.accountName
-                  ? `${activeMethod.accountName} • ${activeMethod.accountNumber || "QR Ready"}`
-                  : activeMethod.accountNumber || "Host Payment Channel"}
-              </Text>
-            </View>
-
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-            >
-              {activeMethod.qrCodeUrl ? (
-                <View
-                  style={[
-                    styles.qrIndicatorTag,
-                    isDark && {
-                      backgroundColor: "rgba(59, 130, 246, 0.15)",
-                      borderColor: "rgba(59, 130, 246, 0.3)",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="qr-code-outline"
-                    size={11}
-                    color={isDark ? colors.accent : "#2563EB"}
-                  />
-                  <Text
-                    style={[
-                      styles.qrIndicatorTagText,
-                      isDark && { color: colors.accent },
-                    ]}
-                  >
-                    QR
-                  </Text>
-                </View>
-              ) : null}
-              <Feather
-                name={showMethodDropdown ? "chevron-up" : "chevron-down"}
-                size={18}
-                color={colors.textSecondary}
-              />
-            </View>
-          </TouchableOpacity>
-
-          {/* Dropdown Menu Options */}
-          {showMethodDropdown && (
-            <View
+            <Text
               style={[
-                styles.dropdownMenu,
+                styles.dueLabel,
+                { color: isDark ? "#60A5FA" : "#1E40AF" },
+              ]}
+            >
+              Current Outstanding Dues
+            </Text>
+            <Text
+              style={[
+                styles.dueAmount,
+                { color: isDark ? colors.text : "#1E3A8A" },
+              ]}
+            >
+              {formatPesos(liveOutstandingCentavos)}
+            </Text>
+            <Text
+              style={[
+                styles.dueNote,
+                { color: isDark ? colors.textSecondary : "#3B82F6" },
+              ]}
+            >
+              {activeCycle
+                ? `${activeCycle.name || "Active billing cycle"} from Firebase`
+                : "No active Firebase billing cycle found"}
+            </Text>
+          </View>
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Payment Method
+          </Text>
+
+          {/* Dropdown Style Payment Method Selector */}
+          <View style={styles.dropdownContainer}>
+            <TouchableOpacity
+              style={[
+                styles.dropdownTrigger,
+                showMethodDropdown && styles.dropdownTriggerOpen,
                 {
                   backgroundColor: colors.card,
-                  borderColor: colors.border,
+                  borderColor: showMethodDropdown
+                    ? colors.primary
+                    : colors.border,
                 },
               ]}
-            >
-              <Text
-                style={[
-                  styles.dropdownMenuHeader,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                HOST CONFIGURED PAYMENT METHODS
-              </Text>
-              {hostPaymentMethods.map((m) => {
-                const isSelected = activeMethod.id === m.id;
-                const badge = getMethodBadge(m.type);
-                return (
-                  <TouchableOpacity
-                    key={m.id}
-                    style={[
-                      styles.dropdownMenuItem,
-                      isSelected && {
-                        backgroundColor: isDark
-                          ? "rgba(59, 130, 246, 0.15)"
-                          : "#EFF6FF",
-                      },
-                      isDark && { borderBottomColor: colors.border },
-                    ]}
-                    onPress={() => {
-                      setSelectedMethodId(m.id);
-                      setShowMethodDropdown(false);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    {m.customIconUrl ? (
-                      <View
-                        style={[
-                          styles.customIconBadgeSmall,
-                          isDark && {
-                            backgroundColor: colors.surfaceInset,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <Image
-                          source={{ uri: m.customIconUrl }}
-                          style={styles.customIconImgSmall}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    ) : (
-                      <View
-                        style={[
-                          styles.methodIconBadgeSmall,
-                          { backgroundColor: badge.bgColor },
-                        ]}
-                      >
-                        <Feather
-                          name={badge.icon as any}
-                          size={15}
-                          color={badge.color}
-                        />
-                      </View>
-                    )}
-
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemTitle,
-                            {
-                              color: isSelected ? colors.primary : colors.text,
-                            },
-                            isSelected && { fontWeight: "800" },
-                          ]}
-                        >
-                          {m.name}
-                        </Text>
-                        {m.qrCodeUrl ? (
-                          <View
-                            style={[
-                              styles.qrIndicatorTag,
-                              isDark && {
-                                backgroundColor: "rgba(59, 130, 246, 0.15)",
-                                borderColor: "rgba(59, 130, 246, 0.3)",
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name="qr-code-outline"
-                              size={10}
-                              color={isDark ? colors.accent : "#2563EB"}
-                            />
-                            <Text
-                              style={[
-                                styles.qrIndicatorTagText,
-                                isDark && { color: colors.accent },
-                              ]}
-                            >
-                              QR
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-
-                      <Text
-                        style={[
-                          styles.dropdownItemSub,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {m.accountName
-                          ? `${m.accountName} • ${m.accountNumber || "Direct Payment"}`
-                          : m.accountNumber || "Pay via this channel"}
-                      </Text>
-                    </View>
-
-                    {isSelected && (
-                      <Feather
-                        name="check"
-                        size={18}
-                        color={colors.primary}
-                        style={{ marginLeft: 8 }}
-                      />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-        </View>
-
-        {/* Host Payment Details Card: QR & Account Number */}
-        <View
-          style={[
-            styles.hostPaymentInfoCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <View style={styles.hostPaymentInfoHeader}>
-            <View
-              style={[
-                styles.verifiedHostBadge,
-                isDark && {
-                  backgroundColor: "rgba(16, 185, 129, 0.15)",
-                  borderColor: "rgba(16, 185, 129, 0.3)",
-                },
-              ]}
-            >
-              <Feather
-                name="shield"
-                size={12}
-                color={isDark ? colors.success : "#10B981"}
-              />
-              <Text
-                style={[
-                  styles.verifiedHostBadgeText,
-                  { color: isDark ? colors.success : "#059669" },
-                ]}
-              >
-                Host Verified Payment
-              </Text>
-            </View>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              onPress={() => setShowMethodDropdown(!showMethodDropdown)}
+              activeOpacity={0.8}
             >
               {activeMethod.customIconUrl ? (
                 <View
                   style={[
                     styles.customIconBadgeSmall,
-                    { width: 32, height: 24 },
                     isDark && {
                       backgroundColor: colors.surfaceInset,
                       borderColor: colors.border,
@@ -2528,342 +2269,616 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                     resizeMode="cover"
                   />
                 </View>
-              ) : null}
-              <Text
-                style={[
-                  styles.hostMethodTypeTag,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                {activeMethod.name}
-              </Text>
-            </View>
-          </View>
+              ) : (
+                <View
+                  style={[
+                    styles.methodIconBadgeSmall,
+                    {
+                      backgroundColor: getMethodBadge(activeMethod.type)
+                        .bgColor,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name={getMethodBadge(activeMethod.type).icon as any}
+                    size={16}
+                    color={getMethodBadge(activeMethod.type).color}
+                  />
+                </View>
+              )}
 
-          {/* Account Details with Copy Button */}
-          {activeMethod.accountNumber ? (
-            <View
-              style={[
-                styles.accountNumberCopyBox,
-                isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text
+                  style={[styles.dropdownSelectedTitle, { color: colors.text }]}
+                >
+                  {activeMethod.name}
+                </Text>
                 <Text
                   style={[
-                    styles.accountLabelText,
+                    styles.dropdownSelectedSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {activeMethod.accountName
+                    ? `${activeMethod.accountName} • ${activeMethod.accountNumber || "QR Ready"}`
+                    : activeMethod.accountNumber || "Host Payment Channel"}
+                </Text>
+              </View>
+
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                {activeMethod.qrCodeUrl ? (
+                  <View
+                    style={[
+                      styles.qrIndicatorTag,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.15)",
+                        borderColor: "rgba(59, 130, 246, 0.3)",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="qr-code-outline"
+                      size={11}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                    <Text
+                      style={[
+                        styles.qrIndicatorTagText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      QR
+                    </Text>
+                  </View>
+                ) : null}
+                <Feather
+                  name={showMethodDropdown ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {/* Dropdown Menu Options */}
+            {showMethodDropdown && (
+              <View
+                style={[
+                  styles.dropdownMenu,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dropdownMenuHeader,
                     { color: colors.textSecondary },
                   ]}
                 >
-                  {activeMethod.accountName
-                    ? `${activeMethod.accountName} (Receiver)`
-                    : "Account / Mobile Number"}
+                  HOST CONFIGURED PAYMENT METHODS
                 </Text>
-                <Text
-                  style={[styles.accountNumberText, { color: colors.text }]}
-                  selectable
-                >
-                  {activeMethod.accountNumber}
-                </Text>
-              </View>
+                {hostPaymentMethods.map((m) => {
+                  const isSelected = activeMethod.id === m.id;
+                  const badge = getMethodBadge(m.type);
+                  return (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[
+                        styles.dropdownMenuItem,
+                        isSelected && {
+                          backgroundColor: isDark
+                            ? "rgba(59, 130, 246, 0.15)"
+                            : "#EFF6FF",
+                        },
+                        isDark && { borderBottomColor: colors.border },
+                      ]}
+                      onPress={() => {
+                        setSelectedMethodId(m.id);
+                        setShowMethodDropdown(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      {m.customIconUrl ? (
+                        <View
+                          style={[
+                            styles.customIconBadgeSmall,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                        >
+                          <Image
+                            source={{ uri: m.customIconUrl }}
+                            style={styles.customIconImgSmall}
+                            resizeMode="cover"
+                          />
+                        </View>
+                      ) : (
+                        <View
+                          style={[
+                            styles.methodIconBadgeSmall,
+                            { backgroundColor: badge.bgColor },
+                          ]}
+                        >
+                          <Feather
+                            name={badge.icon as any}
+                            size={15}
+                            color={badge.color}
+                          />
+                        </View>
+                      )}
 
-              <TouchableOpacity
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemTitle,
+                              {
+                                color: isSelected
+                                  ? colors.primary
+                                  : colors.text,
+                              },
+                              isSelected && { fontWeight: "800" },
+                            ]}
+                          >
+                            {m.name}
+                          </Text>
+                          {m.qrCodeUrl ? (
+                            <View
+                              style={[
+                                styles.qrIndicatorTag,
+                                isDark && {
+                                  backgroundColor: "rgba(59, 130, 246, 0.15)",
+                                  borderColor: "rgba(59, 130, 246, 0.3)",
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="qr-code-outline"
+                                size={10}
+                                color={isDark ? colors.accent : "#2563EB"}
+                              />
+                              <Text
+                                style={[
+                                  styles.qrIndicatorTagText,
+                                  isDark && { color: colors.accent },
+                                ]}
+                              >
+                                QR
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        <Text
+                          style={[
+                            styles.dropdownItemSub,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          {m.accountName
+                            ? `${m.accountName} • ${m.accountNumber || "Direct Payment"}`
+                            : m.accountNumber || "Pay via this channel"}
+                        </Text>
+                      </View>
+
+                      {isSelected && (
+                        <Feather
+                          name="check"
+                          size={18}
+                          color={colors.primary}
+                          style={{ marginLeft: 8 }}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
+          {/* Host Payment Details Card: QR & Account Number */}
+          <View
+            style={[
+              styles.hostPaymentInfoCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.hostPaymentInfoHeader}>
+              <View
                 style={[
-                  styles.copyAccountBtn,
-                  copiedSuccess && styles.copyAccountBtnSuccess,
-                  isDark &&
-                    !copiedSuccess && {
-                      backgroundColor: "rgba(59, 130, 246, 0.15)",
-                      borderColor: "rgba(59, 130, 246, 0.3)",
-                    },
+                  styles.verifiedHostBadge,
+                  isDark && {
+                    backgroundColor: "rgba(16, 185, 129, 0.15)",
+                    borderColor: "rgba(16, 185, 129, 0.3)",
+                  },
                 ]}
-                onPress={() =>
-                  handleCopyAccountNumber(activeMethod.accountNumber)
-                }
-                activeOpacity={0.8}
               >
                 <Feather
-                  name={copiedSuccess ? "check" : "copy"}
-                  size={13}
-                  color={
-                    copiedSuccess
-                      ? "#FFFFFF"
-                      : isDark
-                        ? colors.accent
-                        : "#2563EB"
-                  }
+                  name="shield"
+                  size={12}
+                  color={isDark ? colors.success : "#10B981"}
                 />
                 <Text
                   style={[
-                    styles.copyAccountBtnText,
-                    copiedSuccess && { color: "#FFFFFF" },
-                    isDark &&
-                      !copiedSuccess && {
-                        color: colors.accent,
-                      },
+                    styles.verifiedHostBadgeText,
+                    { color: isDark ? colors.success : "#059669" },
                   ]}
                 >
-                  {copiedSuccess ? "Copied!" : "Copy"}
+                  Host Verified Payment
                 </Text>
-              </TouchableOpacity>
+              </View>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                {activeMethod.customIconUrl ? (
+                  <View
+                    style={[
+                      styles.customIconBadgeSmall,
+                      { width: 32, height: 24 },
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: activeMethod.customIconUrl }}
+                      style={styles.customIconImgSmall}
+                      resizeMode="cover"
+                    />
+                  </View>
+                ) : null}
+                <Text
+                  style={[
+                    styles.hostMethodTypeTag,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  {activeMethod.name}
+                </Text>
+              </View>
             </View>
-          ) : null}
 
-          {/* QR Code Display if available */}
-          {activeMethod.qrCodeUrl ? (
+            {/* Account Details with Copy Button */}
+            {activeMethod.accountNumber ? (
+              <View
+                style={[
+                  styles.accountNumberCopyBox,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.accountLabelText,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {activeMethod.accountName
+                      ? `${activeMethod.accountName} (Receiver)`
+                      : "Account / Mobile Number"}
+                  </Text>
+                  <Text
+                    style={[styles.accountNumberText, { color: colors.text }]}
+                    selectable
+                  >
+                    {activeMethod.accountNumber}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.copyAccountBtn,
+                    copiedSuccess && styles.copyAccountBtnSuccess,
+                    isDark &&
+                      !copiedSuccess && {
+                        backgroundColor: "rgba(59, 130, 246, 0.15)",
+                        borderColor: "rgba(59, 130, 246, 0.3)",
+                      },
+                  ]}
+                  onPress={() =>
+                    handleCopyAccountNumber(activeMethod.accountNumber)
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Feather
+                    name={copiedSuccess ? "check" : "copy"}
+                    size={13}
+                    color={
+                      copiedSuccess
+                        ? "#FFFFFF"
+                        : isDark
+                          ? colors.accent
+                          : "#2563EB"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.copyAccountBtnText,
+                      copiedSuccess && { color: "#FFFFFF" },
+                      isDark &&
+                        !copiedSuccess && {
+                          color: colors.accent,
+                        },
+                    ]}
+                  >
+                    {copiedSuccess ? "Copied!" : "Copy"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {/* QR Code Display if available */}
+            {activeMethod.qrCodeUrl ? (
+              <View
+                style={[
+                  styles.qrDisplayBox,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={styles.qrImageClickable}
+                  onPress={() =>
+                    setPreviewQrModal(activeMethod.qrCodeUrl || null)
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Image
+                    source={{ uri: activeMethod.qrCodeUrl }}
+                    style={styles.qrDisplayImage}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.qrEnlargeHintBadge}>
+                    <Feather name="maximize-2" size={11} color="#FFFFFF" />
+                    <Text style={styles.qrEnlargeHintText}>Tap to Enlarge</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <View style={{ flex: 1, marginLeft: 14 }}>
+                  <Text style={[styles.qrTitle, { color: colors.text }]}>
+                    Scan Host QR Code
+                  </Text>
+                  <Text
+                    style={[styles.qrSubtitle, { color: colors.textSecondary }]}
+                  >
+                    Open {activeMethod.name} or banking app and scan this QR to
+                    pay directly without manual errors.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {/* Notes / Special Instructions from Host */}
+            {Boolean(activeMethod.notes) && (
+              <View
+                style={[
+                  styles.hostNotesNotice,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.1)",
+                    borderColor: "rgba(59, 130, 246, 0.25)",
+                  },
+                ]}
+              >
+                <Feather
+                  name="info"
+                  size={14}
+                  color={isDark ? colors.accent : "#2563EB"}
+                  style={{ marginTop: 1 }}
+                />
+                <Text
+                  style={[
+                    styles.hostNotesNoticeText,
+                    { color: isDark ? colors.text : "#1E293B" },
+                  ]}
+                >
+                  {activeMethod.notes}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Amount to Pay (PHP)
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            keyboardType="decimal-pad"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="0.00"
+            placeholderTextColor={colors.textMuted}
+          />
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Transaction Reference
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            placeholder="Enter transaction reference"
+            placeholderTextColor={colors.textMuted}
+            value={refNum}
+            onChangeText={setRefNum}
+          />
+
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Upload Receipt Proof
+          </Text>
+          {imageUri ? (
             <View
               style={[
-                styles.qrDisplayBox,
-                isDark && {
+                styles.imagePreviewContainer,
+                { borderColor: colors.border },
+              ]}
+            >
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.previewImage}
+                resizeMode="cover"
+              />
+              <TouchableOpacity
+                style={styles.removeImageBtn}
+                onPress={() => setImageUri(null)}
+              >
+                <Text style={styles.removeImageText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[
+                styles.uploadBox,
+                {
                   backgroundColor: colors.surfaceInset,
                   borderColor: colors.border,
                 },
               ]}
+              onPress={handlePickReceipt}
+              activeOpacity={0.8}
             >
-              <TouchableOpacity
-                style={styles.qrImageClickable}
-                onPress={() =>
-                  setPreviewQrModal(activeMethod.qrCodeUrl || null)
-                }
-                activeOpacity={0.85}
+              <View
+                style={[
+                  styles.uploadIconWrap,
+                  {
+                    backgroundColor: isDark
+                      ? colors.card
+                      : "rgba(15, 23, 42, 0.05)",
+                    borderColor: colors.border,
+                    borderWidth: isDark ? 1 : 0,
+                  },
+                ]}
               >
-                <Image
-                  source={{ uri: activeMethod.qrCodeUrl }}
-                  style={styles.qrDisplayImage}
-                  resizeMode="contain"
+                <Feather
+                  name="upload-cloud"
+                  size={22}
+                  color={isDark ? colors.accent : "#0F172A"}
                 />
-                <View style={styles.qrEnlargeHintBadge}>
-                  <Feather name="maximize-2" size={11} color="#FFFFFF" />
-                  <Text style={styles.qrEnlargeHintText}>Tap to Enlarge</Text>
-                </View>
-              </TouchableOpacity>
-
-              <View style={{ flex: 1, marginLeft: 14 }}>
-                <Text style={[styles.qrTitle, { color: colors.text }]}>
-                  Scan Host QR Code
-                </Text>
-                <Text
-                  style={[styles.qrSubtitle, { color: colors.textSecondary }]}
-                >
-                  Open {activeMethod.name} or banking app and scan this QR to
-                  pay directly without manual errors.
-                </Text>
               </View>
-            </View>
-          ) : null}
+              <Text style={[styles.uploadText, { color: colors.text }]}>
+                Upload Receipt / Screenshot
+              </Text>
+              <Text style={[styles.uploadSub, { color: colors.textSecondary }]}>
+                Tap to select image to store securely
+              </Text>
+            </TouchableOpacity>
+          )}
 
-          {/* Notes / Special Instructions from Host */}
-          {Boolean(activeMethod.notes) && (
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Description / Notes (Optional)
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                height: 64,
+                backgroundColor: colors.surfaceInset,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            multiline
+            placeholder="Add memo for roommate host"
+            placeholderTextColor={colors.textMuted}
+            value={notes}
+            onChangeText={setNotes}
+          />
+
+          {isPaymentsLocked ? (
             <View
               style={[
-                styles.hostNotesNotice,
-                isDark && {
-                  backgroundColor: "rgba(59, 130, 246, 0.1)",
-                  borderColor: "rgba(59, 130, 246, 0.25)",
+                styles.submitBtn,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(245, 158, 11, 0.15)"
+                    : "#FEF3C7",
+                  borderWidth: 1,
+                  borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FCD34D",
+                  shadowOpacity: 0,
+                  elevation: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
                 },
               ]}
             >
               <Feather
-                name="info"
-                size={14}
-                color={isDark ? colors.accent : "#2563EB"}
-                style={{ marginTop: 1 }}
+                name="lock"
+                size={16}
+                color={isDark ? "#FBBF24" : "#B45309"}
               />
               <Text
                 style={[
-                  styles.hostNotesNoticeText,
-                  { color: isDark ? colors.text : "#1E293B" },
+                  styles.submitBtnText,
+                  { color: isDark ? "#FBBF24" : "#92400E" },
                 ]}
               >
-                {activeMethod.notes}
+                Bills Under Review · Payments Locked
               </Text>
             </View>
-          )}
-        </View>
-
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Amount to Pay (PHP)
-        </Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: colors.surfaceInset,
-              borderColor: colors.border,
-              color: colors.text,
-            },
-          ]}
-          keyboardType="decimal-pad"
-          value={amount}
-          onChangeText={setAmount}
-          placeholder="0.00"
-          placeholderTextColor={colors.textMuted}
-        />
-
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Transaction Reference
-        </Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: colors.surfaceInset,
-              borderColor: colors.border,
-              color: colors.text,
-            },
-          ]}
-          placeholder="Enter transaction reference"
-          placeholderTextColor={colors.textMuted}
-          value={refNum}
-          onChangeText={setRefNum}
-        />
-
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Upload Receipt Proof
-        </Text>
-        {imageUri ? (
-          <View
-            style={[
-              styles.imagePreviewContainer,
-              { borderColor: colors.border },
-            ]}
-          >
-            <Image
-              source={{ uri: imageUri }}
-              style={styles.previewImage}
-              resizeMode="cover"
-            />
+          ) : (
             <TouchableOpacity
-              style={styles.removeImageBtn}
-              onPress={() => setImageUri(null)}
-            >
-              <Text style={styles.removeImageText}>Remove</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[
-              styles.uploadBox,
-              {
-                backgroundColor: colors.surfaceInset,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={handlePickReceipt}
-            activeOpacity={0.8}
-          >
-            <View
               style={[
-                styles.uploadIconWrap,
+                styles.submitBtn,
                 {
-                  backgroundColor: isDark
-                    ? colors.card
-                    : "rgba(15, 23, 42, 0.05)",
-                  borderColor: colors.border,
-                  borderWidth: isDark ? 1 : 0,
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
                 },
+                uploading && styles.submitBtnDisabled,
               ]}
+              onPress={handleSubmit}
+              disabled={uploading}
+              activeOpacity={0.85}
             >
-              <Feather
-                name="upload-cloud"
-                size={22}
-                color={isDark ? colors.accent : "#0F172A"}
-              />
-            </View>
-            <Text style={[styles.uploadText, { color: colors.text }]}>
-              Upload Receipt / Screenshot
-            </Text>
-            <Text style={[styles.uploadSub, { color: colors.textSecondary }]}>
-              Tap to select image to store securely
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Description / Notes (Optional)
-        </Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              height: 64,
-              backgroundColor: colors.surfaceInset,
-              borderColor: colors.border,
-              color: colors.text,
-            },
-          ]}
-          multiline
-          placeholder="Add memo for roommate host"
-          placeholderTextColor={colors.textMuted}
-          value={notes}
-          onChangeText={setNotes}
-        />
-
-        {isPaymentsLocked ? (
-          <View
-            style={[
-              styles.submitBtn,
-              {
-                backgroundColor: isDark
-                  ? "rgba(245, 158, 11, 0.15)"
-                  : "#FEF3C7",
-                borderWidth: 1,
-                borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FCD34D",
-                shadowOpacity: 0,
-                elevation: 0,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-              },
-            ]}
-          >
-            <Feather
-              name="lock"
-              size={16}
-              color={isDark ? "#FBBF24" : "#B45309"}
-            />
-            <Text
-              style={[
-                styles.submitBtnText,
-                { color: isDark ? "#FBBF24" : "#92400E" },
-              ]}
-            >
-              Bills Under Review · Payments Locked
-            </Text>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[
-              styles.submitBtn,
-              {
-                backgroundColor: colors.primary,
-                shadowColor: colors.primary,
-              },
-              uploading && styles.submitBtnDisabled,
-            ]}
-            onPress={handleSubmit}
-            disabled={uploading}
-            activeOpacity={0.85}
-          >
-            {uploading ? (
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <ActivityIndicator color="#FFFFFF" size="small" />
-                <Text style={styles.submitBtnText}>Uploading Receipt...</Text>
-              </View>
-            ) : (
-              <Text style={styles.submitBtnText}>
-                {submitted ? "Payment Submitted" : "Submit Payment Proof"}
-              </Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </ScrollView>
+              {uploading ? (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={styles.submitBtnText}>Uploading Receipt...</Text>
+                </View>
+              ) : (
+                <Text style={styles.submitBtnText}>
+                  {submitted ? "Payment Submitted" : "Submit Payment Proof"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Menu Modal matching elevated bottom sheet design */}
       <SmoothBottomSheetModal

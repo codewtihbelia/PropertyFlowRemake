@@ -35,12 +35,13 @@ export function setSafeNavBarHidden(hidden: boolean) {
   try {
     const mod = getNativeNavBar();
     if (!mod) return;
-    if (typeof mod.setHidden === "function") {
-      mod.setHidden(hidden);
-    } else if (typeof mod.NavigationBar?.setHidden === "function") {
-      mod.NavigationBar.setHidden(hidden);
-    } else if (typeof mod.setVisibilityAsync === "function") {
-      mod.setVisibilityAsync(hidden ? "hidden" : "visible").catch(() => {});
+    // CRITICAL: On Android standalone APK builds, hiding the navigation bar (immersive mode)
+    // forces the window manager to disable adjustResize, which causes the software keyboard
+    // to render directly on top of TextInputs. We always keep the navigation bar visible.
+    if (typeof mod.setVisibilityAsync === "function") {
+      mod.setVisibilityAsync("visible").catch(() => {});
+    } else if (typeof mod.setHidden === "function") {
+      mod.setHidden(false);
     }
   } catch {
     // Ignore native module errors on unsupported devices
@@ -56,7 +57,7 @@ export const NavigationBar: React.FC<{
 } = Object.assign(
   function SafeNavigationBarComponent({
     style = "light",
-    hidden = true,
+    hidden = false,
   }: {
     style?: "light" | "dark" | "auto" | "inverted";
     hidden?: boolean;
@@ -64,9 +65,9 @@ export const NavigationBar: React.FC<{
     useEffect(() => {
       if (Platform.OS === "android") {
         setSafeNavBarStyle(style);
-        setSafeNavBarHidden(hidden);
+        setSafeNavBarHidden(false);
       }
-    }, [style, hidden]);
+    }, [style]);
     return null;
   },
   {

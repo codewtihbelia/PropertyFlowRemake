@@ -73,7 +73,8 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
 
       match /devices/{deviceId} {
-        allow read, create, update, delete: if isUser(userId) || isSuperAdmin();
+        allow read: if isAuthenticated();
+        allow write: if isUser(userId) || isSuperAdmin();
       }
 
       match /wallet/{walletId} {

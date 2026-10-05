@@ -6,6 +6,7 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  KeyboardAvoidingView,
   Image,
   Alert,
   Modal,
@@ -674,1077 +675,1113 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: Math.max(40, insets.bottom + 24) },
-        ]}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        {profile && !isHost && (
-          <View
-            style={[
-              styles.permissionBanner,
-              isDark && {
-                backgroundColor: "rgba(239, 68, 68, 0.12)",
-                borderColor: "rgba(239, 68, 68, 0.25)",
-              },
-            ]}
-          >
-            <Text
-              style={[styles.permissionTitle, isDark && { color: "#FCA5A5" }]}
-            >
-              Host Permission Required
-            </Text>
-            <Text
-              style={[styles.permissionText, isDark && { color: "#F87171" }]}
-            >
-              You are signed in as a resident. Only household hosts can record
-              bills. Roommates can review charges and settle their share in the
-              Bills tab.
-            </Text>
-          </View>
-        )}
-
-        {/* Group Cards Horizontal Carousel matching screen.png */}
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.groupsCarousel}
-          contentContainerStyle={{ paddingRight: 16, gap: 14 }}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(80, insets.bottom + 40) },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {groupsList.map((grp, idx) => {
-            const isSelected = selectedGroupIndex === idx;
-
-            return (
-              <TouchableOpacity
-                key={grp.id}
-                style={[
-                  styles.groupCard,
-                  isSelected
-                    ? styles.groupCardSelected
-                    : [
-                        styles.groupCardUnselected,
-                        isDark && {
-                          backgroundColor: colors.card,
-                          borderColor: colors.border,
-                        },
-                      ],
-                ]}
-                onPress={() => setSelectedGroupIndex(idx)}
-                activeOpacity={0.9}
+          {profile && !isHost && (
+            <View
+              style={[
+                styles.permissionBanner,
+                isDark && {
+                  backgroundColor: "rgba(239, 68, 68, 0.12)",
+                  borderColor: "rgba(239, 68, 68, 0.25)",
+                },
+              ]}
+            >
+              <Text
+                style={[styles.permissionTitle, isDark && { color: "#FCA5A5" }]}
               >
-                <Text
-                  style={[
-                    styles.groupCardTitle,
-                    isSelected
-                      ? styles.textWhite
-                      : [styles.textDark, isDark && { color: colors.text }],
-                  ]}
-                  numberOfLines={1}
-                >
-                  {grp.name}
-                </Text>
+                Host Permission Required
+              </Text>
+              <Text
+                style={[styles.permissionText, isDark && { color: "#F87171" }]}
+              >
+                You are signed in as a resident. Only household hosts can record
+                bills. Roommates can review charges and settle their share in
+                the Bills tab.
+              </Text>
+            </View>
+          )}
 
-                <Text
-                  style={[
-                    styles.groupCardSub,
-                    isSelected
-                      ? styles.textWhiteSub
-                      : [
-                          styles.textMuted,
-                          isDark && { color: colors.textSecondary },
-                        ],
-                  ]}
-                >
-                  Total Bills: {grp.totalExpenses}
-                </Text>
+          {/* Group Cards Horizontal Carousel matching screen.png */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.groupsCarousel}
+            contentContainerStyle={{ paddingRight: 16, gap: 14 }}
+          >
+            {groupsList.map((grp, idx) => {
+              const isSelected = selectedGroupIndex === idx;
 
-                {/* Overlapping member avatars matching screen.png */}
-                <View style={styles.avatarStackRow}>
-                  {grp.members.slice(0, 3).map((m: any, mIdx: number) => {
-                    const photo = m.profilePicture || m.photoURL;
-                    const initials = (m.displayName || "M")
-                      .slice(0, 2)
-                      .toUpperCase();
-                    const bgColor =
-                      m.color || AVATAR_COLORS[mIdx % AVATAR_COLORS.length];
-
-                    return photo ? (
-                      <Image
-                        key={m.userId || mIdx}
-                        source={{ uri: photo }}
-                        style={[
-                          styles.avatarCircle,
-                          isDark && {
-                            borderColor: isSelected ? "#2563EB" : colors.card,
-                          },
-                          { marginLeft: mIdx === 0 ? 0 : -8 },
-                        ]}
-                      />
-                    ) : (
-                      <View
-                        key={m.userId || mIdx}
-                        style={[
-                          styles.avatarCircle,
-                          {
-                            backgroundColor: bgColor,
-                            marginLeft: mIdx === 0 ? 0 : -8,
-                            borderColor: isDark
-                              ? isSelected
-                                ? "#2563EB"
-                                : colors.card
-                              : "#FFFFFF",
-                          },
-                        ]}
-                      >
-                        <Text style={styles.avatarInitials}>{initials}</Text>
-                      </View>
-                    );
-                  })}
-
-                  {grp.extraCount > 0 && (
-                    <View
-                      style={[
-                        styles.avatarCircle,
-                        styles.avatarBadgeExtra,
-                        { marginLeft: -8 },
-                        isSelected
-                          ? {
-                              backgroundColor: "#DBEAFE",
-                              borderColor: isDark ? "#2563EB" : "#FFFFFF",
-                            }
-                          : isDark
-                            ? {
-                                backgroundColor: "rgba(255, 255, 255, 0.12)",
-                                borderColor: colors.card,
-                              }
-                            : { backgroundColor: "#E2E8F0" },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.avatarBadgeText,
-                          isSelected
-                            ? { color: "#1D4ED8" }
-                            : isDark
-                              ? { color: colors.textSecondary }
-                              : { color: "#475569" },
-                        ]}
-                      >
-                        +{grp.extraCount}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Add Bills Button inside Card matching screen.png */}
+              return (
                 <TouchableOpacity
+                  key={grp.id}
                   style={[
-                    styles.cardActionBtn,
+                    styles.groupCard,
                     isSelected
-                      ? styles.cardActionBtnSelected
+                      ? styles.groupCardSelected
                       : [
-                          styles.cardActionBtnUnselected,
+                          styles.groupCardUnselected,
                           isDark && {
-                            backgroundColor: "rgba(59, 130, 246, 0.15)",
+                            backgroundColor: colors.card,
+                            borderColor: colors.border,
                           },
                         ],
                   ]}
                   onPress={() => setSelectedGroupIndex(idx)}
-                  activeOpacity={0.8}
+                  activeOpacity={0.9}
                 >
                   <Text
                     style={[
-                      styles.cardActionBtnText,
-                      !isSelected && isDark && { color: colors.primary },
+                      styles.groupCardTitle,
+                      isSelected
+                        ? styles.textWhite
+                        : [styles.textDark, isDark && { color: colors.text }],
                     ]}
+                    numberOfLines={1}
                   >
-                    Add Bills
+                    {grp.name}
                   </Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
 
-        {/* Category Field - Beautiful Dropdown Mode (Not in Modal) */}
-        <View style={styles.categorySectionHeader}>
-          <Text style={[styles.label, isDark && { color: colors.text }]}>
-            Bill Category
-          </Text>
-          <View
-            style={[
-              styles.categoryCountPill,
-              isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-            ]}
-          >
-            <Text
-              style={[
-                styles.categoryCountPillText,
-                isDark && { color: colors.textSecondary },
-              ]}
-            >
-              {BILL_CATEGORIES.length} Categories
-            </Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.dropdownSelector,
-            isDark && {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-            isCategoryDropdownOpen &&
-              (isDark
-                ? {
-                    borderColor: colors.primary,
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
-                  }
-                : styles.dropdownSelectorActive),
-          ]}
-          onPress={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.dropdownLeftWrap}>
-            <View
-              style={[
-                styles.dropdownIconBadge,
-                { backgroundColor: activeCategoryMeta.bgColor },
-              ]}
-            >
-              <Ionicons
-                name={activeCategoryMeta.ionicon as any}
-                size={18}
-                color={activeCategoryMeta.color}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-              >
-                <Text
-                  style={[
-                    styles.dropdownTitle,
-                    isDark && { color: colors.text },
-                  ]}
-                >
-                  {selectedCategoryId === "Others" &&
-                  otherCategorySpecified.trim()
-                    ? `Others: ${otherCategorySpecified.trim()}`
-                    : activeCategoryMeta.name}
-                </Text>
-                {selectedCategoryId === "Water" && (
-                  <View
+                  <Text
                     style={[
-                      styles.waterMiniBadge,
-                      isDark && { backgroundColor: "rgba(2, 132, 199, 0.2)" },
+                      styles.groupCardSub,
+                      isSelected
+                        ? styles.textWhiteSub
+                        : [
+                            styles.textMuted,
+                            isDark && { color: colors.textSecondary },
+                          ],
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.waterMiniBadgeText,
-                        isDark && { color: "#38BDF8" },
-                      ]}
-                    >
-                      ₱5/day
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text
-                style={[
-                  styles.dropdownSubtitle,
-                  isDark && { color: colors.textSecondary },
-                ]}
-                numberOfLines={1}
-              >
-                {selectedCategoryId === "Others" &&
-                otherCategorySpecified.trim()
-                  ? `Custom category specified: "${otherCategorySpecified.trim()}"`
-                  : activeCategoryMeta.description}
-              </Text>
-            </View>
-          </View>
-          <View
-            style={[
-              styles.chevronBadge,
-              isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-              isCategoryDropdownOpen &&
-                (isDark
-                  ? { backgroundColor: "rgba(59, 130, 246, 0.2)" }
-                  : styles.chevronBadgeActive),
-            ]}
-          >
-            <Feather
-              name={isCategoryDropdownOpen ? "chevron-up" : "chevron-down"}
-              size={18}
-              color={
-                isCategoryDropdownOpen
-                  ? isDark
-                    ? colors.primary
-                    : "#2563EB"
-                  : isDark
-                    ? colors.textSecondary
-                    : "#64748B"
-              }
-            />
-          </View>
-        </TouchableOpacity>
+                    Total Bills: {grp.totalExpenses}
+                  </Text>
 
-        {/* Inline Category Dropdown List (Expanded) */}
-        {isCategoryDropdownOpen && (
-          <View
-            style={[
-              styles.inlineDropdownList,
-              isDark && {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            {BILL_CATEGORIES.map((cat) => {
-              const isSelected = selectedCategoryId === cat.id;
-              return (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.inlineDropdownItem,
-                    isSelected &&
-                      (isDark
-                        ? {
-                            backgroundColor: "rgba(59, 130, 246, 0.15)",
-                            borderWidth: 1,
-                            borderColor: "rgba(59, 130, 246, 0.35)",
-                          }
-                        : styles.inlineDropdownItemActive),
-                  ]}
-                  onPress={() => {
-                    setSelectedCategoryId(cat.id);
-                    setIsCategoryDropdownOpen(false);
-                    if (cat.id === "Electricity") {
-                      updateAmountFromElectricity(
-                        elecPrevReading,
-                        elecCurrReading,
-                        elecRatePerKwh,
-                      );
-                    }
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.inlineCatIconWrap,
-                      { backgroundColor: cat.bgColor },
-                    ]}
-                  >
-                    <Ionicons
-                      name={cat.ionicon as any}
-                      size={16}
-                      color={cat.color}
-                    />
-                  </View>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.inlineCatName,
-                          isDark && { color: colors.text },
-                          isSelected &&
-                            (isDark
-                              ? { color: colors.primary }
-                              : styles.inlineCatNameActive),
-                        ]}
-                      >
-                        {cat.name}
-                      </Text>
-                      {cat.id === "Water" && (
-                        <View
+                  {/* Overlapping member avatars matching screen.png */}
+                  <View style={styles.avatarStackRow}>
+                    {grp.members.slice(0, 3).map((m: any, mIdx: number) => {
+                      const photo = m.profilePicture || m.photoURL;
+                      const initials = (m.displayName || "M")
+                        .slice(0, 2)
+                        .toUpperCase();
+                      const bgColor =
+                        m.color || AVATAR_COLORS[mIdx % AVATAR_COLORS.length];
+
+                      return photo ? (
+                        <Image
+                          key={m.userId || mIdx}
+                          source={{ uri: photo }}
                           style={[
-                            styles.waterPillTag,
+                            styles.avatarCircle,
                             isDark && {
-                              backgroundColor: "rgba(2, 132, 199, 0.2)",
+                              borderColor: isSelected ? "#2563EB" : colors.card,
+                            },
+                            { marginLeft: mIdx === 0 ? 0 : -8 },
+                          ]}
+                        />
+                      ) : (
+                        <View
+                          key={m.userId || mIdx}
+                          style={[
+                            styles.avatarCircle,
+                            {
+                              backgroundColor: bgColor,
+                              marginLeft: mIdx === 0 ? 0 : -8,
+                              borderColor: isDark
+                                ? isSelected
+                                  ? "#2563EB"
+                                  : colors.card
+                                : "#FFFFFF",
                             },
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.waterPillTagText,
-                              isDark && { color: "#38BDF8" },
-                            ]}
-                          >
-                            Attendance Mode
-                          </Text>
+                          <Text style={styles.avatarInitials}>{initials}</Text>
                         </View>
-                      )}
-                    </View>
+                      );
+                    })}
+
+                    {grp.extraCount > 0 && (
+                      <View
+                        style={[
+                          styles.avatarCircle,
+                          styles.avatarBadgeExtra,
+                          { marginLeft: -8 },
+                          isSelected
+                            ? {
+                                backgroundColor: "#DBEAFE",
+                                borderColor: isDark ? "#2563EB" : "#FFFFFF",
+                              }
+                            : isDark
+                              ? {
+                                  backgroundColor: "rgba(255, 255, 255, 0.12)",
+                                  borderColor: colors.card,
+                                }
+                              : { backgroundColor: "#E2E8F0" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.avatarBadgeText,
+                            isSelected
+                              ? { color: "#1D4ED8" }
+                              : isDark
+                                ? { color: colors.textSecondary }
+                                : { color: "#475569" },
+                          ]}
+                        >
+                          +{grp.extraCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Add Bills Button inside Card matching screen.png */}
+                  <TouchableOpacity
+                    style={[
+                      styles.cardActionBtn,
+                      isSelected
+                        ? styles.cardActionBtnSelected
+                        : [
+                            styles.cardActionBtnUnselected,
+                            isDark && {
+                              backgroundColor: "rgba(59, 130, 246, 0.15)",
+                            },
+                          ],
+                    ]}
+                    onPress={() => setSelectedGroupIndex(idx)}
+                    activeOpacity={0.8}
+                  >
                     <Text
                       style={[
-                        styles.inlineCatDesc,
-                        isDark && { color: colors.textSecondary },
+                        styles.cardActionBtnText,
+                        !isSelected && isDark && { color: colors.primary },
                       ]}
-                      numberOfLines={1}
                     >
-                      {cat.description}
+                      Add Bills
                     </Text>
-                  </View>
-                  {isSelected ? (
-                    <View style={styles.selectedCheckBadge}>
-                      <Feather name="check" size={13} color="#FFFFFF" />
-                    </View>
-                  ) : (
-                    <View
-                      style={[
-                        styles.unselectedRadioCircle,
-                        isDark && { borderColor: colors.border },
-                      ]}
-                    />
-                  )}
+                  </TouchableOpacity>
                 </TouchableOpacity>
               );
             })}
-          </View>
-        )}
+          </ScrollView>
 
-        {/* If user selects "Others", prompt them to specify */}
-        {selectedCategoryId === "Others" && (
-          <View
+          {/* Category Field - Beautiful Dropdown Mode (Not in Modal) */}
+          <View style={styles.categorySectionHeader}>
+            <Text style={[styles.label, isDark && { color: colors.text }]}>
+              Bill Category
+            </Text>
+            <View
+              style={[
+                styles.categoryCountPill,
+                isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.categoryCountPillText,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                {BILL_CATEGORIES.length} Categories
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
             style={[
-              styles.specifyCategoryCard,
+              styles.dropdownSelector,
               isDark && {
                 backgroundColor: colors.card,
                 borderColor: colors.border,
               },
+              isCategoryDropdownOpen &&
+                (isDark
+                  ? {
+                      borderColor: colors.primary,
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                    }
+                  : styles.dropdownSelectorActive),
             ]}
+            onPress={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
+            activeOpacity={0.8}
           >
-            <View style={styles.specifyCategoryHeader}>
+            <View style={styles.dropdownLeftWrap}>
               <View
                 style={[
-                  styles.specifyIconWrap,
-                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                  styles.dropdownIconBadge,
+                  { backgroundColor: activeCategoryMeta.bgColor },
                 ]}
               >
-                <Feather
-                  name="edit-3"
-                  size={15}
-                  color={isDark ? colors.text : "#0F172A"}
+                <Ionicons
+                  name={activeCategoryMeta.ionicon as any}
+                  size={18}
+                  color={activeCategoryMeta.color}
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.specifyCategoryTitle,
-                    isDark && { color: colors.text },
-                  ]}
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                 >
-                  Specify Category Name *
-                </Text>
+                  <Text
+                    style={[
+                      styles.dropdownTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    {selectedCategoryId === "Others" &&
+                    otherCategorySpecified.trim()
+                      ? `Others: ${otherCategorySpecified.trim()}`
+                      : activeCategoryMeta.name}
+                  </Text>
+                  {selectedCategoryId === "Water" && (
+                    <View
+                      style={[
+                        styles.waterMiniBadge,
+                        isDark && { backgroundColor: "rgba(2, 132, 199, 0.2)" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.waterMiniBadgeText,
+                          isDark && { color: "#38BDF8" },
+                        ]}
+                      >
+                        ₱5/day
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text
                   style={[
-                    styles.specifyCategorySub,
+                    styles.dropdownSubtitle,
                     isDark && { color: colors.textSecondary },
                   ]}
+                  numberOfLines={1}
                 >
-                  Please specify what this bill is for (e.g. Parking Fee, Pest
-                  Control, Aircon Cleaning)
+                  {selectedCategoryId === "Others" &&
+                  otherCategorySpecified.trim()
+                    ? `Custom category specified: "${otherCategorySpecified.trim()}"`
+                    : activeCategoryMeta.description}
                 </Text>
               </View>
             </View>
-            <TextInput
+            <View
               style={[
-                styles.specifyCategoryInput,
+                styles.chevronBadge,
+                isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                isCategoryDropdownOpen &&
+                  (isDark
+                    ? { backgroundColor: "rgba(59, 130, 246, 0.2)" }
+                    : styles.chevronBadgeActive),
+              ]}
+            >
+              <Feather
+                name={isCategoryDropdownOpen ? "chevron-up" : "chevron-down"}
+                size={18}
+                color={
+                  isCategoryDropdownOpen
+                    ? isDark
+                      ? colors.primary
+                      : "#2563EB"
+                    : isDark
+                      ? colors.textSecondary
+                      : "#64748B"
+                }
+              />
+            </View>
+          </TouchableOpacity>
+
+          {/* Inline Category Dropdown List (Expanded) */}
+          {isCategoryDropdownOpen && (
+            <View
+              style={[
+                styles.inlineDropdownList,
                 isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderColor: "rgba(59, 130, 246, 0.4)",
-                  color: colors.text,
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
                 },
               ]}
-              placeholder="e.g., Parking Fee, Building Maintenance, Gym..."
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={otherCategorySpecified}
-              onChangeText={setOtherCategorySpecified}
-              maxLength={40}
-              autoCapitalize="words"
-            />
-            <View style={styles.specifyCategoryFooter}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  flex: 1,
-                }}
-              >
-                <Feather name="tag" size={12} color="#0284C7" />
-                <Text
-                  style={[
-                    styles.specifyCategoryTip,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  This custom category name will sync to all roommates' bill
-                  lists.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.charCountText,
-                  isDark && { color: colors.textMuted },
-                ]}
-              >
-                {otherCategorySpecified.length}/40
-              </Text>
+            >
+              {BILL_CATEGORIES.map((cat) => {
+                const isSelected = selectedCategoryId === cat.id;
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.inlineDropdownItem,
+                      isSelected &&
+                        (isDark
+                          ? {
+                              backgroundColor: "rgba(59, 130, 246, 0.15)",
+                              borderWidth: 1,
+                              borderColor: "rgba(59, 130, 246, 0.35)",
+                            }
+                          : styles.inlineDropdownItemActive),
+                    ]}
+                    onPress={() => {
+                      setSelectedCategoryId(cat.id);
+                      setIsCategoryDropdownOpen(false);
+                      if (cat.id === "Electricity") {
+                        updateAmountFromElectricity(
+                          elecPrevReading,
+                          elecCurrReading,
+                          elecRatePerKwh,
+                        );
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.inlineCatIconWrap,
+                        { backgroundColor: cat.bgColor },
+                      ]}
+                    >
+                      <Ionicons
+                        name={cat.ionicon as any}
+                        size={16}
+                        color={cat.color}
+                      />
+                    </View>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.inlineCatName,
+                            isDark && { color: colors.text },
+                            isSelected &&
+                              (isDark
+                                ? { color: colors.primary }
+                                : styles.inlineCatNameActive),
+                          ]}
+                        >
+                          {cat.name}
+                        </Text>
+                        {cat.id === "Water" && (
+                          <View
+                            style={[
+                              styles.waterPillTag,
+                              isDark && {
+                                backgroundColor: "rgba(2, 132, 199, 0.2)",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.waterPillTagText,
+                                isDark && { color: "#38BDF8" },
+                              ]}
+                            >
+                              Attendance Mode
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.inlineCatDesc,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {cat.description}
+                      </Text>
+                    </View>
+                    {isSelected ? (
+                      <View style={styles.selectedCheckBadge}>
+                        <Feather name="check" size={13} color="#FFFFFF" />
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.unselectedRadioCircle,
+                          isDark && { borderColor: colors.border },
+                        ]}
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Water Mode Indicator if Category is Water */}
-        {selectedCategoryId === "Water" && (
-          <View
-            style={[
-              styles.waterInfoNotice,
-              isDark && {
-                backgroundColor: "rgba(2, 132, 199, 0.12)",
-                borderColor: "rgba(2, 132, 199, 0.25)",
-              },
-            ]}
-          >
+          {/* If user selects "Others", prompt them to specify */}
+          {selectedCategoryId === "Others" && (
             <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 4,
-              }}
+              style={[
+                styles.specifyCategoryCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
             >
-              <Feather name="droplet" size={15} color="#0284C7" />
-              <Text
-                style={[styles.waterInfoTitle, isDark && { color: "#38BDF8" }]}
-              >
-                Water Billing Mode: ₱5 / person / day
-              </Text>
-            </View>
-            <Text
-              style={[styles.waterInfoText, isDark && { color: "#BAE6FD" }]}
-            >
-              Non-payor members are exempted. Water consumption incurred by
-              non-payor members is split fairly and reallocated across paying
-              roommates with an explanatory breakdown note.
-            </Text>
-          </View>
-        )}
-
-        {/* Electricity Meter Calculator if Category is Electricity */}
-        {selectedCategoryId === "Electricity" && (
-          <View
-            style={[
-              styles.specifyCategoryCard,
-              {
-                borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FDE68A",
-                backgroundColor: isDark ? colors.card : "#FFFBEB",
-              },
-            ]}
-          >
-            <View style={styles.specifyCategoryHeader}>
-              <View
-                style={[
-                  styles.specifyIconWrap,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(245, 158, 11, 0.16)"
-                      : "#FEF3C7",
-                  },
-                ]}
-              >
-                <Feather
-                  name="zap"
-                  size={15}
-                  color={isDark ? "#FBBF24" : "#D97706"}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text
+              <View style={styles.specifyCategoryHeader}>
+                <View
                   style={[
-                    styles.specifyCategoryTitle,
-                    isDark && { color: colors.text },
+                    styles.specifyIconWrap,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
                   ]}
                 >
-                  Electricity Meter Calculator (kWh)
-                </Text>
-                <Text
-                  style={[
-                    styles.specifyCategorySub,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  (Current Reading - Previous Reading) × Rate per kWh = Total
-                  Electricity Bill
-                </Text>
+                  <Feather
+                    name="edit-3"
+                    size={15}
+                    color={isDark ? colors.text : "#0F172A"}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.specifyCategoryTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Specify Category Name *
+                  </Text>
+                  <Text
+                    style={[
+                      styles.specifyCategorySub,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Please specify what this bill is for (e.g. Parking Fee, Pest
+                    Control, Aircon Cleaning)
+                  </Text>
+                </View>
               </View>
-            </View>
-
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "700",
-                    color: isDark ? colors.textSecondary : "#475569",
-                    marginBottom: 4,
-                  }}
-                >
-                  Previous Reading (kWh)
-                </Text>
-                <TextInput
-                  style={[
-                    styles.specifyCategoryInput,
-                    { marginTop: 0 },
-                    isDark && {
-                      backgroundColor: colors.surfaceInset,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                  ]}
-                  keyboardType="decimal-pad"
-                  placeholder="0"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  value={elecPrevReading}
-                  onChangeText={(val) => {
-                    setElecPrevReading(val);
-                    updateAmountFromElectricity(
-                      val,
-                      elecCurrReading,
-                      elecRatePerKwh,
-                    );
-                  }}
-                />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "700",
-                    color: isDark ? colors.textSecondary : "#475569",
-                    marginBottom: 4,
-                  }}
-                >
-                  Current Reading (kWh)
-                </Text>
-                <TextInput
-                  style={[
-                    styles.specifyCategoryInput,
-                    { marginTop: 0 },
-                    isDark && {
-                      backgroundColor: colors.surfaceInset,
-                      borderColor: colors.border,
-                      color: colors.text,
-                    },
-                    isElecReadingInvalid && {
-                      borderColor: "#EF4444",
-                    },
-                  ]}
-                  keyboardType="decimal-pad"
-                  placeholder="0"
-                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                  value={elecCurrReading}
-                  onChangeText={(val) => {
-                    setElecCurrReading(val);
-                    updateAmountFromElectricity(
-                      elecPrevReading,
-                      val,
-                      elecRatePerKwh,
-                    );
-                  }}
-                />
-              </View>
-            </View>
-
-            <View style={{ marginTop: 10 }}>
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "700",
-                  color: isDark ? colors.textSecondary : "#475569",
-                  marginBottom: 4,
-                }}
-              >
-                Configurable Amount per Kilowatt-Hour (₱ / kWh)
-              </Text>
               <TextInput
                 style={[
                   styles.specifyCategoryInput,
-                  { marginTop: 0 },
                   isDark && {
                     backgroundColor: colors.surfaceInset,
-                    borderColor: colors.border,
+                    borderColor: "rgba(59, 130, 246, 0.4)",
                     color: colors.text,
                   },
                 ]}
-                keyboardType="decimal-pad"
-                placeholder="12.00"
+                placeholder="e.g., Parking Fee, Building Maintenance, Gym..."
                 placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                value={elecRatePerKwh}
-                onChangeText={(val) => {
-                  setElecRatePerKwh(val);
-                  updateAmountFromElectricity(
-                    elecPrevReading,
-                    elecCurrReading,
-                    val,
-                  );
-                }}
+                value={otherCategorySpecified}
+                onChangeText={setOtherCategorySpecified}
+                maxLength={40}
+                autoCapitalize="words"
               />
+              <View style={styles.specifyCategoryFooter}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    flex: 1,
+                  }}
+                >
+                  <Feather name="tag" size={12} color="#0284C7" />
+                  <Text
+                    style={[
+                      styles.specifyCategoryTip,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    This custom category name will sync to all roommates' bill
+                    lists.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.charCountText,
+                    isDark && { color: colors.textMuted },
+                  ]}
+                >
+                  {otherCategorySpecified.length}/40
+                </Text>
+              </View>
             </View>
+          )}
 
-            {isElecReadingInvalid ? (
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "700",
-                  color: "#EF4444",
-                  marginTop: 8,
-                }}
-              >
-                Current reading must be greater than or equal to previous
-                reading ({parsedElecPrev} kWh).
-              </Text>
-            ) : (
+          {/* Water Mode Indicator if Category is Water */}
+          {selectedCategoryId === "Water" && (
+            <View
+              style={[
+                styles.waterInfoNotice,
+                isDark && {
+                  backgroundColor: "rgba(2, 132, 199, 0.12)",
+                  borderColor: "rgba(2, 132, 199, 0.25)",
+                },
+              ]}
+            >
               <View
                 style={{
-                  marginTop: 10,
-                  padding: 10,
-                  borderRadius: 10,
-                  backgroundColor: isDark
-                    ? "rgba(245, 158, 11, 0.14)"
-                    : "#FEF3C7",
                   flexDirection: "row",
                   alignItems: "center",
-                  justifyContent: "space-between",
+                  gap: 6,
+                  marginBottom: 4,
                 }}
               >
+                <Feather name="droplet" size={15} color="#0284C7" />
+                <Text
+                  style={[
+                    styles.waterInfoTitle,
+                    isDark && { color: "#38BDF8" },
+                  ]}
+                >
+                  Water Billing Mode: ₱5 / person / day
+                </Text>
+              </View>
+              <Text
+                style={[styles.waterInfoText, isDark && { color: "#BAE6FD" }]}
+              >
+                Non-payor members are exempted. Water consumption incurred by
+                non-payor members is split fairly and reallocated across paying
+                roommates with an explanatory breakdown note.
+              </Text>
+            </View>
+          )}
+
+          {/* Electricity Meter Calculator if Category is Electricity */}
+          {selectedCategoryId === "Electricity" && (
+            <View
+              style={[
+                styles.specifyCategoryCard,
+                {
+                  borderColor: isDark ? "rgba(245, 158, 11, 0.35)" : "#FDE68A",
+                  backgroundColor: isDark ? colors.card : "#FFFBEB",
+                },
+              ]}
+            >
+              <View style={styles.specifyCategoryHeader}>
+                <View
+                  style={[
+                    styles.specifyIconWrap,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(245, 158, 11, 0.16)"
+                        : "#FEF3C7",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="zap"
+                    size={15}
+                    color={isDark ? "#FBBF24" : "#D97706"}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.specifyCategoryTitle,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
+                    Electricity Meter Calculator (kWh)
+                  </Text>
+                  <Text
+                    style={[
+                      styles.specifyCategorySub,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    (Current Reading - Previous Reading) × Rate per kWh = Total
+                    Electricity Bill
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                 <View style={{ flex: 1 }}>
                   <Text
                     style={{
                       fontSize: 11,
                       fontWeight: "700",
-                      color: isDark ? "#FBBF24" : "#92400E",
+                      color: isDark ? colors.textSecondary : "#475569",
+                      marginBottom: 4,
                     }}
                   >
-                    ({parsedElecCurr} - {parsedElecPrev} kWh) × ₱
-                    {parsedElecRate.toFixed(2)}/kWh
+                    Previous Reading (kWh)
                   </Text>
+                  <TextInput
+                    style={[
+                      styles.specifyCategoryInput,
+                      { marginTop: 0 },
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                        color: colors.text,
+                      },
+                    ]}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    value={elecPrevReading}
+                    onChangeText={(val) => {
+                      setElecPrevReading(val);
+                      updateAmountFromElectricity(
+                        val,
+                        elecCurrReading,
+                        elecRatePerKwh,
+                      );
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
                   <Text
                     style={{
                       fontSize: 11,
-                      color: isDark ? "#FDE68A" : "#B45309",
-                      marginTop: 2,
+                      fontWeight: "700",
+                      color: isDark ? colors.textSecondary : "#475569",
+                      marginBottom: 4,
                     }}
                   >
-                    Consumption: {consumedKwh} kWh
+                    Current Reading (kWh)
                   </Text>
+                  <TextInput
+                    style={[
+                      styles.specifyCategoryInput,
+                      { marginTop: 0 },
+                      isDark && {
+                        backgroundColor: colors.surfaceInset,
+                        borderColor: colors.border,
+                        color: colors.text,
+                      },
+                      isElecReadingInvalid && {
+                        borderColor: "#EF4444",
+                      },
+                    ]}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    value={elecCurrReading}
+                    onChangeText={(val) => {
+                      setElecCurrReading(val);
+                      updateAmountFromElectricity(
+                        elecPrevReading,
+                        val,
+                        elecRatePerKwh,
+                      );
+                    }}
+                  />
                 </View>
+              </View>
+
+              <View style={{ marginTop: 10 }}>
                 <Text
                   style={{
-                    fontSize: 15,
-                    fontWeight: "800",
-                    color: isDark ? "#FBBF24" : "#B45309",
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: isDark ? colors.textSecondary : "#475569",
+                    marginBottom: 4,
                   }}
                 >
-                  ₱{computedElecPesos.toFixed(2)}
+                  Configurable Amount per Kilowatt-Hour (₱ / kWh)
                 </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Amount Field matching screen.png */}
-        <Text style={[styles.label, isDark && { color: colors.text }]}>
-          Amount
-        </Text>
-        <View
-          style={[
-            styles.inputContainer,
-            isDark && {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <TextInput
-            style={[styles.input, isDark && { color: colors.text }]}
-            placeholder="₱0.00"
-            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-            keyboardType="decimal-pad"
-            value={amount}
-            onChangeText={(val) => {
-              // Format with leading ₱ if typed cleanly
-              if (!val) {
-                setAmount("");
-              } else if (val.startsWith("₱")) {
-                setAmount(val);
-              } else {
-                setAmount(`₱${val}`);
-              }
-            }}
-          />
-        </View>
-
-        {/* Document (Optional) matching screen.png */}
-        <Text style={[styles.label, isDark && { color: colors.text }]}>
-          Document{" "}
-          <Text
-            style={[
-              styles.optionalLabel,
-              isDark && { color: colors.textMuted },
-            ]}
-          >
-            (Optional)
-          </Text>
-        </Text>
-        <TouchableOpacity
-          style={[
-            styles.uploadDashedBox,
-            isDark && {
-              backgroundColor: "rgba(255, 255, 255, 0.02)",
-              borderColor: "rgba(59, 130, 246, 0.3)",
-            },
-          ]}
-          onPress={handlePickImage}
-          activeOpacity={0.8}
-        >
-          {imageUri ? (
-            <View style={styles.previewContainer}>
-              <Image source={{ uri: imageUri }} style={styles.previewImage} />
-              <View style={styles.changeOverlay}>
-                <Feather
-                  name="refresh-cw"
-                  size={14}
-                  color={isDark ? colors.primary : "#2563EB"}
-                />
-                <Text
+                <TextInput
                   style={[
-                    styles.changeText,
-                    isDark && { color: colors.primary },
+                    styles.specifyCategoryInput,
+                    { marginTop: 0 },
+                    isDark && {
+                      backgroundColor: colors.surfaceInset,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
                   ]}
-                >
-                  Change Document
-                </Text>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.uploadPlaceholder}>
-              <View
-                style={[
-                  styles.uploadIconCircle,
-                  isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
-                ]}
-              >
-                <Feather
-                  name="image"
-                  size={20}
-                  color={isDark ? colors.text : "#0F172A"}
+                  keyboardType="decimal-pad"
+                  placeholder="12.00"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  value={elecRatePerKwh}
+                  onChangeText={(val) => {
+                    setElecRatePerKwh(val);
+                    updateAmountFromElectricity(
+                      elecPrevReading,
+                      elecCurrReading,
+                      val,
+                    );
+                  }}
                 />
               </View>
-              <Text
-                style={[styles.uploadText, isDark && { color: colors.primary }]}
-              >
-                Upload Image or Video
-              </Text>
+
+              {isElecReadingInvalid ? (
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: "#EF4444",
+                    marginTop: 8,
+                  }}
+                >
+                  Current reading must be greater than or equal to previous
+                  reading ({parsedElecPrev} kWh).
+                </Text>
+              ) : (
+                <View
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 10,
+                    backgroundColor: isDark
+                      ? "rgba(245, 158, 11, 0.14)"
+                      : "#FEF3C7",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "700",
+                        color: isDark ? "#FBBF24" : "#92400E",
+                      }}
+                    >
+                      ({parsedElecCurr} - {parsedElecPrev} kWh) × ₱
+                      {parsedElecRate.toFixed(2)}/kWh
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: isDark ? "#FDE68A" : "#B45309",
+                        marginTop: 2,
+                      }}
+                    >
+                      Consumption: {consumedKwh} kWh
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: "800",
+                      color: isDark ? "#FBBF24" : "#B45309",
+                    }}
+                  >
+                    ₱{computedElecPesos.toFixed(2)}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
-        </TouchableOpacity>
 
-        {/* Description (Optional) matching screen.png */}
-        <Text style={[styles.label, isDark && { color: colors.text }]}>
-          Description{" "}
-          <Text
-            style={[
-              styles.optionalLabel,
-              isDark && { color: colors.textMuted },
-            ]}
-          >
-            (Optional)
+          {/* Amount Field matching screen.png */}
+          <Text style={[styles.label, isDark && { color: colors.text }]}>
+            Amount
           </Text>
-        </Text>
-        <View
-          style={[
-            styles.inputContainer,
-            isDark && {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <TextInput
-            style={[styles.input, isDark && { color: colors.text }]}
-            placeholder="Add a note or context"
-            placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-            value={description}
-            onChangeText={setDescription}
-          />
-        </View>
-
-        {/* Split Method matching screen.png */}
-        <Text style={[styles.label, isDark && { color: colors.text }]}>
-          Split Method
-        </Text>
-        <View style={styles.splitRow}>
-          <TouchableOpacity
-            style={[
-              styles.splitOptionBtn,
-              splitMethod === "Equal"
-                ? [
-                    styles.splitOptionActive,
-                    isDark && {
-                      backgroundColor: "rgba(59, 130, 246, 0.18)",
-                      borderColor: colors.primary,
-                    },
-                  ]
-                : [
-                    styles.splitOptionInactive,
-                    isDark && {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                    },
-                  ],
-            ]}
-            onPress={() => setSplitMethod("Equal")}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.splitOptionText,
-                splitMethod === "Equal"
-                  ? [
-                      styles.splitTextActive,
-                      isDark && { color: colors.primary },
-                    ]
-                  : [
-                      styles.splitTextInactive,
-                      isDark && { color: colors.textSecondary },
-                    ],
-              ]}
-            >
-              Equal
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.splitOptionBtn,
-              splitMethod === "% Custom"
-                ? [
-                    styles.splitOptionActive,
-                    isDark && {
-                      backgroundColor: "rgba(59, 130, 246, 0.18)",
-                      borderColor: colors.primary,
-                    },
-                  ]
-                : [
-                    styles.splitOptionInactive,
-                    isDark && {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                    },
-                  ],
-            ]}
-            onPress={() => setSplitMethod("% Custom")}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.splitOptionText,
-                splitMethod === "% Custom"
-                  ? [
-                      styles.splitTextActive,
-                      isDark && { color: colors.primary },
-                    ]
-                  : [
-                      styles.splitTextInactive,
-                      isDark && { color: colors.textSecondary },
-                    ],
-              ]}
-            >
-              % Custom
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Fair Split on Payors Only Info Banner */}
-        <View
-          style={[
-            styles.fairSplitBadge,
-            isDark && {
-              backgroundColor: "rgba(16, 185, 129, 0.12)",
-              borderColor: "rgba(16, 185, 129, 0.25)",
-            },
-          ]}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather
-              name="shield"
-              size={14}
-              color={isDark ? "#34D399" : "#2563EB"}
-            />
-            <Text
-              style={[
-                styles.fairSplitBadgeTitle,
-                isDark && { color: "#34D399" },
-              ]}
-            >
-              Fair Split on Payors Only
-            </Text>
-          </View>
-          <Text
-            style={[styles.fairSplitBadgeDesc, isDark && { color: "#A7F3D0" }]}
-          >
-            {activePayors.length} active payor(s) share this bill equally.{" "}
-            {activeNonPayors.length > 0
-              ? `${activeNonPayors.length} non-payor member(s) are exempted.`
-              : "All active roommates are payors."}
-          </Text>
-        </View>
-
-        {/* Member Allocation Breakdown for Equal Split */}
-        {splitMethod === "Equal" && (
           <View
             style={[
-              styles.equalSplitCard,
+              styles.inputContainer,
               isDark && {
                 backgroundColor: colors.card,
                 borderColor: colors.border,
               },
             ]}
           >
+            <TextInput
+              style={[styles.input, isDark && { color: colors.text }]}
+              placeholder="₱0.00"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+              keyboardType="decimal-pad"
+              value={amount}
+              onChangeText={(val) => {
+                // Format with leading ₱ if typed cleanly
+                if (!val) {
+                  setAmount("");
+                } else if (val.startsWith("₱")) {
+                  setAmount(val);
+                } else {
+                  setAmount(`₱${val}`);
+                }
+              }}
+            />
+          </View>
+
+          {/* Document (Optional) matching screen.png */}
+          <Text style={[styles.label, isDark && { color: colors.text }]}>
+            Document{" "}
             <Text
               style={[
-                styles.equalSplitHeader,
-                isDark && { color: colors.text },
+                styles.optionalLabel,
+                isDark && { color: colors.textMuted },
               ]}
             >
-              Calculated Member Share
+              (Optional)
             </Text>
-            {activeMembers.map((m) => {
-              const uid = m.userId || m.memberId || m.id || "";
-              const isPayor = isPayorMember(m);
-              const isWater = isWaterCategory;
-              const numericAmount =
-                parseFloat(amount.replace(/[^0-9.]/g, "")) || 0;
-              const amountCents = Math.round(numericAmount * 100);
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.uploadDashedBox,
+              isDark && {
+                backgroundColor: "rgba(255, 255, 255, 0.02)",
+                borderColor: "rgba(59, 130, 246, 0.3)",
+              },
+            ]}
+            onPress={handlePickImage}
+            activeOpacity={0.8}
+          >
+            {imageUri ? (
+              <View style={styles.previewContainer}>
+                <Image source={{ uri: imageUri }} style={styles.previewImage} />
+                <View style={styles.changeOverlay}>
+                  <Feather
+                    name="refresh-cw"
+                    size={14}
+                    color={isDark ? colors.primary : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.changeText,
+                      isDark && { color: colors.primary },
+                    ]}
+                  >
+                    Change Document
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.uploadPlaceholder}>
+                <View
+                  style={[
+                    styles.uploadIconCircle,
+                    isDark && { backgroundColor: "rgba(255, 255, 255, 0.08)" },
+                  ]}
+                >
+                  <Feather
+                    name="image"
+                    size={20}
+                    color={isDark ? colors.text : "#0F172A"}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.uploadText,
+                    isDark && { color: colors.primary },
+                  ]}
+                >
+                  Upload Image or Video
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
 
-              let memberShareCents = 0;
-              let note = "";
-              if (!isPayor) {
-                memberShareCents = 0;
-                if (isWater) {
+          {/* Description (Optional) matching screen.png */}
+          <Text style={[styles.label, isDark && { color: colors.text }]}>
+            Description{" "}
+            <Text
+              style={[
+                styles.optionalLabel,
+                isDark && { color: colors.textMuted },
+              ]}
+            >
+              (Optional)
+            </Text>
+          </Text>
+          <View
+            style={[
+              styles.inputContainer,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <TextInput
+              style={[styles.input, isDark && { color: colors.text }]}
+              placeholder="Add a note or context"
+              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+              value={description}
+              onChangeText={setDescription}
+            />
+          </View>
+
+          {/* Split Method matching screen.png */}
+          <Text style={[styles.label, isDark && { color: colors.text }]}>
+            Split Method
+          </Text>
+          <View style={styles.splitRow}>
+            <TouchableOpacity
+              style={[
+                styles.splitOptionBtn,
+                splitMethod === "Equal"
+                  ? [
+                      styles.splitOptionActive,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.18)",
+                        borderColor: colors.primary,
+                      },
+                    ]
+                  : [
+                      styles.splitOptionInactive,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ],
+              ]}
+              onPress={() => setSplitMethod("Equal")}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.splitOptionText,
+                  splitMethod === "Equal"
+                    ? [
+                        styles.splitTextActive,
+                        isDark && { color: colors.primary },
+                      ]
+                    : [
+                        styles.splitTextInactive,
+                        isDark && { color: colors.textSecondary },
+                      ],
+                ]}
+              >
+                Equal
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.splitOptionBtn,
+                splitMethod === "% Custom"
+                  ? [
+                      styles.splitOptionActive,
+                      isDark && {
+                        backgroundColor: "rgba(59, 130, 246, 0.18)",
+                        borderColor: colors.primary,
+                      },
+                    ]
+                  : [
+                      styles.splitOptionInactive,
+                      isDark && {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ],
+              ]}
+              onPress={() => setSplitMethod("% Custom")}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.splitOptionText,
+                  splitMethod === "% Custom"
+                    ? [
+                        styles.splitTextActive,
+                        isDark && { color: colors.primary },
+                      ]
+                    : [
+                        styles.splitTextInactive,
+                        isDark && { color: colors.textSecondary },
+                      ],
+                ]}
+              >
+                % Custom
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Fair Split on Payors Only Info Banner */}
+          <View
+            style={[
+              styles.fairSplitBadge,
+              isDark && {
+                backgroundColor: "rgba(16, 185, 129, 0.12)",
+                borderColor: "rgba(16, 185, 129, 0.25)",
+              },
+            ]}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            >
+              <Feather
+                name="shield"
+                size={14}
+                color={isDark ? "#34D399" : "#2563EB"}
+              />
+              <Text
+                style={[
+                  styles.fairSplitBadgeTitle,
+                  isDark && { color: "#34D399" },
+                ]}
+              >
+                Fair Split on Payors Only
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.fairSplitBadgeDesc,
+                isDark && { color: "#A7F3D0" },
+              ]}
+            >
+              {activePayors.length} active payor(s) share this bill equally.{" "}
+              {activeNonPayors.length > 0
+                ? `${activeNonPayors.length} non-payor member(s) are exempted.`
+                : "All active roommates are payors."}
+            </Text>
+          </View>
+
+          {/* Member Allocation Breakdown for Equal Split */}
+          {splitMethod === "Equal" && (
+            <View
+              style={[
+                styles.equalSplitCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.equalSplitHeader,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Calculated Member Share
+              </Text>
+              {activeMembers.map((m) => {
+                const uid = m.userId || m.memberId || m.id || "";
+                const isPayor = isPayorMember(m);
+                const isWater = isWaterCategory;
+                const numericAmount =
+                  parseFloat(amount.replace(/[^0-9.]/g, "")) || 0;
+                const amountCents = Math.round(numericAmount * 100);
+
+                let memberShareCents = 0;
+                let note = "";
+                if (!isPayor) {
+                  memberShareCents = 0;
+                  if (isWater) {
+                    const rate = Number(
+                      waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                    );
+                    const { membersBreakdown } = computeCycleWaterBreakdown(
+                      activeMembers,
+                      cycleAttendance,
+                      attendanceSubmissions,
+                      rate,
+                    );
+                    const npItem = membersBreakdown.find((b) =>
+                      matchesMemberUid(m, b.userId),
+                    );
+                    note =
+                      npItem?.nonPayorAllocationSummary ||
+                      "Exempted (Non-payor)";
+                  } else {
+                    note = "Exempted (Non-payor)";
+                  }
+                } else if (isWater) {
                   const rate = Number(
                     waterConfig?.rateCentavosPerPersonPerDay ?? 500,
                   );
@@ -1754,53 +1791,140 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                     attendanceSubmissions,
                     rate,
                   );
-                  const npItem = membersBreakdown.find((b) =>
+                  const pItem = membersBreakdown.find((b) =>
                     matchesMemberUid(m, b.userId),
                   );
+                  memberShareCents = pItem?.shareCentavos || 0;
+                  const days = pItem?.daysPresent || 0;
+                  const ownCost = pItem?.ownWaterCentavos || 0;
+                  const extra = pItem?.nonPayorWaterCentavos || 0;
                   note =
-                    npItem?.nonPayorAllocationSummary || "Exempted (Non-payor)";
+                    extra > 0
+                      ? `${days}d own (₱${(ownCost / 100).toFixed(2)}) + ₱${(extra / 100).toFixed(2)} non-payor share`
+                      : `${days}d own @ ₱${rate / 100}/day`;
                 } else {
-                  note = "Exempted (Non-payor)";
+                  memberShareCents = computeFairSplitShareCentavos(
+                    amountCents,
+                    activePayors,
+                    uid,
+                  );
+                  note = "Equal payor share";
                 }
-              } else if (isWater) {
-                const rate = Number(
-                  waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-                );
-                const { membersBreakdown } = computeCycleWaterBreakdown(
-                  activeMembers,
-                  cycleAttendance,
-                  attendanceSubmissions,
-                  rate,
-                );
-                const pItem = membersBreakdown.find((b) =>
-                  matchesMemberUid(m, b.userId),
-                );
-                memberShareCents = pItem?.shareCentavos || 0;
-                const days = pItem?.daysPresent || 0;
-                const ownCost = pItem?.ownWaterCentavos || 0;
-                const extra = pItem?.nonPayorWaterCentavos || 0;
-                note =
-                  extra > 0
-                    ? `${days}d own (₱${(ownCost / 100).toFixed(2)}) + ₱${(extra / 100).toFixed(2)} non-payor share`
-                    : `${days}d own @ ₱${rate / 100}/day`;
-              } else {
-                memberShareCents = computeFairSplitShareCentavos(
-                  amountCents,
-                  activePayors,
-                  uid,
-                );
-                note = "Equal payor share";
-              }
 
-              return (
-                <View
-                  key={m.userId || m.memberId}
-                  style={[
-                    styles.memberShareRow,
-                    isDark && { borderBottomColor: colors.borderSubtle },
-                  ]}
-                >
-                  <View style={{ flex: 1, paddingRight: 8 }}>
+                return (
+                  <View
+                    key={m.userId || m.memberId}
+                    style={[
+                      styles.memberShareRow,
+                      isDark && { borderBottomColor: colors.borderSubtle },
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.memberShareName,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {m.displayName || "Roommate"}
+                        </Text>
+                        <View
+                          style={
+                            isPayor
+                              ? [
+                                  styles.badgePayor,
+                                  isDark && {
+                                    backgroundColor: "rgba(59, 130, 246, 0.2)",
+                                  },
+                                ]
+                              : [
+                                  styles.badgeNonPayor,
+                                  isDark && {
+                                    backgroundColor:
+                                      "rgba(255, 255, 255, 0.08)",
+                                  },
+                                ]
+                          }
+                        >
+                          <Text
+                            style={
+                              isPayor
+                                ? [
+                                    styles.badgeTextPayor,
+                                    isDark && { color: "#93C5FD" },
+                                  ]
+                                : [
+                                    styles.badgeTextNonPayor,
+                                    isDark && { color: colors.textSecondary },
+                                  ]
+                            }
+                          >
+                            {isPayor ? "Payor" : "Non-Payor"}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text
+                        style={[
+                          styles.memberShareNote,
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        {note}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.memberShareAmount,
+                        isDark && { color: colors.primary },
+                        !isPayor &&
+                          (isDark
+                            ? { color: colors.textMuted }
+                            : styles.memberShareAmountExempt),
+                      ]}
+                    >
+                      ₱{(memberShareCents / 100).toFixed(2)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Custom Split breakdown if % Custom is selected */}
+          {splitMethod === "% Custom" && (
+            <View
+              style={[
+                styles.customSplitsCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.customSplitsHeader,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Roommate Split Allocation (%)
+              </Text>
+              {activeMembers.map((m) => {
+                const uid = m.userId || m.memberId;
+                const currentVal =
+                  customSplits[uid] ??
+                  Math.round(100 / Math.max(1, activePayors.length));
+                const isPayor = isPayorMember(m);
+
+                return (
+                  <View key={uid} style={styles.customSplitRow}>
                     <View
                       style={{
                         flexDirection: "row",
@@ -1810,7 +1934,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                     >
                       <Text
                         style={[
-                          styles.memberShareName,
+                          styles.customSplitName,
                           isDark && { color: colors.text },
                         ]}
                       >
@@ -1846,188 +1970,89 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                                 ]
                           }
                         >
-                          {isPayor ? "Payor" : "Non-Payor"}
+                          {isPayor ? "Payor" : "Exempt"}
                         </Text>
                       </View>
                     </View>
-                    <Text
-                      style={[
-                        styles.memberShareNote,
-                        isDark && { color: colors.textSecondary },
-                      ]}
-                    >
-                      {note}
-                    </Text>
+                    {isPayor ? (
+                      <View
+                        style={[
+                          styles.customSplitInputWrap,
+                          isDark && {
+                            backgroundColor: colors.surfaceInset,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <TextInput
+                          style={[
+                            styles.customSplitInput,
+                            isDark && { color: colors.text },
+                          ]}
+                          keyboardType="number-pad"
+                          value={String(currentVal)}
+                          onChangeText={(txt) => {
+                            const num =
+                              parseInt(txt.replace(/[^0-9]/g, "")) || 0;
+                            setCustomSplits((prev) => ({
+                              ...prev,
+                              [uid]: num,
+                            }));
+                          }}
+                        />
+                        <Text
+                          style={[
+                            styles.customSplitPercent,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          %
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isDark ? colors.textMuted : "#64748B",
+                          fontWeight: "600",
+                        }}
+                      >
+                        ₱0.00 (Exempt)
+                      </Text>
+                    )}
                   </View>
-                  <Text
-                    style={[
-                      styles.memberShareAmount,
-                      isDark && { color: colors.primary },
-                      !isPayor &&
-                        (isDark
-                          ? { color: colors.textMuted }
-                          : styles.memberShareAmountExempt),
-                    ]}
-                  >
-                    ₱{(memberShareCents / 100).toFixed(2)}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
+                );
+              })}
+            </View>
+          )}
 
-        {/* Custom Split breakdown if % Custom is selected */}
-        {splitMethod === "% Custom" && (
-          <View
+          {/* Primary Bottom Action Button matching screen.png */}
+          <TouchableOpacity
             style={[
-              styles.customSplitsCard,
-              isDark && {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+              styles.updateBtn,
+              (!isHost || uploading) && {
+                opacity: 0.6,
+                backgroundColor: !isHost
+                  ? isDark
+                    ? "rgba(255, 255, 255, 0.15)"
+                    : "#94A3B8"
+                  : "#2563EB",
               },
             ]}
+            onPress={handleSave}
+            disabled={uploading || !isHost}
+            activeOpacity={0.85}
           >
-            <Text
-              style={[
-                styles.customSplitsHeader,
-                isDark && { color: colors.text },
-              ]}
-            >
-              Roommate Split Allocation (%)
+            <Text style={styles.updateBtnText}>
+              {!isHost
+                ? "Host Permission Required"
+                : uploading
+                  ? "Saving..."
+                  : "Add Bill"}
             </Text>
-            {activeMembers.map((m) => {
-              const uid = m.userId || m.memberId;
-              const currentVal =
-                customSplits[uid] ??
-                Math.round(100 / Math.max(1, activePayors.length));
-              const isPayor = isPayorMember(m);
-
-              return (
-                <View key={uid} style={styles.customSplitRow}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.customSplitName,
-                        isDark && { color: colors.text },
-                      ]}
-                    >
-                      {m.displayName || "Roommate"}
-                    </Text>
-                    <View
-                      style={
-                        isPayor
-                          ? [
-                              styles.badgePayor,
-                              isDark && {
-                                backgroundColor: "rgba(59, 130, 246, 0.2)",
-                              },
-                            ]
-                          : [
-                              styles.badgeNonPayor,
-                              isDark && {
-                                backgroundColor: "rgba(255, 255, 255, 0.08)",
-                              },
-                            ]
-                      }
-                    >
-                      <Text
-                        style={
-                          isPayor
-                            ? [
-                                styles.badgeTextPayor,
-                                isDark && { color: "#93C5FD" },
-                              ]
-                            : [
-                                styles.badgeTextNonPayor,
-                                isDark && { color: colors.textSecondary },
-                              ]
-                        }
-                      >
-                        {isPayor ? "Payor" : "Exempt"}
-                      </Text>
-                    </View>
-                  </View>
-                  {isPayor ? (
-                    <View
-                      style={[
-                        styles.customSplitInputWrap,
-                        isDark && {
-                          backgroundColor: colors.surfaceInset,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      <TextInput
-                        style={[
-                          styles.customSplitInput,
-                          isDark && { color: colors.text },
-                        ]}
-                        keyboardType="number-pad"
-                        value={String(currentVal)}
-                        onChangeText={(txt) => {
-                          const num = parseInt(txt.replace(/[^0-9]/g, "")) || 0;
-                          setCustomSplits((prev) => ({ ...prev, [uid]: num }));
-                        }}
-                      />
-                      <Text
-                        style={[
-                          styles.customSplitPercent,
-                          isDark && { color: colors.textSecondary },
-                        ]}
-                      >
-                        %
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: isDark ? colors.textMuted : "#64748B",
-                        fontWeight: "600",
-                      }}
-                    >
-                      ₱0.00 (Exempt)
-                    </Text>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Primary Bottom Action Button matching screen.png */}
-        <TouchableOpacity
-          style={[
-            styles.updateBtn,
-            (!isHost || uploading) && {
-              opacity: 0.6,
-              backgroundColor: !isHost
-                ? isDark
-                  ? "rgba(255, 255, 255, 0.15)"
-                  : "#94A3B8"
-                : "#2563EB",
-            },
-          ]}
-          onPress={handleSave}
-          disabled={uploading || !isHost}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.updateBtnText}>
-            {!isHost
-              ? "Host Permission Required"
-              : uploading
-                ? "Saving..."
-                : "Add Bill"}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 };
