@@ -349,6 +349,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   useEffect(() => {
     const firebaseUser = auth.currentUser;
     if (!firebaseUser?.uid) return;
+    registerForPushNotificationsAsync(firebaseUser.uid).catch((err) => {
+      console.warn("[App] Initial push token registration notice:", err);
+    });
     const unsub = mobileDataService.listenToUserProfile(
       firebaseUser.uid,
       (p) => {
@@ -598,6 +601,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         setRootFlow("saved_profile");
         return;
       }
+      registerForPushNotificationsAsync(firebaseUser.uid).catch(() => {});
       setRootFlow("main");
     } else {
       // Check if there is an explicitly saved profile on this device

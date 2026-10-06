@@ -3,7 +3,7 @@ import Constants, { ExecutionEnvironment } from "expo-constants";
 import { isRunningInExpoGo } from "expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { mobileDataService } from "./firebaseDataService";
-import { doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, updateDoc, setDoc, arrayUnion } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 export interface PushTokenRecord {
@@ -145,6 +145,10 @@ export async function registerForPushNotificationsAsync(
     }
 
     if (finalStatus !== "granted") {
+      console.warn(
+        "[PushNotification] Notification permission not granted. Status:",
+        finalStatus,
+      );
       return null;
     }
 
@@ -157,6 +161,7 @@ export async function registerForPushNotificationsAsync(
     token = tokenData?.data || null;
 
     if (token) {
+      console.log("[PushNotification] Acquired valid Expo push token:", token);
       const deviceId = await getOrCreateDeviceId();
       const record: PushTokenRecord = {
         userId,
@@ -172,24 +177,35 @@ export async function registerForPushNotificationsAsync(
 
       // 2. Also save directly on user's primary document for fast lookup
       try {
-        await updateDoc(doc(db, "users", userId), {
-          pushToken: token,
-          pushTokens: arrayUnion(token),
-          lastActiveDate: new Date().toISOString(),
-        });
+        await setDoc(
+          doc(db, "users", userId),
+          {
+            pushToken: token,
+            pushTokens: arrayUnion(token),
+            lastActiveDate: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+        console.log(
+          "[PushNotification] Successfully saved push token to Firestore user document for uid:",
+          userId,
+        );
       } catch (docErr) {
-        // Doc might not exist yet or merge will happen on profile write
+        console.warn(
+          "[PushNotification] User doc push token save notice:",
+          docErr,
+        );
       }
     }
   } catch (error: any) {
     const msg = String(error?.message || error);
     if (!msg.includes("removed from Expo Go")) {
-      console.warn(
-        "[PushNotification] Gracefully handled push notification setup:",
+      console.error(
+        "[PushNotification] Failed to obtain or register native push token:",
         error,
       );
     }
-    token = `ExponentPushToken[dev-fallback-${userId}]`;
+    token = null;
   }
 
   return token;

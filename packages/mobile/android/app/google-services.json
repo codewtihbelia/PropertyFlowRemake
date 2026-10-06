@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "506286947370",
+    "project_id": "splitzy-d429d",
+    "storage_bucket": "splitzy-d429d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:506286947370:android:3017bd21e17329f5ca1708",
+        "android_client_info": {
+          "package_name": "com.splitzy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -90,7 +90,12 @@ class PushDispatchService {
       }),
     );
 
-    return Array.from(tokenSet);
+    const tokens = Array.from(tokenSet);
+    console.log(
+      `[PushDispatch] Resolved ${tokens.length} token(s) for user(s) [${uniqueUids.join(", ")}]:`,
+      tokens,
+    );
+    return tokens;
   }
 
   /**
@@ -104,6 +109,10 @@ class PushDispatchService {
   ): Promise<boolean> {
     const validTokens = tokens.filter(isValidExpoPushToken);
     if (validTokens.length === 0) {
+      console.warn(
+        "[PushDispatch] No valid registered Expo push tokens found for recipient(s). Tokens provided:",
+        tokens,
+      );
       return false;
     }
 
@@ -120,6 +129,9 @@ class PushDispatchService {
     }));
 
     try {
+      console.log(
+        `[PushDispatch] Dispatching push notification "${payload.title}" to ${validTokens.length} token(s)...`,
+      );
       const response = await fetch(EXPO_PUSH_URL, {
         method: "POST",
         headers: {
@@ -131,17 +143,36 @@ class PushDispatchService {
       });
 
       if (!response.ok) {
-        console.warn(
-          "[PushDispatch] Expo push service responded with status:",
+        console.error(
+          "[PushDispatch] Expo push service responded with error status:",
           response.status,
         );
         return false;
       }
 
       const resData = await response.json();
+      console.log(
+        "[PushDispatch] Expo push service response receipt:",
+        JSON.stringify(resData),
+      );
+
+      if (Array.isArray(resData?.data)) {
+        resData.data.forEach((ticket: any, index: number) => {
+          if (ticket.status === "error") {
+            console.error(
+              `[PushDispatch] Expo ticket ERROR for token ${validTokens[index]}: ${ticket.message} (${ticket.details?.error})`,
+            );
+          } else if (ticket.status === "ok") {
+            console.log(
+              `[PushDispatch] Expo ticket OK for token ${validTokens[index]}, ticket ID: ${ticket.id}`,
+            );
+          }
+        });
+      }
+
       return !!resData;
     } catch (error) {
-      console.warn(
+      console.error(
         "[PushDispatch] Network error dispatching push notification:",
         error,
       );
