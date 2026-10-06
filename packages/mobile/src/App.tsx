@@ -190,9 +190,8 @@ function FloatingNavBar({
   const insets = useSafeAreaInsets();
   const { navAnim, isVisible } = useNavVisibility();
   const { isDark, colors } = useTheme();
-  // With phone navigation bar hidden on Android, position menu sleekly near bottom
-  const bottomOffset =
-    Platform.OS === "android" ? 14 : Math.max(insets.bottom + 4, 18);
+  // Position floating menu with sleek clearance above phone's system navigation buttons / home indicator
+  const bottomOffset = Math.max(insets.bottom, 0) + 14;
 
   const translateY = navAnim.interpolate({
     inputRange: [0, 1],

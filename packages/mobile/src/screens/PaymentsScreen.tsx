@@ -2111,7 +2111,10 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   return (
     <View
       key="payment-form-root"
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[
+        styles.container,
+        { backgroundColor: colors.background, paddingBottom: insets.bottom },
+      ]}
     >
       <StatusBar
         barStyle={colors.statusBar}
@@ -3081,7 +3084,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "800",
   },
-  scrollContent: { padding: 20, paddingBottom: 85 },
+  scrollContent: { padding: 20, paddingBottom: 96 },
   title: { fontSize: 22, fontWeight: "900" },
   subtitle: { fontSize: 12, marginTop: 2, marginBottom: 16 },
   dueCard: {

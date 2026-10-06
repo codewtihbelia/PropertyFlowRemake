@@ -2747,6 +2747,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       style={[
         styles.container,
         isDark && { backgroundColor: colors.background },
+        { paddingBottom: insets.bottom },
       ]}
     >
       <StatusBar

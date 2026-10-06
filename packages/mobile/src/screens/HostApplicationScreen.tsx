@@ -225,7 +225,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         styles.container,
         isDark && { backgroundColor: colors.background },
       ]}
-      edges={["top", "left", "right"]}
+      edges={["top", "bottom", "left", "right"]}
     >
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}

@@ -569,6 +569,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       style={[
         styles.container,
         isDark && { backgroundColor: colors.background },
+        { paddingBottom: insets.bottom },
       ]}
     >
       <StatusBar
@@ -1724,7 +1725,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#0F172A",
   },
-  scrollContent: { padding: 20, paddingBottom: 85 },
+  scrollContent: { padding: 20, paddingBottom: 96 },
   segmentContainer: {
     flexDirection: "row",
     backgroundColor: "#F1F5F9",

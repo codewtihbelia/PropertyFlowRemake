@@ -1037,6 +1037,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       style={[
         styles.container,
         isDark && { backgroundColor: colors.background },
+        { paddingBottom: insets.bottom },
       ]}
     >
       <StatusBar

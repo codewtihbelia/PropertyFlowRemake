@@ -14,6 +14,7 @@ import {
   StyleProp,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 
 export interface SmoothBottomSheetModalProps {
@@ -47,6 +48,7 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
   sheetStyle,
   dismissible = true,
 }) => {
+  const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
   const [isRendered, setIsRendered] = useState(visible);
   const animValue = useRef(new Animated.Value(0)).current;
@@ -151,6 +153,9 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
           <Animated.View
             style={[
               isCenter ? styles.centerCard : styles.bottomSheetCard,
+              !isCenter && {
+                paddingBottom: Math.max(insets.bottom, 16) + 12,
+              },
               {
                 maxHeight: maxHeight as any,
                 opacity: cardOpacity,

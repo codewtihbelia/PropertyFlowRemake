@@ -1428,7 +1428,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: colors.background, paddingBottom: insets.bottom },
+      ]}
+    >
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
         translucent
@@ -1557,7 +1562,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               styles.scrollContent,
               {
                 paddingTop: 10,
-                paddingBottom: Math.max(insets.bottom, 14) + 72,
+                paddingBottom: 96,
               },
             ]}
             showsVerticalScrollIndicator={false}

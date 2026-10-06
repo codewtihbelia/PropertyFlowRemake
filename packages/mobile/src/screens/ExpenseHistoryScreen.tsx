@@ -814,6 +814,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       style={[
         styles.container,
         isDark && { backgroundColor: colors.background },
+        { paddingBottom: insets.bottom },
       ]}
     >
       <StatusBar
@@ -1290,7 +1291,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 6,
-    paddingBottom: 40,
+    paddingBottom: 48,
   },
   summaryBanner: {
     backgroundColor: "#F0FDF4",

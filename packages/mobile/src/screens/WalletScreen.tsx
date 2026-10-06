@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import {
@@ -421,6 +422,7 @@ export function WalletScreen({
   onNavigateToBills,
   onNavigateToSettle,
 }: WalletScreenProps) {
+  const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
   const { onScroll, showNav } = useNavVisibility();
 
@@ -1288,7 +1290,10 @@ export function WalletScreen({
     <View
       style={[
         styles.screen,
-        { backgroundColor: isDark ? colors.background : "#F8FAFC" },
+        {
+          backgroundColor: isDark ? colors.background : "#F8FAFC",
+          paddingBottom: insets.bottom,
+        },
       ]}
     >
       {/* Top App Header */}
@@ -8409,7 +8414,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 96,
   },
   heroCard: {
     borderRadius: 24,
