@@ -1072,7 +1072,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           }}
           contentContainerStyle={[
             styles.successScrollContent,
-            { paddingBottom: Math.max(insets.bottom + 32, 48) },
+            { paddingBottom: Math.max(insets.bottom + 48, 80) },
           ]}
           showsVerticalScrollIndicator={false}
         >
@@ -2182,12 +2182,16 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
       >
         <ScrollView
           key="payment-form-scroll"
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(120, insets.bottom + 95) },
+          ]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           onScroll={onScroll}
           scrollEventThrottle={16}

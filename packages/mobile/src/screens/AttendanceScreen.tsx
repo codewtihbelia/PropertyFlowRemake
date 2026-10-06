@@ -14,7 +14,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import {
@@ -254,6 +257,7 @@ export const AttendanceScreen: React.FC<{
   pendingLeaveAction,
   onClearPendingLeave,
 }) => {
+  const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
   const currentUser = auth.currentUser;
   const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
@@ -1509,7 +1513,10 @@ export const AttendanceScreen: React.FC<{
         <UniversalSkeleton type="attendance" />
       ) : (
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(120, insets.bottom + 95) },
+          ]}
           showsVerticalScrollIndicator={false}
           onScroll={onScroll}
           scrollEventThrottle={16}
@@ -2795,7 +2802,7 @@ export const AttendanceScreen: React.FC<{
                         <View style={styles.submitBtnInner}>
                           <Text style={styles.submitButtonText}>
                             {isMyAttendanceSubmitted
-                              ? `Update (₱${waterFee.toFixed(2)})`
+                              ? `Save & Submit Attendance (₱${waterFee.toFixed(2)})`
                               : `Submit Attendance (₱${waterFee.toFixed(2)})`}
                           </Text>
                           <Feather

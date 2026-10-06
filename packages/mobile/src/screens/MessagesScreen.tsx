@@ -200,7 +200,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   );
   const bottomInset = Math.max(
     insets.bottom,
-    Platform.OS === "android" ? 14 : 10,
+    Platform.OS === "android" ? 24 : 16,
   );
 
   const currentUid = auth.currentUser?.uid || "";
@@ -1107,7 +1107,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         {/* Message Feed */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
           <ScrollView
@@ -1504,7 +1504,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             style={[
               styles.capsuleInputOuterContainer,
               {
-                paddingBottom: isKeyboardOpen ? 8 : Math.max(bottomInset, 10),
+                paddingBottom: isKeyboardOpen
+                  ? 8
+                  : Math.max(bottomInset, Platform.OS === "android" ? 20 : 12),
                 backgroundColor: isDark ? "#181A20" : "#FFFFFF",
                 borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "#F1F5F9",
               },
@@ -1596,7 +1598,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         >
           <ScrollView
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{
+              gap: 12,
+              paddingBottom: Math.max(40, insets.bottom + 24),
+            }}
           >
             <Text
               style={[
@@ -2286,7 +2292,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       {/* Seamless Facebook Messenger-Style Conversation List (Sorted Chronologically) */}
       <ScrollView
         style={styles.scrollList}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(120, insets.bottom + 95) },
+        ]}
         onScroll={onScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
@@ -2516,7 +2525,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ gap: 14, paddingBottom: 16 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            gap: 14,
+            paddingBottom: Math.max(40, insets.bottom + 24),
+          }}
         >
           {/* Note Preview Avatar Center */}
           <View style={styles.notePreviewCenterWrap}>
@@ -2979,7 +2992,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               <View
                 style={[
                   styles.noteViewerBottomContainer,
-                  { paddingBottom: bottomInset + 10 },
+                  {
+                    paddingBottom: Math.max(
+                      bottomInset + 10,
+                      insets.bottom + 16,
+                    ),
+                  },
                 ]}
               >
                 {/* Quick Reaction Pills Row matching reference screenshot */}
@@ -3119,7 +3137,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            gap: 12,
+            paddingBottom: Math.max(40, insets.bottom + 24),
+          }}
         >
           <Text
             style={[
@@ -3265,7 +3287,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ gap: 10, paddingBottom: 16 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            gap: 10,
+            paddingBottom: Math.max(40, insets.bottom + 24),
+          }}
         >
           {/* Option: Group Chat */}
           <TouchableOpacity

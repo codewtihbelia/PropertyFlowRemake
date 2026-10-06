@@ -594,7 +594,10 @@ export const PaymentMethodConfigurationScreen: React.FC<
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(90, insets.bottom + 40) },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -1137,10 +1140,13 @@ export const PaymentMethodConfigurationScreen: React.FC<
       >
         <ScrollView
           style={{ maxHeight: 520 }}
+          contentContainerStyle={{
+            paddingBottom: Math.max(40, insets.bottom + 24),
+          }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={{ paddingTop: 4, paddingBottom: 24 }}>
+          <View style={{ paddingTop: 4 }}>
             {/* Payment Type Selection */}
             <View style={styles.inputGroup}>
               <Text

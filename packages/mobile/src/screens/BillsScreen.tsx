@@ -641,7 +641,10 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
           }}
         >
           <ScrollView
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: Math.max(120, insets.bottom + 95) },
+            ]}
             showsVerticalScrollIndicator={false}
             onScroll={onScroll}
             scrollEventThrottle={16}

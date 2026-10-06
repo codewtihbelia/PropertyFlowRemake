@@ -1581,6 +1581,9 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
       >
         <ScrollView
           style={styles.modalMonthList}
+          contentContainerStyle={{
+            paddingBottom: Math.max(30, insets.bottom + 16),
+          }}
           showsVerticalScrollIndicator={false}
         >
           {periodOptions.map((opt) => {
@@ -1669,7 +1672,12 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         subtitle="Utility categories, attendance deductions & remainder verification"
         icon={<Feather name="bar-chart-2" size={18} color="#2563EB" />}
       >
-        <View style={styles.modalDetailsContent}>
+        <View
+          style={[
+            styles.modalDetailsContent,
+            { paddingBottom: Math.max(24, insets.bottom + 16) },
+          ]}
+        >
           {/* Summary Box */}
           <View
             style={[

@@ -8,7 +8,10 @@ import {
   Image,
   StatusBar,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
@@ -68,6 +71,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
   onBack,
 }) => {
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const currentUser = auth.currentUser;
   const [members, setMembers] = useState<any[]>([]);
   const [payments, setPayments] = useState<MobilePayment[]>([]);
@@ -308,7 +312,10 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(90, insets.bottom + 40) },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Main Expense Hero Card */}

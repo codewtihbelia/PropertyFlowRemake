@@ -1562,7 +1562,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               styles.scrollContent,
               {
                 paddingTop: 10,
-                paddingBottom: 96,
+                paddingBottom: Math.max(120, insets.bottom + 95),
               },
             ]}
             showsVerticalScrollIndicator={false}

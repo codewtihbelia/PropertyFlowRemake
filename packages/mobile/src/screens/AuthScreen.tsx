@@ -587,14 +587,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       )}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <ScrollView
           style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
           contentContainerStyle={[
             styles.scrollContent,
-            { backgroundColor: bottomBgColor, paddingBottom: 60 },
+            {
+              backgroundColor: bottomBgColor,
+              paddingBottom: Math.max(80, insets.bottom + 48),
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}

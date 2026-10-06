@@ -7,7 +7,10 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { formatPesos } from "@propertyflow/shared";
 import { useTheme } from "../context/ThemeContext";
@@ -32,6 +35,7 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
   onPayPress,
 }) => {
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const currentUser = auth.currentUser;
   const cachedProfile = mobileDataService.getCachedProfile(currentUser?.uid);
   const householdId = cachedProfile?.householdId || "";
@@ -225,7 +229,13 @@ export const SettleDuesScreen: React.FC<SettleDuesScreenProps> = ({
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(90, insets.bottom + 40) },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* KPI Cards */}
         <View style={styles.statsRow}>
           <View

@@ -174,7 +174,10 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
           style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
           contentContainerStyle={[
             styles.scrollContent,
-            { backgroundColor: bottomBgColor, paddingBottom: 60 },
+            {
+              backgroundColor: bottomBgColor,
+              paddingBottom: Math.max(80, insets.bottom + 48),
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}

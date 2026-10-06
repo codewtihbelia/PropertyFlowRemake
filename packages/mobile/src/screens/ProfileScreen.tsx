@@ -12,7 +12,10 @@ import {
   Switch,
   Modal,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { formatPesos } from "@propertyflow/shared";
@@ -55,6 +58,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     email: "",
   },
 }) => {
+  const insets = useSafeAreaInsets();
   const { onScroll } = useNavVisibility();
   const { isDark, toggleTheme, cycleTheme, themeMode, setThemeMode, colors } =
     useTheme();
@@ -644,7 +648,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(120, insets.bottom + 95) },
+        ]}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}

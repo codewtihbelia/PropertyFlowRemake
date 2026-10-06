@@ -1,13 +1,23 @@
-import React, { createContext, useContext, useRef, useState, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
 import {
   Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Keyboard,
+  Platform,
 } from "react-native";
 
 interface NavVisibilityContextValue {
   navAnim: Animated.Value;
   isVisible: boolean;
+  isKeyboardVisible: boolean;
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   showNav: () => void;
   hideNav: () => void;
@@ -17,6 +27,7 @@ interface NavVisibilityContextValue {
 const NavVisibilityContext = createContext<NavVisibilityContextValue>({
   navAnim: new Animated.Value(0),
   isVisible: true,
+  isKeyboardVisible: false,
   onScroll: () => {},
   showNav: () => {},
   hideNav: () => {},
@@ -28,10 +39,13 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const navAnim = useRef(new Animated.Value(0)).current; // 0 = visible, 1 = hidden
   const [isVisible, setIsVisible] = useState(true);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const lastOffsetY = useRef(0);
-  const isAnimating = useRef(false);
+  const isKeyboardOpenRef = useRef(false);
 
   const showNav = useCallback(() => {
+    // If keyboard is currently open, keep nav hidden
+    if (isKeyboardOpenRef.current) return;
     setIsVisible(true);
     Animated.timing(navAnim, {
       toValue: 0,
@@ -50,13 +64,45 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [navAnim]);
 
   const resetNav = useCallback(() => {
+    if (isKeyboardOpenRef.current) return;
     setIsVisible(true);
     navAnim.setValue(0);
     lastOffsetY.current = 0;
   }, [navAnim]);
 
+  // Global keyboard listeners to auto-hide floating nav bar while typing
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const onKeyboardShow = () => {
+      isKeyboardOpenRef.current = true;
+      setIsKeyboardVisible(true);
+      hideNav();
+    };
+
+    const onKeyboardHide = () => {
+      isKeyboardOpenRef.current = false;
+      setIsKeyboardVisible(false);
+      showNav();
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onKeyboardShow);
+    const hideSub = Keyboard.addListener(hideEvent, onKeyboardHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [hideNav, showNav]);
+
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Don't animate nav while keyboard is active
+      if (isKeyboardOpenRef.current) return;
+
       const currentY = event.nativeEvent.contentOffset.y;
       const diff = currentY - lastOffsetY.current;
 
@@ -82,7 +128,7 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
 
       lastOffsetY.current = currentY;
     },
-    [showNav, hideNav]
+    [showNav, hideNav],
   );
 
   return (
@@ -90,6 +136,7 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
       value={{
         navAnim,
         isVisible,
+        isKeyboardVisible,
         onScroll,
         showNav,
         hideNav,

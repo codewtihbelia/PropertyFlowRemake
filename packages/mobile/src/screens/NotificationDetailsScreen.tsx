@@ -284,7 +284,7 @@ export const NotificationDetailsScreen: React.FC<
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, 24) + 32 },
+          { paddingBottom: Math.max(90, insets.bottom + 40) },
         ]}
         showsVerticalScrollIndicator={false}
       >

@@ -914,7 +914,13 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         </View>
 
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 24 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: 24,
+              paddingBottom: Math.max(100, insets.bottom + 60),
+            },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           <View
@@ -1081,7 +1087,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, 20) + 90 },
+          { paddingBottom: Math.max(100, insets.bottom + 60) },
         ]}
         showsVerticalScrollIndicator={false}
       >

@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { mobileDataService } from "../services/firebaseDataService";
 import { SmoothBottomSheetModal } from "./SmoothBottomSheetModal";
 import { useTheme } from "../context/ThemeContext";
@@ -43,6 +44,7 @@ export const ElectricitySettingsModal: React.FC<
   onSaved,
 }) => {
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [previousReadingInput, setPreviousReadingInput] = useState("0");
   const [currentReadingInput, setCurrentReadingInput] = useState("0");
   const [ratePerKwhInput, setRatePerKwhInput] = useState("12.00");
@@ -177,7 +179,10 @@ export const ElectricitySettingsModal: React.FC<
     >
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollBody}
+        contentContainerStyle={[
+          styles.scrollBody,
+          { paddingBottom: Math.max(40, insets.bottom + 24) },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.readingsRow}>

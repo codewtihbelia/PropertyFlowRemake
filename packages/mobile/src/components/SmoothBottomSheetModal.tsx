@@ -134,7 +134,7 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
       statusBarTranslucent
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardContainer}
       >
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
@@ -154,7 +154,9 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
             style={[
               isCenter ? styles.centerCard : styles.bottomSheetCard,
               !isCenter && {
-                paddingBottom: Math.max(insets.bottom, 16) + 12,
+                paddingBottom:
+                  Math.max(insets.bottom, Platform.OS === "android" ? 24 : 16) +
+                  16,
               },
               {
                 maxHeight: maxHeight as any,

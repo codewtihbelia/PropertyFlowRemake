@@ -191,7 +191,8 @@ function FloatingNavBar({
   const { navAnim, isVisible } = useNavVisibility();
   const { isDark, colors } = useTheme();
   // Position floating menu with sleek clearance above phone's system navigation buttons / home indicator
-  const bottomOffset = Math.max(insets.bottom, 0) + 14;
+  const bottomOffset =
+    Math.max(insets.bottom, Platform.OS === "android" ? 24 : 16) + 12;
 
   const translateY = navAnim.interpolate({
     inputRange: [0, 1],

@@ -13,7 +13,10 @@ import {
   Platform,
   StatusBar,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import { mobileDataService } from "../services/firebaseDataService";
@@ -53,6 +56,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
   onBack,
 }) => {
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [application, setApplication] = useState<HostApplication | null>(null);
   const [households, setHouseholds] = useState<any[]>([]);
@@ -274,11 +278,14 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(100, insets.bottom + 48) },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -1307,7 +1314,13 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         icon={<Feather name="shield" size={18} color="#2563EB" />}
         maxHeight="86%"
       >
-        <ScrollView style={{ maxHeight: 360, marginTop: 4 }}>
+        <ScrollView
+          style={{ maxHeight: 360, marginTop: 4 }}
+          contentContainerStyle={{
+            paddingBottom: Math.max(30, insets.bottom + 16),
+          }}
+          showsVerticalScrollIndicator={false}
+        >
           {managementTypesList.map((type) => {
             const isSelected = managementType === type;
             return (

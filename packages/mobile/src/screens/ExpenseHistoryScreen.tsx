@@ -1061,7 +1061,10 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: Math.max(90, insets.bottom + 40) },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           {/* Settled Summary Card */}

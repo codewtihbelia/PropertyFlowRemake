@@ -1974,13 +1974,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
           <ScrollView
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: 60 },
+              { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -2110,6 +2110,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <View
             style={[
               styles.bottomBar,
+              { paddingBottom: Math.max(14, insets.bottom + 6) },
               isDark && {
                 backgroundColor: colors.surface,
                 borderTopWidth: 1,
@@ -2187,13 +2188,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
           <ScrollView
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: 60 },
+              { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -2308,13 +2309,13 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
           keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         >
           <ScrollView
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: 60 },
+              { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -2501,6 +2502,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           <View
             style={[
               styles.bottomBar,
+              { paddingBottom: Math.max(14, insets.bottom + 6) },
               isDark && {
                 backgroundColor: colors.surface,
                 borderTopWidth: 1,
@@ -2806,7 +2808,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(110, insets.bottom + 80) },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -4393,7 +4398,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         style={[
           styles.bottomBar,
           {
-            paddingBottom: Math.max(insets.bottom, 14),
+            paddingBottom: Math.max(14, insets.bottom + 6),
           },
           isDark && {
             backgroundColor: colors.surface,

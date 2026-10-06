@@ -13,6 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { mobileDataService } from "../services/firebaseDataService";
 import { SmoothBottomSheetModal } from "./SmoothBottomSheetModal";
 import { useTheme } from "../context/ThemeContext";
@@ -43,6 +44,7 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
   onSaved,
 }) => {
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [selectedMode, setSelectedMode] =
     useState<WaterPricingModel>("PER_PERSON_DAY");
   const [dailyRateInput, setDailyRateInput] = useState("5.00");
@@ -166,7 +168,11 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
     >
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollBody}
+        contentContainerStyle={[
+          styles.scrollBody,
+          { paddingBottom: Math.max(30, insets.bottom + 16) },
+        ]}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Segmented Mode Selector */}
         <Text style={[styles.sectionLabel, isDark && { color: colors.text }]}>
@@ -538,7 +544,11 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
 
       {/* Bottom Actions */}
       <View
-        style={[styles.bottomBar, isDark && { borderTopColor: colors.border }]}
+        style={[
+          styles.bottomBar,
+          isDark && { borderTopColor: colors.border },
+          { paddingBottom: Math.max(12, insets.bottom) },
+        ]}
       >
         <TouchableOpacity
           style={[

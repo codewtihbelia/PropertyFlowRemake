@@ -387,7 +387,7 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[styles.container, { backgroundColor: bgColor }]}
     >
       <StatusBar
@@ -422,7 +422,7 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: Math.max(insets.bottom + 16, 24),
+            paddingBottom: Math.max(80, insets.bottom + 40),
           },
         ]}
         showsVerticalScrollIndicator={false}
