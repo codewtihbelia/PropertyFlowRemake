@@ -888,7 +888,7 @@ export const AttendanceScreen: React.FC<{
     : isFixedMode
       ? myFixedSharePesos
       : presentCount * ratePerDayPesos;
-  const { onScroll } = useNavVisibility();
+  const { onScroll, keyboardHeight } = useNavVisibility();
 
   // Initialize and open the slide-up Submit Attendance Bottom Sheet
   const handleOpenSubmitModal = () => {
@@ -2802,7 +2802,7 @@ export const AttendanceScreen: React.FC<{
                         <View style={styles.submitBtnInner}>
                           <Text style={styles.submitButtonText}>
                             {isMyAttendanceSubmitted
-                              ? `Save & Submit Attendance (₱${waterFee.toFixed(2)})`
+                              ? `Update (₱${waterFee.toFixed(2)})`
                               : `Submit Attendance (₱${waterFee.toFixed(2)})`}
                           </Text>
                           <Feather
@@ -2961,7 +2961,13 @@ export const AttendanceScreen: React.FC<{
         }}
       >
         <KeyboardAvoidingView
-          style={styles.bottomSheetOverlay}
+          style={[
+            styles.bottomSheetOverlay,
+            Platform.OS === "android" &&
+              (keyboardHeight || 0) > 0 && {
+                paddingBottom: keyboardHeight,
+              },
+          ]}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <TouchableOpacity

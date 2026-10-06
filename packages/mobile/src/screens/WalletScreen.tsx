@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -426,7 +427,37 @@ export function WalletScreen({
 }: WalletScreenProps) {
   const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
-  const { onScroll, showNav } = useNavVisibility();
+  const { onScroll, showNav, keyboardHeight } = useNavVisibility();
+  const [localKeyboardHeight, setLocalKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const s1 = Keyboard.addListener(showEvent, (e: any) => {
+      setLocalKeyboardHeight(e?.endCoordinates?.height || 0);
+    });
+    const s2 = Keyboard.addListener(hideEvent, () => {
+      setLocalKeyboardHeight(0);
+    });
+    return () => {
+      s1.remove();
+      s2.remove();
+    };
+  }, []);
+
+  const effectiveKeyboardHeight = Math.max(
+    keyboardHeight || 0,
+    localKeyboardHeight,
+  );
+  const dynamicModalOverlayStyle = [
+    styles.modalOverlay,
+    effectiveKeyboardHeight > 0 && {
+      paddingBottom: effectiveKeyboardHeight,
+    },
+  ];
 
   useEffect(() => {
     showNav();
@@ -2917,7 +2948,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowCashInModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -3145,7 +3176,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowAddCardModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -3184,167 +3215,173 @@ export function WalletScreen({
               Link a mock card or e-wallet for quick household splits
             </Text>
 
-            {/* Type selector: All Philippine Bank & E-Wallet Presets */}
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, marginVertical: 12 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: effectiveKeyboardHeight > 0 ? 240 : 380 }}
             >
-              {Object.values(PHILIPPINE_CARD_PRESETS).map((prov) => (
-                <TouchableOpacity
-                  key={prov.type}
-                  style={[
-                    styles.providerChip,
-                    newCardType === prov.type
-                      ? {
-                          backgroundColor: prov.gradient[0],
-                          borderColor: prov.accentColor,
-                          borderWidth: 1.5,
-                        }
-                      : {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F1F5F9",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                        },
-                  ]}
-                  onPress={() => {
-                    setNewCardType(prov.type as any);
-                    if (
-                      !newCardName ||
-                      Object.values(PHILIPPINE_CARD_PRESETS).some(
-                        (p) => p.name === newCardName,
-                      )
-                    ) {
-                      setNewCardName(prov.name);
-                    }
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: prov.gradient[0],
-                      marginRight: 4,
-                    }}
-                  />
-                  <Text
+              {/* Type selector: All Philippine Bank & E-Wallet Presets */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, marginVertical: 12 }}
+              >
+                {Object.values(PHILIPPINE_CARD_PRESETS).map((prov) => (
+                  <TouchableOpacity
+                    key={prov.type}
                     style={[
-                      styles.providerChipText,
-                      {
-                        color:
-                          newCardType === prov.type
-                            ? "#FFFFFF"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                        fontWeight: newCardType === prov.type ? "800" : "600",
-                      },
+                      styles.providerChip,
+                      newCardType === prov.type
+                        ? {
+                            backgroundColor: prov.gradient[0],
+                            borderColor: prov.accentColor,
+                            borderWidth: 1.5,
+                          }
+                        : {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                          },
                     ]}
+                    onPress={() => {
+                      setNewCardType(prov.type as any);
+                      if (
+                        !newCardName ||
+                        Object.values(PHILIPPINE_CARD_PRESETS).some(
+                          (p) => p.name === newCardName,
+                        )
+                      ) {
+                        setNewCardName(prov.name);
+                      }
+                    }}
                   >
-                    {prov.shortCode}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <View
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: prov.gradient[0],
+                        marginRight: 4,
+                      }}
+                    />
+                    <Text
+                      style={[
+                        styles.providerChipText,
+                        {
+                          color:
+                            newCardType === prov.type
+                              ? "#FFFFFF"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                          fontWeight: newCardType === prov.type ? "800" : "600",
+                        },
+                      ]}
+                    >
+                      {prov.shortCode}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Account / Card Nickname (Optional)
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. My Personal GCash or Salary Card"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={newCardName}
+                onChangeText={setNewCardName}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                {newCardType === "gcash"
+                  ? "Mobile Number"
+                  : "Last 4 Digits / Number"}
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder={newCardType === "gcash" ? "09171234567" : "8821"}
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={newCardNumber}
+                onChangeText={setNewCardNumber}
+                keyboardType="numeric"
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Account Holder Name
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. Alex Chen"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={newCardHolder}
+                onChangeText={setNewCardHolder}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Initial Card Balance (₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. 5000"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={newCardBalance}
+                onChangeText={setNewCardBalance}
+                keyboardType="numeric"
+              />
             </ScrollView>
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Account / Card Nickname (Optional)
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. My Personal GCash or Salary Card"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={newCardName}
-              onChangeText={setNewCardName}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              {newCardType === "gcash"
-                ? "Mobile Number"
-                : "Last 4 Digits / Number"}
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder={newCardType === "gcash" ? "09171234567" : "8821"}
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={newCardNumber}
-              onChangeText={setNewCardNumber}
-              keyboardType="numeric"
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Account Holder Name
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. Alex Chen"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={newCardHolder}
-              onChangeText={setNewCardHolder}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Initial Card Balance (₱)
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. 5000"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={newCardBalance}
-              onChangeText={setNewCardBalance}
-              keyboardType="numeric"
-            />
 
             <TouchableOpacity
               style={styles.modalPrimaryBtn}
@@ -3380,7 +3417,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowCardDetailModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -3898,7 +3935,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowExpenseSimModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -4343,7 +4380,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowTransferModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -4852,7 +4889,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowCashExpenseModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -5190,7 +5227,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowCashAutomationModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -5487,7 +5524,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowAddPocketModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -5672,7 +5709,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowPocketActionModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -6049,7 +6086,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setSelectedTx(null)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -6398,7 +6435,7 @@ export function WalletScreen({
           }
         }}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -6576,7 +6613,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowSendMoneyModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -6824,7 +6861,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowRequestSplitModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -7024,7 +7061,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowScanQrModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -7236,7 +7273,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowAnalyticsModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -7368,7 +7405,7 @@ export function WalletScreen({
         animationType="slide"
         onRequestClose={() => setShowLimitsModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -8958,7 +8995,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 24,
-    paddingBottom: 44,
+    paddingBottom: 28,
+    maxHeight: "92%",
   },
   modalHandle: {
     width: 40,

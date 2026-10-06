@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -12,6 +12,8 @@ import {
   TouchableWithoutFeedback,
   ViewStyle,
   StyleProp,
+  Keyboard,
+  Dimensions,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -52,6 +54,49 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
   const { isDark, colors } = useTheme();
   const [isRendered, setIsRendered] = useState(visible);
   const animValue = useRef(new Animated.Value(0)).current;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Track native keyboard height dynamically on both iOS and Android
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const onShow = (e: any) => {
+      setKeyboardHeight(e?.endCoordinates?.height || 0);
+    };
+    const onHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Compute adaptive maxHeight so the sheet never blows past the top of the screen when elevated
+  const { height: windowHeight } = Dimensions.get("window");
+  const computedMaxHeight = useMemo(() => {
+    let base = windowHeight * 0.9;
+    if (typeof maxHeight === "number") {
+      base = maxHeight;
+    } else if (typeof maxHeight === "string" && maxHeight.endsWith("%")) {
+      const pct = parseFloat(maxHeight) / 100;
+      if (!isNaN(pct)) base = windowHeight * pct;
+    }
+
+    if (keyboardHeight > 0) {
+      const safeTop = insets.top + (Platform.OS === "android" ? 12 : 20);
+      const availableSpace = windowHeight - keyboardHeight - safeTop;
+      return Math.min(base, Math.max(220, availableSpace));
+    }
+    return base;
+  }, [maxHeight, keyboardHeight, windowHeight, insets.top]);
 
   // Decide if close button should be shown
   const shouldShowCloseBtn =
@@ -147,6 +192,14 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
           style={[
             styles.wrapper,
             isCenter ? styles.wrapperCenter : styles.wrapperBottom,
+            !isCenter &&
+              keyboardHeight > 0 && {
+                paddingBottom: Platform.OS === "android" ? keyboardHeight : 0,
+              },
+            isCenter &&
+              keyboardHeight > 0 && {
+                paddingBottom: keyboardHeight / 2,
+              },
           ]}
           pointerEvents="box-none"
         >
@@ -155,11 +208,15 @@ export const SmoothBottomSheetModal: React.FC<SmoothBottomSheetModalProps> = ({
               isCenter ? styles.centerCard : styles.bottomSheetCard,
               !isCenter && {
                 paddingBottom:
-                  Math.max(insets.bottom, Platform.OS === "android" ? 24 : 16) +
-                  16,
+                  keyboardHeight > 0
+                    ? 16
+                    : Math.max(
+                        insets.bottom,
+                        Platform.OS === "android" ? 24 : 16,
+                      ) + 16,
               },
               {
-                maxHeight: maxHeight as any,
+                maxHeight: computedMaxHeight,
                 opacity: cardOpacity,
                 transform: [{ translateY }, { scale: cardScale }],
               },

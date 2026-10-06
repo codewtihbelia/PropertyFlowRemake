@@ -1974,8 +1974,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={
+            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
+          }
         >
           <ScrollView
             contentContainerStyle={[
@@ -2188,8 +2190,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={
+            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
+          }
         >
           <ScrollView
             contentContainerStyle={[
@@ -2309,8 +2313,10 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={
+            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
+          }
         >
           <ScrollView
             contentContainerStyle={[

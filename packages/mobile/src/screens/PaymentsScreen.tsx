@@ -82,7 +82,8 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     Platform.OS === "ios" ? 44 : 20,
   );
   const [showMenu, setShowMenu] = useState(false);
-  const { onScroll, hideNav, showNav } = useNavVisibility();
+  const { onScroll, hideNav, showNav, keyboardHeight, isKeyboardVisible } =
+    useNavVisibility();
   const [method, setMethod] = useState<
     "GCash" | "Maya" | "Cash" | "Bank Transfer"
   >("GCash");
@@ -2182,14 +2183,21 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={
+          Platform.OS === "ios" ? topInset : (StatusBar.currentHeight ?? 0)
+        }
       >
         <ScrollView
           key="payment-form-scroll"
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Math.max(120, insets.bottom + 95) },
+            {
+              paddingBottom: Math.max(
+                120,
+                insets.bottom + (isKeyboardVisible ? keyboardHeight + 30 : 95),
+              ),
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}

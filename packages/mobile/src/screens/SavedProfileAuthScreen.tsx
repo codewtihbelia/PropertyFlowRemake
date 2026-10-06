@@ -387,7 +387,7 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={[styles.container, { backgroundColor: bgColor }]}
     >
       <StatusBar

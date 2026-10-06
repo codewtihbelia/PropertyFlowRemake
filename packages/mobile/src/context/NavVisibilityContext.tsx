@@ -18,6 +18,7 @@ interface NavVisibilityContextValue {
   navAnim: Animated.Value;
   isVisible: boolean;
   isKeyboardVisible: boolean;
+  keyboardHeight: number;
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   showNav: () => void;
   hideNav: () => void;
@@ -28,6 +29,7 @@ const NavVisibilityContext = createContext<NavVisibilityContextValue>({
   navAnim: new Animated.Value(0),
   isVisible: true,
   isKeyboardVisible: false,
+  keyboardHeight: 0,
   onScroll: () => {},
   showNav: () => {},
   hideNav: () => {},
@@ -40,6 +42,7 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
   const navAnim = useRef(new Animated.Value(0)).current; // 0 = visible, 1 = hidden
   const [isVisible, setIsVisible] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const lastOffsetY = useRef(0);
   const isKeyboardOpenRef = useRef(false);
 
@@ -77,15 +80,17 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
     const hideEvent =
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-    const onKeyboardShow = () => {
+    const onKeyboardShow = (e: any) => {
       isKeyboardOpenRef.current = true;
       setIsKeyboardVisible(true);
+      setKeyboardHeight(e?.endCoordinates?.height || 0);
       hideNav();
     };
 
     const onKeyboardHide = () => {
       isKeyboardOpenRef.current = false;
       setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
       showNav();
     };
 
@@ -137,6 +142,7 @@ export const NavVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({
         navAnim,
         isVisible,
         isKeyboardVisible,
+        keyboardHeight,
         onScroll,
         showNav,
         hideNav,

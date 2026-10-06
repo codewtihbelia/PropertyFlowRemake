@@ -27,6 +27,7 @@ import {
 } from "../services/firebaseDataService";
 import { BILL_CATEGORIES, getCategoryMeta } from "../services/categoryService";
 import { useTheme } from "../context/ThemeContext";
+import { useNavVisibility } from "../context/NavVisibilityContext";
 
 interface AddExpenseScreenProps {
   onBack: () => void;
@@ -63,6 +64,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   onSaveExpense,
 }) => {
   const { isDark, colors } = useTheme();
+  const { keyboardHeight, isKeyboardVisible } = useNavVisibility();
   const [selectedGroupIndex, setSelectedGroupIndex] = useState(0);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("Rent");
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
@@ -677,13 +679,20 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={
+          Platform.OS === "ios" ? topInset : (StatusBar.currentHeight ?? 0)
+        }
       >
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Math.max(100, insets.bottom + 60) },
+            {
+              paddingBottom: Math.max(
+                100,
+                insets.bottom + (isKeyboardVisible ? keyboardHeight + 30 : 60),
+              ),
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
