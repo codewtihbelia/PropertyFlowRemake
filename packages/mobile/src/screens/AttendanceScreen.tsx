@@ -2867,7 +2867,7 @@ export const AttendanceScreen: React.FC<{
                         <View style={styles.submitBtnInner}>
                           <Text style={styles.submitButtonText}>
                             {isMyAttendanceSubmitted
-                              ? `Save & Submit Attendance (₱${waterFee.toFixed(2)})`
+                              ? `Update (₱${waterFee.toFixed(2)})`
                               : `Submit Attendance (₱${waterFee.toFixed(2)})`}
                           </Text>
                           <Feather

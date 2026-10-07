@@ -425,7 +425,7 @@ export interface WalletTransaction {
   paymentMethodUsed: string;
   referenceId?: string;
   timestamp: string;
-  status: "completed" | "pending";
+  status: "completed" | "pending" | "failed";
   note?: string;
   icon?: string;
   category?: string;

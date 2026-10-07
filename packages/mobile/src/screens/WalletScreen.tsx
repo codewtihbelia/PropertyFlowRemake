@@ -501,6 +501,7 @@ export function WalletScreen({
   const [cashInAmount, setCashInAmount] = useState<string>("1000");
   const [cashInMethod, setCashInMethod] = useState<string>("GCash");
   const [selectedCashInCardId, setSelectedCashInCardId] = useState<string>("");
+  const [cashInSource, setCashInSource] = useState<string>("");
 
   const [showAddCardModal, setShowAddCardModal] = useState<boolean>(false);
   const [newCardType, setNewCardType] = useState<CardProviderType>("gcash");
@@ -590,6 +591,10 @@ export function WalletScreen({
   const [selectedTx, setSelectedTx] = useState<AppWalletTransaction | null>(
     null,
   );
+  const [isEditingTxNote, setIsEditingTxNote] = useState<boolean>(false);
+  const [editedTxNoteText, setEditedTxNoteText] = useState<string>("");
+  const [isSavingTxNote, setIsSavingTxNote] = useState<boolean>(false);
+  const [isDeletingTx, setIsDeletingTx] = useState<boolean>(false);
   const [txFilter, setTxFilter] = useState<
     "all" | "cash_in" | "payment" | "savings"
   >("all");
@@ -675,6 +680,7 @@ export function WalletScreen({
       wallet.cards.find((c) => c.isDefault) || wallet.cards[0];
     setSelectedCashInCardId(defaultCard.id);
     setCashInMethod(defaultCard.name);
+    setCashInSource("");
     setShowCashInModal(true);
   };
 
@@ -688,15 +694,23 @@ export function WalletScreen({
     try {
       const targetCardId =
         selectedCashInCardId || wallet?.cards?.[0]?.id || cashInMethod;
-      const updated = await walletService.cashIn(currentUid, num, targetCardId);
+      const cleanSource = cashInSource.trim();
+      const updated = await walletService.cashIn(
+        currentUid,
+        num,
+        targetCardId,
+        cleanSource || undefined,
+      );
       setWallet(updated);
       setShowCashInModal(false);
       setCashInAmount("1000");
+      setCashInSource("");
       const matched = updated.cards.find((c) => c.id === targetCardId);
       const cardTitle = matched ? matched.name : cashInMethod;
+      const sourceSuffix = cleanSource ? ` from ${cleanSource}` : "";
       Alert.alert(
         "Top-up Successful",
-        `₱${num.toLocaleString()} has been added to ${cardTitle}. Total Available Digital Balance updated!`,
+        `₱${num.toLocaleString()} has been added${sourceSuffix} to ${cardTitle}. Total Available Digital Balance updated!`,
       );
     } catch (e: any) {
       Alert.alert("Top-up Failed", e?.message || "Could not complete top up.");
@@ -741,6 +755,98 @@ export function WalletScreen({
     } finally {
       setIsDeletingCard(false);
     }
+  };
+
+  const handleStartEditTxNote = () => {
+    if (!selectedTx) return;
+    const currentNote =
+      selectedTx.note ||
+      (!selectedTx.description?.startsWith("Daily simulated expense") &&
+      !selectedTx.description?.startsWith("Added ₱") &&
+      !selectedTx.description?.startsWith("Transferred ₱")
+        ? selectedTx.description
+        : "") ||
+      (selectedTx.type === "cash_in" ? (selectedTx as any)?.source : "");
+    setEditedTxNoteText(currentNote || "");
+    setIsEditingTxNote(true);
+  };
+
+  const handleSaveTxNote = async () => {
+    if (!selectedTx) return;
+    try {
+      setIsSavingTxNote(true);
+      const clean = editedTxNoteText.trim();
+      const res = await walletService.updateTransactionNote(
+        currentUid,
+        selectedTx.id,
+        clean,
+      );
+      if (res.success) {
+        setWallet(res.updatedState);
+        const refreshedTx = res.updatedState.transactions.find(
+          (t) => t.id === selectedTx.id,
+        );
+        if (refreshedTx) {
+          setSelectedTx(refreshedTx);
+        } else {
+          setSelectedTx({
+            ...selectedTx,
+            note: clean || undefined,
+            description: clean || selectedTx.description,
+          });
+        }
+        setIsEditingTxNote(false);
+        Alert.alert(
+          "Note Updated",
+          "Transaction note has been saved permanently.",
+        );
+      } else {
+        Alert.alert("Update Failed", res.message);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not save note.");
+    } finally {
+      setIsSavingTxNote(false);
+    }
+  };
+
+  const handleDeleteSelectedTx = () => {
+    if (!selectedTx) return;
+    Alert.alert(
+      "Delete Transaction",
+      `Are you sure you want to delete this ${selectedTx.title} record (₱${selectedTx.amount.toLocaleString()})? Your wallet balance will automatically adjust.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete & Adjust Balance",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsDeletingTx(true);
+              const res = await walletService.deleteTransaction(
+                currentUid,
+                selectedTx.id,
+              );
+              if (res.success) {
+                setWallet(res.updatedState);
+                setSelectedTx(null);
+                setIsEditingTxNote(false);
+                Alert.alert("Deleted", res.message);
+              } else {
+                Alert.alert("Error", res.message);
+              }
+            } catch (e: any) {
+              Alert.alert(
+                "Error",
+                e?.message || "Could not delete transaction.",
+              );
+            } finally {
+              setIsDeletingTx(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleSendMoney = async () => {
@@ -1229,11 +1335,12 @@ export function WalletScreen({
       selectedExpensePreset.id === "custom" && customExpenseTitle.trim()
         ? customExpenseTitle.trim()
         : selectedExpensePreset.title;
+    const cleanNote = simNote.trim();
     const finalIcon =
       selectedExpensePreset.id === "custom"
         ? getExpenseSemanticIconMobile({
             title: finalTitle,
-            note: simNote,
+            note: cleanNote,
             type: "expense_simulation",
           }).icon
         : selectedExpensePreset.icon === "cart"
@@ -1248,11 +1355,13 @@ export function WalletScreen({
         amt,
         finalTitle,
         finalIcon,
-        simNote,
+        cleanNote,
       );
       if (res.success) {
         setWallet(res.updatedState);
         setShowExpenseSimModal(false);
+        setSimNote("");
+        setCustomExpenseTitle("");
         Alert.alert("Expense Simulated", res.message);
       } else {
         Alert.alert("Simulation Failed", res.message);
@@ -3075,6 +3184,127 @@ export function WalletScreen({
                 />
               </View>
 
+              {/* Money Source / Origin Field */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: isDark ? colors.textSecondary : "#475569",
+                    marginTop: 12,
+                  },
+                ]}
+              >
+                Money Source / Origin (Optional)
+              </Text>
+              <View
+                style={[
+                  styles.simChipRow,
+                  { marginBottom: 6, flexWrap: "wrap" },
+                ]}
+              >
+                {[
+                  "Salary",
+                  "Freelance / Gig",
+                  "Savings",
+                  "Allowance",
+                  "Bonus / Gift",
+                  "Business / Sales",
+                  "Refund",
+                  "Other",
+                ].map((srcPreset) => {
+                  const isSelected = cashInSource === srcPreset;
+                  return (
+                    <TouchableOpacity
+                      key={srcPreset}
+                      style={[
+                        styles.simChipBtn,
+                        {
+                          backgroundColor: isSelected
+                            ? isDark
+                              ? "#1E3A8A"
+                              : "#DBEAFE"
+                            : isDark
+                              ? colors.surfaceInset
+                              : "#F1F5F9",
+                          borderColor: isSelected
+                            ? "#2563EB"
+                            : isDark
+                              ? colors.border
+                              : "#E2E8F0",
+                        },
+                      ]}
+                      onPress={() =>
+                        setCashInSource(isSelected ? "" : srcPreset)
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.simChipBtnText,
+                          {
+                            color: isSelected
+                              ? isDark
+                                ? "#93C5FD"
+                                : "#1D4ED8"
+                              : isDark
+                                ? colors.textMuted
+                                : "#475569",
+                            fontWeight: isSelected ? "700" : "500",
+                          },
+                        ]}
+                      >
+                        {srcPreset}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <View
+                style={[
+                  styles.amountInputWrap,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    height: 46,
+                    paddingHorizontal: 12,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="wallet-outline"
+                  size={18}
+                  color={isDark ? colors.textMuted : "#64748B"}
+                  style={{ marginRight: 8 }}
+                />
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    {
+                      color: isDark ? colors.text : "#0F172A",
+                      fontSize: 14,
+                      textAlign: "left",
+                      flex: 1,
+                    },
+                  ]}
+                  value={cashInSource}
+                  onChangeText={setCashInSource}
+                  placeholder="e.g. Monthly Salary, Freelance gig, Allowance"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                />
+                {Boolean(cashInSource) && (
+                  <TouchableOpacity
+                    onPress={() => setCashInSource("")}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={18}
+                      color={isDark ? colors.textMuted : "#94A3B8"}
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+
               {/* Destination Card Select */}
               <Text
                 style={[
@@ -4327,35 +4557,83 @@ export function WalletScreen({
                     )}
 
                     {/* Expense Note / Memo */}
-                    <Text
-                      style={[
-                        styles.inputLabel,
-                        {
-                          color: isDark ? colors.textSecondary : "#475569",
-                          marginTop: 10,
-                        },
-                      ]}
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginTop: 10,
+                      }}
                     >
-                      Expense Note (Optional)
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.modalTextInput,
-                        {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F8FAFC",
-                          borderColor: isDark ? colors.border : "#CBD5E1",
-                          color: isDark ? colors.text : "#0F172A",
-                        },
-                      ]}
-                      value={simNote}
-                      onChangeText={setSimNote}
-                      placeholder="e.g. Afternoon latte & snack"
-                      placeholderTextColor={
-                        isDark ? colors.textMuted : "#94A3B8"
-                      }
-                    />
+                      <Text
+                        style={[
+                          styles.inputLabel,
+                          {
+                            color: isDark ? colors.textSecondary : "#475569",
+                            marginTop: 0,
+                          },
+                        ]}
+                      >
+                        Expense Note / Memo
+                      </Text>
+                      {Boolean(selectedExpensePreset.defaultNote) &&
+                        simNote !== selectedExpensePreset.defaultNote && (
+                          <TouchableOpacity
+                            onPress={() =>
+                              setSimNote(selectedExpensePreset.defaultNote)
+                            }
+                            hitSlop={{ top: 6, bottom: 6, left: 8, right: 8 }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: "600",
+                                color: "#2563EB",
+                              }}
+                            >
+                              Reset to preset note
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                    </View>
+                    <View style={{ position: "relative" }}>
+                      <TextInput
+                        style={[
+                          styles.modalTextInput,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#F8FAFC",
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                            color: isDark ? colors.text : "#0F172A",
+                            paddingRight: Boolean(simNote) ? 36 : 14,
+                          },
+                        ]}
+                        value={simNote}
+                        onChangeText={setSimNote}
+                        placeholder="e.g. Afternoon latte & snack"
+                        placeholderTextColor={
+                          isDark ? colors.textMuted : "#94A3B8"
+                        }
+                      />
+                      {Boolean(simNote) && (
+                        <TouchableOpacity
+                          onPress={() => setSimNote("")}
+                          style={{
+                            position: "absolute",
+                            right: 10,
+                            top: 14,
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons
+                            name="close-circle"
+                            size={18}
+                            color={isDark ? colors.textMuted : "#94A3B8"}
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
 
                     {/* Action Buttons */}
                     <TouchableOpacity
@@ -6159,14 +6437,20 @@ export function WalletScreen({
         visible={Boolean(selectedTx)}
         transparent
         animationType="slide"
-        onRequestClose={() => setSelectedTx(null)}
+        onRequestClose={() => {
+          setSelectedTx(null);
+          setIsEditingTxNote(false);
+        }}
         statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            onPress={() => setSelectedTx(null)}
+            onPress={() => {
+              setSelectedTx(null);
+              setIsEditingTxNote(false);
+            }}
           />
           <View
             style={[
@@ -6237,13 +6521,15 @@ export function WalletScreen({
                 {selectedTx?.type === "expense_simulation" ||
                 selectedTx?.type === "cash_expense"
                   ? "Expense Receipt"
-                  : "Payment Receipt"}
+                  : selectedTx?.type === "cash_in"
+                    ? "Top-up Receipt"
+                    : "Payment Receipt"}
               </Text>
               <Text style={styles.receiptAmount}>
                 ₱{selectedTx?.amount.toLocaleString()}
               </Text>
 
-              {/* Prominent Expense Note Box */}
+              {/* Prominent Expense Note / Source Box */}
               {(() => {
                 const matchedPreset = QUICK_EXPENSE_PRESETS.find(
                   (p: QuickExpensePreset) =>
@@ -6251,16 +6537,24 @@ export function WalletScreen({
                       selectedTx?.title?.toLowerCase() ||
                     p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
                 );
-                const fallbackNote =
+                const rawNote = selectedTx?.note?.trim() || "";
+                const rawSource = (selectedTx as any)?.source?.trim() || "";
+                const rawDesc = selectedTx?.description?.trim() || "";
+                const isGenericDesc =
+                  rawDesc.startsWith("Daily simulated expense") ||
+                  rawDesc.startsWith("Added ₱") ||
+                  rawDesc.startsWith("Transferred ₱");
+
+                const customNote =
+                  rawNote ||
+                  (!isGenericDesc ? rawDesc : "") ||
+                  (selectedTx?.type === "cash_in" ? rawSource : "");
+                const displayExpenseNote =
+                  customNote ||
                   matchedPreset?.defaultNote ||
-                  selectedTx?.description?.trim() ||
-                  (selectedTx?.type === "expense_simulation"
-                    ? `Daily simulated expense for ${selectedTx?.title}`
-                    : selectedTx?.title || "Daily transaction record");
-                const hasCustomNote = Boolean(selectedTx?.note?.trim());
-                const displayExpenseNote = hasCustomNote
-                  ? selectedTx?.note?.trim()
-                  : fallbackNote;
+                  (selectedTx?.type === "cash_in"
+                    ? "Digital wallet top-up"
+                    : "Daily transaction record");
 
                 return (
                   <View
@@ -6279,7 +6573,7 @@ export function WalletScreen({
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "space-between",
-                        marginBottom: 4,
+                        marginBottom: isEditingTxNote ? 8 : 4,
                       }}
                     >
                       <View
@@ -6290,7 +6584,11 @@ export function WalletScreen({
                         }}
                       >
                         <Ionicons
-                          name="document-text"
+                          name={
+                            selectedTx?.type === "cash_in"
+                              ? "wallet"
+                              : "document-text"
+                          }
                           size={14}
                           color="#2563EB"
                         />
@@ -6300,40 +6598,141 @@ export function WalletScreen({
                             { color: isDark ? colors.textMuted : "#64748B" },
                           ]}
                         >
-                          EXPENSE NOTE
+                          {selectedTx?.type === "cash_in"
+                            ? "MONEY SOURCE / ORIGIN"
+                            : "EXPENSE NOTE"}
                         </Text>
                       </View>
-                      {!hasCustomNote && (
-                        <View
+                      {!isEditingTxNote && (
+                        <TouchableOpacity
+                          onPress={handleStartEditTxNote}
                           style={{
-                            backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
-                            paddingHorizontal: 7,
-                            paddingVertical: 2,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 4,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
                             borderRadius: 6,
+                            backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
                           }}
+                          activeOpacity={0.7}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         >
+                          <Ionicons name="pencil" size={11} color="#2563EB" />
                           <Text
                             style={{
-                              fontSize: 10,
+                              fontSize: 11,
                               fontWeight: "700",
                               color: "#2563EB",
-                              textTransform: "uppercase",
-                              letterSpacing: 0.5,
                             }}
                           >
-                            Preset Fallback
+                            Edit Note
                           </Text>
-                        </View>
+                        </TouchableOpacity>
                       )}
                     </View>
-                    <Text
-                      style={[
-                        styles.receiptNoteValue,
-                        { color: isDark ? colors.text : "#0F172A" },
-                      ]}
-                    >
-                      {displayExpenseNote}
-                    </Text>
+
+                    {isEditingTxNote ? (
+                      <View style={{ marginTop: 4 }}>
+                        <TextInput
+                          style={[
+                            styles.modalTextInput,
+                            {
+                              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+                              borderColor: "#2563EB",
+                              color: isDark ? colors.text : "#0F172A",
+                              fontSize: 14,
+                              paddingVertical: 8,
+                              paddingHorizontal: 10,
+                              minHeight: 42,
+                              marginBottom: 8,
+                            },
+                          ]}
+                          value={editedTxNoteText}
+                          onChangeText={setEditedTxNoteText}
+                          placeholder={
+                            selectedTx?.type === "cash_in"
+                              ? "Enter source of funds (e.g. Salary)..."
+                              : "Enter custom expense note..."
+                          }
+                          placeholderTextColor={
+                            isDark ? colors.textMuted : "#94A3B8"
+                          }
+                          autoFocus
+                        />
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            gap: 8,
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <TouchableOpacity
+                            onPress={() => setIsEditingTxNote(false)}
+                            style={{
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                              backgroundColor: isDark ? "#334155" : "#E2E8F0",
+                            }}
+                            disabled={isSavingTxNote}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                fontWeight: "600",
+                                color: isDark ? "#CBD5E1" : "#475569",
+                              }}
+                            >
+                              Cancel
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={handleSaveTxNote}
+                            style={{
+                              paddingHorizontal: 14,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                              backgroundColor: "#2563EB",
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                            disabled={isSavingTxNote}
+                          >
+                            {isSavingTxNote ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="checkmark"
+                                  size={13}
+                                  color="#FFFFFF"
+                                />
+                                <Text
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: "700",
+                                    color: "#FFFFFF",
+                                  }}
+                                >
+                                  Save Note
+                                </Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.receiptNoteValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {displayExpenseNote}
+                      </Text>
+                    )}
                   </View>
                 );
               })()}
@@ -6363,6 +6762,40 @@ export function WalletScreen({
                   {selectedTx?.title}
                 </Text>
               </View>
+
+              {/* Money Source Row */}
+              {Boolean(
+                (selectedTx as any)?.source ||
+                (selectedTx?.type === "cash_in" &&
+                  (selectedTx?.note || selectedTx?.description)),
+              ) && (
+                <View style={styles.receiptRow}>
+                  <Text
+                    style={[
+                      styles.receiptLabel,
+                      { color: isDark ? colors.textMuted : "#64748B" },
+                    ]}
+                  >
+                    Money Source
+                  </Text>
+                  <Text
+                    style={[
+                      styles.receiptValue,
+                      { color: "#10B981", fontWeight: "700" },
+                    ]}
+                  >
+                    {(selectedTx as any)?.source ||
+                      (selectedTx?.note &&
+                      !selectedTx.note.startsWith("Added ₱")
+                        ? selectedTx.note
+                        : "") ||
+                      (selectedTx?.description &&
+                      !selectedTx.description.startsWith("Added ₱")
+                        ? selectedTx.description
+                        : "Cash Deposit")}
+                  </Text>
+                </View>
+              )}
 
               {Boolean(
                 selectedTx?.category ||
@@ -6399,7 +6832,9 @@ export function WalletScreen({
                     { color: isDark ? colors.textMuted : "#64748B" },
                   ]}
                 >
-                  Expense Note
+                  {selectedTx?.type === "cash_in"
+                    ? "Source / Note"
+                    : "Expense Note"}
                 </Text>
                 <Text
                   style={[
@@ -6418,13 +6853,20 @@ export function WalletScreen({
                           selectedTx?.title?.toLowerCase() ||
                         p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
                     );
+                    const rawNote = selectedTx?.note?.trim() || "";
+                    const rawSource = (selectedTx as any)?.source?.trim() || "";
+                    const rawDesc = selectedTx?.description?.trim() || "";
+                    const isGenericDesc =
+                      rawDesc.startsWith("Daily simulated expense") ||
+                      rawDesc.startsWith("Added ₱") ||
+                      rawDesc.startsWith("Transferred ₱");
+                    const customNote =
+                      rawNote || (!isGenericDesc ? rawDesc : "") || rawSource;
                     return (
-                      selectedTx?.note?.trim() ||
+                      customNote ||
                       matchedPreset?.defaultNote ||
-                      selectedTx?.description?.trim() ||
-                      (selectedTx?.type === "expense_simulation"
-                        ? `Daily simulated expense for ${selectedTx?.title}`
-                        : selectedTx?.title || "Daily transaction record")
+                      selectedTx?.title ||
+                      "Completed record"
                     );
                   })()}
                 </Text>
@@ -6505,10 +6947,43 @@ export function WalletScreen({
 
               <TouchableOpacity
                 style={styles.modalPrimaryBtn}
-                onPress={() => setSelectedTx(null)}
+                onPress={() => {
+                  setSelectedTx(null);
+                  setIsEditingTxNote(false);
+                }}
                 activeOpacity={0.8}
               >
                 <Text style={styles.modalPrimaryBtnText}>Close Receipt</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalCancelBtn,
+                  {
+                    marginTop: 10,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    borderColor: isDark ? "#7F1D1D" : "#FEE2E2",
+                  },
+                ]}
+                onPress={handleDeleteSelectedTx}
+                disabled={isDeletingTx}
+                activeOpacity={0.7}
+              >
+                {isDeletingTx ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+                ) : (
+                  <>
+                    <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                    <Text
+                      style={[styles.modalCancelBtnText, { color: "#EF4444" }]}
+                    >
+                      Delete Transaction
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -9734,6 +10209,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderTopWidth: 1,
+    marginBottom: 24,
   },
   walkthroughNavBackBtn: {
     flexDirection: "row",

@@ -180,6 +180,8 @@ export interface PaymentCard {
   expiry?: string;
   createdAt: string;
   balance: number;
+  initialBalance?: number;
+  shortCode?: string;
 }
 
 export interface SavingsPocket {
@@ -191,6 +193,7 @@ export interface SavingsPocket {
   icon: string;
   category: "emergency" | "travel" | "bills" | "deposit" | "personal";
   createdAt: string;
+  initialAmount?: number;
 }
 
 export type WalletTransactionType =
@@ -249,10 +252,11 @@ export interface WalletTransaction {
   paymentMethodUsed: string;
   referenceId?: string;
   timestamp: string;
-  status: "completed" | "pending";
+  status: "completed" | "pending" | "failed";
   note?: string;
   icon?: string;
   category?: string;
+  source?: string;
 }
 
 export interface WalletState {
@@ -328,6 +332,278 @@ function sanitizeForFirestore<T>(val: T): T {
     return copy;
   }
   return val;
+}
+
+function isCardMatchTx(tx: WalletTransaction, card: PaymentCard): boolean {
+  if (!tx || !card) return false;
+  if (
+    tx.referenceId &&
+    (tx.referenceId === card.id || tx.referenceId.startsWith(card.id))
+  ) {
+    return true;
+  }
+  if (tx.paymentMethodUsed) {
+    const p = tx.paymentMethodUsed.toLowerCase().trim();
+    const c = card.name.toLowerCase().trim();
+    if (p === c || p.includes(c) || c.includes(p)) return true;
+    const cardShortCode =
+      card.shortCode ||
+      (card.type && PHILIPPINE_CARD_PRESETS[card.type]
+        ? PHILIPPINE_CARD_PRESETS[card.type].shortCode
+        : undefined);
+    if (cardShortCode && p.includes(cardShortCode.toLowerCase())) return true;
+    if (
+      card.type &&
+      (p.includes(card.type.toLowerCase()) ||
+        card.type.toLowerCase().includes(p))
+    ) {
+      return true;
+    }
+  }
+  if (
+    tx.type === "cash_expense" &&
+    (card.type === "cash" ||
+      card.id === "card_cash_hand" ||
+      card.name.toLowerCase().includes("cash"))
+  ) {
+    return true;
+  }
+  if (
+    !tx.referenceId &&
+    card.isDefault &&
+    (tx.type === "cash_in" || tx.type === "debt_settlement")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function calculateCardDeltaForTxs(
+  txs: WalletTransaction[],
+  card: PaymentCard,
+): number {
+  let delta = 0;
+  for (const tx of txs) {
+    const isCardMatch = isCardMatchTx(tx, card);
+    if (tx.type === "cash_in") {
+      if (isCardMatch) delta += tx.amount;
+    } else if (
+      tx.type === "expense_simulation" ||
+      tx.type === "cash_expense" ||
+      tx.type === "bill_payment"
+    ) {
+      if (isCardMatch) delta -= tx.amount;
+    } else if (tx.type === "debt_settlement") {
+      if (
+        isCardMatch ||
+        (tx.paymentMethodUsed === "Splitzy Wallet" && card.isDefault)
+      ) {
+        delta -= tx.amount;
+      }
+    } else if (tx.type === "savings_deposit") {
+      if (
+        tx.paymentMethodUsed === card.name ||
+        (tx.referenceId && tx.referenceId.startsWith(card.id))
+      ) {
+        delta -= tx.amount;
+      }
+    } else if (tx.type === "savings_withdrawal") {
+      if (
+        tx.paymentMethodUsed === card.name ||
+        (tx.referenceId && tx.referenceId.endsWith(card.id))
+      ) {
+        delta += tx.amount;
+      }
+    } else if (tx.type === "card_transfer") {
+      if (tx.referenceId && tx.referenceId.includes("->")) {
+        const [fromId, toId] = tx.referenceId.split("->");
+        if (fromId === card.id) delta -= tx.amount;
+        if (toId === card.id) delta += tx.amount;
+      } else if (tx.paymentMethodUsed && tx.paymentMethodUsed.includes("➔")) {
+        const parts = tx.paymentMethodUsed.split("➔").map((s) => s.trim());
+        if (parts[0] === card.name) delta -= tx.amount;
+        if (parts[1] === card.name) delta += tx.amount;
+      }
+    }
+  }
+  return delta;
+}
+
+export function reconcileWalletState(
+  state: WalletState,
+  previousState?: WalletState | null,
+): WalletState {
+  if (!state) return state;
+
+  const rawCards = Array.isArray(state.cards) ? state.cards : [];
+  const rawPockets = Array.isArray(state.pockets) ? state.pockets : [];
+  const rawTransactions = (
+    Array.isArray(state.transactions) ? state.transactions : []
+  ).map((tx) => {
+    if (!tx) return tx;
+    if (tx.source && !tx.note) {
+      return { ...tx, note: tx.source };
+    }
+    // Preserve note from description if note was not explicitly saved
+    if (
+      !tx.note &&
+      tx.description &&
+      !tx.description.startsWith("Daily simulated expense") &&
+      !tx.description.startsWith("Added ₱") &&
+      !tx.description.startsWith("Transferred ₱")
+    ) {
+      return { ...tx, note: tx.description };
+    }
+    return tx;
+  });
+
+  const effectiveTxs = rawTransactions.filter(
+    (tx) =>
+      tx &&
+      typeof tx.amount === "number" &&
+      !isNaN(tx.amount) &&
+      tx.status !== "failed",
+  );
+
+  // Detect manually deleted transactions in Firebase Cloud
+  const previousTxs = Array.isArray(previousState?.transactions)
+    ? previousState.transactions.filter(
+        (pt) =>
+          pt &&
+          typeof pt.amount === "number" &&
+          !isNaN(pt.amount) &&
+          pt.status !== "failed",
+      )
+    : [];
+
+  const currentTxIdSet = new Set(effectiveTxs.map((t) => t.id));
+  const deletedTxs = previousTxs.filter((pt) => !currentTxIdSet.has(pt.id));
+
+  // 1. Reconcile Savings Pockets
+  const updatedPockets = rawPockets.map((pocket) => {
+    const prevPocket = previousState?.pockets?.find((p) => p.id === pocket.id);
+    let pocketDelta = 0;
+    for (const tx of effectiveTxs) {
+      if (tx.type === "savings_deposit" && tx.referenceId === pocket.id) {
+        pocketDelta += tx.amount;
+      } else if (
+        tx.type === "savings_withdrawal" &&
+        tx.referenceId === pocket.id
+      ) {
+        pocketDelta -= tx.amount;
+      }
+    }
+
+    let initialPocket: number;
+    if (typeof pocket.initialAmount === "number") {
+      initialPocket = pocket.initialAmount;
+    } else if (typeof prevPocket?.initialAmount === "number") {
+      initialPocket = prevPocket.initialAmount;
+    } else if (
+      deletedTxs.length > 0 &&
+      typeof prevPocket?.currentAmount === "number"
+    ) {
+      let deletedPocketDelta = 0;
+      for (const dtx of deletedTxs) {
+        if (dtx.type === "savings_deposit" && dtx.referenceId === pocket.id) {
+          deletedPocketDelta += dtx.amount;
+        } else if (
+          dtx.type === "savings_withdrawal" &&
+          dtx.referenceId === pocket.id
+        ) {
+          deletedPocketDelta -= dtx.amount;
+        }
+      }
+      const adjustedPocketAmount = Math.max(
+        0,
+        prevPocket.currentAmount - deletedPocketDelta,
+      );
+      initialPocket = Math.max(0, adjustedPocketAmount - pocketDelta);
+    } else if (
+      previousTxs.length > 0 &&
+      typeof prevPocket?.currentAmount === "number"
+    ) {
+      let prevPocketDelta = 0;
+      for (const ptx of previousTxs) {
+        if (ptx.type === "savings_deposit" && ptx.referenceId === pocket.id) {
+          prevPocketDelta += ptx.amount;
+        } else if (
+          ptx.type === "savings_withdrawal" &&
+          ptx.referenceId === pocket.id
+        ) {
+          prevPocketDelta -= ptx.amount;
+        }
+      }
+      initialPocket = Math.max(0, prevPocket.currentAmount - prevPocketDelta);
+    } else {
+      initialPocket = Math.max(0, (pocket.currentAmount || 0) - pocketDelta);
+    }
+
+    const computedTarget = Math.max(0, initialPocket + pocketDelta);
+    return {
+      ...pocket,
+      initialAmount: initialPocket,
+      currentAmount: computedTarget,
+    };
+  });
+
+  // 2. Reconcile Payment Cards with deterministic cloud deletion support
+  const isSingleCard = rawCards.length === 1;
+  const updatedCards = rawCards.map((card) => {
+    const isDefault = Boolean(card.isDefault) || isSingleCard;
+    const prevCard = previousState?.cards?.find((c) => c.id === card.id);
+    const cardDelta = calculateCardDeltaForTxs(effectiveTxs, card);
+
+    let initialBase: number;
+    if (typeof card.initialBalance === "number") {
+      initialBase = card.initialBalance;
+    } else if (typeof prevCard?.initialBalance === "number") {
+      initialBase = prevCard.initialBalance;
+    } else if (deletedTxs.length > 0 && typeof prevCard?.balance === "number") {
+      const deletedDelta = calculateCardDeltaForTxs(deletedTxs, card);
+      const adjustedBal = Math.max(0, prevCard.balance - deletedDelta);
+      initialBase = Math.max(0, adjustedBal - cardDelta);
+    } else if (
+      previousTxs.length > 0 &&
+      typeof prevCard?.balance === "number"
+    ) {
+      const prevDelta = calculateCardDeltaForTxs(previousTxs, card);
+      initialBase = Math.max(0, prevCard.balance - prevDelta);
+    } else {
+      initialBase = Math.max(0, (card.balance || 0) - cardDelta);
+    }
+
+    const computedBal = Math.max(0, initialBase + cardDelta);
+    return {
+      ...card,
+      initialBalance: initialBase,
+      balance: computedBal,
+    };
+  });
+
+  const totalBalance =
+    updatedCards.length > 0
+      ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
+      : effectiveTxs.reduce((acc, tx) => {
+          if (tx.type === "cash_in") return acc + tx.amount;
+          if (
+            tx.type === "expense_simulation" ||
+            tx.type === "cash_expense" ||
+            tx.type === "bill_payment" ||
+            tx.type === "debt_settlement"
+          )
+            return Math.max(0, acc - tx.amount);
+          return acc;
+        }, 0);
+
+  return {
+    ...state,
+    cards: updatedCards,
+    pockets: updatedPockets,
+    transactions: rawTransactions,
+    balance: totalBalance,
+    updatedAt: state.updatedAt || new Date().toISOString(),
+  };
 }
 
 export class WebWalletService {
@@ -436,22 +712,7 @@ export class WebWalletService {
     }
 
     if (remoteState) {
-      const cards = (remoteState.cards || []).map((c: any) => ({
-        ...c,
-        balance: typeof c.balance === "number" ? c.balance : 0,
-      }));
-      const derivedBalance =
-        cards.length > 0
-          ? cards.reduce((acc, c) => acc + (c.balance || 0), 0)
-          : typeof remoteState.balance === "number"
-            ? remoteState.balance
-            : 0;
-
-      const synchronized: WalletState = {
-        ...remoteState,
-        cards,
-        balance: derivedBalance,
-      };
+      const synchronized = reconcileWalletState(remoteState);
 
       try {
         localStorage.setItem(
@@ -463,23 +724,8 @@ export class WebWalletService {
     }
 
     if (cached) {
-      const cards = (cached.cards || []).map((c: any) => ({
-        ...c,
-        balance: typeof c.balance === "number" ? c.balance : 0,
-      }));
-      const derivedBalance =
-        cards.length > 0
-          ? cards.reduce((acc, c) => acc + (c.balance || 0), 0)
-          : typeof cached.balance === "number"
-            ? cached.balance
-            : 0;
-
-      const synchronized: WalletState = {
-        ...cached,
-        cards,
-        balance: derivedBalance,
-      };
-      await this.persist(targetUid, synchronized);
+      const synchronized = reconcileWalletState(cached);
+      this.persist(targetUid, synchronized);
       return synchronized;
     }
 
@@ -542,7 +788,10 @@ export class WebWalletService {
     const effectiveUid =
       !userId || userId === "guest" ? auth.currentUser?.uid || "guest" : userId;
 
-    callback(this.getLocalWallet(effectiveUid));
+    let lastKnownState: WalletState | null = null;
+    const initialLocal = this.getLocalWallet(effectiveUid);
+    lastKnownState = initialLocal;
+    callback(initialLocal);
 
     const targetUid =
       auth.currentUser?.uid || (effectiveUid !== "guest" ? effectiveUid : null);
@@ -561,25 +810,8 @@ export class WebWalletService {
           if (snap.exists()) {
             const data = snap.data() as WalletState;
             if (data && !isLegacyDemoWallet(data)) {
-              const cards = (data.cards || []).map((c: any) => ({
-                ...c,
-                balance: typeof c.balance === "number" ? c.balance : 0,
-              }));
-              const derivedBalance =
-                cards.length > 0
-                  ? cards.reduce((acc, c) => acc + (c.balance || 0), 0)
-                  : typeof data.balance === "number"
-                    ? data.balance
-                    : 0;
-
-              const synchronized: WalletState = {
-                ...data,
-                cards,
-                balance: derivedBalance,
-                pockets: data.pockets || [],
-                transactions: data.transactions || [],
-                updatedAt: data.updatedAt || new Date().toISOString(),
-              };
+              const synchronized = reconcileWalletState(data, lastKnownState);
+              lastKnownState = synchronized;
 
               try {
                 localStorage.setItem(
@@ -588,10 +820,30 @@ export class WebWalletService {
                 );
               } catch {}
               callback(synchronized);
+
+              // Detect if Firebase had transactions manually deleted or balance altered
+              const cardBalancesDiffer = (data.cards || []).some((c: any) => {
+                const match = synchronized.cards.find((sc) => sc.id === c.id);
+                return match && match.balance !== c.balance;
+              });
+              const pocketsDiffer = (data.pockets || []).some((p: any) => {
+                const match = synchronized.pockets.find((sp) => sp.id === p.id);
+                return match && match.currentAmount !== p.currentAmount;
+              });
+              if (
+                cardBalancesDiffer ||
+                pocketsDiffer ||
+                synchronized.balance !== data.balance ||
+                (data.transactions || []).length !==
+                  synchronized.transactions.length
+              ) {
+                this.persist(targetUid, synchronized).catch(() => {});
+              }
             }
           } else {
             // When document is deleted in Firestore cloud, seamlessly sync empty wallet state
             const empty = buildDefaultWallet(targetUid);
+            lastKnownState = empty;
             try {
               localStorage.setItem(
                 WALLET_STORAGE_KEY_PREFIX + effectiveUid,
@@ -620,22 +872,8 @@ export class WebWalletService {
                 return;
               }
 
-              const cards = (remote.cards || []).map((c: any) => ({
-                ...c,
-                balance: typeof c.balance === "number" ? c.balance : 0,
-              }));
-              const derivedBalance =
-                cards.length > 0
-                  ? cards.reduce((acc, c) => acc + (c.balance || 0), 0)
-                  : typeof remote.balance === "number"
-                    ? remote.balance
-                    : 0;
-
-              const synchronized: WalletState = {
-                ...remote,
-                cards,
-                balance: derivedBalance,
-              };
+              const synchronized = reconcileWalletState(remote, lastKnownState);
+              lastKnownState = synchronized;
 
               try {
                 localStorage.setItem(
@@ -644,11 +882,30 @@ export class WebWalletService {
                 );
               } catch {}
               callback(synchronized);
+
+              const cardBalancesDiffer = (remote.cards || []).some((c: any) => {
+                const match = synchronized.cards.find((sc) => sc.id === c.id);
+                return match && match.balance !== c.balance;
+              });
+              const pocketsDiffer = (remote.pockets || []).some((p: any) => {
+                const match = synchronized.pockets.find((sp) => sp.id === p.id);
+                return match && match.currentAmount !== p.currentAmount;
+              });
+              if (
+                cardBalancesDiffer ||
+                pocketsDiffer ||
+                synchronized.balance !== remote.balance ||
+                (remote.transactions || []).length !==
+                  synchronized.transactions.length
+              ) {
+                this.persist(targetUid, synchronized).catch(() => {});
+              }
             } else if (
               data &&
               (data.walletState === null || data.walletState === undefined)
             ) {
               const empty = buildDefaultWallet(targetUid);
+              lastKnownState = empty;
               try {
                 localStorage.setItem(
                   WALLET_STORAGE_KEY_PREFIX + effectiveUid,
@@ -660,6 +917,7 @@ export class WebWalletService {
           } else {
             // User doc deleted in cloud
             const empty = buildDefaultWallet(targetUid);
+            lastKnownState = empty;
             try {
               localStorage.setItem(
                 WALLET_STORAGE_KEY_PREFIX + effectiveUid,
@@ -706,6 +964,7 @@ export class WebWalletService {
     userId: string,
     amount: number,
     cardIdOrMethod: string = "GCash",
+    source?: string,
   ): Promise<WalletState> {
     const current = await this.getWallet(userId);
 
@@ -720,7 +979,14 @@ export class WebWalletService {
 
     const updatedCards = current.cards.map((c) => {
       if (targetCard && c.id === targetCard.id) {
-        return { ...c, balance: (c.balance || 0) + amount };
+        return {
+          ...c,
+          balance: (c.balance || 0) + amount,
+          initialBalance:
+            typeof c.initialBalance === "number"
+              ? c.initialBalance
+              : c.balance || 0,
+        };
       }
       return c;
     });
@@ -731,16 +997,23 @@ export class WebWalletService {
         ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
         : current.balance + amount;
 
+    const sourceTrimmed = source?.trim() || "";
     const newTx: WalletTransaction = {
       id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
       type: "cash_in",
       amount,
-      title: `Top-up via ${displayMethod}`,
-      description: `Added ₱${amount.toLocaleString()} to ${displayMethod}`,
+      title: sourceTrimmed
+        ? `Top-up: ${sourceTrimmed}`
+        : `Top-up via ${displayMethod}`,
+      description: sourceTrimmed
+        ? `Added ₱${amount.toLocaleString()} from ${sourceTrimmed} to ${displayMethod}`
+        : `Added ₱${amount.toLocaleString()} to ${displayMethod}`,
       paymentMethodUsed: displayMethod,
       referenceId: targetCard?.id || "",
       timestamp: new Date().toISOString(),
       status: "completed",
+      source: sourceTrimmed || undefined,
+      note: sourceTrimmed || undefined,
     };
 
     const updated: WalletState = {
@@ -751,8 +1024,9 @@ export class WebWalletService {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.persist(userId, updated);
-    return updated;
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
   }
 
   async deductForBill(
@@ -903,6 +1177,7 @@ export class WebWalletService {
     const newCard: PaymentCard = {
       ...card,
       balance: cardBal,
+      initialBalance: cardBal,
       expiry: card.expiry || "",
       id: "card_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
       createdAt: new Date().toISOString(),
@@ -1210,17 +1485,19 @@ export class WebWalletService {
       0,
     );
 
+    const finalNote = typeof note === "string" ? note.trim() : "";
     const newTx: WalletTransaction = {
       id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
       type: "expense_simulation",
       amount,
       title: categoryTitle,
-      description: note || `Daily simulated expense charged to ${card.name}`,
+      description:
+        finalNote || `Daily simulated expense charged to ${card.name}`,
       paymentMethodUsed: card.name,
       referenceId: card.id,
       timestamp: new Date().toISOString(),
       status: "completed",
-      note: note?.trim() || undefined,
+      note: finalNote || undefined,
       icon: categoryIcon || undefined,
       category: categoryTitle,
     };
@@ -1233,11 +1510,83 @@ export class WebWalletService {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.persist(userId, updated);
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
     return {
       success: true,
-      updatedState: updated,
+      updatedState: reconciled,
       message: `Charged ₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} for ${categoryTitle} from ${card.name}!`,
+    };
+  }
+
+  async deleteTransaction(
+    userId: string,
+    txId: string,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const targetTx = current.transactions.find((t) => t.id === txId);
+    if (!targetTx) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Transaction not found.",
+      };
+    }
+
+    const remainingTxs = current.transactions.filter((t) => t.id !== txId);
+    const updated: WalletState = {
+      ...current,
+      transactions: remainingTxs,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const reconciled = reconcileWalletState(updated, current);
+    await this.persist(userId, reconciled);
+    return {
+      success: true,
+      updatedState: reconciled,
+      message: "Transaction deleted and balances automatically adjusted.",
+    };
+  }
+
+  async updateTransactionNote(
+    userId: string,
+    txId: string,
+    newNote: string,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const txIndex = current.transactions.findIndex((t) => t.id === txId);
+    if (txIndex === -1) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Transaction not found.",
+      };
+    }
+
+    const cleanNote = newNote.trim();
+    const targetTx = current.transactions[txIndex];
+    const updatedTx: WalletTransaction = {
+      ...targetTx,
+      note: cleanNote || undefined,
+      description: cleanNote || targetTx.description,
+    };
+
+    const updatedTransactions = [...current.transactions];
+    updatedTransactions[txIndex] = updatedTx;
+
+    const updated: WalletState = {
+      ...current,
+      transactions: updatedTransactions,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const reconciled = reconcileWalletState(updated, current);
+    await this.persist(userId, reconciled);
+    return {
+      success: true,
+      updatedState: reconciled,
+      message: "Expense note updated successfully!",
     };
   }
 

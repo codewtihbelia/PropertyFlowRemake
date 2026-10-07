@@ -234,6 +234,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [chatInputText, setChatInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const messageScrollRef = useRef<ScrollView>(null);
+  const chatInputRef = useRef<TextInput>(null);
+  const noteReplyInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInput>(null);
 
   // Messenger-style tap to reveal message timestamp and seen status
   const [toggledMessageIds, setToggledMessageIds] = useState<
@@ -1543,7 +1546,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               </TouchableOpacity>
 
               {/* Rounded capsule text input */}
-              <View
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => chatInputRef.current?.focus()}
                 style={[
                   styles.capsuleTextInputWrapper,
                   {
@@ -1553,6 +1558,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 ]}
               >
                 <TextInput
+                  ref={chatInputRef}
                   style={[
                     styles.capsuleTextInput,
                     { color: isDark ? "#FFFFFF" : "#0F172A" },
@@ -1564,8 +1570,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   onSubmitEditing={handleSendMessage}
                   returnKeyType="send"
                   multiline={false}
+                  blurOnSubmit={false}
+                  autoCorrect={true}
+                  autoCapitalize="sentences"
+                  underlineColorAndroid="transparent"
                 />
-              </View>
+              </TouchableOpacity>
 
               {/* Circular Send Button */}
               <TouchableOpacity
@@ -1846,7 +1856,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
       {/* Search Input Bar */}
       <View style={styles.searchBarWrapper}>
-        <View
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => searchInputRef.current?.focus()}
           style={[
             styles.searchBar,
             {
@@ -1862,6 +1874,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             style={styles.searchIcon}
           />
           <TextInput
+            ref={searchInputRef}
             style={[
               styles.searchInput,
               { color: isDark ? "#FFFFFF" : "#0F172A" },
@@ -1884,7 +1897,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               />
             </TouchableOpacity>
           )}
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* FACEBOOK MESSENGER STYLE: Active Stories / Thought Notes Tray */}
@@ -3050,7 +3063,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Rounded capsule text input */}
-                  <View
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => noteReplyInputRef.current?.focus()}
                     style={[
                       styles.noteViewerCapsuleInputWrapper,
                       {
@@ -3062,6 +3077,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     ]}
                   >
                     <TextInput
+                      ref={noteReplyInputRef}
                       style={[
                         styles.noteViewerCapsuleTextInput,
                         { color: isDark ? "#FFFFFF" : "#0F172A" },
@@ -3072,6 +3088,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       onChangeText={setNoteReplyText}
                       onSubmitEditing={handleSendNoteReply}
                       returnKeyType="send"
+                      blurOnSubmit={false}
+                      autoCorrect={true}
+                      autoCapitalize="sentences"
+                      underlineColorAndroid="transparent"
                     />
 
                     <Feather
@@ -3080,7 +3100,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       color="#2563EB"
                       style={{ marginRight: 4 }}
                     />
-                  </View>
+                  </TouchableOpacity>
 
                   {/* Right side: Quick emojis or Send button */}
                   {noteReplyText.trim().length > 0 ? (
@@ -3506,8 +3526,11 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    height: "100%",
     fontSize: 13.5,
     fontWeight: "500",
+    paddingVertical: 0,
+    textAlignVertical: "center",
   },
 
   /* FACEBOOK MESSENGER STORY / THOUGHT NOTE TRAY */
@@ -4038,8 +4061,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   capsuleTextInput: {
-    fontSize: 13.5,
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    fontSize: 14,
     paddingVertical: 0,
+    paddingHorizontal: 0,
+    textAlignVertical: "center",
   },
   capsuleSendButton: {
     width: 38,
@@ -4374,8 +4402,10 @@ const styles = StyleSheet.create({
   },
   noteViewerCapsuleTextInput: {
     flex: 1,
+    height: "100%",
     fontSize: 14,
     paddingVertical: 0,
+    textAlignVertical: "center",
   },
   noteViewerQuickEmojiRightWrap: {
     flexDirection: "row",
