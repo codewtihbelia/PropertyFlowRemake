@@ -284,9 +284,11 @@ export const NotificationDetailsScreen: React.FC<
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(90, insets.bottom + 40) },
+          { paddingBottom: Math.max(100, insets.bottom + 50) },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         {/* Main Full-Mode Notification Hero Card */}
         <View

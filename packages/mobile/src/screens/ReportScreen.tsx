@@ -1115,6 +1115,8 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             { paddingBottom: Math.max(insets.bottom + 90, 110) },
           ]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
         >
           {/* TITLE & SUBTITLE AREA */}
           <View style={styles.titleSection}>

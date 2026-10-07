@@ -1107,16 +1107,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         {/* Message Feed */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={
-            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-          }
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
         >
           <ScrollView
             ref={messageScrollRef}
             style={styles.chatScrollList}
             contentContainerStyle={styles.chatScrollContent}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => {
               messageScrollRef.current?.scrollToEnd({ animated: true });
@@ -2989,7 +2988,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
             {/* Bottom Section: Quick Reaction Pills & Reply Input Bar */}
             <KeyboardAvoidingView
-              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
             >
               <View
                 style={[

@@ -1783,56 +1783,65 @@ export const AttendanceScreen: React.FC<{
               )}
 
               {/* =========================================================================
-                WATER UTILITY FEE ACTION BAR - Pixel perfect match to Image 1
+                WATER UTILITY FEE ACTION BAR
                 ========================================================================= */}
               <View
                 style={[
                   styles.feeBarCard,
+                  isEditingAttendance && styles.feeBarCardEditing,
                   isDark && {
                     backgroundColor: colors.card,
-                    borderColor: colors.border,
+                    borderColor: isEditingAttendance
+                      ? isDark
+                        ? "rgba(59, 130, 246, 0.45)"
+                        : "#93C5FD"
+                      : colors.border,
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.feeIconCircle,
-                    isDark && { backgroundColor: colors.primaryLight },
-                  ]}
-                >
-                  <Ionicons
-                    name="water"
-                    size={18}
-                    color={isDark ? colors.accent : "#2563EB"}
-                  />
-                </View>
-
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text
+                {/* Header Row: Icon, Title & Rate, Status/Edit Badge */}
+                <View style={styles.feeBarHeaderRow}>
+                  <View
                     style={[
-                      styles.feeBarTitle,
-                      isDark && { color: colors.text },
+                      styles.feeIconCircle,
+                      isDark && { backgroundColor: colors.primaryLight },
                     ]}
                   >
-                    Water Utility Fee
-                  </Text>
-                  <Text
-                    style={[
-                      styles.feeBarSubtitle,
-                      isDark && { color: colors.textSecondary },
-                    ]}
-                  >
-                    {pricingModel === "FIXED_MONTHLY"
-                      ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
-                      : pricingModel === "FIXED_PER_PERSON_MONTH"
-                        ? `Fixed ₱${fixedPerPersonPesos.toFixed(2)} flat fee`
-                        : `Fixed ₱${ratePerDayPesos.toFixed(0)} per present day`}
-                  </Text>
-                </View>
+                    <Ionicons
+                      name="water"
+                      size={18}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                  </View>
 
-                {!isFixedMode && !isCycleClosedOrPaidOff && (
-                  <View style={styles.feeBarActions}>
-                    {isCalendarLocked ? (
+                  <View style={styles.feeBarTextWrap}>
+                    <Text
+                      style={[
+                        styles.feeBarTitle,
+                        isDark && { color: colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Water Utility Fee
+                    </Text>
+                    <Text
+                      style={[
+                        styles.feeBarSubtitle,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {pricingModel === "FIXED_MONTHLY"
+                        ? `Fixed ₱${fixedMonthlyPesos.toFixed(2)} split evenly`
+                        : pricingModel === "FIXED_PER_PERSON_MONTH"
+                          ? `Fixed ₱${fixedPerPersonPesos.toFixed(2)} flat fee`
+                          : `Fixed ₱${ratePerDayPesos.toFixed(0)} per present day`}
+                    </Text>
+                  </View>
+
+                  {!isFixedMode &&
+                    !isCycleClosedOrPaidOff &&
+                    isCalendarLocked && (
                       <TouchableOpacity
                         style={[
                           styles.editAttendancePillBtn,
@@ -1858,16 +1867,85 @@ export const AttendanceScreen: React.FC<{
                           Edit Attendance
                         </Text>
                       </TouchableOpacity>
-                    ) : (
-                      <>
+                    )}
+
+                  {!isFixedMode &&
+                    !isCycleClosedOrPaidOff &&
+                    !isCalendarLocked &&
+                    isEditingAttendance &&
+                    isMyAttendanceSubmitted && (
+                      <View
+                        style={[
+                          styles.editingModeBadge,
+                          isDark && {
+                            backgroundColor: "rgba(59, 130, 246, 0.15)",
+                            borderColor: "rgba(59, 130, 246, 0.35)",
+                          },
+                        ]}
+                      >
+                        <View style={styles.editingPulseDot} />
+                        <Text
+                          style={[
+                            styles.editingModeBadgeText,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
+                          Editing
+                        </Text>
+                      </View>
+                    )}
+
+                  {isCycleClosedOrPaidOff && (
+                    <View
+                      style={[
+                        styles.settledFeePill,
+                        isDark && {
+                          backgroundColor: "rgba(16, 185, 129, 0.16)",
+                          borderColor: "rgba(16, 185, 129, 0.35)",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.settledFeePillText,
+                          isDark && { color: "#34D399" },
+                        ]}
+                      >
+                        Settled · ₱0.00
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Dedicated Action Toolbar when editing or marking attendance */}
+                {!isFixedMode &&
+                  !isCycleClosedOrPaidOff &&
+                  !isCalendarLocked && (
+                    <>
+                      <View
+                        style={[
+                          styles.feeBarDivider,
+                          isDark && { backgroundColor: colors.border },
+                        ]}
+                      />
+
+                      <View style={styles.feeBarActionsStrip}>
                         <TouchableOpacity
                           style={[
                             styles.markAllBtn,
-                            isDark && { backgroundColor: colors.primaryLight },
+                            isDark && {
+                              backgroundColor: colors.primaryLight,
+                              borderColor: colors.borderHighlighted,
+                            },
                           ]}
                           onPress={markAll}
-                          activeOpacity={0.65}
+                          activeOpacity={0.7}
                         >
+                          <Feather
+                            name="check-square"
+                            size={13}
+                            color={isDark ? colors.accent : "#2563EB"}
+                          />
                           <Text
                             style={[
                               styles.markAllBtnText,
@@ -1884,12 +1962,16 @@ export const AttendanceScreen: React.FC<{
                             isDark && {
                               backgroundColor: colors.surfaceInset,
                               borderColor: colors.border,
-                              borderWidth: 1,
                             },
                           ]}
                           onPress={clearAll}
-                          activeOpacity={0.65}
+                          activeOpacity={0.7}
                         >
+                          <Feather
+                            name="rotate-ccw"
+                            size={12}
+                            color={isDark ? colors.textSecondary : "#64748B"}
+                          />
                           <Text
                             style={[
                               styles.clearBtnText,
@@ -1905,48 +1987,31 @@ export const AttendanceScreen: React.FC<{
                             style={[
                               styles.cancelEditPillBtn,
                               isDark && {
-                                backgroundColor: "rgba(239, 68, 68, 0.14)",
-                                borderColor: "rgba(239, 68, 68, 0.3)",
+                                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                                borderColor: "rgba(239, 68, 68, 0.28)",
                               },
                             ]}
                             onPress={handleCancelEditing}
                             activeOpacity={0.7}
                           >
+                            <Feather
+                              name="x"
+                              size={13}
+                              color={isDark ? "#F87171" : "#DC2626"}
+                            />
                             <Text
                               style={[
                                 styles.cancelEditPillBtnText,
-                                isDark && { color: "#FCA5A5" },
+                                isDark && { color: "#F87171" },
                               ]}
                             >
                               Cancel
                             </Text>
                           </TouchableOpacity>
                         )}
-                      </>
-                    )}
-                  </View>
-                )}
-
-                {isCycleClosedOrPaidOff && (
-                  <View
-                    style={[
-                      styles.settledFeePill,
-                      isDark && {
-                        backgroundColor: "rgba(16, 185, 129, 0.16)",
-                        borderColor: "rgba(16, 185, 129, 0.35)",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.settledFeePillText,
-                        isDark && { color: "#34D399" },
-                      ]}
-                    >
-                      Settled · ₱0.00
-                    </Text>
-                  </View>
-                )}
+                      </View>
+                    </>
+                  )}
               </View>
 
               {/* Locked Calendar Hint Banner (when user taps a locked date) */}
@@ -2802,7 +2867,7 @@ export const AttendanceScreen: React.FC<{
                         <View style={styles.submitBtnInner}>
                           <Text style={styles.submitButtonText}>
                             {isMyAttendanceSubmitted
-                              ? `Update (₱${waterFee.toFixed(2)})`
+                              ? `Save & Submit Attendance (₱${waterFee.toFixed(2)})`
                               : `Submit Attendance (₱${waterFee.toFixed(2)})`}
                           </Text>
                           <Feather
@@ -4007,47 +4072,104 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  /* Water Utility Fee Bar matching Image 1 */
+  /* Water Utility Fee Bar & Actions Strip */
   feeBarCard: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 14,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  feeBarCardEditing: {
+    borderColor: "#93C5FD",
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  feeBarHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   feeIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
+    marginRight: 12,
+  },
+  feeBarTextWrap: {
+    flex: 1,
+    marginRight: 8,
   },
   feeBarTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "800",
     color: "#0F172A",
+    letterSpacing: -0.2,
   },
   feeBarSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: "#64748B",
-    marginTop: 1,
+    marginTop: 2,
+    fontWeight: "500",
   },
-  feeBarActions: {
+  editingModeBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 10,
+    paddingVertical: 4.5,
+    borderRadius: 12,
+  },
+  editingPulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#2563EB",
+  },
+  editingModeBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#2563EB",
+    letterSpacing: 0.2,
+  },
+  feeBarDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  feeBarActionsStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   markAllBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     backgroundColor: "#EFF6FF",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    paddingVertical: 8.5,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
   markAllBtnText: {
     fontSize: 12,
@@ -4055,15 +4177,22 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
   clearBtn: {
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 8.5,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
   clearBtnText: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#64748B",
+    color: "#475569",
   },
   editAttendancePillBtn: {
     flexDirection: "row",
@@ -4082,12 +4211,17 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
   cancelEditPillBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
     backgroundColor: "#FEF2F2",
     borderWidth: 1,
     borderColor: "#FECACA",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 14,
+    paddingVertical: 8.5,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
   cancelEditPillBtnText: {
     fontSize: 12,

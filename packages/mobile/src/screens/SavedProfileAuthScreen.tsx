@@ -387,7 +387,8 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       style={[styles.container, { backgroundColor: bgColor }]}
     >
       <StatusBar
@@ -422,11 +423,12 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingBottom: Math.max(80, insets.bottom + 40),
+            paddingBottom: Math.max(90, insets.bottom + 50),
           },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         <View style={styles.mainContent}>
           {/* Avatar with Surrounding Floating Splitzy Badges */}

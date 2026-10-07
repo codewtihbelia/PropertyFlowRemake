@@ -2038,6 +2038,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           transparent={true}
           animationType="fade"
           onRequestClose={() => setPreviewQrModal(null)}
+          statusBarTranslucent={true}
         >
           <View style={styles.lightboxOverlay}>
             <TouchableOpacity
@@ -2183,10 +2184,8 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? topInset : (StatusBar.currentHeight ?? 0)
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
       >
         <ScrollView
           key="payment-form-scroll"
@@ -2195,11 +2194,12 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             {
               paddingBottom: Math.max(
                 120,
-                insets.bottom + (isKeyboardVisible ? keyboardHeight + 30 : 95),
+                insets.bottom + (isKeyboardVisible ? keyboardHeight + 40 : 95),
               ),
             },
           ]}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           showsVerticalScrollIndicator={false}
           onScroll={onScroll}
           scrollEventThrottle={16}
@@ -3045,6 +3045,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
         transparent={true}
         animationType="fade"
         onRequestClose={() => setPreviewQrModal(null)}
+        statusBarTranslucent={true}
       >
         <View style={styles.lightboxOverlay}>
           <TouchableOpacity

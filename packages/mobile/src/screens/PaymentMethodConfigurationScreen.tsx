@@ -596,9 +596,10 @@ export const PaymentMethodConfigurationScreen: React.FC<
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(90, insets.bottom + 40) },
+          { paddingBottom: Math.max(100, insets.bottom + 50) },
         ]}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Guide Card */}
@@ -1139,12 +1140,13 @@ export const PaymentMethodConfigurationScreen: React.FC<
         }
       >
         <ScrollView
-          style={{ maxHeight: 520 }}
+          style={{ flexShrink: 1 }}
           contentContainerStyle={{
-            paddingBottom: Math.max(40, insets.bottom + 24),
+            paddingBottom: Math.max(80, insets.bottom + 60),
           }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
         >
           <View style={{ paddingTop: 4 }}>
             {/* Payment Type Selection */}
@@ -1813,6 +1815,7 @@ export const PaymentMethodConfigurationScreen: React.FC<
         transparent={true}
         animationType="fade"
         onRequestClose={() => setPreviewQrUrl(null)}
+        statusBarTranslucent={true}
       >
         <View style={styles.lightboxOverlay}>
           <TouchableOpacity

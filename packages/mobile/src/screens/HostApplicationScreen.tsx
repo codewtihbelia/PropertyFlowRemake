@@ -278,10 +278,8 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={0}
       >
         <ScrollView
           contentContainerStyle={[
@@ -289,6 +287,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
             { paddingBottom: Math.max(100, insets.bottom + 48) },
           ]}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           showsVerticalScrollIndicator={false}
         >
           {loading ? (

@@ -922,6 +922,8 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
             },
           ]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
         >
           <View
             style={[
@@ -1090,6 +1092,8 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
           { paddingBottom: Math.max(100, insets.bottom + 60) },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         {/* Household Information Banner Card */}
         <View

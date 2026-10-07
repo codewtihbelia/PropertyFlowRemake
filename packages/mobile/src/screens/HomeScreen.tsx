@@ -1566,6 +1566,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               },
             ]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             onScroll={onScroll}
             scrollEventThrottle={16}
           >
@@ -3192,6 +3194,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {selectedSettledExpense && (
           <ScrollView
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             style={{ marginTop: 4, maxHeight: 440 }}
           >
             <View
@@ -3472,7 +3476,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           />
         }
       >
-        <View style={{ paddingTop: 4 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 24 }}
+        >
           <Text style={[styles.inputLabel, isDark && { color: colors.text }]}>
             Household Code (e.g. PF-402)
           </Text>
@@ -3540,7 +3549,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </SmoothBottomSheetModal>
 
       {/* Recent Updates Activity Feed Modal */}
@@ -3562,6 +3571,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           style={{ marginTop: 6, maxHeight: 440 }}
         >
           {recentActivities.length === 0 ? (

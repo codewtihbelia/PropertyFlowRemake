@@ -170,9 +170,10 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(30, insets.bottom + 16) },
+          { paddingBottom: Math.max(80, insets.bottom + 60) },
         ]}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         {/* Segmented Mode Selector */}
         <Text style={[styles.sectionLabel, isDark && { color: colors.text }]}>

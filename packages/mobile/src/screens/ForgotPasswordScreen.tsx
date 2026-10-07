@@ -92,10 +92,8 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
       )}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       >
         <ScrollView
           style={[styles.scrollView, { backgroundColor: bottomBgColor }]}
@@ -103,10 +101,11 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
             styles.scrollContent,
             {
               backgroundColor: bottomBgColor,
-              paddingBottom: Math.max(80, insets.bottom + 48),
+              paddingBottom: Math.max(90, insets.bottom + 50),
             },
           ]}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           showsVerticalScrollIndicator={false}
           bounces={false}
         >

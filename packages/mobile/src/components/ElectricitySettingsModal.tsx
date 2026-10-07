@@ -181,9 +181,10 @@ export const ElectricitySettingsModal: React.FC<
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(40, insets.bottom + 24) },
+          { paddingBottom: Math.max(80, insets.bottom + 60) },
         ]}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         <View style={styles.readingsRow}>
           <View style={{ flex: 1 }}>

@@ -452,6 +452,17 @@ export function WalletScreen({
     keyboardHeight || 0,
     localKeyboardHeight,
   );
+  const windowHeight = Dimensions.get("window").height;
+  const modalAdaptiveMaxHeight = React.useMemo(() => {
+    if (effectiveKeyboardHeight > 0) {
+      return Math.max(
+        260,
+        windowHeight - effectiveKeyboardHeight - (insets.top + 24),
+      );
+    }
+    return windowHeight * 0.92;
+  }, [effectiveKeyboardHeight, windowHeight, insets.top]);
+
   const dynamicModalOverlayStyle = [
     styles.modalOverlay,
     effectiveKeyboardHeight > 0 && {
@@ -2947,6 +2958,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowCashInModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -2958,6 +2970,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -2987,184 +3000,191 @@ export function WalletScreen({
               Select quick amount or type custom value
             </Text>
 
-            {/* Quick Amount Pills */}
-            <View style={styles.quickAmountsRow}>
-              {["500", "1000", "2000", "5000"].map((preset) => (
-                <TouchableOpacity
-                  key={preset}
-                  style={[
-                    styles.quickPill,
-                    cashInAmount === preset
-                      ? { backgroundColor: "#2563EB" }
-                      : {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F1F5F9",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                        },
-                  ]}
-                  onPress={() => setCashInAmount(preset)}
-                >
-                  <Text
-                    style={[
-                      styles.quickPillText,
-                      {
-                        color:
-                          cashInAmount === preset
-                            ? "#FFFFFF"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                      },
-                    ]}
-                  >
-                    ₱{preset}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Input */}
-            <View
-              style={[
-                styles.amountInputWrap,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.currencyPrefix,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                ₱
-              </Text>
-              <TextInput
-                style={[
-                  styles.amountInput,
-                  { color: isDark ? colors.text : "#0F172A" },
-                ]}
-                keyboardType="numeric"
-                value={cashInAmount}
-                onChangeText={setCashInAmount}
-                placeholder="0.00"
-                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              />
-            </View>
-
-            {/* Destination Card Select */}
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Deposit Funds To Card
-            </Text>
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, marginVertical: 8 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              style={{ maxHeight: effectiveKeyboardHeight > 0 ? 260 : 420 }}
             >
-              {(wallet?.cards || []).map((card) => {
-                const isSelected =
-                  (selectedCashInCardId || wallet?.cards[0]?.id) === card.id;
-                return (
+              {/* Quick Amount Pills */}
+              <View style={styles.quickAmountsRow}>
+                {["500", "1000", "2000", "5000"].map((preset) => (
                   <TouchableOpacity
-                    key={card.id}
+                    key={preset}
                     style={[
-                      styles.cardPickBox,
-                      isSelected
-                        ? {
-                            borderColor: "#2563EB",
-                            backgroundColor: isDark ? "#1E3A8A35" : "#EFF6FF",
-                          }
+                      styles.quickPill,
+                      cashInAmount === preset
+                        ? { backgroundColor: "#2563EB" }
                         : {
-                            borderColor: isDark ? colors.border : "#E2E8F0",
                             backgroundColor: isDark
                               ? colors.surfaceInset
-                              : "#FFFFFF",
+                              : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
                           },
                     ]}
-                    onPress={() => {
-                      setSelectedCashInCardId(card.id);
-                      setCashInMethod(card.name);
-                    }}
+                    onPress={() => setCashInAmount(preset)}
                   >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        marginBottom: 4,
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.cardPickName,
-                          { color: isDark ? colors.text : "#0F172A" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {card.name}
-                      </Text>
-                      {card.isDefault && (
-                        <View style={styles.cardDefaultMiniBadge}>
-                          <Text style={styles.cardDefaultMiniText}>
-                            PRIMARY
-                          </Text>
-                        </View>
-                      )}
-                    </View>
                     <Text
                       style={[
-                        styles.cardPickAccount,
-                        { color: isDark ? colors.textMuted : "#64748B" },
+                        styles.quickPillText,
+                        {
+                          color:
+                            cashInAmount === preset
+                              ? "#FFFFFF"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                        },
                       ]}
                     >
-                      {card.accountNumber}
-                    </Text>
-                    <Text style={styles.cardPickBalance}>
-                      ₱
-                      {(card.balance || 0).toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      ₱{preset}
                     </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                ))}
+              </View>
 
-            {/* Confirm button */}
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={handleCashIn}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modalPrimaryBtnText}>
-                Confirm Top-up of ₱
-                {parseFloat(cashInAmount || "0").toLocaleString()}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowCashInModal(false)}
-            >
-              <Text
+              {/* Input */}
+              <View
                 style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.amountInputWrap,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                  },
                 ]}
               >
-                Cancel
+                <Text
+                  style={[
+                    styles.currencyPrefix,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  ₱
+                </Text>
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                  keyboardType="numeric"
+                  value={cashInAmount}
+                  onChangeText={setCashInAmount}
+                  placeholder="0.00"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                />
+              </View>
+
+              {/* Destination Card Select */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Deposit Funds To Card
               </Text>
-            </TouchableOpacity>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10, marginVertical: 8 }}
+              >
+                {(wallet?.cards || []).map((card) => {
+                  const isSelected =
+                    (selectedCashInCardId || wallet?.cards[0]?.id) === card.id;
+                  return (
+                    <TouchableOpacity
+                      key={card.id}
+                      style={[
+                        styles.cardPickBox,
+                        isSelected
+                          ? {
+                              borderColor: "#2563EB",
+                              backgroundColor: isDark ? "#1E3A8A35" : "#EFF6FF",
+                            }
+                          : {
+                              borderColor: isDark ? colors.border : "#E2E8F0",
+                              backgroundColor: isDark
+                                ? colors.surfaceInset
+                                : "#FFFFFF",
+                            },
+                      ]}
+                      onPress={() => {
+                        setSelectedCashInCardId(card.id);
+                        setCashInMethod(card.name);
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.cardPickName,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {card.name}
+                        </Text>
+                        {card.isDefault && (
+                          <View style={styles.cardDefaultMiniBadge}>
+                            <Text style={styles.cardDefaultMiniText}>
+                              PRIMARY
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.cardPickAccount,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        {card.accountNumber}
+                      </Text>
+                      <Text style={styles.cardPickBalance}>
+                        ₱
+                        {(card.balance || 0).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Confirm button */}
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={handleCashIn}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalPrimaryBtnText}>
+                  Confirm Top-up of ₱
+                  {parseFloat(cashInAmount || "0").toLocaleString()}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowCashInModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -3175,6 +3195,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowAddCardModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -3186,6 +3207,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -3416,6 +3438,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowCardDetailModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -3427,6 +3450,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -3448,7 +3472,11 @@ export function WalletScreen({
                 const isGCash = selectedCardDetail.type === "gcash";
 
                 return (
-                  <View>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                  >
                     <Text
                       style={[
                         styles.modalTitle,
@@ -3921,7 +3949,7 @@ export function WalletScreen({
                         Close
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                  </ScrollView>
                 );
               })()}
           </View>
@@ -3934,6 +3962,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowExpenseSimModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -3945,6 +3974,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -3969,7 +3999,14 @@ export function WalletScreen({
                 const balanceAfter = Math.max(0, cardBal - expenseAmt);
 
                 return (
-                  <View>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets={true}
+                    style={{
+                      maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500,
+                    }}
+                  >
                     <View style={styles.simModalHeaderRow}>
                       <LinearGradient
                         colors={selectedExpensePreset.gradient}
@@ -4366,7 +4403,7 @@ export function WalletScreen({
                         Cancel
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                  </ScrollView>
                 );
               })()}
           </View>
@@ -4379,6 +4416,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowTransferModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -4390,6 +4428,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -4417,7 +4456,12 @@ export function WalletScreen({
               const isSameCard = transferSourceCardId === transferDestCardId;
 
               return (
-                <View>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  automaticallyAdjustKeyboardInsets={true}
+                  style={{ maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500 }}
+                >
                   <View style={styles.transferHeaderRow}>
                     <View
                       style={[
@@ -4875,7 +4919,7 @@ export function WalletScreen({
                       Cancel
                     </Text>
                   </TouchableOpacity>
-                </View>
+                </ScrollView>
               );
             })()}
           </View>
@@ -4888,6 +4932,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowCashExpenseModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -4899,6 +4944,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -4922,7 +4968,12 @@ export function WalletScreen({
               const isInsufficient = cashBal < expenseAmt;
 
               return (
-                <View>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  automaticallyAdjustKeyboardInsets={true}
+                  style={{ maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500 }}
+                >
                   <View style={styles.simModalHeaderRow}>
                     <View
                       style={[
@@ -5213,7 +5264,7 @@ export function WalletScreen({
                       Cancel
                     </Text>
                   </TouchableOpacity>
-                </View>
+                </ScrollView>
               );
             })()}
           </View>
@@ -5226,6 +5277,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowCashAutomationModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -5237,6 +5289,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -5266,7 +5319,11 @@ export function WalletScreen({
               const isInsufficient = cashBal < totalDailyAuto;
 
               return (
-                <View>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{ paddingBottom: 24 }}
+                >
                   <View style={styles.simModalHeaderRow}>
                     <View
                       style={[
@@ -5510,7 +5567,7 @@ export function WalletScreen({
                       Done
                     </Text>
                   </TouchableOpacity>
-                </View>
+                </ScrollView>
               );
             })()}
           </View>
@@ -5523,6 +5580,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowAddPocketModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -5534,6 +5592,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -5563,141 +5622,148 @@ export function WalletScreen({
               Set aside money for utility cushions, rent deposits or trips
             </Text>
 
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Pocket Name
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. Condo Security Deposit"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={pocketName}
-              onChangeText={setPocketName}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Target Goal Amount (₱)
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="10000"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              keyboardType="numeric"
-              value={pocketTarget}
-              onChangeText={setPocketTarget}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Category
-            </Text>
-            <View style={styles.sourcesRow}>
-              {[
-                {
-                  cat: "emergency",
-                  label: "Emergency",
-                  icon: "shield-checkmark",
-                },
-                { cat: "travel", label: "Travel", icon: "airplane" },
-                { cat: "deposit", label: "Deposit", icon: "home" },
-                { cat: "bills", label: "Bills Buffer", icon: "receipt" },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.cat}
-                  style={[
-                    styles.sourceCard,
-                    pocketCategory === item.cat
-                      ? {
-                          borderColor: "#2563EB",
-                          backgroundColor: "#2563EB15",
-                        }
-                      : {
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#FFFFFF",
-                        },
-                  ]}
-                  onPress={() => setPocketCategory(item.cat as any)}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={18}
-                    color={
-                      pocketCategory === item.cat
-                        ? "#2563EB"
-                        : isDark
-                          ? colors.textMuted
-                          : "#64748B"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.sourceText,
-                      {
-                        color:
-                          pocketCategory === item.cat
-                            ? "#2563EB"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                      },
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={handleCreatePocket}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modalPrimaryBtnText}>Create Pocket</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowAddPocketModal(false)}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              style={{ maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500 }}
             >
               <Text
                 style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
                 ]}
               >
-                Cancel
+                Pocket Name
               </Text>
-            </TouchableOpacity>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. Condo Security Deposit"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={pocketName}
+                onChangeText={setPocketName}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Target Goal Amount (₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="10000"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                keyboardType="numeric"
+                value={pocketTarget}
+                onChangeText={setPocketTarget}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Category
+              </Text>
+              <View style={styles.sourcesRow}>
+                {[
+                  {
+                    cat: "emergency",
+                    label: "Emergency",
+                    icon: "shield-checkmark",
+                  },
+                  { cat: "travel", label: "Travel", icon: "airplane" },
+                  { cat: "deposit", label: "Deposit", icon: "home" },
+                  { cat: "bills", label: "Bills Buffer", icon: "receipt" },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.cat}
+                    style={[
+                      styles.sourceCard,
+                      pocketCategory === item.cat
+                        ? {
+                            borderColor: "#2563EB",
+                            backgroundColor: "#2563EB15",
+                          }
+                        : {
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#FFFFFF",
+                          },
+                    ]}
+                    onPress={() => setPocketCategory(item.cat as any)}
+                  >
+                    <Ionicons
+                      name={item.icon as any}
+                      size={18}
+                      color={
+                        pocketCategory === item.cat
+                          ? "#2563EB"
+                          : isDark
+                            ? colors.textMuted
+                            : "#64748B"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.sourceText,
+                        {
+                          color:
+                            pocketCategory === item.cat
+                              ? "#2563EB"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                        },
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={handleCreatePocket}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalPrimaryBtnText}>Create Pocket</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowAddPocketModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -5708,6 +5774,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowPocketActionModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -5719,6 +5786,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -5752,329 +5820,336 @@ export function WalletScreen({
                 : `Move funds back to your wallet balance (₱${selectedPocket?.currentAmount.toLocaleString()} in pocket)`}
             </Text>
 
-            <View style={styles.quickAmountsRow}>
-              {["200", "500", "1000", "2000"].map((preset) => (
-                <TouchableOpacity
-                  key={preset}
-                  style={[
-                    styles.quickPill,
-                    pocketTransferAmount === preset
-                      ? { backgroundColor: "#2563EB" }
-                      : {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F1F5F9",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                        },
-                  ]}
-                  onPress={() => setPocketTransferAmount(preset)}
-                >
-                  <Text
-                    style={[
-                      styles.quickPillText,
-                      {
-                        color:
-                          pocketTransferAmount === preset
-                            ? "#FFFFFF"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                      },
-                    ]}
-                  >
-                    ₱{preset}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View
-              style={[
-                styles.amountInputWrap,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.currencyPrefix,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                ₱
-              </Text>
-              <TextInput
-                style={[
-                  styles.amountInput,
-                  { color: isDark ? colors.text : "#0F172A" },
-                ]}
-                keyboardType="numeric"
-                value={pocketTransferAmount}
-                onChangeText={setPocketTransferAmount}
-                placeholder="0.00"
-                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              />
-            </View>
-
-            {/* Select Card to Deduct From (when stashing) or Withdraw To (when withdrawing) */}
-            <Text
-              style={[
-                styles.inputLabel,
-                {
-                  color: isDark ? colors.textSecondary : "#475569",
-                  marginTop: 14,
-                  marginBottom: 6,
-                },
-              ]}
-            >
-              {pocketActionType === "deposit"
-                ? "Deduct From Configured Card"
-                : "Withdraw To Configured Card"}
-            </Text>
-
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              style={{ maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500 }}
             >
-              {(wallet?.cards || []).map((c) => {
-                const isSelected =
-                  (pocketSelectedCardId ||
-                    wallet?.cards.find((x) => x.isDefault)?.id ||
-                    wallet?.cards[0]?.id) === c.id;
-                const preset =
-                  PHILIPPINE_CARD_PRESETS[c.type] ||
-                  PHILIPPINE_CARD_PRESETS.custom;
-                const isCashCard = c.type === "cash";
-
-                return (
+              <View style={styles.quickAmountsRow}>
+                {["200", "500", "1000", "2000"].map((preset) => (
                   <TouchableOpacity
-                    key={c.id}
+                    key={preset}
                     style={[
-                      styles.pocketCardOption,
-                      isSelected
-                        ? {
-                            borderColor: isCashCard ? "#059669" : "#2563EB",
-                            backgroundColor: isDark
-                              ? isCashCard
-                                ? "#064E3B40"
-                                : "#1E3A8A35"
-                              : isCashCard
-                                ? "#ECFDF5"
-                                : "#EFF6FF",
-                          }
+                      styles.quickPill,
+                      pocketTransferAmount === preset
+                        ? { backgroundColor: "#2563EB" }
                         : {
-                            borderColor: isDark ? colors.border : "#E2E8F0",
                             backgroundColor: isDark
                               ? colors.surfaceInset
-                              : "#FFFFFF",
+                              : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
                           },
                     ]}
-                    onPress={() => setPocketSelectedCardId(c.id)}
-                    activeOpacity={0.75}
+                    onPress={() => setPocketTransferAmount(preset)}
                   >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                        marginBottom: 3,
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor: preset?.gradient[0] || "#2563EB",
-                        }}
-                      />
-                      <Text
-                        style={[
-                          styles.pocketCardOptionName,
-                          {
-                            color: isSelected
-                              ? isCashCard
-                                ? "#059669"
-                                : "#2563EB"
+                    <Text
+                      style={[
+                        styles.quickPillText,
+                        {
+                          color:
+                            pocketTransferAmount === preset
+                              ? "#FFFFFF"
                               : isDark
                                 ? colors.text
                                 : "#0F172A",
-                            fontWeight: isSelected ? "700" : "600",
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {c.name}
-                      </Text>
-                      {c.isDefault && (
-                        <View style={styles.cardDefaultMiniBadge}>
-                          <Text style={styles.cardDefaultMiniText}>
-                            PRIMARY
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.pocketCardOptionAccount,
-                        { color: isDark ? colors.textMuted : "#64748B" },
-                      ]}
-                    >
-                      {c.accountNumber}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.pocketCardOptionBal,
-                        {
-                          color: isSelected
-                            ? isCashCard
-                              ? "#047857"
-                              : "#1D4ED8"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
                         },
                       ]}
                     >
-                      ₱
-                      {(c.balance || 0).toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      ₱{preset}
                     </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                ))}
+              </View>
 
-            {/* Live Impact Preview */}
-            {(() => {
-              const activeCard =
-                wallet?.cards.find(
-                  (c) =>
-                    c.id ===
-                    (pocketSelectedCardId ||
-                      wallet?.cards.find((x) => x.isDefault)?.id ||
-                      wallet?.cards[0]?.id),
-                ) || wallet?.cards[0];
-              const num = parseFloat(pocketTransferAmount) || 0;
-              const cardBal = activeCard?.balance || 0;
-              const isInsufficient =
-                pocketActionType === "deposit" && cardBal < num;
-
-              if (!activeCard) return null;
-
-              return (
-                <View
+              <View
+                style={[
+                  styles.amountInputWrap,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                  },
+                ]}
+              >
+                <Text
                   style={[
-                    styles.pocketPreviewBox,
-                    {
-                      backgroundColor: isInsufficient
-                        ? isDark
-                          ? "#450A0A30"
-                          : "#FEF2F2"
-                        : isDark
-                          ? colors.surfaceInset
-                          : "#F0FDF4",
-                      borderColor: isInsufficient
-                        ? "#EF4444"
-                        : isDark
-                          ? colors.border
-                          : "#BBF7D0",
-                    },
+                    styles.currencyPrefix,
+                    { color: isDark ? colors.textMuted : "#64748B" },
                   ]}
                 >
-                  <Ionicons
-                    name={
-                      isInsufficient ? "alert-circle" : "information-circle"
-                    }
-                    size={16}
-                    color={isInsufficient ? "#EF4444" : "#10B981"}
-                  />
-                  <Text
+                  ₱
+                </Text>
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                  keyboardType="numeric"
+                  value={pocketTransferAmount}
+                  onChangeText={setPocketTransferAmount}
+                  placeholder="0.00"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                />
+              </View>
+
+              {/* Select Card to Deduct From (when stashing) or Withdraw To (when withdrawing) */}
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    color: isDark ? colors.textSecondary : "#475569",
+                    marginTop: 14,
+                    marginBottom: 6,
+                  },
+                ]}
+              >
+                {pocketActionType === "deposit"
+                  ? "Deduct From Configured Card"
+                  : "Withdraw To Configured Card"}
+              </Text>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+              >
+                {(wallet?.cards || []).map((c) => {
+                  const isSelected =
+                    (pocketSelectedCardId ||
+                      wallet?.cards.find((x) => x.isDefault)?.id ||
+                      wallet?.cards[0]?.id) === c.id;
+                  const preset =
+                    PHILIPPINE_CARD_PRESETS[c.type] ||
+                    PHILIPPINE_CARD_PRESETS.custom;
+                  const isCashCard = c.type === "cash";
+
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[
+                        styles.pocketCardOption,
+                        isSelected
+                          ? {
+                              borderColor: isCashCard ? "#059669" : "#2563EB",
+                              backgroundColor: isDark
+                                ? isCashCard
+                                  ? "#064E3B40"
+                                  : "#1E3A8A35"
+                                : isCashCard
+                                  ? "#ECFDF5"
+                                  : "#EFF6FF",
+                            }
+                          : {
+                              borderColor: isDark ? colors.border : "#E2E8F0",
+                              backgroundColor: isDark
+                                ? colors.surfaceInset
+                                : "#FFFFFF",
+                            },
+                      ]}
+                      onPress={() => setPocketSelectedCardId(c.id)}
+                      activeOpacity={0.75}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          marginBottom: 3,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor: preset?.gradient[0] || "#2563EB",
+                          }}
+                        />
+                        <Text
+                          style={[
+                            styles.pocketCardOptionName,
+                            {
+                              color: isSelected
+                                ? isCashCard
+                                  ? "#059669"
+                                  : "#2563EB"
+                                : isDark
+                                  ? colors.text
+                                  : "#0F172A",
+                              fontWeight: isSelected ? "700" : "600",
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {c.name}
+                        </Text>
+                        {c.isDefault && (
+                          <View style={styles.cardDefaultMiniBadge}>
+                            <Text style={styles.cardDefaultMiniText}>
+                              PRIMARY
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.pocketCardOptionAccount,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        {c.accountNumber}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.pocketCardOptionBal,
+                          {
+                            color: isSelected
+                              ? isCashCard
+                                ? "#047857"
+                                : "#1D4ED8"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                          },
+                        ]}
+                      >
+                        ₱
+                        {(c.balance || 0).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Live Impact Preview */}
+              {(() => {
+                const activeCard =
+                  wallet?.cards.find(
+                    (c) =>
+                      c.id ===
+                      (pocketSelectedCardId ||
+                        wallet?.cards.find((x) => x.isDefault)?.id ||
+                        wallet?.cards[0]?.id),
+                  ) || wallet?.cards[0];
+                const num = parseFloat(pocketTransferAmount) || 0;
+                const cardBal = activeCard?.balance || 0;
+                const isInsufficient =
+                  pocketActionType === "deposit" && cardBal < num;
+
+                if (!activeCard) return null;
+
+                return (
+                  <View
                     style={[
-                      styles.pocketPreviewText,
+                      styles.pocketPreviewBox,
                       {
-                        color: isInsufficient
+                        backgroundColor: isInsufficient
+                          ? isDark
+                            ? "#450A0A30"
+                            : "#FEF2F2"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F0FDF4",
+                        borderColor: isInsufficient
                           ? "#EF4444"
                           : isDark
-                            ? colors.text
-                            : "#15803D",
+                            ? colors.border
+                            : "#BBF7D0",
                       },
                     ]}
                   >
-                    {pocketActionType === "deposit"
-                      ? isInsufficient
-                        ? `Insufficient balance on ${activeCard.name} (₱${cardBal.toLocaleString()} available)`
-                        : `After saving: ${activeCard.name} balance will be ₱${Math.max(0, cardBal - num).toLocaleString()}`
-                      : `After withdrawal: ${activeCard.name} balance will be ₱${(cardBal + num).toLocaleString()}`}
-                  </Text>
-                </View>
-              );
-            })()}
+                    <Ionicons
+                      name={
+                        isInsufficient ? "alert-circle" : "information-circle"
+                      }
+                      size={16}
+                      color={isInsufficient ? "#EF4444" : "#10B981"}
+                    />
+                    <Text
+                      style={[
+                        styles.pocketPreviewText,
+                        {
+                          color: isInsufficient
+                            ? "#EF4444"
+                            : isDark
+                              ? colors.text
+                              : "#15803D",
+                        },
+                      ]}
+                    >
+                      {pocketActionType === "deposit"
+                        ? isInsufficient
+                          ? `Insufficient balance on ${activeCard.name} (₱${cardBal.toLocaleString()} available)`
+                          : `After saving: ${activeCard.name} balance will be ₱${Math.max(0, cardBal - num).toLocaleString()}`
+                        : `After withdrawal: ${activeCard.name} balance will be ₱${(cardBal + num).toLocaleString()}`}
+                    </Text>
+                  </View>
+                );
+              })()}
 
-            {(() => {
-              const activeCard =
-                wallet?.cards.find(
-                  (c) =>
-                    c.id ===
-                    (pocketSelectedCardId ||
-                      wallet?.cards.find((x) => x.isDefault)?.id ||
-                      wallet?.cards[0]?.id),
-                ) || wallet?.cards[0];
-              const num = parseFloat(pocketTransferAmount) || 0;
-              const cardBal = activeCard?.balance || 0;
-              const isInsufficient =
-                pocketActionType === "deposit"
-                  ? cardBal < num
-                  : (selectedPocket?.currentAmount || 0) < num;
+              {(() => {
+                const activeCard =
+                  wallet?.cards.find(
+                    (c) =>
+                      c.id ===
+                      (pocketSelectedCardId ||
+                        wallet?.cards.find((x) => x.isDefault)?.id ||
+                        wallet?.cards[0]?.id),
+                  ) || wallet?.cards[0];
+                const num = parseFloat(pocketTransferAmount) || 0;
+                const cardBal = activeCard?.balance || 0;
+                const isInsufficient =
+                  pocketActionType === "deposit"
+                    ? cardBal < num
+                    : (selectedPocket?.currentAmount || 0) < num;
 
-              return (
-                <TouchableOpacity
-                  style={[
-                    styles.modalPrimaryBtn,
-                    (isInsufficient || num <= 0) && {
-                      backgroundColor: "#94A3B8",
-                    },
-                  ]}
-                  disabled={isInsufficient || num <= 0}
-                  onPress={handlePocketTransfer}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalPrimaryBtnText}>
-                    {isInsufficient && num > 0
-                      ? `Insufficient Balance on ${pocketActionType === "deposit" ? activeCard?.name || "Card" : selectedPocket?.name || "Pocket"}`
-                      : num <= 0
-                        ? "Enter Amount"
-                        : `Confirm ${pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱${num.toLocaleString(
-                            "en-US",
-                            {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            },
-                          )}`}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })()}
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      (isInsufficient || num <= 0) && {
+                        backgroundColor: "#94A3B8",
+                      },
+                    ]}
+                    disabled={isInsufficient || num <= 0}
+                    onPress={handlePocketTransfer}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.modalPrimaryBtnText}>
+                      {isInsufficient && num > 0
+                        ? `Insufficient Balance on ${pocketActionType === "deposit" ? activeCard?.name || "Card" : selectedPocket?.name || "Pocket"}`
+                        : num <= 0
+                          ? "Enter Amount"
+                          : `Confirm ${pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱${num.toLocaleString(
+                              "en-US",
+                              {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              },
+                            )}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
 
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowPocketActionModal(false)}
-            >
-              <Text
-                style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowPocketActionModal(false)}
               >
-                Cancel
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -6085,6 +6160,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setSelectedTx(null)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -6096,6 +6172,7 @@ export function WalletScreen({
             style={[
               styles.receiptSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -6108,178 +6185,166 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-            {(() => {
-              const isExpense =
-                selectedTx?.type === "expense_simulation" ||
-                selectedTx?.type === "cash_expense";
-              if (isExpense && selectedTx) {
-                const iconData = getExpenseSemanticIconMobile(selectedTx);
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
+              {(() => {
+                const isExpense =
+                  selectedTx?.type === "expense_simulation" ||
+                  selectedTx?.type === "cash_expense";
+                if (isExpense && selectedTx) {
+                  const iconData = getExpenseSemanticIconMobile(selectedTx);
+                  return (
+                    <View
+                      style={[
+                        styles.receiptTopCircle,
+                        {
+                          backgroundColor: iconData.bg,
+                          padding: 14,
+                          borderRadius: 36,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={iconData.icon}
+                        size={36}
+                        color={iconData.color}
+                      />
+                    </View>
+                  );
+                }
                 return (
-                  <View
-                    style={[
-                      styles.receiptTopCircle,
-                      {
-                        backgroundColor: iconData.bg,
-                        padding: 14,
-                        borderRadius: 36,
-                        alignItems: "center",
-                        justifyContent: "center",
-                      },
-                    ]}
-                  >
+                  <View style={styles.receiptTopCircle}>
                     <Ionicons
-                      name={iconData.icon}
-                      size={36}
-                      color={iconData.color}
+                      name="checkmark-circle"
+                      size={48}
+                      color="#10B981"
                     />
                   </View>
                 );
-              }
-              return (
-                <View style={styles.receiptTopCircle}>
-                  <Ionicons name="checkmark-circle" size={48} color="#10B981" />
-                </View>
-              );
-            })()}
+              })()}
 
-            <Text
-              style={[
-                styles.receiptTitle,
-                { color: isDark ? colors.text : "#0F172A" },
-              ]}
-            >
-              {selectedTx?.type === "expense_simulation" ||
-              selectedTx?.type === "cash_expense"
-                ? "Expense Receipt"
-                : "Payment Receipt"}
-            </Text>
-            <Text style={styles.receiptAmount}>
-              ₱{selectedTx?.amount.toLocaleString()}
-            </Text>
+              <Text
+                style={[
+                  styles.receiptTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                {selectedTx?.type === "expense_simulation" ||
+                selectedTx?.type === "cash_expense"
+                  ? "Expense Receipt"
+                  : "Payment Receipt"}
+              </Text>
+              <Text style={styles.receiptAmount}>
+                ₱{selectedTx?.amount.toLocaleString()}
+              </Text>
 
-            {/* Prominent Expense Note Box */}
-            {(() => {
-              const matchedPreset = QUICK_EXPENSE_PRESETS.find(
-                (p: QuickExpensePreset) =>
-                  p.title.toLowerCase() === selectedTx?.title?.toLowerCase() ||
-                  p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
-              );
-              const fallbackNote =
-                matchedPreset?.defaultNote ||
-                selectedTx?.description?.trim() ||
-                (selectedTx?.type === "expense_simulation"
-                  ? `Daily simulated expense for ${selectedTx?.title}`
-                  : selectedTx?.title || "Daily transaction record");
-              const hasCustomNote = Boolean(selectedTx?.note?.trim());
-              const displayExpenseNote = hasCustomNote
-                ? selectedTx?.note?.trim()
-                : fallbackNote;
+              {/* Prominent Expense Note Box */}
+              {(() => {
+                const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                  (p: QuickExpensePreset) =>
+                    p.title.toLowerCase() ===
+                      selectedTx?.title?.toLowerCase() ||
+                    p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
+                );
+                const fallbackNote =
+                  matchedPreset?.defaultNote ||
+                  selectedTx?.description?.trim() ||
+                  (selectedTx?.type === "expense_simulation"
+                    ? `Daily simulated expense for ${selectedTx?.title}`
+                    : selectedTx?.title || "Daily transaction record");
+                const hasCustomNote = Boolean(selectedTx?.note?.trim());
+                const displayExpenseNote = hasCustomNote
+                  ? selectedTx?.note?.trim()
+                  : fallbackNote;
 
-              return (
-                <View
-                  style={[
-                    styles.receiptNoteCard,
-                    {
-                      backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                      borderColor: isDark ? colors.border : "#E2E8F0",
-                    },
-                  ]}
-                >
+                return (
                   <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
+                    style={[
+                      styles.receiptNoteCard,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                      },
+                    ]}
                   >
                     <View
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
-                        gap: 6,
+                        justifyContent: "space-between",
+                        marginBottom: 4,
                       }}
                     >
-                      <Ionicons
-                        name="document-text"
-                        size={14}
-                        color="#2563EB"
-                      />
-                      <Text
-                        style={[
-                          styles.receiptNoteLabel,
-                          { color: isDark ? colors.textMuted : "#64748B" },
-                        ]}
-                      >
-                        EXPENSE NOTE
-                      </Text>
-                    </View>
-                    {!hasCustomNote && (
                       <View
                         style={{
-                          backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
-                          paddingHorizontal: 7,
-                          paddingVertical: 2,
-                          borderRadius: 6,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
                         }}
                       >
+                        <Ionicons
+                          name="document-text"
+                          size={14}
+                          color="#2563EB"
+                        />
                         <Text
-                          style={{
-                            fontSize: 10,
-                            fontWeight: "700",
-                            color: "#2563EB",
-                            textTransform: "uppercase",
-                            letterSpacing: 0.5,
-                          }}
+                          style={[
+                            styles.receiptNoteLabel,
+                            { color: isDark ? colors.textMuted : "#64748B" },
+                          ]}
                         >
-                          Preset Fallback
+                          EXPENSE NOTE
                         </Text>
                       </View>
-                    )}
+                      {!hasCustomNote && (
+                        <View
+                          style={{
+                            backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
+                            paddingHorizontal: 7,
+                            paddingVertical: 2,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: "700",
+                              color: "#2563EB",
+                              textTransform: "uppercase",
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            Preset Fallback
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.receiptNoteValue,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                    >
+                      {displayExpenseNote}
+                    </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.receiptNoteValue,
-                      { color: isDark ? colors.text : "#0F172A" },
-                    ]}
-                  >
-                    {displayExpenseNote}
-                  </Text>
-                </View>
-              );
-            })()}
+                );
+              })()}
 
-            <View
-              style={[
-                styles.receiptDivider,
-                { backgroundColor: isDark ? colors.border : "#E2E8F0" },
-              ]}
-            />
-
-            <View style={styles.receiptRow}>
-              <Text
+              <View
                 style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.receiptDivider,
+                  { backgroundColor: isDark ? colors.border : "#E2E8F0" },
                 ]}
-              >
-                Transaction
-              </Text>
-              <Text
-                style={[
-                  styles.receiptValue,
-                  { color: isDark ? colors.text : "#0F172A" },
-                ]}
-              >
-                {selectedTx?.title}
-              </Text>
-            </View>
+              />
 
-            {Boolean(
-              selectedTx?.category ||
-              selectedTx?.type === "expense_simulation" ||
-              selectedTx?.type === "cash_expense",
-            ) && (
               <View style={styles.receiptRow}>
                 <Text
                   style={[
@@ -6287,7 +6352,7 @@ export function WalletScreen({
                     { color: isDark ? colors.textMuted : "#64748B" },
                   ]}
                 >
-                  Category
+                  Transaction
                 </Text>
                 <Text
                   style={[
@@ -6295,129 +6360,157 @@ export function WalletScreen({
                     { color: isDark ? colors.text : "#0F172A" },
                   ]}
                 >
-                  {selectedTx?.category ||
-                    (selectedTx?.type === "expense_simulation"
-                      ? "Daily Expense"
-                      : "Cash on Hand")}
+                  {selectedTx?.title}
                 </Text>
               </View>
-            )}
 
-            <View style={styles.receiptRow}>
-              <Text
-                style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Expense Note
-              </Text>
-              <Text
-                style={[
-                  styles.receiptValue,
-                  { color: isDark ? colors.text : "#0F172A", maxWidth: "60%" },
-                ]}
-                numberOfLines={3}
-              >
-                {(() => {
-                  const matchedPreset = QUICK_EXPENSE_PRESETS.find(
-                    (p: QuickExpensePreset) =>
-                      p.title.toLowerCase() ===
-                        selectedTx?.title?.toLowerCase() ||
-                      p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
-                  );
-                  return (
-                    selectedTx?.note?.trim() ||
-                    matchedPreset?.defaultNote ||
-                    selectedTx?.description?.trim() ||
-                    (selectedTx?.type === "expense_simulation"
-                      ? `Daily simulated expense for ${selectedTx?.title}`
-                      : selectedTx?.title || "Daily transaction record")
-                  );
-                })()}
-              </Text>
-            </View>
+              {Boolean(
+                selectedTx?.category ||
+                selectedTx?.type === "expense_simulation" ||
+                selectedTx?.type === "cash_expense",
+              ) && (
+                <View style={styles.receiptRow}>
+                  <Text
+                    style={[
+                      styles.receiptLabel,
+                      { color: isDark ? colors.textMuted : "#64748B" },
+                    ]}
+                  >
+                    Category
+                  </Text>
+                  <Text
+                    style={[
+                      styles.receiptValue,
+                      { color: isDark ? colors.text : "#0F172A" },
+                    ]}
+                  >
+                    {selectedTx?.category ||
+                      (selectedTx?.type === "expense_simulation"
+                        ? "Daily Expense"
+                        : "Cash on Hand")}
+                  </Text>
+                </View>
+              )}
 
-            <View style={styles.receiptRow}>
-              <Text
-                style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Method
-              </Text>
-              <Text
-                style={[
-                  styles.receiptValue,
-                  { color: isDark ? colors.text : "#0F172A" },
-                ]}
-              >
-                {selectedTx?.paymentMethodUsed}
-              </Text>
-            </View>
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Expense Note
+                </Text>
+                <Text
+                  style={[
+                    styles.receiptValue,
+                    {
+                      color: isDark ? colors.text : "#0F172A",
+                      maxWidth: "60%",
+                    },
+                  ]}
+                  numberOfLines={3}
+                >
+                  {(() => {
+                    const matchedPreset = QUICK_EXPENSE_PRESETS.find(
+                      (p: QuickExpensePreset) =>
+                        p.title.toLowerCase() ===
+                          selectedTx?.title?.toLowerCase() ||
+                        p.id.toLowerCase() === selectedTx?.title?.toLowerCase(),
+                    );
+                    return (
+                      selectedTx?.note?.trim() ||
+                      matchedPreset?.defaultNote ||
+                      selectedTx?.description?.trim() ||
+                      (selectedTx?.type === "expense_simulation"
+                        ? `Daily simulated expense for ${selectedTx?.title}`
+                        : selectedTx?.title || "Daily transaction record")
+                    );
+                  })()}
+                </Text>
+              </View>
 
-            <View style={styles.receiptRow}>
-              <Text
-                style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Status
-              </Text>
-              <Text style={[styles.receiptValue, { color: "#10B981" }]}>
-                Verified & Completed
-              </Text>
-            </View>
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Method
+                </Text>
+                <Text
+                  style={[
+                    styles.receiptValue,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                >
+                  {selectedTx?.paymentMethodUsed}
+                </Text>
+              </View>
 
-            <View style={styles.receiptRow}>
-              <Text
-                style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Reference ID
-              </Text>
-              <Text
-                style={[
-                  styles.receiptValue,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                {selectedTx?.id}
-              </Text>
-            </View>
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Status
+                </Text>
+                <Text style={[styles.receiptValue, { color: "#10B981" }]}>
+                  Verified & Completed
+                </Text>
+              </View>
 
-            <View style={styles.receiptRow}>
-              <Text
-                style={[
-                  styles.receiptLabel,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Timestamp
-              </Text>
-              <Text
-                style={[
-                  styles.receiptValue,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                {selectedTx?.timestamp
-                  ? new Date(selectedTx.timestamp).toLocaleString()
-                  : ""}
-              </Text>
-            </View>
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Reference ID
+                </Text>
+                <Text
+                  style={[
+                    styles.receiptValue,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  {selectedTx?.id}
+                </Text>
+              </View>
 
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={() => setSelectedTx(null)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modalPrimaryBtnText}>Close Receipt</Text>
-            </TouchableOpacity>
+              <View style={styles.receiptRow}>
+                <Text
+                  style={[
+                    styles.receiptLabel,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Timestamp
+                </Text>
+                <Text
+                  style={[
+                    styles.receiptValue,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  {selectedTx?.timestamp
+                    ? new Date(selectedTx.timestamp).toLocaleString()
+                    : ""}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={() => setSelectedTx(null)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalPrimaryBtnText}>Close Receipt</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -6434,6 +6527,7 @@ export function WalletScreen({
             setDeleteCardConfirmText("");
           }
         }}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -6451,6 +6545,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? "#7F1D1D" : "#FEE2E2",
                 borderWidth: 1,
@@ -6463,145 +6558,153 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-
-            <View style={{ alignItems: "center", marginVertical: 8 }}>
-              <View
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: isDark ? "#450A0A" : "#FEE2E2",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 10,
-                }}
-              >
-                <Ionicons name="trash-outline" size={26} color="#EF4444" />
-              </View>
-              <Text
-                style={[
-                  styles.modalTitle,
-                  {
-                    color: isDark ? colors.text : "#0F172A",
-                    textAlign: "center",
-                  },
-                ]}
-              >
-                Remove {selectedCardToDelete?.name || "Payment Card"}
-              </Text>
-              <Text
-                style={[
-                  styles.modalSubtitle,
-                  {
-                    color: isDark ? colors.textMuted : "#64748B",
-                    textAlign: "center",
-                    marginHorizontal: 10,
-                  },
-                ]}
-              >
-                Unlinking this card will deduct its balance of ₱
-                {(selectedCardToDelete?.balance || 0).toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}{" "}
-                from your Available Digital Balance.
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.deleteWarningBox,
-                {
-                  backgroundColor: isDark ? "#450A0A40" : "#FEF2F2",
-                  borderColor: isDark ? "#7F1D1D" : "#FCA5A5",
-                },
-              ]}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
             >
-              <Text
-                style={[
-                  styles.deleteWarningPrompt,
-                  { color: isDark ? "#FCA5A5" : "#991B1B" },
-                ]}
-              >
-                Security Question:{"\n"}
-                Please type{" "}
-                <Text style={{ fontWeight: "800" }}>
-                  {selectedCardToDelete?.name}
-                </Text>{" "}
-                below to confirm deletion:
-              </Text>
-              <TextInput
-                style={[
-                  styles.modalTextInput,
-                  {
-                    backgroundColor: isDark ? colors.surfaceInset : "#FFFFFF",
-                    borderColor:
-                      selectedCardToDelete &&
-                      deleteCardConfirmText.trim().toLowerCase() ===
-                        selectedCardToDelete.name.trim().toLowerCase()
-                        ? "#10B981"
-                        : isDark
-                          ? colors.border
-                          : "#CBD5E1",
-                    color: isDark ? colors.text : "#0F172A",
-                    marginTop: 8,
-                  },
-                ]}
-                placeholder={`Type "${selectedCardToDelete?.name || "Card Name"}"`}
-                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-                value={deleteCardConfirmText}
-                onChangeText={setDeleteCardConfirmText}
-                autoCapitalize="words"
-                editable={!isDeletingCard}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.modalDangerBtn,
-                !selectedCardToDelete ||
-                deleteCardConfirmText.trim().toLowerCase() !==
-                  selectedCardToDelete.name.trim().toLowerCase() ||
-                isDeletingCard
-                  ? { opacity: 0.4 }
-                  : { opacity: 1 },
-              ]}
-              onPress={handleConfirmDeleteCard}
-              disabled={
-                !selectedCardToDelete ||
-                deleteCardConfirmText.trim().toLowerCase() !==
-                  selectedCardToDelete.name.trim().toLowerCase() ||
-                isDeletingCard
-              }
-              activeOpacity={0.8}
-            >
-              {isDeletingCard ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <Text style={styles.modalDangerBtnText}>
-                  Permanently Delete Card
+              <View style={{ alignItems: "center", marginVertical: 8 }}>
+                <View
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 26,
+                    backgroundColor: isDark ? "#450A0A" : "#FEE2E2",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginBottom: 10,
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={26} color="#EF4444" />
+                </View>
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    {
+                      color: isDark ? colors.text : "#0F172A",
+                      textAlign: "center",
+                    },
+                  ]}
+                >
+                  Remove {selectedCardToDelete?.name || "Payment Card"}
                 </Text>
-              )}
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.modalSubtitle,
+                    {
+                      color: isDark ? colors.textMuted : "#64748B",
+                      textAlign: "center",
+                      marginHorizontal: 10,
+                    },
+                  ]}
+                >
+                  Unlinking this card will deduct its balance of ₱
+                  {(selectedCardToDelete?.balance || 0).toLocaleString(
+                    "en-US",
+                    {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    },
+                  )}{" "}
+                  from your Available Digital Balance.
+                </Text>
+              </View>
 
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => {
-                setShowDeleteCardModal(false);
-                setSelectedCardToDelete(null);
-                setDeleteCardConfirmText("");
-              }}
-              disabled={isDeletingCard}
-            >
-              <Text
+              <View
                 style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.deleteWarningBox,
+                  {
+                    backgroundColor: isDark ? "#450A0A40" : "#FEF2F2",
+                    borderColor: isDark ? "#7F1D1D" : "#FCA5A5",
+                  },
                 ]}
               >
-                Cancel
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.deleteWarningPrompt,
+                    { color: isDark ? "#FCA5A5" : "#991B1B" },
+                  ]}
+                >
+                  Security Question:{"\n"}
+                  Please type{" "}
+                  <Text style={{ fontWeight: "800" }}>
+                    {selectedCardToDelete?.name}
+                  </Text>{" "}
+                  below to confirm deletion:
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalTextInput,
+                    {
+                      backgroundColor: isDark ? colors.surfaceInset : "#FFFFFF",
+                      borderColor:
+                        selectedCardToDelete &&
+                        deleteCardConfirmText.trim().toLowerCase() ===
+                          selectedCardToDelete.name.trim().toLowerCase()
+                          ? "#10B981"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      color: isDark ? colors.text : "#0F172A",
+                      marginTop: 8,
+                    },
+                  ]}
+                  placeholder={`Type "${selectedCardToDelete?.name || "Card Name"}"`}
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                  value={deleteCardConfirmText}
+                  onChangeText={setDeleteCardConfirmText}
+                  autoCapitalize="words"
+                  editable={!isDeletingCard}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalDangerBtn,
+                  !selectedCardToDelete ||
+                  deleteCardConfirmText.trim().toLowerCase() !==
+                    selectedCardToDelete.name.trim().toLowerCase() ||
+                  isDeletingCard
+                    ? { opacity: 0.4 }
+                    : { opacity: 1 },
+                ]}
+                onPress={handleConfirmDeleteCard}
+                disabled={
+                  !selectedCardToDelete ||
+                  deleteCardConfirmText.trim().toLowerCase() !==
+                    selectedCardToDelete.name.trim().toLowerCase() ||
+                  isDeletingCard
+                }
+                activeOpacity={0.8}
+              >
+                {isDeletingCard ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.modalDangerBtnText}>
+                    Permanently Delete Card
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setShowDeleteCardModal(false);
+                  setSelectedCardToDelete(null);
+                  setDeleteCardConfirmText("");
+                }}
+                disabled={isDeletingCard}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -6612,6 +6715,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowSendMoneyModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -6623,6 +6727,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -6652,204 +6757,218 @@ export function WalletScreen({
               Instant transfer to roommate via linked Philippine card
             </Text>
 
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Recipient Roommate
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. Alex Chen or 0917-123-4567"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={sendRecipient}
-              onChangeText={setSendRecipient}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Funding Payment Card
-            </Text>
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, marginVertical: 4 }}
-            >
-              {(wallet?.cards || []).map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[
-                    styles.providerChip,
-                    sendSelectedCardId === c.id
-                      ? { backgroundColor: "#2563EB" }
-                      : {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F1F5F9",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                        },
-                  ]}
-                  onPress={() => setSendSelectedCardId(c.id)}
-                >
-                  <Text
-                    style={[
-                      styles.providerChipText,
-                      {
-                        color:
-                          sendSelectedCardId === c.id
-                            ? "#FFFFFF"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                      },
-                    ]}
-                  >
-                    {c.name} (₱{(c.balance || 0).toLocaleString()})
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Amount (₱)
-            </Text>
-            <View
-              style={[
-                styles.amountInputWrap,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                },
-              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={true}
+              style={{ maxHeight: effectiveKeyboardHeight > 0 ? 280 : 500 }}
             >
               <Text
                 style={[
-                  styles.currencyPrefix,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
                 ]}
               >
-                ₱
+                Recipient Roommate
               </Text>
               <TextInput
                 style={[
-                  styles.amountInput,
-                  { color: isDark ? colors.text : "#0F172A" },
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
                 ]}
-                keyboardType="numeric"
-                value={sendAmount}
-                onChangeText={setSendAmount}
-                placeholder="0.00"
+                placeholder="e.g. Alex Chen or 0917-123-4567"
                 placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={sendRecipient}
+                onChangeText={setSendRecipient}
               />
-            </View>
 
-            {(() => {
-              const fundingCard =
-                wallet?.cards.find((c) => c.id === sendSelectedCardId) ||
-                wallet?.cards[0];
-              const fundingBal = fundingCard?.balance || 0;
-              const sendVal = parseFloat(sendAmount) || 0;
-              const isSendInsufficient = fundingBal < sendVal;
-
-              return (
-                <View style={{ width: "100%", marginTop: 8 }}>
-                  {fundingCard && isSendInsufficient && sendVal > 0 && (
-                    <View
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Funding Payment Card
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, marginVertical: 4 }}
+              >
+                {(wallet?.cards || []).map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.providerChip,
+                      sendSelectedCardId === c.id
+                        ? { backgroundColor: "#2563EB" }
+                        : {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                          },
+                    ]}
+                    onPress={() => setSendSelectedCardId(c.id)}
+                  >
+                    <Text
                       style={[
-                        styles.simPreviewCallout,
+                        styles.providerChipText,
                         {
-                          backgroundColor: isDark ? "#450A0A30" : "#FEF2F2",
-                          borderColor: "#EF4444",
-                          marginBottom: 12,
+                          color:
+                            sendSelectedCardId === c.id
+                              ? "#FFFFFF"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
                         },
                       ]}
                     >
-                      <Ionicons name="alert-circle" size={18} color="#EF4444" />
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[styles.simPreviewText, { color: "#EF4444" }]}
-                        >
-                          Insufficient balance on {fundingCard.name}. Available:
-                          ₱{fundingBal.toLocaleString()} (Short by ₱
-                          {(sendVal - fundingBal).toLocaleString()}).
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-
-                  <TouchableOpacity
-                    style={[
-                      styles.modalPrimaryBtn,
-                      (isSendInsufficient ||
-                        sendVal <= 0 ||
-                        !sendRecipient.trim()) && {
-                        backgroundColor: "#94A3B8",
-                      },
-                    ]}
-                    disabled={
-                      isSendInsufficient ||
-                      sendVal <= 0 ||
-                      !sendRecipient.trim()
-                    }
-                    onPress={handleSendMoney}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons
-                      name={
-                        isSendInsufficient && sendVal > 0
-                          ? "alert-circle"
-                          : "paper-plane"
-                      }
-                      size={18}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.modalPrimaryBtnText}>
-                      {isSendInsufficient && sendVal > 0
-                        ? `Insufficient Balance on ${fundingCard?.name || "Card"}`
-                        : sendVal <= 0
-                          ? "Enter Amount"
-                          : `Send ₱${sendVal.toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })} Now`}
+                      {c.name} (₱{(c.balance || 0).toLocaleString()})
                     </Text>
                   </TouchableOpacity>
-                </View>
-              );
-            })()}
+                ))}
+              </ScrollView>
 
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowSendMoneyModal(false)}
-            >
               <Text
                 style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
                 ]}
               >
-                Cancel
+                Amount (₱)
               </Text>
-            </TouchableOpacity>
+              <View
+                style={[
+                  styles.amountInputWrap,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.currencyPrefix,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  ₱
+                </Text>
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                  keyboardType="numeric"
+                  value={sendAmount}
+                  onChangeText={setSendAmount}
+                  placeholder="0.00"
+                  placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                />
+              </View>
+
+              {(() => {
+                const fundingCard =
+                  wallet?.cards.find((c) => c.id === sendSelectedCardId) ||
+                  wallet?.cards[0];
+                const fundingBal = fundingCard?.balance || 0;
+                const sendVal = parseFloat(sendAmount) || 0;
+                const isSendInsufficient = fundingBal < sendVal;
+
+                return (
+                  <View style={{ width: "100%", marginTop: 8 }}>
+                    {fundingCard && isSendInsufficient && sendVal > 0 && (
+                      <View
+                        style={[
+                          styles.simPreviewCallout,
+                          {
+                            backgroundColor: isDark ? "#450A0A30" : "#FEF2F2",
+                            borderColor: "#EF4444",
+                            marginBottom: 12,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="alert-circle"
+                          size={18}
+                          color="#EF4444"
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.simPreviewText,
+                              { color: "#EF4444" },
+                            ]}
+                          >
+                            Insufficient balance on {fundingCard.name}.
+                            Available: ₱{fundingBal.toLocaleString()} (Short by
+                            ₱{(sendVal - fundingBal).toLocaleString()}).
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={[
+                        styles.modalPrimaryBtn,
+                        (isSendInsufficient ||
+                          sendVal <= 0 ||
+                          !sendRecipient.trim()) && {
+                          backgroundColor: "#94A3B8",
+                        },
+                      ]}
+                      disabled={
+                        isSendInsufficient ||
+                        sendVal <= 0 ||
+                        !sendRecipient.trim()
+                      }
+                      onPress={handleSendMoney}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={
+                          isSendInsufficient && sendVal > 0
+                            ? "alert-circle"
+                            : "paper-plane"
+                        }
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.modalPrimaryBtnText}>
+                        {isSendInsufficient && sendVal > 0
+                          ? `Insufficient Balance on ${fundingCard?.name || "Card"}`
+                          : sendVal <= 0
+                            ? "Enter Amount"
+                            : `Send ₱${sendVal.toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} Now`}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowSendMoneyModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -6860,6 +6979,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowRequestSplitModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -6871,6 +6991,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -6883,173 +7004,181 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: isDark ? colors.text : "#0F172A" },
-              ]}
-            >
-              Request Expense Split
-            </Text>
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: isDark ? colors.textMuted : "#64748B" },
-              ]}
-            >
-              Divide a household bill evenly among roommates
-            </Text>
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Expense Description
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                },
-              ]}
-              placeholder="e.g. Meralco Electricity, Water, or Fiber WiFi"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={splitTitle}
-              onChangeText={setSplitTitle}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Total Bill Amount (₱)
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                  fontWeight: "800",
-                },
-              ]}
-              keyboardType="numeric"
-              placeholder="2400"
-              placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
-              value={splitAmount}
-              onChangeText={setSplitAmount}
-            />
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Split Among ({splitNumPeople} roommates)
-            </Text>
-            <View style={{ flexDirection: "row", gap: 8, marginVertical: 4 }}>
-              {[2, 3, 4, 5, 6].map((num) => (
-                <TouchableOpacity
-                  key={num}
-                  style={[
-                    styles.quickPill,
-                    splitNumPeople === num
-                      ? { backgroundColor: "#059669" }
-                      : {
-                          backgroundColor: isDark
-                            ? colors.surfaceInset
-                            : "#F1F5F9",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.border : "#E2E8F0",
-                        },
-                  ]}
-                  onPress={() => setSplitNumPeople(num)}
-                >
-                  <Text
-                    style={[
-                      styles.quickPillText,
-                      {
-                        color:
-                          splitNumPeople === num
-                            ? "#FFFFFF"
-                            : isDark
-                              ? colors.text
-                              : "#0F172A",
-                      },
-                    ]}
-                  >
-                    {num} Pax
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View
-              style={{
-                backgroundColor: isDark ? "#064E3B40" : "#ECFDF5",
-                borderColor: isDark ? "#065F46" : "#A7F3D0",
-                borderWidth: 1,
-                borderRadius: 14,
-                padding: 12,
-                marginVertical: 10,
-                alignItems: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 12,
-                  color: isDark ? "#A7F3D0" : "#065F46",
-                  fontWeight: "600",
-                }}
-              >
-                Calculated Share Per Roommate:
-              </Text>
-              <Text
-                style={{
-                  fontSize: 22,
-                  fontWeight: "800",
-                  color: isDark ? "#34D399" : "#047857",
-                  marginTop: 2,
-                }}
-              >
-                ₱
-                {(
-                  (parseFloat(splitAmount) || 0) / (splitNumPeople || 1)
-                ).toFixed(2)}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.modalPrimaryBtn, { backgroundColor: "#059669" }]}
-              onPress={handleCreateSplitRequest}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="send" size={18} color="#FFFFFF" />
-              <Text style={styles.modalPrimaryBtnText}>Send Split Request</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowRequestSplitModal(false)}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
             >
               <Text
                 style={[
-                  styles.modalCancelBtnText,
+                  styles.modalTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Request Expense Split
+              </Text>
+              <Text
+                style={[
+                  styles.modalSubtitle,
                   { color: isDark ? colors.textMuted : "#64748B" },
                 ]}
               >
-                Cancel
+                Divide a household bill evenly among roommates
               </Text>
-            </TouchableOpacity>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Expense Description
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. Meralco Electricity, Water, or Fiber WiFi"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={splitTitle}
+                onChangeText={setSplitTitle}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Total Bill Amount (₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                    fontWeight: "800",
+                  },
+                ]}
+                keyboardType="numeric"
+                placeholder="2400"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={splitAmount}
+                onChangeText={setSplitAmount}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Split Among ({splitNumPeople} roommates)
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginVertical: 4 }}>
+                {[2, 3, 4, 5, 6].map((num) => (
+                  <TouchableOpacity
+                    key={num}
+                    style={[
+                      styles.quickPill,
+                      splitNumPeople === num
+                        ? { backgroundColor: "#059669" }
+                        : {
+                            backgroundColor: isDark
+                              ? colors.surfaceInset
+                              : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                          },
+                    ]}
+                    onPress={() => setSplitNumPeople(num)}
+                  >
+                    <Text
+                      style={[
+                        styles.quickPillText,
+                        {
+                          color:
+                            splitNumPeople === num
+                              ? "#FFFFFF"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                        },
+                      ]}
+                    >
+                      {num} Pax
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View
+                style={{
+                  backgroundColor: isDark ? "#064E3B40" : "#ECFDF5",
+                  borderColor: isDark ? "#065F46" : "#A7F3D0",
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  padding: 12,
+                  marginVertical: 10,
+                  alignItems: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? "#A7F3D0" : "#065F46",
+                    fontWeight: "600",
+                  }}
+                >
+                  Calculated Share Per Roommate:
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 22,
+                    fontWeight: "800",
+                    color: isDark ? "#34D399" : "#047857",
+                    marginTop: 2,
+                  }}
+                >
+                  ₱
+                  {(
+                    (parseFloat(splitAmount) || 0) / (splitNumPeople || 1)
+                  ).toFixed(2)}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalPrimaryBtn, { backgroundColor: "#059669" }]}
+                onPress={handleCreateSplitRequest}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="send" size={18} color="#FFFFFF" />
+                <Text style={styles.modalPrimaryBtnText}>
+                  Send Split Request
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowRequestSplitModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -7060,6 +7189,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowScanQrModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -7071,6 +7201,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -7272,6 +7403,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowAnalyticsModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -7283,6 +7415,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -7295,105 +7428,113 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: isDark ? colors.text : "#0F172A" },
-              ]}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
             >
-              Monthly Wallet Analytics
-            </Text>
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: isDark ? colors.textMuted : "#64748B" },
-              ]}
-            >
-              Category expense distribution across cards
-            </Text>
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Monthly Wallet Analytics
+              </Text>
+              <Text
+                style={[
+                  styles.modalSubtitle,
+                  { color: isDark ? colors.textMuted : "#64748B" },
+                ]}
+              >
+                Category expense distribution across cards
+              </Text>
 
-            <View style={{ marginVertical: 12, gap: 10 }}>
-              {[
-                {
-                  label: "Rent & Room Deposit",
-                  pct: "55%",
-                  amount: "₱8,250",
-                  color: "#2563EB",
-                },
-                {
-                  label: "Electricity & Meralco",
-                  pct: "25%",
-                  amount: "₱3,750",
-                  color: "#D97706",
-                },
-                {
-                  label: "Water & Shared Fiber",
-                  pct: "12%",
-                  amount: "₱1,800",
-                  color: "#059669",
-                },
-                {
-                  label: "Groceries & Supplies",
-                  pct: "8%",
-                  amount: "₱1,200",
-                  color: "#7C3AED",
-                },
-              ].map((item) => (
-                <View key={item.label}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "600",
-                        color: isDark ? colors.text : "#1E293B",
-                      }}
-                    >
-                      {item.label}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#64748B",
-                      }}
-                    >
-                      {item.amount} ({item.pct})
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      height: 8,
-                      backgroundColor: isDark ? colors.surfaceInset : "#E2E8F0",
-                      borderRadius: 4,
-                      overflow: "hidden",
-                    }}
-                  >
+              <View style={{ marginVertical: 12, gap: 10 }}>
+                {[
+                  {
+                    label: "Rent & Room Deposit",
+                    pct: "55%",
+                    amount: "₱8,250",
+                    color: "#2563EB",
+                  },
+                  {
+                    label: "Electricity & Meralco",
+                    pct: "25%",
+                    amount: "₱3,750",
+                    color: "#D97706",
+                  },
+                  {
+                    label: "Water & Shared Fiber",
+                    pct: "12%",
+                    amount: "₱1,800",
+                    color: "#059669",
+                  },
+                  {
+                    label: "Groceries & Supplies",
+                    pct: "8%",
+                    amount: "₱1,200",
+                    color: "#7C3AED",
+                  },
+                ].map((item) => (
+                  <View key={item.label}>
                     <View
                       style={{
-                        width: item.pct as any,
-                        height: 8,
-                        backgroundColor: item.color,
-                        borderRadius: 4,
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
                       }}
-                    />
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "600",
+                          color: isDark ? colors.text : "#1E293B",
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#64748B",
+                        }}
+                      >
+                        {item.amount} ({item.pct})
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        height: 8,
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#E2E8F0",
+                        borderRadius: 4,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: item.pct as any,
+                          height: 8,
+                          backgroundColor: item.color,
+                          borderRadius: 4,
+                        }}
+                      />
+                    </View>
                   </View>
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
 
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={() => setShowAnalyticsModal(false)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modalPrimaryBtnText}>Done</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={() => setShowAnalyticsModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalPrimaryBtnText}>Done</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -7404,6 +7545,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => setShowLimitsModal(false)}
+        statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
@@ -7415,6 +7557,7 @@ export function WalletScreen({
             style={[
               styles.modalSheet,
               {
+                maxHeight: modalAdaptiveMaxHeight,
                 backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
                 borderColor: isDark ? colors.border : "transparent",
                 borderWidth: isDark ? 1 : 0,
@@ -7427,158 +7570,164 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: isDark ? colors.text : "#0F172A" },
-              ]}
-            >
-              Card Limits & Security
-            </Text>
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: isDark ? colors.textMuted : "#64748B" },
-              ]}
-            >
-              Daily spend caps and anti-fraud protections
-            </Text>
-
-            <Text
-              style={[
-                styles.inputLabel,
-                { color: isDark ? colors.textSecondary : "#475569" },
-              ]}
-            >
-              Daily Online Spend Limit (₱)
-            </Text>
-            <TextInput
-              style={[
-                styles.modalTextInput,
-                {
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderColor: isDark ? colors.border : "#CBD5E1",
-                  color: isDark ? colors.text : "#0F172A",
-                  fontWeight: "800",
-                },
-              ]}
-              keyboardType="numeric"
-              value={dailyOnlineLimit}
-              onChangeText={setDailyOnlineLimit}
-              placeholder="15000"
-            />
-
-            <View style={{ marginVertical: 12, gap: 10 }}>
-              <TouchableOpacity
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: 12,
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: isDark ? colors.border : "#E2E8F0",
-                }}
-                onPress={() => setIsCardLocked(!isCardLocked)}
-              >
-                <View>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "700",
-                      color: isDark ? colors.text : "#0F172A",
-                    }}
-                  >
-                    Lock Cards Temporarily
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      color: isDark ? colors.textMuted : "#64748B",
-                    }}
-                  >
-                    Instantly freeze linked debit cards
-                  </Text>
-                </View>
-                <Ionicons
-                  name={isCardLocked ? "lock-closed" : "lock-open-outline"}
-                  size={22}
-                  color={isCardLocked ? "#EF4444" : "#10B981"}
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: 12,
-                  backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: isDark ? colors.border : "#E2E8F0",
-                }}
-                onPress={() => setAllowContactless(!allowContactless)}
-              >
-                <View>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "700",
-                      color: isDark ? colors.text : "#0F172A",
-                    }}
-                  >
-                    QR Ph & Contactless NFC
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      color: isDark ? colors.textMuted : "#64748B",
-                    }}
-                  >
-                    Allow 1-tap fast settlements
-                  </Text>
-                </View>
-                <Ionicons
-                  name={
-                    allowContactless
-                      ? "checkmark-circle"
-                      : "close-circle-outline"
-                  }
-                  size={22}
-                  color={allowContactless ? "#10B981" : "#94A3B8"}
-                />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.modalPrimaryBtn}
-              onPress={() => {
-                setShowLimitsModal(false);
-                Alert.alert(
-                  "Security Settings Saved",
-                  `Daily limit set to ₱${parseFloat(dailyOnlineLimit || "0").toLocaleString()}. Security status active.`,
-                );
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modalPrimaryBtnText}>Save Preferences</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowLimitsModal(false)}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 24 }}
             >
               <Text
                 style={[
-                  styles.modalCancelBtnText,
+                  styles.modalTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Card Limits & Security
+              </Text>
+              <Text
+                style={[
+                  styles.modalSubtitle,
                   { color: isDark ? colors.textMuted : "#64748B" },
                 ]}
               >
-                Close
+                Daily spend caps and anti-fraud protections
               </Text>
-            </TouchableOpacity>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textSecondary : "#475569" },
+                ]}
+              >
+                Daily Online Spend Limit (₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.modalTextInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                    fontWeight: "800",
+                  },
+                ]}
+                keyboardType="numeric"
+                value={dailyOnlineLimit}
+                onChangeText={setDailyOnlineLimit}
+                placeholder="15000"
+              />
+
+              <View style={{ marginVertical: 12, gap: 10 }}>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: 12,
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: isDark ? colors.border : "#E2E8F0",
+                  }}
+                  onPress={() => setIsCardLocked(!isCardLocked)}
+                >
+                  <View>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "700",
+                        color: isDark ? colors.text : "#0F172A",
+                      }}
+                    >
+                      Lock Cards Temporarily
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: isDark ? colors.textMuted : "#64748B",
+                      }}
+                    >
+                      Instantly freeze linked debit cards
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name={isCardLocked ? "lock-closed" : "lock-open-outline"}
+                    size={22}
+                    color={isCardLocked ? "#EF4444" : "#10B981"}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: 12,
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: isDark ? colors.border : "#E2E8F0",
+                  }}
+                  onPress={() => setAllowContactless(!allowContactless)}
+                >
+                  <View>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "700",
+                        color: isDark ? colors.text : "#0F172A",
+                      }}
+                    >
+                      QR Ph & Contactless NFC
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: isDark ? colors.textMuted : "#64748B",
+                      }}
+                    >
+                      Allow 1-tap fast settlements
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name={
+                      allowContactless
+                        ? "checkmark-circle"
+                        : "close-circle-outline"
+                    }
+                    size={22}
+                    color={allowContactless ? "#10B981" : "#94A3B8"}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={() => {
+                  setShowLimitsModal(false);
+                  Alert.alert(
+                    "Security Settings Saved",
+                    `Daily limit set to ₱${parseFloat(dailyOnlineLimit || "0").toLocaleString()}. Security status active.`,
+                  );
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalPrimaryBtnText}>Save Preferences</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowLimitsModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalCancelBtnText,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Close
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -7589,6 +7738,7 @@ export function WalletScreen({
         transparent
         animationType="slide"
         onRequestClose={() => handleFinishWalkthrough()}
+        statusBarTranslucent={true}
       >
         <View style={styles.walkthroughOverlay}>
           <TouchableOpacity

@@ -70,6 +70,12 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
 
   const insets = useSafeAreaInsets();
+  const scrollViewRef = React.useRef<ScrollView>(null);
+  const scrollToField = (y: number) => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y, animated: true });
+    }, 120);
+  };
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
     insets.top,
@@ -679,22 +685,22 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? topInset : (StatusBar.currentHeight ?? 0)
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
       >
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={[
             styles.scrollContent,
             {
               paddingBottom: Math.max(
-                100,
-                insets.bottom + (isKeyboardVisible ? keyboardHeight + 30 : 60),
+                120,
+                insets.bottom + (isKeyboardVisible ? keyboardHeight + 40 : 60),
               ),
             },
           ]}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
           showsVerticalScrollIndicator={false}
         >
           {profile && !isHost && (
@@ -1187,6 +1193,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
                 placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                 value={otherCategorySpecified}
                 onChangeText={setOtherCategorySpecified}
+                onFocus={() => scrollToField(180)}
                 maxLength={40}
                 autoCapitalize="words"
               />

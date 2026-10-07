@@ -1974,10 +1974,8 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={
-            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-          }
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
         >
           <ScrollView
             contentContainerStyle={[
@@ -1985,6 +1983,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.inputGroup}>
@@ -2190,10 +2189,8 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={
-            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-          }
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
         >
           <ScrollView
             contentContainerStyle={[
@@ -2201,6 +2198,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.inputGroup}>
@@ -2313,10 +2311,8 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={
-            Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0)
-          }
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
         >
           <ScrollView
             contentContainerStyle={[
@@ -2324,6 +2320,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               { paddingBottom: Math.max(100, insets.bottom + 48) },
             ]}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.inputGroup}>
@@ -2819,6 +2816,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           { paddingBottom: Math.max(110, insets.bottom + 80) },
         ]}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
         showsVerticalScrollIndicator={false}
       >
         {/* Top Group Selector Pills - Exactly matching user image */}
@@ -5631,6 +5629,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
           style={{ maxHeight: 520 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
         >
           <View style={{ paddingTop: 4, paddingBottom: 24 }}>
             {/* Bill Title Input */}

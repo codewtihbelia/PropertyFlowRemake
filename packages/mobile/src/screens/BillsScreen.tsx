@@ -646,6 +646,8 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
               { paddingBottom: Math.max(120, insets.bottom + 95) },
             ]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
             onScroll={onScroll}
             scrollEventThrottle={16}
           >

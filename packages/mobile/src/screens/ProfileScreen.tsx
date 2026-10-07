@@ -653,6 +653,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           { paddingBottom: Math.max(120, insets.bottom + 95) },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
@@ -2230,8 +2232,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <ScrollView
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          style={{ maxHeight: 480 }}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 60 }}
+          automaticallyAdjustKeyboardInsets={true}
+          style={{ flexShrink: 1 }}
+          contentContainerStyle={{
+            paddingTop: 4,
+            paddingBottom: Math.max(80, insets.bottom + 60),
+          }}
         >
           {/* Photo Avatar In Modal */}
           <View

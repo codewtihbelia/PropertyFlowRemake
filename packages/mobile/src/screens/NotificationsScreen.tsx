@@ -1044,6 +1044,8 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
               { paddingBottom: Math.max(100, insets.bottom + 50) },
             ]}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={true}
           >
             {notifications.length === 0 ? (
               <View
