@@ -24921,3 +24921,6 @@
 {"_e":"metro:bundling:progress","_t":1791372982015,"id":"1","progress":0.9662696393091549,"total":1117,"current":1098}
 {"_e":"metro:bundling:progress","_t":1791372982153,"id":"1","progress":0.9839503273652329,"total":1117,"current":1108}
 {"_e":"metro:bundling:progress","_t":1791372982254,"id":"1","progress":0.9982150829081633,"total":1120,"current":1119}
+{"_e":"metro:bundling:progress","_t":1791372982949,"id":"1","progress":0.999,"total":1120,"current":1120}
+{"_e":"metro:bundling:progress","_t":1791372983049,"id":"1","progress":0.999,"total":1131,"current":1131}
+{"_e":"metro:bundling:done","_t":1791372983444,"id":"1","total":1131,"ms":19042.1942}
