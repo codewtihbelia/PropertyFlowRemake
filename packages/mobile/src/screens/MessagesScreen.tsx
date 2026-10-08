@@ -190,7 +190,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   onOpenSettleDues,
   onOpenAddExpense,
 }) => {
-  const { onScroll } = useNavVisibility();
+  const { onScroll, keyboardHeight: contextKeyboardHeight } =
+    useNavVisibility();
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const topInset = Math.max(
@@ -212,6 +213,20 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const currentUserPhotoURL =
     currentUser?.photoURL || auth.currentUser?.photoURL || undefined;
 
+  const cachedProfile = mobileDataService.getCachedProfile(currentUid);
+  const [userProfile, setUserProfile] = useState<any | null>(
+    () => cachedProfile,
+  );
+
+  // Sync profile real-time to immediately detect join approval / rejection
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsub = mobileDataService.listenToUserProfile(currentUid, (p) => {
+      if (p) setUserProfile(p);
+    });
+    return () => unsub();
+  }, [currentUid]);
+
   // Real Firestore state
   const [householdMembers, setHouseholdMembers] = useState<any[]>([]);
   const [householdInfo, setHouseholdInfo] = useState<any>(null);
@@ -220,6 +235,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     Record<string, { note: string; emoji?: string; updatedAt: string }>
   >({});
   const [loading, setLoading] = useState(true);
+
+  // Strict helper: only active approved members belong in the group chat and direct messages
+  const isActiveMember = (m: any) => {
+    if (!m) return false;
+    const s = String(m.status || "").toUpperCase();
+    const js = String(m.joinRequestStatus || "").toUpperCase();
+    if (
+      s === "REJECTED" ||
+      s === "DECLINED" ||
+      s === "PENDING" ||
+      s === "INACTIVE" ||
+      s === "REMOVED" ||
+      s === "CANCELLED"
+    ) {
+      return false;
+    }
+    if (
+      js === "REJECTED" ||
+      js === "DECLINED" ||
+      js === "PENDING" ||
+      js === "REMOVED"
+    ) {
+      return false;
+    }
+    if (m.rejectionReason || m.rejectedDate) {
+      return false;
+    }
+    return (
+      s === "ACTIVE" || m.role === "HOST" || (!m.status && !m.joinRequestStatus)
+    );
+  };
 
   // Search and Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -242,24 +288,36 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [toggledMessageIds, setToggledMessageIds] = useState<
     Record<string, boolean>
   >({});
+  const [localKeyboardHeight, setLocalKeyboardHeight] = useState(0);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const keyboardHeight = Math.max(
+    localKeyboardHeight,
+    contextKeyboardHeight || 0,
+  );
 
   useEffect(() => {
-    const showSub = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
-      () => {
-        setIsKeyboardOpen(true);
-        setTimeout(() => {
-          messageScrollRef.current?.scrollToEnd({ animated: true });
-        }, 60);
-      },
-    );
-    const hideSub = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => {
-        setIsKeyboardOpen(false);
-      },
-    );
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height || 0;
+      setLocalKeyboardHeight(h);
+      setIsKeyboardOpen(true);
+      setTimeout(() => {
+        messageScrollRef.current?.scrollToEnd({ animated: true });
+      }, 60);
+    };
+
+    const onHide = () => {
+      setLocalKeyboardHeight(0);
+      setIsKeyboardOpen(false);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+
     return () => {
       showSub.remove();
       hideSub.remove();
@@ -311,7 +369,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       householdId,
       (members) => {
-        setHouseholdMembers(members || []);
+        setHouseholdMembers((members || []).filter(isActiveMember));
       },
     );
 
@@ -350,13 +408,42 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     };
   }, [householdId, currentUid]);
 
-  // Real bills group members (excluding the current user)
+  // Real bills group members (excluding the current user, strictly active members only)
   const billsGroupMembers = useMemo(() => {
     return householdMembers.filter((m) => {
+      if (!isActiveMember(m)) return false;
       const uid = m.userId || m.memberId;
       return uid && uid !== currentUid && uid !== `mem_${currentUid}`;
     });
   }, [householdMembers, currentUid]);
+
+  const isHost =
+    userProfile?.role === "HOST" ||
+    userProfile?.role === "SUPER_ADMIN" ||
+    userProfile?.hostApplicationStatus === "APPROVED" ||
+    householdInfo?.hostId === currentUid ||
+    householdMembers.some(
+      (m) =>
+        (m.userId === currentUid || m.memberId === currentUid) &&
+        m.role === "HOST",
+    );
+
+  const isCurrentMemberActive = useMemo(() => {
+    if (isHost) return true;
+    if (userProfile?.joinRequestStatus === "REJECTED") return false;
+    if (!householdId) return false;
+    return householdMembers.some(
+      (m) =>
+        (m.userId === currentUid || m.memberId === currentUid) &&
+        isActiveMember(m),
+    );
+  }, [
+    isHost,
+    userProfile?.joinRequestStatus,
+    householdId,
+    householdMembers,
+    currentUid,
+  ]);
 
   // Current user's thought note
   const currentUserMember = householdMembers.find(
@@ -969,16 +1056,430 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
+  // Guard 1: Rejected applicant cannot access messages or group chats
+  if (userProfile?.joinRequestStatus === "REJECTED") {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: isDark ? "#111215" : "#FFFFFF",
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent
+          backgroundColor="transparent"
+        />
+        <View style={styles.header}>
+          <View style={styles.headerLeftRow}>
+            {onBack && (
+              <TouchableOpacity
+                style={[
+                  styles.backButton,
+                  {
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                    borderColor: isDark
+                      ? "rgba(255, 255, 255, 0.1)"
+                      : "#E2E8F0",
+                  },
+                ]}
+                onPress={onBack}
+                accessibilityLabel="Back"
+              >
+                <Feather
+                  name="chevron-left"
+                  size={22}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </TouchableOpacity>
+            )}
+            <Text
+              style={[
+                styles.screenTitle,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+            >
+              Messages
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
+        >
+          <View
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 36,
+              backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#FFE4E6",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 16,
+            }}
+          >
+            <Feather name="shield-off" size={32} color="#E11D48" />
+          </View>
+          <Text
+            style={{
+              fontSize: 18,
+              fontFamily: "Inter-Bold",
+              color: isDark ? "#FDA4AF" : "#9F1239",
+              textAlign: "center",
+              marginBottom: 8,
+            }}
+          >
+            Join Request Declined
+          </Text>
+          <Text
+            style={{
+              fontSize: 14,
+              fontFamily: "Inter-Regular",
+              color: isDark ? "#FECDD3" : "#BE123C",
+              textAlign: "center",
+              lineHeight: 20,
+              marginBottom: 16,
+            }}
+          >
+            Your request to join this household group was declined by the host.
+            Only active members of the group can access group chats and direct
+            messages.
+          </Text>
+          {Boolean(userProfile.joinRejectionReason) && (
+            <View
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+                borderRadius: 10,
+                backgroundColor: isDark
+                  ? "rgba(0,0,0,0.3)"
+                  : "rgba(255,255,255,0.9)",
+                marginBottom: 20,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(239, 68, 68, 0.2)" : "#FCA5A5",
+                maxWidth: 320,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: "Inter-Medium",
+                  color: isDark ? "#FCA5A5" : "#9F1239",
+                  textAlign: "center",
+                }}
+              >
+                Reason: "{userProfile.joinRejectionReason}"
+              </Text>
+            </View>
+          )}
+          {onBack && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#E11D48",
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 12,
+              }}
+              onPress={onBack}
+            >
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                Return to Home
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Guard 2: Group membership required to chat
+  if (!householdId) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: isDark ? "#111215" : "#FFFFFF",
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent
+          backgroundColor="transparent"
+        />
+        <View style={styles.header}>
+          <View style={styles.headerLeftRow}>
+            {onBack && (
+              <TouchableOpacity
+                style={[
+                  styles.backButton,
+                  {
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                    borderColor: isDark
+                      ? "rgba(255, 255, 255, 0.1)"
+                      : "#E2E8F0",
+                  },
+                ]}
+                onPress={onBack}
+                accessibilityLabel="Back"
+              >
+                <Feather
+                  name="chevron-left"
+                  size={22}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </TouchableOpacity>
+            )}
+            <Text
+              style={[
+                styles.screenTitle,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+            >
+              Messages
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
+        >
+          <View
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 36,
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 16,
+            }}
+          >
+            <Feather
+              name="message-square"
+              size={32}
+              color={isDark ? "#94A3B8" : "#64748B"}
+            />
+          </View>
+          <Text
+            style={{
+              fontSize: 18,
+              fontFamily: "Inter-Bold",
+              color: isDark ? "#FFFFFF" : "#0F172A",
+              textAlign: "center",
+              marginBottom: 8,
+            }}
+          >
+            Group Membership Required
+          </Text>
+          <Text
+            style={{
+              fontSize: 14,
+              fontFamily: "Inter-Regular",
+              color: isDark ? "#94A3B8" : "#64748B",
+              textAlign: "center",
+              lineHeight: 20,
+              marginBottom: 20,
+              maxWidth: 300,
+            }}
+          >
+            You must be an active member of a household group to access group
+            chats and roommate messaging.
+          </Text>
+          {onBack && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#2563EB",
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 12,
+              }}
+              onPress={onBack}
+            >
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                Return to Home
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Guard 3: Non-member restricted access
+  if (
+    !loading &&
+    householdMembers.length > 0 &&
+    !isCurrentMemberActive &&
+    !isHost
+  ) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: isDark ? "#111215" : "#FFFFFF",
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent
+          backgroundColor="transparent"
+        />
+        <View style={styles.header}>
+          <View style={styles.headerLeftRow}>
+            {onBack && (
+              <TouchableOpacity
+                style={[
+                  styles.backButton,
+                  {
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                    borderColor: isDark
+                      ? "rgba(255, 255, 255, 0.1)"
+                      : "#E2E8F0",
+                  },
+                ]}
+                onPress={onBack}
+                accessibilityLabel="Back"
+              >
+                <Feather
+                  name="chevron-left"
+                  size={22}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </TouchableOpacity>
+            )}
+            <Text
+              style={[
+                styles.screenTitle,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+            >
+              Messages
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
+        >
+          <View
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 36,
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 16,
+            }}
+          >
+            <Feather
+              name="lock"
+              size={32}
+              color={isDark ? "#94A3B8" : "#64748B"}
+            />
+          </View>
+          <Text
+            style={{
+              fontSize: 18,
+              fontFamily: "Inter-Bold",
+              color: isDark ? "#FFFFFF" : "#0F172A",
+              textAlign: "center",
+              marginBottom: 8,
+            }}
+          >
+            Access Restricted
+          </Text>
+          <Text
+            style={{
+              fontSize: 14,
+              fontFamily: "Inter-Regular",
+              color: isDark ? "#94A3B8" : "#64748B",
+              textAlign: "center",
+              lineHeight: 20,
+              marginBottom: 20,
+              maxWidth: 300,
+            }}
+          >
+            Only active members of this household group can view and send
+            messages.
+          </Text>
+          {onBack && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#2563EB",
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 12,
+              }}
+              onPress={onBack}
+            >
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 14,
+                }}
+              >
+                Return to Home
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   // ==========================================
   // VIEW 1: FULL-SCREEN NATIVE MESSENGER CHAT
   // ==========================================
   if (activeThread) {
     return (
-      <View
+      <KeyboardAvoidingView
         style={[
           styles.container,
           { backgroundColor: isDark ? "#111215" : "#FFFFFF" },
         ]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={0}
       >
         <StatusBar
           barStyle={isDark ? "light-content" : "dark-content"}
@@ -1108,494 +1609,499 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </View>
 
         {/* Message Feed */}
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+        <ScrollView
+          ref={messageScrollRef}
+          style={styles.chatScrollList}
+          contentContainerStyle={styles.chatScrollContent}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => {
+            messageScrollRef.current?.scrollToEnd({ animated: true });
+          }}
         >
-          <ScrollView
-            ref={messageScrollRef}
-            style={styles.chatScrollList}
-            contentContainerStyle={styles.chatScrollContent}
-            keyboardShouldPersistTaps="handled"
-            automaticallyAdjustKeyboardInsets={true}
-            showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => {
-              messageScrollRef.current?.scrollToEnd({ animated: true });
-            }}
-          >
-            {activeThread.messages.length === 0 ? (
-              <View style={styles.chatEmptyState}>
-                <View
-                  style={[
-                    styles.chatEmptyAvatarBig,
-                    { backgroundColor: activeThread.avatarBg },
-                  ]}
-                >
-                  {activeThread.photoURL ? (
-                    <Image
-                      source={{ uri: activeThread.photoURL }}
-                      style={styles.avatarImage}
-                    />
-                  ) : activeThread.type === "group" ? (
-                    <Ionicons name="home" size={32} color="#FFFFFF" />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.chatEmptyAvatarText,
-                        { color: activeThread.avatarColor },
-                      ]}
-                    >
-                      {activeThread.initials}
-                    </Text>
-                  )}
-                </View>
-                <Text
-                  style={[
-                    styles.chatEmptyTitle,
-                    { color: isDark ? "#FFFFFF" : "#0F172A" },
-                  ]}
-                >
-                  {activeThread.name}
-                </Text>
-                <Text
-                  style={[
-                    styles.chatEmptySubtitle,
-                    { color: isDark ? "#94A3B8" : "#64748B" },
-                  ]}
-                >
-                  {activeThread.type === "group"
-                    ? "Welcome to your household group chat! Share bills, receipts, and split notes here."
-                    : `You and ${activeThread.name} are connected in the bills group. Send a wave to say hi!`}
-                </Text>
+          {activeThread.messages.length === 0 ? (
+            <View style={styles.chatEmptyState}>
+              <View
+                style={[
+                  styles.chatEmptyAvatarBig,
+                  { backgroundColor: activeThread.avatarBg },
+                ]}
+              >
+                {activeThread.photoURL ? (
+                  <Image
+                    source={{ uri: activeThread.photoURL }}
+                    style={styles.avatarImage}
+                  />
+                ) : activeThread.type === "group" ? (
+                  <Ionicons name="home" size={32} color="#FFFFFF" />
+                ) : (
+                  <Text
+                    style={[
+                      styles.chatEmptyAvatarText,
+                      { color: activeThread.avatarColor },
+                    ]}
+                  >
+                    {activeThread.initials}
+                  </Text>
+                )}
               </View>
-            ) : (
-              activeThread.messages.map((msg, index) => {
-                const prevMsg = activeThread.messages[index - 1];
-                const showSenderName =
-                  !msg.isMe && (!prevMsg || prevMsg.senderId !== msg.senderId);
+              <Text
+                style={[
+                  styles.chatEmptyTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                {activeThread.name}
+              </Text>
+              <Text
+                style={[
+                  styles.chatEmptySubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {activeThread.type === "group"
+                  ? "Welcome to your household group chat! Share bills, receipts, and split notes here."
+                  : `You and ${activeThread.name} are connected in the bills group. Send a wave to say hi!`}
+              </Text>
+            </View>
+          ) : (
+            activeThread.messages.map((msg, index) => {
+              const prevMsg = activeThread.messages[index - 1];
+              const showSenderName =
+                !msg.isMe && (!prevMsg || prevMsg.senderId !== msg.senderId);
 
-                // Resolve sender avatar & initials for incoming messages (Facebook Messenger style)
-                const senderAvatar = !msg.isMe
-                  ? memberAvatarMap.get(msg.senderId) ||
-                    memberAvatarMap.get(msg.senderId?.replace(/^mem_/, "")) ||
-                    (activeThread.type === "direct"
-                      ? {
-                          name: activeThread.name,
-                          initials: activeThread.initials,
-                          photoURL: activeThread.photoURL,
-                          bg: activeThread.avatarBg,
-                          text: activeThread.avatarColor,
-                        }
-                      : {
-                          name: msg.sender || "Roommate",
-                          initials: getInitials(msg.sender || "R"),
-                          photoURL: undefined,
-                          bg: AVATAR_PALETTES[
-                            Math.abs(hashString(msg.senderId || "R")) %
-                              AVATAR_PALETTES.length
-                          ].bg,
-                          text: AVATAR_PALETTES[
-                            Math.abs(hashString(msg.senderId || "R")) %
-                              AVATAR_PALETTES.length
-                          ].text,
-                        })
-                  : null;
-
-                const isExpanded = !!toggledMessageIds[msg.id];
-
-                if (msg.isMe) {
-                  const otherReaders = (msg.readBy || []).filter(
-                    (uid) => uid !== currentUid && uid !== `mem_${currentUid}`,
-                  );
-                  const isSeen =
-                    otherReaders.length > 0 ||
-                    (activeThread.type === "direct" &&
-                      activeThread.targetUserId &&
-                      (msg.readBy || []).includes(activeThread.targetUserId));
-
-                  let seenLabel = "· Sent";
-                  if (isSeen) {
-                    if (activeThread.type === "direct") {
-                      seenLabel = `· Seen by ${activeThread.name.split(" ")[0]}`;
-                    } else {
-                      const readerNames = otherReaders
-                        .map((uid) => {
-                          const m = memberAvatarMap.get(uid);
-                          return m ? m.name.split(" ")[0] : null;
-                        })
-                        .filter(Boolean) as string[];
-
-                      if (readerNames.length === 1) {
-                        seenLabel = `· Seen by ${readerNames[0]}`;
-                      } else if (readerNames.length > 1) {
-                        seenLabel = `· Seen by ${readerNames[0]} and ${readerNames.length - 1} other${readerNames.length - 1 > 1 ? "s" : ""}`;
-                      } else {
-                        seenLabel = "· Seen";
+              // Resolve sender avatar & initials for incoming messages (Facebook Messenger style)
+              const senderAvatar = !msg.isMe
+                ? memberAvatarMap.get(msg.senderId) ||
+                  memberAvatarMap.get(msg.senderId?.replace(/^mem_/, "")) ||
+                  (activeThread.type === "direct"
+                    ? {
+                        name: activeThread.name,
+                        initials: activeThread.initials,
+                        photoURL: activeThread.photoURL,
+                        bg: activeThread.avatarBg,
+                        text: activeThread.avatarColor,
                       }
+                    : {
+                        name: msg.sender || "Roommate",
+                        initials: getInitials(msg.sender || "R"),
+                        photoURL: undefined,
+                        bg: AVATAR_PALETTES[
+                          Math.abs(hashString(msg.senderId || "R")) %
+                            AVATAR_PALETTES.length
+                        ].bg,
+                        text: AVATAR_PALETTES[
+                          Math.abs(hashString(msg.senderId || "R")) %
+                            AVATAR_PALETTES.length
+                        ].text,
+                      })
+                : null;
+
+              const isExpanded = !!toggledMessageIds[msg.id];
+
+              if (msg.isMe) {
+                const otherReaders = (msg.readBy || []).filter(
+                  (uid) => uid !== currentUid && uid !== `mem_${currentUid}`,
+                );
+                const isSeen =
+                  otherReaders.length > 0 ||
+                  (activeThread.type === "direct" &&
+                    activeThread.targetUserId &&
+                    (msg.readBy || []).includes(activeThread.targetUserId));
+
+                let seenLabel = "· Sent";
+                if (isSeen) {
+                  if (activeThread.type === "direct") {
+                    seenLabel = `· Seen by ${activeThread.name.split(" ")[0]}`;
+                  } else {
+                    const readerNames = otherReaders
+                      .map((uid) => {
+                        const m = memberAvatarMap.get(uid);
+                        return m ? m.name.split(" ")[0] : null;
+                      })
+                      .filter(Boolean) as string[];
+
+                    if (readerNames.length === 1) {
+                      seenLabel = `· Seen by ${readerNames[0]}`;
+                    } else if (readerNames.length > 1) {
+                      seenLabel = `· Seen by ${readerNames[0]} and ${readerNames.length - 1} other${readerNames.length - 1 > 1 ? "s" : ""}`;
+                    } else {
+                      seenLabel = "· Seen";
                     }
                   }
+                }
 
-                  return (
-                    <View
-                      key={msg.id}
-                      style={[styles.msgBubbleRow, styles.msgRowMe]}
+                return (
+                  <View
+                    key={msg.id}
+                    style={[styles.msgBubbleRow, styles.msgRowMe]}
+                  >
+                    {/* Speech bubble */}
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => handleToggleMessage(msg.id)}
+                      style={[styles.speechBubble, styles.speechBubbleMe]}
                     >
-                      {/* Speech bubble */}
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => handleToggleMessage(msg.id)}
-                        style={[styles.speechBubble, styles.speechBubbleMe]}
+                      <Text
+                        style={[
+                          styles.speechBubbleText,
+                          styles.speechBubbleTextMe,
+                        ]}
                       >
-                        <Text
+                        {msg.text}
+                      </Text>
+
+                      {/* Embedded Expense Split Card */}
+                      {msg.type === "expense_split" && msg.meta && (
+                        <View
                           style={[
-                            styles.speechBubbleText,
-                            styles.speechBubbleTextMe,
+                            styles.msgEmbedCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
                           ]}
                         >
-                          {msg.text}
-                        </Text>
-
-                        {/* Embedded Expense Split Card */}
-                        {msg.type === "expense_split" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.msgEmbedHeaderRow}>
-                              <Text
-                                style={[
-                                  styles.msgEmbedCategory,
-                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                                ]}
-                              >
-                                🛒 {msg.meta.category}
-                              </Text>
-                              <Text style={styles.msgEmbedAmount}>
-                                {msg.meta.amount}
-                              </Text>
-                            </View>
-                            {msg.meta.share && (
-                              <Text
-                                style={[
-                                  styles.msgEmbedShare,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                Calculated split share: {msg.meta.share}
-                              </Text>
-                            )}
-                          </View>
-                        )}
-
-                        {/* Embedded Payment Claim Card */}
-                        {msg.type === "payment_claim" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
+                          <View style={styles.msgEmbedHeaderRow}>
                             <Text
                               style={[
                                 styles.msgEmbedCategory,
                                 { color: isDark ? "#FFFFFF" : "#0F172A" },
                               ]}
                             >
-                              💳 {msg.meta.paymentMethod || "Payment Settle"}
+                              🛒 {msg.meta.category}
                             </Text>
                             <Text style={styles.msgEmbedAmount}>
-                              Amount: {msg.meta.amount}
+                              {msg.meta.amount}
                             </Text>
                           </View>
-                        )}
-                      </TouchableOpacity>
-
-                      {/* Messenger-style tapped Time & Seen indicator */}
-                      {isExpanded && (
-                        <View style={styles.msgStatusRowMe}>
-                          <Text
-                            style={[
-                              styles.msgStatusText,
-                              isDark && { color: "#94A3B8" },
-                            ]}
-                          >
-                            {msg.time}{" "}
+                          {msg.meta.share && (
                             <Text
                               style={[
-                                styles.msgStatusSeenBadge,
-                                isSeen && { color: "#2563EB" },
+                                styles.msgEmbedShare,
+                                { color: isDark ? "#94A3B8" : "#64748B" },
                               ]}
                             >
-                              {seenLabel}
+                              Calculated split share: {msg.meta.share}
                             </Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Embedded Payment Claim Card */}
+                      {msg.type === "payment_claim" && msg.meta && (
+                        <View
+                          style={[
+                            styles.msgEmbedCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.msgEmbedCategory,
+                              { color: isDark ? "#FFFFFF" : "#0F172A" },
+                            ]}
+                          >
+                            💳 {msg.meta.paymentMethod || "Payment Settle"}
+                          </Text>
+                          <Text style={styles.msgEmbedAmount}>
+                            Amount: {msg.meta.amount}
                           </Text>
                         </View>
                       )}
-                    </View>
-                  );
-                }
+                    </TouchableOpacity>
 
-                // Incoming message: Facebook Messenger style layout with avatar on the left
-                return (
-                  <View key={msg.id} style={styles.msgThemContainer}>
-                    {showSenderName && activeThread.type === "group" && (
-                      <Text
-                        style={[
-                          styles.msgSenderName,
-                          { color: isDark ? "#64748B" : "#94A3B8" },
-                        ]}
-                      >
-                        {msg.sender}
-                      </Text>
-                    )}
-
-                    <View style={styles.msgThemRowWithAvatar}>
-                      {/* 30x30 Circular Avatar on every incoming message line */}
-                      <View
-                        style={[
-                          styles.msgAvatarWrap,
-                          { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
-                        ]}
-                      >
-                        {senderAvatar?.photoURL ? (
-                          <Image
-                            source={{ uri: senderAvatar.photoURL }}
-                            style={styles.msgAvatarImage}
-                          />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.msgAvatarInitials,
-                              { color: senderAvatar?.text || "#2563EB" },
-                            ]}
-                          >
-                            {senderAvatar?.initials || "R"}
-                          </Text>
-                        )}
-                      </View>
-
-                      {/* Speech bubble */}
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => handleToggleMessage(msg.id)}
-                        style={[
-                          styles.speechBubble,
-                          styles.speechBubbleThem,
-                          {
-                            backgroundColor: isDark ? "#242731" : "#F1F5F9",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.speechBubbleText,
-                            { color: isDark ? "#FFFFFF" : "#0F172A" },
-                          ]}
-                        >
-                          {msg.text}
-                        </Text>
-
-                        {/* Embedded Expense Split Card */}
-                        {msg.type === "expense_split" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.msgEmbedHeaderRow}>
-                              <Text
-                                style={[
-                                  styles.msgEmbedCategory,
-                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                                ]}
-                              >
-                                🛒 {msg.meta.category}
-                              </Text>
-                              <Text style={styles.msgEmbedAmount}>
-                                {msg.meta.amount}
-                              </Text>
-                            </View>
-                            {msg.meta.share && (
-                              <Text
-                                style={[
-                                  styles.msgEmbedShare,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                Calculated split share: {msg.meta.share}
-                              </Text>
-                            )}
-                          </View>
-                        )}
-
-                        {/* Embedded Payment Claim Card */}
-                        {msg.type === "payment_claim" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.msgEmbedCategory,
-                                { color: isDark ? "#FFFFFF" : "#0F172A" },
-                              ]}
-                            >
-                              💳 {msg.meta.paymentMethod || "Payment Settle"}
-                            </Text>
-                            <Text style={styles.msgEmbedAmount}>
-                              Amount: {msg.meta.amount}
-                            </Text>
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Messenger-style tapped Time indicator for incoming message */}
+                    {/* Messenger-style tapped Time & Seen indicator */}
                     {isExpanded && (
-                      <View style={styles.msgStatusRowThem}>
+                      <View style={styles.msgStatusRowMe}>
                         <Text
                           style={[
                             styles.msgStatusText,
                             isDark && { color: "#94A3B8" },
                           ]}
                         >
-                          {msg.time}
+                          {msg.time}{" "}
+                          <Text
+                            style={[
+                              styles.msgStatusSeenBadge,
+                              isSeen && { color: "#2563EB" },
+                            ]}
+                          >
+                            {seenLabel}
+                          </Text>
                         </Text>
                       </View>
                     )}
                   </View>
                 );
-              })
-            )}
-          </ScrollView>
+              }
 
-          {/* Generous Safe-Area Padded Bottom Capsule Input Bar */}
-          <View
-            style={[
-              styles.capsuleInputOuterContainer,
-              {
-                paddingBottom: isKeyboardOpen
-                  ? 8
-                  : Math.max(bottomInset, Platform.OS === "android" ? 20 : 12),
-                backgroundColor: isDark ? "#181A20" : "#FFFFFF",
-                borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "#F1F5F9",
-              },
-            ]}
-          >
-            <View style={styles.capsuleInputInnerRow}>
-              {/* Quick Split trigger inside chat */}
-              <TouchableOpacity
+              // Incoming message: Facebook Messenger style layout with avatar on the left
+              return (
+                <View key={msg.id} style={styles.msgThemContainer}>
+                  {showSenderName && activeThread.type === "group" && (
+                    <Text
+                      style={[
+                        styles.msgSenderName,
+                        { color: isDark ? "#64748B" : "#94A3B8" },
+                      ]}
+                    >
+                      {msg.sender}
+                    </Text>
+                  )}
+
+                  <View style={styles.msgThemRowWithAvatar}>
+                    {/* 30x30 Circular Avatar on every incoming message line */}
+                    <View
+                      style={[
+                        styles.msgAvatarWrap,
+                        { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
+                      ]}
+                    >
+                      {senderAvatar?.photoURL ? (
+                        <Image
+                          source={{ uri: senderAvatar.photoURL }}
+                          style={styles.msgAvatarImage}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.msgAvatarInitials,
+                            { color: senderAvatar?.text || "#2563EB" },
+                          ]}
+                        >
+                          {senderAvatar?.initials || "R"}
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Speech bubble */}
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => handleToggleMessage(msg.id)}
+                      style={[
+                        styles.speechBubble,
+                        styles.speechBubbleThem,
+                        {
+                          backgroundColor: isDark ? "#242731" : "#F1F5F9",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.speechBubbleText,
+                          { color: isDark ? "#FFFFFF" : "#0F172A" },
+                        ]}
+                      >
+                        {msg.text}
+                      </Text>
+
+                      {/* Embedded Expense Split Card */}
+                      {msg.type === "expense_split" && msg.meta && (
+                        <View
+                          style={[
+                            styles.msgEmbedCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={styles.msgEmbedHeaderRow}>
+                            <Text
+                              style={[
+                                styles.msgEmbedCategory,
+                                { color: isDark ? "#FFFFFF" : "#0F172A" },
+                              ]}
+                            >
+                              🛒 {msg.meta.category}
+                            </Text>
+                            <Text style={styles.msgEmbedAmount}>
+                              {msg.meta.amount}
+                            </Text>
+                          </View>
+                          {msg.meta.share && (
+                            <Text
+                              style={[
+                                styles.msgEmbedShare,
+                                { color: isDark ? "#94A3B8" : "#64748B" },
+                              ]}
+                            >
+                              Calculated split share: {msg.meta.share}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Embedded Payment Claim Card */}
+                      {msg.type === "payment_claim" && msg.meta && (
+                        <View
+                          style={[
+                            styles.msgEmbedCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.msgEmbedCategory,
+                              { color: isDark ? "#FFFFFF" : "#0F172A" },
+                            ]}
+                          >
+                            💳 {msg.meta.paymentMethod || "Payment Settle"}
+                          </Text>
+                          <Text style={styles.msgEmbedAmount}>
+                            Amount: {msg.meta.amount}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Messenger-style tapped Time indicator for incoming message */}
+                  {isExpanded && (
+                    <View style={styles.msgStatusRowThem}>
+                      <Text
+                        style={[
+                          styles.msgStatusText,
+                          isDark && { color: "#94A3B8" },
+                        ]}
+                      >
+                        {msg.time}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+
+        {/* Generous Safe-Area Padded Bottom Capsule Input Bar */}
+        <View
+          style={[
+            styles.capsuleInputOuterContainer,
+            {
+              paddingBottom:
+                Platform.OS === "android" && keyboardHeight > 0
+                  ? keyboardHeight + 8
+                  : isKeyboardOpen
+                    ? 8
+                    : Math.max(
+                        bottomInset,
+                        Platform.OS === "android" ? 20 : 12,
+                      ),
+              backgroundColor: isDark ? "#181A20" : "#FFFFFF",
+              borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "#F1F5F9",
+            },
+          ]}
+        >
+          <View style={styles.capsuleInputInnerRow}>
+            {/* Quick Split trigger inside chat */}
+            <TouchableOpacity
+              style={[
+                styles.capsuleActionIconBtn,
+                {
+                  backgroundColor: isDark ? "#242731" : "#F1F5F9",
+                },
+              ]}
+              onPress={() => {
+                if (
+                  activeThread.type === "direct" &&
+                  activeThread.targetUserId
+                ) {
+                  setSplitTargetId(activeThread.targetUserId);
+                } else {
+                  setSplitTargetId("ALL");
+                }
+                setShowRequestSplitModal(true);
+              }}
+              accessibilityLabel="Quick split expense"
+            >
+              <Feather
+                name="plus"
+                size={19}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+            </TouchableOpacity>
+
+            {/* Rounded capsule text input */}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => chatInputRef.current?.focus()}
+              style={[
+                styles.capsuleTextInputWrapper,
+                {
+                  backgroundColor: isDark ? "#242731" : "#F1F5F9",
+                  borderColor: isDark ? "rgba(255,255,255,0.06)" : "#E2E8F0",
+                },
+              ]}
+            >
+              <TextInput
+                ref={chatInputRef}
                 style={[
-                  styles.capsuleActionIconBtn,
-                  {
-                    backgroundColor: isDark ? "#242731" : "#F1F5F9",
-                  },
+                  styles.capsuleTextInput,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
                 ]}
-                onPress={() => {
-                  if (
-                    activeThread.type === "direct" &&
-                    activeThread.targetUserId
-                  ) {
-                    setSplitTargetId(activeThread.targetUserId);
-                  } else {
-                    setSplitTargetId("ALL");
-                  }
-                  setShowRequestSplitModal(true);
+                placeholder={`Message ${activeThread.name.split(" ")[0]}...`}
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                value={chatInputText}
+                onChangeText={setChatInputText}
+                onSubmitEditing={handleSendMessage}
+                onFocus={() => {
+                  setTimeout(() => {
+                    messageScrollRef.current?.scrollToEnd({ animated: true });
+                  }, 100);
                 }}
-                accessibilityLabel="Quick split expense"
-              >
-                <Feather
-                  name="plus"
-                  size={19}
-                  color={isDark ? "#60A5FA" : "#2563EB"}
-                />
-              </TouchableOpacity>
+                returnKeyType="send"
+                multiline={false}
+                blurOnSubmit={false}
+                autoCorrect={true}
+                autoCapitalize="sentences"
+                underlineColorAndroid="transparent"
+              />
+            </TouchableOpacity>
 
-              {/* Rounded capsule text input */}
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => chatInputRef.current?.focus()}
-                style={[
-                  styles.capsuleTextInputWrapper,
-                  {
-                    backgroundColor: isDark ? "#242731" : "#F1F5F9",
-                    borderColor: isDark ? "rgba(255,255,255,0.06)" : "#E2E8F0",
-                  },
-                ]}
-              >
-                <TextInput
-                  ref={chatInputRef}
-                  style={[
-                    styles.capsuleTextInput,
-                    { color: isDark ? "#FFFFFF" : "#0F172A" },
-                  ]}
-                  placeholder={`Message ${activeThread.name.split(" ")[0]}...`}
-                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
-                  value={chatInputText}
-                  onChangeText={setChatInputText}
-                  onSubmitEditing={handleSendMessage}
-                  returnKeyType="send"
-                  multiline={false}
-                  blurOnSubmit={false}
-                  autoCorrect={true}
-                  autoCapitalize="sentences"
-                  underlineColorAndroid="transparent"
-                />
-              </TouchableOpacity>
-
-              {/* Circular Send Button */}
-              <TouchableOpacity
-                style={[
-                  styles.capsuleSendButton,
-                  (!chatInputText.trim() || isSending) && { opacity: 0.5 },
-                ]}
-                onPress={handleSendMessage}
-                disabled={!chatInputText.trim() || isSending}
-                accessibilityLabel="Send message"
-              >
-                {isSending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="send" size={17} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
-            </View>
+            {/* Circular Send Button */}
+            <TouchableOpacity
+              style={[
+                styles.capsuleSendButton,
+                (!chatInputText.trim() || isSending) && { opacity: 0.5 },
+              ]}
+              onPress={handleSendMessage}
+              disabled={!chatInputText.trim() || isSending}
+              accessibilityLabel="Send message"
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="send" size={17} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </View>
 
         {/* MODAL: Request Split inside full-screen view */}
         <SmoothBottomSheetModal
@@ -1746,7 +2252,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </TouchableOpacity>
           </ScrollView>
         </SmoothBottomSheetModal>
-      </View>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -2771,6 +3277,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         animationType="fade"
         transparent={false}
         onRequestClose={() => setViewingNoteData(null)}
+        statusBarTranslucent={true}
       >
         {viewingNoteData && (
           <View
@@ -3008,10 +3515,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 style={[
                   styles.noteViewerBottomContainer,
                   {
-                    paddingBottom: Math.max(
-                      bottomInset + 10,
-                      insets.bottom + 16,
-                    ),
+                    paddingBottom:
+                      Platform.OS === "android" && keyboardHeight > 0
+                        ? keyboardHeight + 12
+                        : Math.max(bottomInset + 10, insets.bottom + 16),
                   },
                 ]}
               >

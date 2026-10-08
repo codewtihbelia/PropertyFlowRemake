@@ -42,9 +42,12 @@ service cloud.firestore {
     
     function isHouseholdMember(householdId) {
       return isAuthenticated() && (
-        exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/households/$(householdId)/members/$('mem_' + request.auth.uid)) ||
-        (hasUserDoc() && 'householdId' in getUserData() && getUserData().householdId == householdId) ||
+        (exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)).data.status == 'ACTIVE') ||
+        (exists(/databases/$(database)/documents/households/$(householdId)/members/$('mem_' + request.auth.uid)) &&
+         get(/databases/$(database)/documents/households/$(householdId)/members/$('mem_' + request.auth.uid)).data.status == 'ACTIVE') ||
+        (hasUserDoc() && 'householdId' in getUserData() && getUserData().householdId == householdId &&
+         (!('joinRequestStatus' in getUserData()) || getUserData().joinRequestStatus != 'REJECTED')) ||
         isHouseholdHost(householdId) ||
         isSuperAdmin()
       );
@@ -123,7 +126,7 @@ service cloud.firestore {
       match /members/{memberId} {
         allow read: if true;
         allow create, update: if isHost(householdId) || isSuperAdmin() || isUser(memberId) || (request.auth.uid != null && request.resource.data.userId == request.auth.uid);
-        allow delete: if isHost(householdId) || isSuperAdmin() || isUser(memberId);
+        allow delete: if isHost(householdId) || isSuperAdmin() || isUser(memberId) || (request.auth.uid != null && resource != null && resource.data.userId == request.auth.uid);
       }
 
       // Subcollection: billingCycles

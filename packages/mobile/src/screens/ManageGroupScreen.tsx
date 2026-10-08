@@ -248,6 +248,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
         householdId,
         rejectingMember.userId || rejectingMember.memberId,
         reason,
+        rejectingMember.id || rejectingMember.docId,
       );
       if (success) {
         Alert.alert("Request Declined", "The join request has been declined.");
@@ -370,6 +371,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
     const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
       setCloudMembers,
+      { includePending: true },
     );
     const unsubWater = mobileDataService.listenToWaterConfig(
       householdId,

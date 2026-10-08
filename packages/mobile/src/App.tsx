@@ -1319,15 +1319,18 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       )}
 
       {/* Floating draggable messages widget, floating and draggable across the screen */}
-      {currentTab !== "messages" && overlayScreen === "none" && (
-        <FloatingMessagesBubble
-          unreadCount={unreadMessagesCount}
-          latestUnreadMessage={latestUnreadMessage}
-          onPress={() => {
-            setOverlayScreen("messages");
-          }}
-        />
-      )}
+      {currentTab !== "messages" &&
+        overlayScreen === "none" &&
+        Boolean(householdId) &&
+        userProfile?.joinRequestStatus !== "REJECTED" && (
+          <FloatingMessagesBubble
+            unreadCount={unreadMessagesCount}
+            latestUnreadMessage={latestUnreadMessage}
+            onPress={() => {
+              setOverlayScreen("messages");
+            }}
+          />
+        )}
 
       {/* Smooth Save Profile & Quick PIN Prompt Modal (fading/sliding from bottom) */}
       {auth.currentUser?.uid && (
@@ -1579,7 +1582,7 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     paddingVertical: 5,
     paddingHorizontal: 8,
-    borderWidth: 4,
+    borderWidth: 1,
     borderColor: "rgba(241, 245, 249, 0.95)",
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 6 },

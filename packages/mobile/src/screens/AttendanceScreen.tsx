@@ -610,6 +610,51 @@ export const AttendanceScreen: React.FC<{
     };
   }, [currentUser?.uid]);
 
+  // Real-time profile sync so join rejection status or household changes update instantly
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsub = mobileDataService.listenToUserProfile(
+      currentUser.uid,
+      (p) => {
+        if (p) {
+          setProfile(p);
+          setIsProfileLoaded(true);
+        }
+      },
+    );
+    return () => unsub();
+  }, [currentUser?.uid]);
+
+  const isActiveGroupMember = (m: any) => {
+    if (!m) return false;
+    const s = String(m.status || "").toUpperCase();
+    const js = String(m.joinRequestStatus || "").toUpperCase();
+    if (
+      s === "REJECTED" ||
+      s === "DECLINED" ||
+      s === "PENDING" ||
+      s === "INACTIVE" ||
+      s === "REMOVED" ||
+      s === "CANCELLED"
+    ) {
+      return false;
+    }
+    if (
+      js === "REJECTED" ||
+      js === "DECLINED" ||
+      js === "PENDING" ||
+      js === "REMOVED"
+    ) {
+      return false;
+    }
+    if (m.rejectionReason || m.rejectedDate) {
+      return false;
+    }
+    return (
+      s === "ACTIVE" || m.role === "HOST" || (!m.status && !m.joinRequestStatus)
+    );
+  };
+
   useEffect(() => {
     // Wait for profile resolution before deciding if user is in a household
     if (!isProfileLoaded) {
@@ -648,7 +693,8 @@ export const AttendanceScreen: React.FC<{
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
       (data) => {
-        setMembers(data);
+        const activeOnly = (data || []).filter(isActiveGroupMember);
+        setMembers(activeOnly);
         attReady.members = true;
         checkReady();
       },
@@ -1521,7 +1567,155 @@ export const AttendanceScreen: React.FC<{
           onScroll={onScroll}
           scrollEventThrottle={16}
         >
-          {!resolvedHouseholdId || !activeCycle ? (
+          {profile?.joinRequestStatus === "REJECTED" ? (
+            <View
+              style={[
+                styles.emptyCard,
+                {
+                  borderColor: isDark ? "rgba(239, 68, 68, 0.3)" : "#FECDD3",
+                  backgroundColor: isDark
+                    ? "rgba(239, 68, 68, 0.08)"
+                    : "#FFF1F2",
+                },
+              ]}
+            >
+              <View
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 28,
+                  backgroundColor: isDark
+                    ? "rgba(239, 68, 68, 0.2)"
+                    : "#FFE4E6",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <Feather name="shield-off" size={26} color="#E11D48" />
+              </View>
+              <Text
+                style={[
+                  styles.emptyTitle,
+                  { color: isDark ? "#FDA4AF" : "#9F1239" },
+                ]}
+              >
+                Join Request Declined
+              </Text>
+              <Text
+                style={[
+                  styles.emptySub,
+                  {
+                    color: isDark ? "#FECDD3" : "#BE123C",
+                    marginBottom: 12,
+                  },
+                ]}
+              >
+                Your request to join this group was declined by the host. Only
+                active members of the household can access attendance and
+                roommate breakdown.
+              </Text>
+              {Boolean(profile.joinRejectionReason) && (
+                <View
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: isDark
+                      ? "rgba(0,0,0,0.3)"
+                      : "rgba(255,255,255,0.8)",
+                    marginBottom: 16,
+                    borderWidth: 1,
+                    borderColor: isDark ? "rgba(239, 68, 68, 0.2)" : "#FCA5A5",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontFamily: "Inter-Medium",
+                      color: isDark ? "#FCA5A5" : "#9F1239",
+                    }}
+                  >
+                    Reason: "{profile.joinRejectionReason}"
+                  </Text>
+                </View>
+              )}
+              {onBack && (
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: "#E11D48",
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                  }}
+                  onPress={onBack}
+                >
+                  <Text
+                    style={{
+                      color: "#FFFFFF",
+                      fontFamily: "Inter-SemiBold",
+                      fontSize: 13,
+                    }}
+                  >
+                    Return to Home
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : !resolvedHouseholdId ||
+            (!isHost &&
+              isProfileLoaded &&
+              !loading &&
+              members.length > 0 &&
+              !members.some((m) => matchesMemberUid(m, activeUserId))) ? (
+            <View
+              style={[
+                styles.emptyCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Ionicons name="lock-closed-outline" size={40} color="#94A3B8" />
+              <Text
+                style={[styles.emptyTitle, isDark && { color: colors.text }]}
+              >
+                Group Membership Required
+              </Text>
+              <Text
+                style={[
+                  styles.emptySub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Only active members of a household group can access attendance
+                tracking and roommate water splits.
+              </Text>
+              {onBack && (
+                <TouchableOpacity
+                  style={{
+                    marginTop: 12,
+                    backgroundColor: colors.primary,
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                  }}
+                  onPress={onBack}
+                >
+                  <Text
+                    style={{
+                      color: "#FFFFFF",
+                      fontFamily: "Inter-SemiBold",
+                      fontSize: 13,
+                    }}
+                  >
+                    Return to Home
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : !activeCycle ? (
             <View
               style={[
                 styles.emptyCard,
@@ -4567,7 +4761,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   syncedPillText: {
-    fontSize: 10,
+    fontSize: 6,
     fontWeight: "800",
     color: "#FFFFFF",
   },
@@ -4580,7 +4774,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   exemptPillText: {
-    fontSize: 10,
+    fontSize: 6,
     fontWeight: "800",
     color: "#475569",
   },
@@ -5112,6 +5306,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
+    marginBottom: 24,
   },
   sheetKeepEditingBtn: {
     paddingVertical: 14,

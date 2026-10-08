@@ -122,3 +122,13 @@
 {"_e":"metro:bundling:started","_t":1791373150094,"id":"2","platform":"android","environment":null,"entry":"node_modules\\expo\\AppEntry.js"}
 {"_e":"metro:bundling:done","_t":1791373205686,"id":"1","total":1001,"ms":55593.2991}
 {"_e":"metro:bundling:done","_t":1791373223471,"id":"2","total":1002,"ms":73378.4534}
+{"_e":"root:init","_t":1791381441028,"format":"v0-jsonl","version":"57.0.28"}
+{"_e":"env:mode","_t":1791381441918,"nodeEnv":"production","babelEnv":"production","mode":"production"}
+{"_e":"env:load","_t":1791381441925,"mode":"production","files":["../..\\..\\.env"],"env":{"EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME":"ri4xxxwk","EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET":"splitzy","EXPO_PUBLIC_FIREBASE_API_KEY":"AIzaSyBuWDUV1wuqmbtSZ2c4l1zwuASd9wOFkHM","EXPO_PUBLIC_FIREBASE_APP_ID":"1:506286947370:web:9a88634693baa2dbed9753","EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN":"splitzy-d429d.firebaseapp.com","EXPO_PUBLIC_FIREBASE_DATABASE_ID":"splitzy","EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID":"506286947370","EXPO_PUBLIC_FIREBASE_PROJECT_ID":"splitzy-d429d","EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET":"splitzy-d429d.firebasestorage.app","EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID":"","EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID":"","EXPO_PUBLIC_GOOGLE_REDIRECT_URI":"https://auth.expo.io/@splitzy01/splitzy-mobile","EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID":"506286947370-9j79gdt1re3u0vge7tsrnkcsoo8vimbc.apps.googleusercontent.com"}}
+{"_e":"devserver:start","_t":1791381442228,"mode":"production","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":true}
+{"_e":"metro:config","_t":1791381444135,"serverRoot":"../..\\..\\..\\..","projectRoot":"../..\\..","exporting":true,"flags":{"autolinkingModuleResolution":true,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"metro:instantiate","_t":1791381444404,"atlas":false,"workers":3,"host":null,"port":null}
+{"_e":"metro:bundling:started","_t":1791381445193,"id":"1","platform":"ios","environment":null,"entry":"node_modules\\expo\\AppEntry.js"}
+{"_e":"metro:bundling:started","_t":1791381445194,"id":"2","platform":"android","environment":null,"entry":"node_modules\\expo\\AppEntry.js"}
+{"_e":"metro:bundling:done","_t":1791381502223,"id":"1","total":1001,"ms":57030.0744}
+{"_e":"metro:bundling:done","_t":1791381518020,"id":"2","total":1002,"ms":72826.1998}

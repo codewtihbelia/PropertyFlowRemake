@@ -4479,7 +4479,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   waterYouBadgeText: {
-    fontSize: 9,
+    fontSize: 6,
     fontWeight: "800",
     color: "#FFFFFF",
   },
@@ -4490,7 +4490,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   waterPayorPillText: {
-    fontSize: 9,
+    fontSize: 6,
     fontWeight: "800",
     color: "#B45309",
   },
@@ -4501,7 +4501,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   waterHostPillText: {
-    fontSize: 9,
+    fontSize: 6,
     fontWeight: "800",
     color: "#1E40AF",
   },
@@ -4512,7 +4512,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   waterNonPayorPillText: {
-    fontSize: 9,
+    fontSize: 6,
     fontWeight: "800",
     color: "#7E22CE",
   },
