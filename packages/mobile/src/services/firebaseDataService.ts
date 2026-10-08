@@ -6347,6 +6347,127 @@ export const mobileDataService = {
     }
   },
 
+  listenToDirectMessages(
+    userId: string,
+    callback: (messages: any[]) => void,
+  ): () => void {
+    if (!userId) {
+      callback([]);
+      return () => {};
+    }
+    const colRef = collection(db, "directMessages");
+    const qSent = query(colRef, where("senderId", "==", userId));
+    const qReceived = query(colRef, where("recipientId", "==", userId));
+
+    let sentList: any[] = [];
+    let receivedList: any[] = [];
+
+    const notify = () => {
+      const map = new Map<string, any>();
+      sentList.forEach((m) => map.set(m.id, m));
+      receivedList.forEach((m) => map.set(m.id, m));
+      const list = Array.from(map.values());
+      list.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+        const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+        return timeA - timeB;
+      });
+      callback(list);
+    };
+
+    const unsubSent = onSnapshot(
+      qSent,
+      (snap) => {
+        sentList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        notify();
+      },
+      (err) => console.warn("[DirectMessages] sent:", err),
+    );
+
+    const unsubRecv = onSnapshot(
+      qReceived,
+      (snap) => {
+        receivedList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        notify();
+      },
+      (err) => console.warn("[DirectMessages] received:", err),
+    );
+
+    return () => {
+      unsubSent();
+      unsubRecv();
+    };
+  },
+
+  async markDirectMessagesRead(
+    messageIds: string[],
+    userId: string,
+  ): Promise<void> {
+    if (!userId || !messageIds.length) return;
+    try {
+      await Promise.all(
+        messageIds.map(async (msgId) => {
+          const docRef = doc(db, "directMessages", msgId);
+          await updateDoc(docRef, {
+            readBy: arrayUnion(userId),
+          }).catch(() => {});
+        }),
+      );
+    } catch (e) {
+      console.warn("[Firestore Mobile] markDirectMessagesRead:", e);
+    }
+  },
+
+  async sendDirectMessage(message: {
+    conversationId: string;
+    senderId: string;
+    senderName: string;
+    recipientId: string;
+    text: string;
+    type?: string;
+    meta?: any;
+    householdId?: string;
+  }): Promise<string> {
+    const msgId = `msg_dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const nowIso = new Date().toISOString();
+    const newDoc = {
+      id: msgId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      senderName: message.senderName,
+      recipientId: message.recipientId,
+      text: message.text,
+      type: message.type || "text",
+      meta: message.meta || {},
+      readBy: [message.senderId],
+      createdAt: nowIso,
+      timestamp: nowIso,
+      householdId: message.householdId || null,
+    };
+
+    await setDoc(doc(db, "directMessages", msgId), sanitizeData(newDoc));
+
+    if (message.householdId) {
+      setDoc(
+        doc(db, `households/${message.householdId}/messages`, msgId),
+        sanitizeData(newDoc),
+      ).catch(() => {});
+    }
+
+    pushDispatchService
+      .sendHouseholdMessagePush({
+        householdId: message.householdId || "direct",
+        senderId: message.senderId,
+        senderName: message.senderName || "Friend",
+        text: message.text || "Sent a message",
+        messageId: msgId,
+        recipientId: message.recipientId,
+      })
+      .catch(() => {});
+
+    return msgId;
+  },
+
   async seedHouseholdMessagesIfEmpty(
     _householdId: string,
     _initialMessages: any[],

@@ -1,0 +1,4065 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  ActivityIndicator,
+  Alert,
+  Share,
+  RefreshControl,
+  Platform,
+  StatusBar,
+} from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../context/ThemeContext";
+import { auth } from "../firebase/config";
+import {
+  communityService,
+  CommunityPost,
+  CommunityCategory,
+  CommunityFriendship,
+  CommunityMember,
+  CommunityStory,
+  ReactionType,
+  CATEGORY_LABELS,
+  formatAuthorDisplayName,
+  FB_6_REACTIONS,
+} from "../services/communityService";
+import { CreatePostModal } from "../components/CreatePostModal";
+import { PostCommentsModal } from "../components/PostCommentsModal";
+import { CreateStoryModal } from "../components/CreateStoryModal";
+import { StoryViewerModal } from "../components/StoryViewerModal";
+import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
+
+export { FB_6_REACTIONS };
+
+interface CommunityScreenProps {
+  onBack: () => void;
+  currentUser?: {
+    uid?: string;
+    name?: string;
+    displayName?: string;
+    email?: string;
+    role?: string;
+    householdName?: string;
+    photoURL?: string;
+    profilePicture?: string;
+  };
+  onOpenDirectChat?: (
+    targetUserId: string,
+    targetUserName: string,
+    targetUserAvatar?: string,
+  ) => void;
+  onNavigateToSplitzyProfile?: () => void;
+}
+
+const CATEGORIES: CommunityCategory[] = [
+  "all",
+  "general",
+  "roommate_tips",
+  "items_sale",
+  "looking_for_roomie",
+  "events",
+  "bills_advice",
+];
+
+export const CommunityScreen: React.FC<CommunityScreenProps> = ({
+  onBack,
+  currentUser = {},
+  onOpenDirectChat,
+  onNavigateToSplitzyProfile,
+}) => {
+  const insets = useSafeAreaInsets();
+  const { isDark } = useTheme();
+
+  // Active top tab: "feed" or "network"
+  const [activeMainTab, setActiveMainTab] = useState<"feed" | "network">(
+    "feed",
+  );
+
+  // Feed states
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedCategory, setSelectedCategory] =
+    useState<CommunityCategory>("all");
+  const [feedScope, setFeedScope] = useState<"all" | "friends" | "my">("all");
+
+  // Stories states
+  const [cloudStories, setCloudStories] = useState<CommunityStory[]>([]);
+  const [createStoryVisible, setCreateStoryVisible] = useState(false);
+  const [storyViewerVisible, setStoryViewerVisible] = useState(false);
+  const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
+
+  // Modals
+  const [createPostVisible, setCreatePostVisible] = useState(false);
+  const [activePostForComments, setActivePostForComments] =
+    useState<CommunityPost | null>(null);
+
+  // Friendships & Discovery states
+  const [friendships, setFriendships] = useState<CommunityFriendship[]>([]);
+  const [networkSubTab, setNetworkSubTab] = useState<
+    "discover" | "requests" | "friends"
+  >("discover");
+  const [friendsFilter, setFriendsFilter] = useState<
+    "all" | "suggestions" | "friends"
+  >("all");
+  const [showNetworkSearch, setShowNetworkSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [discoveredMembers, setDiscoveredMembers] = useState<CommunityMember[]>(
+    [],
+  );
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [processingActionId, setProcessingActionId] = useState<string | null>(
+    null,
+  );
+  const [dismissedSuggestionUids, setDismissedSuggestionUids] = useState<
+    Set<string>
+  >(new Set());
+  const [activeReactionPostId, setActiveReactionPostId] = useState<
+    string | null
+  >(null);
+
+  // User Profile full-screen state
+  const [selectedProfileUser, setSelectedProfileUser] =
+    useState<UserProfileInfo | null>(null);
+
+  const currentUid = auth.currentUser?.uid || currentUser.uid || "";
+  const currentDisplayName = formatAuthorDisplayName(
+    currentUser.displayName || currentUser.name,
+    currentUser.email || auth.currentUser?.email,
+  );
+  const currentAvatar =
+    currentUser.photoURL || currentUser.profilePicture || "";
+
+  // Subscribe to real-time posts
+  useEffect(() => {
+    setLoadingPosts(true);
+    const unsub = communityService.subscribePosts((list) => {
+      setPosts(list);
+      setLoadingPosts(false);
+      setRefreshing(false);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Subscribe to real-time stories
+  useEffect(() => {
+    const unsub = communityService.subscribeStories((list) => {
+      setCloudStories(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to friendships
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsub = communityService.subscribeFriendships(currentUid, (list) => {
+      setFriendships(list);
+    });
+    return () => unsub();
+  }, [currentUid]);
+
+  // Load members for People You May Know & Discovery
+  const loadMembers = useCallback(async () => {
+    if (!currentUid) return;
+    setLoadingMembers(true);
+    try {
+      const members = await communityService.discoverMembers(
+        currentUid,
+        friendships,
+        searchQuery,
+      );
+      setDiscoveredMembers(members);
+    } catch (err) {
+      console.warn("Failed to load members:", err);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, [currentUid, friendships, searchQuery]);
+
+  // Initial load & when network tab opens
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  // 100% Real cloud-synced stories
+  const displayStories = useMemo(() => {
+    return cloudStories;
+  }, [cloudStories]);
+
+  // Real incoming requests from Firestore only
+  const allIncomingRequests = useMemo(() => {
+    return friendships.filter(
+      (f) => f.receiverId === currentUid && f.status === "pending",
+    );
+  }, [friendships, currentUid]);
+
+  // Pending incoming requests count
+  const incomingRequests = allIncomingRequests;
+
+  // Accepted friends count & IDs
+  const acceptedFriends = useMemo(() => {
+    return friendships.filter((f) => f.status === "accepted");
+  }, [friendships]);
+
+  const acceptedFriendUids = useMemo(() => {
+    return acceptedFriends.map((f) =>
+      f.senderId === currentUid ? f.receiverId : f.senderId,
+    );
+  }, [acceptedFriends, currentUid]);
+
+  // Suggestions for "People You May Know"
+  const peopleYouMayKnow = useMemo(() => {
+    const incomingSenderIds = new Set(
+      allIncomingRequests.map((r) => r.senderId),
+    );
+    return discoveredMembers.filter((m) => {
+      if (m.uid === currentUid) return false;
+      if (dismissedSuggestionUids.has(m.uid)) return false;
+      if (m.friendshipStatus === "friends") return false;
+      if (incomingSenderIds.has(m.uid)) return false;
+      return true;
+    });
+  }, [
+    discoveredMembers,
+    currentUid,
+    dismissedSuggestionUids,
+    allIncomingRequests,
+  ]);
+
+  // Handler to open Facebook-style user profile view (100% real cloud data)
+  const handleOpenUserProfile = useCallback(
+    (userInfo: {
+      uid: string;
+      name?: string;
+      email?: string;
+      avatar?: string;
+      coverImage?: string;
+      role?: string;
+      householdName?: string;
+      bio?: string;
+      location?: string;
+      mutualFriendsCount?: number;
+      friendsCount?: number;
+    }) => {
+      const discMatch = discoveredMembers.find((m) => m.uid === userInfo.uid);
+
+      let friendshipStatus: UserProfileInfo["friendshipStatus"] = "none";
+      let friendshipId: string | undefined = undefined;
+
+      const rel = friendships.find(
+        (f) =>
+          (f.senderId === currentUid && f.receiverId === userInfo.uid) ||
+          (f.receiverId === currentUid && f.senderId === userInfo.uid),
+      );
+
+      if (rel) {
+        friendshipId = rel.id;
+        if (rel.status === "accepted") {
+          friendshipStatus = "friends";
+        } else if (rel.status === "pending") {
+          friendshipStatus =
+            rel.senderId === currentUid ? "pending_sent" : "pending_received";
+        }
+      } else if (allIncomingRequests.some((r) => r.senderId === userInfo.uid)) {
+        const foundReq = allIncomingRequests.find(
+          (r) => r.senderId === userInfo.uid,
+        );
+        friendshipStatus = "pending_received";
+        friendshipId = foundReq?.id;
+      } else if (discMatch) {
+        friendshipStatus = discMatch.friendshipStatus;
+        friendshipId = discMatch.friendshipId;
+      }
+
+      const cleanName = formatAuthorDisplayName(
+        userInfo.name || discMatch?.name,
+        userInfo.email || discMatch?.email,
+      );
+
+      const resolved: UserProfileInfo = {
+        uid: userInfo.uid,
+        name: cleanName,
+        email: userInfo.email || discMatch?.email || "",
+        avatar: userInfo.avatar || discMatch?.avatar || "",
+        coverImage:
+          userInfo.coverImage ||
+          "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80",
+        role: userInfo.role || discMatch?.role || "Splitzy Resident",
+        householdName: userInfo.householdName || discMatch?.householdName || "",
+        bio:
+          userInfo.bio ||
+          "Splitting bills, sharing space, and creating memories with great roommates! 🏡✨",
+        location: userInfo.location || "San Francisco, CA",
+        joinedDate: "October 2024",
+        friendshipStatus,
+        friendshipId,
+      };
+
+      setSelectedProfileUser(resolved);
+    },
+    [discoveredMembers, friendships, currentUid, allIncomingRequests],
+  );
+
+  // Filter posts
+  const filteredPosts = useMemo(() => {
+    return posts.filter((post) => {
+      if (selectedCategory !== "all" && post.category !== selectedCategory) {
+        return false;
+      }
+      if (feedScope === "my") {
+        return post.authorId === currentUid;
+      }
+      if (feedScope === "friends") {
+        return (
+          post.authorId === currentUid ||
+          acceptedFriendUids.includes(post.authorId)
+        );
+      }
+      return true;
+    });
+  }, [posts, selectedCategory, feedScope, currentUid, acceptedFriendUids]);
+
+  // Pull to refresh
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadMembers().finally(() => setRefreshing(false));
+  };
+
+  // React with any of the 6 Facebook emojis
+  const handleSelectReaction = async (
+    post: CommunityPost,
+    reactionType: ReactionType,
+  ) => {
+    if (!currentUid) {
+      Alert.alert("Sign In Required", "Please sign in to react to posts.");
+      return;
+    }
+    setActiveReactionPostId(null);
+
+    // Optimistic local state update
+    setPosts((prevPosts) =>
+      prevPosts.map((p) => {
+        if (p.id !== post.id) return p;
+        const currentLikes = p.likes || [];
+        const currentReactions = p.reactions ? { ...p.reactions } : {};
+        const isCurrentReaction = currentReactions[currentUid] === reactionType;
+
+        let newLikes: string[];
+        if (isCurrentReaction) {
+          newLikes = currentLikes.filter((id) => id !== currentUid);
+          delete currentReactions[currentUid];
+        } else {
+          newLikes = currentLikes.includes(currentUid)
+            ? currentLikes
+            : [...currentLikes, currentUid];
+          currentReactions[currentUid] = reactionType;
+        }
+
+        return {
+          ...p,
+          likes: newLikes,
+          reactions: currentReactions,
+        };
+      }),
+    );
+
+    try {
+      await communityService.reactToPost(
+        post.id,
+        post.likes || [],
+        post.reactions || {},
+        reactionType,
+      );
+    } catch (err) {
+      console.warn("Failed to react to post:", err);
+    }
+  };
+
+  // Like handler (tap toggles: if reacted, unreacts; if not, sets "like")
+  const handleToggleLike = async (post: CommunityPost) => {
+    if (!currentUid) {
+      Alert.alert("Sign In Required", "Please sign in to react to posts.");
+      return;
+    }
+    const existingReaction = post.reactions?.[currentUid];
+    const targetReaction: ReactionType = existingReaction || "like";
+    await handleSelectReaction(post, targetReaction);
+  };
+
+  // Like story
+  const handleLikeStory = async (story: CommunityStory) => {
+    try {
+      await communityService.toggleLikeStory(story.id, story.likes || []);
+    } catch (err) {
+      console.warn("Failed to like story:", err);
+    }
+  };
+
+  // Delete post handler
+  const handleDeletePost = (post: CommunityPost) => {
+    Alert.alert(
+      "Delete Post",
+      "Are you sure you want to delete this post? This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await communityService.deletePost(post.id);
+            } catch (err) {
+              console.warn("Failed to delete post:", err);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // Share post
+  const handleSharePost = async (post: CommunityPost) => {
+    try {
+      const authorText = resolvePostAuthorName(post);
+      await Share.share({
+        message: `[Splitzy Community] ${authorText} posted: "${post.content}"\n\nJoin the roommate community on Splitzy!`,
+        title: "Splitzy Community Post",
+      });
+    } catch {
+      // user dismissed
+    }
+  };
+
+  // Send friend request
+  const handleSendFriendRequest = async (member: CommunityMember) => {
+    try {
+      setProcessingActionId(member.uid);
+      await communityService.sendFriendRequest(
+        {
+          uid: member.uid,
+          name: member.name,
+          avatar: member.avatar,
+          email: member.email,
+        },
+        {
+          name: currentDisplayName,
+          avatar: currentAvatar,
+          email: currentUser.email || auth.currentUser?.email,
+        },
+      );
+      await loadMembers();
+    } catch (err: any) {
+      Alert.alert("Error", err?.message || "Could not send friend request.");
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  // Accept friend request
+  const handleAcceptRequest = async (friendshipId: string) => {
+    try {
+      setProcessingActionId(friendshipId);
+      await communityService.acceptFriendRequest(friendshipId);
+    } catch (err: any) {
+      Alert.alert("Error", err?.message || "Could not accept request.");
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  // Decline/cancel friend request
+  const handleDeclineRequest = async (friendshipId: string) => {
+    try {
+      setProcessingActionId(friendshipId);
+      await communityService.declineOrCancelFriendRequest(friendshipId);
+    } catch (err: any) {
+      Alert.alert("Error", err?.message || "Could not remove request.");
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  const handleDismissSuggestion = (uid: string) => {
+    setDismissedSuggestionUids((prev) => new Set([...prev, uid]));
+  };
+
+  const resolvePostAuthorName = useCallback(
+    (post: CommunityPost) => {
+      if (post.authorId === currentUid && currentDisplayName) {
+        return currentDisplayName;
+      }
+      return formatAuthorDisplayName(post.authorName, post.authorEmail);
+    },
+    [currentUid, currentDisplayName],
+  );
+
+  const formatTimeAgo = (isoString?: string) => {
+    if (!isoString) return "";
+    const diff = Math.max(0, Date.now() - new Date(isoString).getTime());
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 86400000);
+    if (days === 1) return "Yesterday";
+    return `${days}d ago`;
+  };
+
+  // Render a Facebook-style post card
+  const renderFacebookPostCard = (post: CommunityPost) => {
+    const isLiked = currentUid ? post.likes.includes(currentUid) : false;
+    const isAuthor = currentUid === post.authorId;
+    const catConf = CATEGORY_LABELS[post.category] || CATEGORY_LABELS.general;
+    const authorNameResolved = resolvePostAuthorName(post);
+    const userReaction = currentUid ? post.reactions?.[currentUid] : undefined;
+    const isLikedOrReacted = !!(isLiked || userReaction);
+
+    const getReactionButtonDisplay = () => {
+      if (userReaction === "love") {
+        return {
+          label: "Love",
+          color: "#EF4444",
+          icon: <Ionicons name="heart" size={18} color="#EF4444" />,
+        };
+      }
+      if (userReaction === "haha") {
+        return {
+          label: "Haha",
+          color: "#F59E0B",
+          icon: <Text style={styles.fbReactBtnEmoji}>😆</Text>,
+        };
+      }
+      if (userReaction === "wow") {
+        return {
+          label: "Wow",
+          color: "#F59E0B",
+          icon: <Text style={styles.fbReactBtnEmoji}>😮</Text>,
+        };
+      }
+      if (userReaction === "sad") {
+        return {
+          label: "Sad",
+          color: "#3B82F6",
+          icon: <Text style={styles.fbReactBtnEmoji}>😢</Text>,
+        };
+      }
+      if (userReaction === "angry") {
+        return {
+          label: "Angry",
+          color: "#EA580C",
+          icon: <Text style={styles.fbReactBtnEmoji}>😡</Text>,
+        };
+      }
+      if (userReaction === "care") {
+        return {
+          label: "Care",
+          color: "#F59E0B",
+          icon: <Text style={styles.fbReactBtnEmoji}>🥰</Text>,
+        };
+      }
+      if (userReaction === "like" || isLiked) {
+        return {
+          label: "Like",
+          color: "#2563EB",
+          icon: <Ionicons name="thumbs-up" size={18} color="#2563EB" />,
+        };
+      }
+      return {
+        label: "Like",
+        color: isDark ? "#CBD5E1" : "#475569",
+        icon: (
+          <Ionicons
+            name="thumbs-up-outline"
+            size={18}
+            color={isDark ? "#94A3B8" : "#64748B"}
+          />
+        ),
+      };
+    };
+
+    const reactionBtnDisplay = getReactionButtonDisplay();
+
+    // Distinct reaction types present on this post
+    const presentReactionTypes: ReactionType[] = (() => {
+      const set = new Set<ReactionType>();
+      if (post.reactions) {
+        Object.values(post.reactions).forEach((t) => set.add(t));
+      }
+      if (set.size === 0 && (post.likes?.length || 0) > 0) {
+        set.add("like");
+      }
+      return Array.from(set);
+    })();
+
+    const topInset = Math.max(
+      Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
+      insets.top,
+      24,
+    );
+
+    return (
+      <View
+        key={post.id}
+        style={[
+          styles.fbPostCard,
+          {
+            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            borderColor: isDark ? "#334155" : "#E2E8F0",
+          },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent
+          backgroundColor="#FFFFFF"
+        />
+
+        {/* Post Author Header (Facebook style) */}
+        <View style={styles.fbPostHeader}>
+          <TouchableOpacity
+            onPress={() =>
+              handleOpenUserProfile({
+                uid: post.authorId,
+                name: authorNameResolved,
+                avatar: post.authorAvatar,
+                email: post.authorEmail,
+                role: post.authorRole,
+                householdName: post.authorHouseholdName,
+              })
+            }
+            activeOpacity={0.8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              flex: 1,
+            }}
+          >
+            {post.authorAvatar ? (
+              <Image
+                source={{ uri: post.authorAvatar }}
+                style={styles.fbPostAvatar}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.fbPostAvatarPlaceholder,
+                  { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.fbPostAvatarInitials,
+                    { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                  ]}
+                >
+                  {authorNameResolved.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.fbPostAuthorInfo}>
+              <View style={styles.fbAuthorNameRow}>
+                <Text
+                  style={[
+                    styles.fbAuthorName,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  {authorNameResolved}
+                </Text>
+                {post.authorRole === "HOST" && (
+                  <View style={styles.hostBadge}>
+                    <Text style={styles.hostBadgeText}>HOST</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.fbMetaRow}>
+                <Text
+                  style={[
+                    styles.fbTimeText,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  {formatTimeAgo(post.createdAt)}
+                </Text>
+                <Text
+                  style={[
+                    styles.fbDotSeparator,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  •
+                </Text>
+
+                {/* Category chip */}
+                <View
+                  style={[
+                    styles.fbCategoryTag,
+                    { backgroundColor: catConf.color + "15" },
+                  ]}
+                >
+                  <Feather
+                    name={catConf.icon as any}
+                    size={10}
+                    color={catConf.color}
+                    style={{ marginRight: 3 }}
+                  />
+                  <Text
+                    style={[styles.fbCategoryTagText, { color: catConf.color }]}
+                  >
+                    {catConf.label}
+                  </Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.fbDotSeparator,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  •
+                </Text>
+                <Ionicons
+                  name="globe-outline"
+                  size={12}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          {/* Right Action Menu */}
+          <TouchableOpacity
+            onPress={() => {
+              if (isAuthor) {
+                Alert.alert("Post Options", "Manage your community post:", [
+                  {
+                    text: "Share",
+                    onPress: () => handleSharePost(post),
+                  },
+                  {
+                    text: "Delete Post",
+                    style: "destructive",
+                    onPress: () => handleDeletePost(post),
+                  },
+                  { text: "Cancel", style: "cancel" },
+                ]);
+              } else {
+                handleSharePost(post);
+              }
+            }}
+            style={styles.fbMoreBtn}
+          >
+            <Feather
+              name="more-horizontal"
+              size={20}
+              color={isDark ? "#94A3B8" : "#64748B"}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Post Text Content */}
+        {post.content ? (
+          <Text
+            style={[
+              styles.fbContentText,
+              { color: isDark ? "#F1F5F9" : "#1E293B" },
+            ]}
+          >
+            {post.content}
+          </Text>
+        ) : null}
+
+        {/* Full-width Media Grid (Facebook style) */}
+        {post.images && post.images.length > 0 && (
+          <View style={styles.fbImagesContainer}>
+            {post.images.length === 1 ? (
+              <Image
+                source={{ uri: post.images[0] }}
+                style={styles.fbSingleImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.fbMultiImageGrid}>
+                {post.images.map((imgUri, idx) => (
+                  <Image
+                    key={idx}
+                    source={{ uri: imgUri }}
+                    style={styles.fbGridImage}
+                    resizeMode="cover"
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Facebook Social Stats Row */}
+        <View
+          style={[
+            styles.fbStatsRow,
+            { borderTopColor: isDark ? "#334155" : "#F1F5F9" },
+          ]}
+        >
+          <View style={styles.fbReactionGroup}>
+            <View style={styles.fbReactionBubbles}>
+              {presentReactionTypes.length === 0 ? (
+                <View style={styles.fbLikeBubble}>
+                  <Ionicons name="thumbs-up" size={10} color="#FFFFFF" />
+                </View>
+              ) : (
+                presentReactionTypes.slice(0, 3).map((rType, rIdx) => {
+                  if (rType === "love") {
+                    return (
+                      <View
+                        key={rType}
+                        style={[
+                          styles.fbBubbleCircle,
+                          {
+                            backgroundColor: "#EF4444",
+                            zIndex: 10 - rIdx,
+                          },
+                        ]}
+                      >
+                        <Ionicons name="heart" size={9} color="#FFFFFF" />
+                      </View>
+                    );
+                  }
+                  if (rType === "haha") {
+                    return (
+                      <View
+                        key={rType}
+                        style={[
+                          styles.fbBubbleCircle,
+                          {
+                            backgroundColor: "#F59E0B",
+                            zIndex: 10 - rIdx,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.fbBubbleEmoji}>😆</Text>
+                      </View>
+                    );
+                  }
+                  if (rType === "wow") {
+                    return (
+                      <View
+                        key={rType}
+                        style={[
+                          styles.fbBubbleCircle,
+                          {
+                            backgroundColor: "#F59E0B",
+                            zIndex: 10 - rIdx,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.fbBubbleEmoji}>😮</Text>
+                      </View>
+                    );
+                  }
+                  if (rType === "sad") {
+                    return (
+                      <View
+                        key={rType}
+                        style={[
+                          styles.fbBubbleCircle,
+                          {
+                            backgroundColor: "#3B82F6",
+                            zIndex: 10 - rIdx,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.fbBubbleEmoji}>😢</Text>
+                      </View>
+                    );
+                  }
+                  if (rType === "angry") {
+                    return (
+                      <View
+                        key={rType}
+                        style={[
+                          styles.fbBubbleCircle,
+                          {
+                            backgroundColor: "#EA580C",
+                            zIndex: 10 - rIdx,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.fbBubbleEmoji}>😡</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <View
+                      key={rType}
+                      style={[
+                        styles.fbBubbleCircle,
+                        {
+                          backgroundColor: "#2563EB",
+                          zIndex: 10 - rIdx,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="thumbs-up" size={9} color="#FFFFFF" />
+                    </View>
+                  );
+                })
+              )}
+            </View>
+            <Text
+              style={[
+                styles.fbStatsText,
+                { color: isDark ? "#94A3B8" : "#64748B" },
+              ]}
+            >
+              {post.likes.length > 0
+                ? isLikedOrReacted
+                  ? post.likes.length === 1
+                    ? "You"
+                    : `You and ${post.likes.length - 1} other${
+                        post.likes.length - 1 > 1 ? "s" : ""
+                      }`
+                  : `${post.likes.length}`
+                : "Be the first to react"}
+            </Text>
+          </View>
+
+          <View style={styles.fbRightStats}>
+            <TouchableOpacity onPress={() => setActivePostForComments(post)}>
+              <Text
+                style={[
+                  styles.fbStatsText,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {post.commentsCount}{" "}
+                {post.commentsCount === 1 ? "comment" : "comments"}
+              </Text>
+            </TouchableOpacity>
+            <Text
+              style={[
+                styles.fbDotSeparator,
+                { color: isDark ? "#94A3B8" : "#64748B" },
+              ]}
+            >
+              •
+            </Text>
+            <Text
+              style={[
+                styles.fbStatsText,
+                { color: isDark ? "#94A3B8" : "#64748B" },
+              ]}
+            >
+              {post.sharesCount || 0} shares
+            </Text>
+          </View>
+        </View>
+
+        {/* Facebook 3-Button Action Bar (with Floating Reaction Dock) */}
+        <View style={styles.fbActionBarWrap}>
+          {/* Floating Facebook Reactions Dock (Pops up when holding LIKE button) */}
+          {activeReactionPostId === post.id && (
+            <>
+              {/* Invisible backdrop to dismiss dock on outside tap */}
+              <TouchableOpacity
+                style={styles.reactionBackdrop}
+                onPress={() => setActiveReactionPostId(null)}
+                activeOpacity={1}
+              />
+              <View
+                style={[
+                  styles.fbReactionDock,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+              >
+                {FB_6_REACTIONS.map((reactItem) => {
+                  const isSelected = userReaction === reactItem.type;
+                  return (
+                    <TouchableOpacity
+                      key={reactItem.type}
+                      onPress={() => handleSelectReaction(post, reactItem.type)}
+                      style={[
+                        styles.fbReactionDockItem,
+                        isSelected && {
+                          backgroundColor: isDark ? "#334155" : "#EFF6FF",
+                        },
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.fbReactionDockEmoji}>
+                        {reactItem.emoji}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.fbReactionDockLabel,
+                          { color: reactItem.color },
+                        ]}
+                      >
+                        {reactItem.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          <View
+            style={[
+              styles.fbActionBar,
+              {
+                borderTopColor: isDark ? "#334155" : "#E2E8F0",
+                borderBottomColor: isDark ? "#334155" : "#F1F5F9",
+              },
+            ]}
+          >
+            {/* LIKE BUTTON: Single tap to like/unlike, hold/long-press to open 6 react emojis */}
+            <TouchableOpacity
+              onPress={() => {
+                if (activeReactionPostId === post.id) {
+                  setActiveReactionPostId(null);
+                } else {
+                  handleToggleLike(post);
+                }
+              }}
+              onLongPress={() => {
+                setActiveReactionPostId(
+                  activeReactionPostId === post.id ? null : post.id,
+                );
+              }}
+              delayLongPress={260}
+              style={styles.fbActionBtn}
+              activeOpacity={0.7}
+            >
+              {reactionBtnDisplay.icon}
+              <Text
+                style={[
+                  styles.fbActionBtnText,
+                  {
+                    color: reactionBtnDisplay.color,
+                    fontWeight: isLikedOrReacted ? "700" : "600",
+                  },
+                ]}
+              >
+                {reactionBtnDisplay.label}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setActivePostForComments(post)}
+              style={styles.fbActionBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="chatbubble-outline"
+                size={18}
+                color={isDark ? "#94A3B8" : "#64748B"}
+              />
+              <Text
+                style={[
+                  styles.fbActionBtnText,
+                  { color: isDark ? "#CBD5E1" : "#475569" },
+                ]}
+              >
+                Comment
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleSharePost(post)}
+              style={styles.fbActionBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="arrow-redo-outline"
+                size={19}
+                color={isDark ? "#94A3B8" : "#64748B"}
+              />
+              <Text
+                style={[
+                  styles.fbActionBtnText,
+                  { color: isDark ? "#CBD5E1" : "#475569" },
+                ]}
+              >
+                Share
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Facebook Inline Quick Comment Prompt */}
+        <View style={styles.fbInlineCommentRow}>
+          {currentAvatar ? (
+            <Image
+              source={{ uri: currentAvatar }}
+              style={styles.fbMiniCommentAvatar}
+            />
+          ) : (
+            <View
+              style={[
+                styles.fbMiniCommentAvatarPlaceholder,
+                { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.fbMiniCommentInitial,
+                  { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                ]}
+              >
+                {currentDisplayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            onPress={() => setActivePostForComments(post)}
+            style={[
+              styles.fbInlineCommentInput,
+              {
+                backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                borderColor: isDark ? "#334155" : "#E2E8F0",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.fbInlineCommentPlaceholder,
+                { color: isDark ? "#64748B" : "#94A3B8" },
+              ]}
+            >
+              Write a comment...
+            </Text>
+            <Ionicons
+              name="happy-outline"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  // Render the "People You May Know" Section
+  const renderPeopleYouMayKnowSection = () => {
+    if (peopleYouMayKnow.length === 0) return null;
+
+    return (
+      <View
+        style={[
+          styles.pymkSectionCard,
+          {
+            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            borderColor: isDark ? "#334155" : "#E2E8F0",
+          },
+        ]}
+      >
+        <View style={styles.pymkHeaderRow}>
+          <View style={styles.pymkTitleGroup}>
+            <Ionicons name="people" size={20} color="#2563EB" />
+            <Text
+              style={[
+                styles.pymkTitle,
+                { color: isDark ? "#F8FAFC" : "#0F172A" },
+              ]}
+            >
+              People You May Know
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              setActiveMainTab("network");
+              setNetworkSubTab("discover");
+            }}
+          >
+            <Text style={styles.pymkSeeAllText}>See all</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.pymkScrollContent}
+        >
+          {peopleYouMayKnow.map((member) => {
+            const isProcessing = processingActionId === member.uid;
+            const isSent = member.friendshipStatus === "pending_sent";
+            const cleanName = formatAuthorDisplayName(
+              member.name,
+              member.email,
+            );
+
+            return (
+              <View
+                key={member.uid}
+                style={[
+                  styles.pymkCard,
+                  {
+                    backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+              >
+                {/* Dismiss button */}
+                <TouchableOpacity
+                  onPress={() => handleDismissSuggestion(member.uid)}
+                  style={styles.pymkDismissBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Feather name="x" size={15} color="#FFFFFF" />
+                </TouchableOpacity>
+
+                {/* Portrait Picture / Avatar */}
+                <TouchableOpacity
+                  onPress={() =>
+                    handleOpenUserProfile({
+                      uid: member.uid,
+                      name: cleanName,
+                      avatar: member.avatar,
+                      email: member.email,
+                      role: member.role,
+                      householdName: member.householdName,
+                    })
+                  }
+                  activeOpacity={0.85}
+                  style={styles.pymkAvatarWrap}
+                >
+                  {member.avatar ? (
+                    <Image
+                      source={{ uri: member.avatar }}
+                      style={styles.pymkAvatar}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.pymkAvatarPlaceholder,
+                        { backgroundColor: isDark ? "#1E293B" : "#DBEAFE" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pymkInitial,
+                          { color: isDark ? "#93C5FD" : "#2563EB" },
+                        ]}
+                      >
+                        {cleanName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Member Info */}
+                <View style={styles.pymkBody}>
+                  <TouchableOpacity
+                    onPress={() =>
+                      handleOpenUserProfile({
+                        uid: member.uid,
+                        name: cleanName,
+                        avatar: member.avatar,
+                        email: member.email,
+                        role: member.role,
+                        householdName: member.householdName,
+                      })
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.pymkName,
+                        { color: isDark ? "#F8FAFC" : "#0F172A" },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {cleanName}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.pymkSub,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {member.householdName || "Suggested for you"}
+                  </Text>
+
+                  {/* Primary Add Friend Button */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!isSent && !isProcessing) {
+                        handleSendFriendRequest(member);
+                      }
+                    }}
+                    disabled={isSent || isProcessing}
+                    style={[
+                      styles.pymkAddBtn,
+                      isSent && styles.pymkAddBtnSent,
+                      { backgroundColor: isSent ? "#10B981" : "#2563EB" },
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    {isProcessing ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name={isSent ? "checkmark" : "person-add"}
+                          size={15}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.pymkAddBtnText}>
+                          {isSent ? "Requested" : "Add friend"}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Secondary Remove Button (Facebook style) */}
+                  <TouchableOpacity
+                    onPress={() => handleDismissSuggestion(member.uid)}
+                    style={[
+                      styles.pymkRemoveBtn,
+                      {
+                        backgroundColor: isDark ? "#334155" : "#E2E8F0",
+                      },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.pymkRemoveBtnText,
+                        { color: isDark ? "#E2E8F0" : "#475569" },
+                      ]}
+                    >
+                      Remove
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  if (selectedProfileUser) {
+    return (
+      <View style={{ flex: 1 }}>
+        <UserProfileScreen
+          user={selectedProfileUser}
+          onBack={() => setSelectedProfileUser(null)}
+          currentUser={currentUser}
+          posts={posts}
+          onSendFriendRequest={async (user) => {
+            await communityService.sendFriendRequest(
+              {
+                uid: user.uid,
+                name: user.name,
+                avatar: user.avatar,
+                email: user.email,
+              },
+              {
+                name: currentDisplayName,
+                avatar: currentAvatar,
+                email: currentUser.email || auth.currentUser?.email,
+              },
+            );
+            setSelectedProfileUser((prev) =>
+              prev ? { ...prev, friendshipStatus: "pending_sent" } : null,
+            );
+            setDiscoveredMembers((prev) =>
+              prev.map((m) =>
+                m.uid === user.uid
+                  ? { ...m, friendshipStatus: "pending_sent" }
+                  : m,
+              ),
+            );
+          }}
+          onAcceptFriendRequest={async (friendshipId) => {
+            await handleAcceptRequest(friendshipId);
+            setSelectedProfileUser((prev) =>
+              prev ? { ...prev, friendshipStatus: "friends" } : null,
+            );
+          }}
+          onDeclineOrCancelRequest={async (friendshipId) => {
+            await handleDeclineRequest(friendshipId);
+            setSelectedProfileUser((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    friendshipStatus: "none",
+                    friendshipId: undefined,
+                  }
+                : null,
+            );
+          }}
+          onToggleLikePost={handleToggleLike}
+          onSelectReaction={handleSelectReaction}
+          onOpenComments={(post) => setActivePostForComments(post)}
+          onOpenUserProfile={(user) => handleOpenUserProfile(user)}
+          onOpenDirectChat={(uid, name, avatar) => {
+            if (onOpenDirectChat) {
+              onOpenDirectChat(uid, name, avatar);
+            } else {
+              setSelectedProfileUser(null);
+              onBack();
+            }
+          }}
+          onNavigateToSplitzyProfile={() => {
+            setSelectedProfileUser(null);
+            onNavigateToSplitzyProfile?.();
+          }}
+        />
+
+        <PostCommentsModal
+          visible={!!activePostForComments}
+          post={activePostForComments}
+          onClose={() => setActivePostForComments(null)}
+          currentUser={currentUser}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[
+        styles.safeArea,
+        { backgroundColor: isDark ? "#0B1120" : "#F8FAFC" },
+      ]}
+      edges={["top"]}
+    >
+      {/* Top Header */}
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+            borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+          },
+        ]}
+      >
+        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <Feather
+            name="chevron-left"
+            size={22}
+            color={isDark ? "#F8FAFC" : "#0F172A"}
+          />
+        </TouchableOpacity>
+
+        <View style={styles.headerTitleWrap}>
+          <View style={styles.headerRow}>
+            <Ionicons name="sparkles" size={18} color="#2563EB" />
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: isDark ? "#F8FAFC" : "#0F172A" },
+              ]}
+            >
+              Splitzy Community
+            </Text>
+          </View>
+          <Text
+            style={[
+              styles.headerSubtitle,
+              { color: isDark ? "#94A3B8" : "#64748B" },
+            ]}
+          >
+            Social feed & roommate network
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={() => setCreatePostVisible(true)}
+          style={styles.headerPostBtn}
+        >
+          <Ionicons name="add" size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Main Tab Toggle: Feed vs Friends & Network */}
+      <View
+        style={[
+          styles.mainTabsContainer,
+          {
+            backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+            borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+          },
+        ]}
+      >
+        <TouchableOpacity
+          onPress={() => setActiveMainTab("feed")}
+          style={[
+            styles.mainTabBtn,
+            activeMainTab === "feed" && styles.mainTabBtnActive,
+          ]}
+        >
+          <Feather
+            name="file-text"
+            size={16}
+            color={
+              activeMainTab === "feed"
+                ? "#2563EB"
+                : isDark
+                  ? "#94A3B8"
+                  : "#64748B"
+            }
+          />
+          <Text
+            style={[
+              styles.mainTabBtnText,
+              {
+                color:
+                  activeMainTab === "feed"
+                    ? "#2563EB"
+                    : isDark
+                      ? "#94A3B8"
+                      : "#64748B",
+                fontWeight: activeMainTab === "feed" ? "700" : "500",
+              },
+            ]}
+          >
+            Feed
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setActiveMainTab("network")}
+          style={[
+            styles.mainTabBtn,
+            activeMainTab === "network" && styles.mainTabBtnActive,
+          ]}
+        >
+          <Ionicons
+            name="people-outline"
+            size={17}
+            color={
+              activeMainTab === "network"
+                ? "#2563EB"
+                : isDark
+                  ? "#94A3B8"
+                  : "#64748B"
+            }
+          />
+          <Text
+            style={[
+              styles.mainTabBtnText,
+              {
+                color:
+                  activeMainTab === "network"
+                    ? "#2563EB"
+                    : isDark
+                      ? "#94A3B8"
+                      : "#64748B",
+                fontWeight: activeMainTab === "network" ? "700" : "500",
+              },
+            ]}
+          >
+            Friends & Network
+          </Text>
+          {incomingRequests.length > 0 && (
+            <View style={styles.tabBadge}>
+              <Text style={styles.tabBadgeText}>{incomingRequests.length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* FEED TAB VIEW */}
+      {activeMainTab === "feed" ? (
+        <ScrollView
+          style={styles.feedScrollView}
+          contentContainerStyle={[
+            styles.feedScrollContent,
+            {
+              paddingBottom: insets.bottom + 80,
+              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            },
+          ]}
+          onScrollBeginDrag={() => {
+            if (activeReactionPostId) {
+              setActiveReactionPostId(null);
+            }
+          }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#2563EB"
+            />
+          }
+        >
+          {/* Quick Post Prompt Card (Facebook style) */}
+          <View
+            style={[
+              styles.quickPostCard,
+              {
+                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              },
+            ]}
+          >
+            <View style={styles.quickPostRow}>
+              {currentAvatar ? (
+                <Image
+                  source={{ uri: currentAvatar }}
+                  style={styles.quickPostAvatar}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.quickPostAvatarPlaceholder,
+                    { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.quickPostAvatarInitials,
+                      { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                    ]}
+                  >
+                    {currentDisplayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                onPress={() => setCreatePostVisible(true)}
+                style={[
+                  styles.quickPostInputFake,
+                  {
+                    backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.quickPostPlaceholder,
+                    { color: isDark ? "#64748B" : "#94A3B8" },
+                  ]}
+                >
+                  What's on your mind, {currentDisplayName.split(" ")[0]}?
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View
+              style={[
+                styles.quickPostFooter,
+                { borderTopColor: isDark ? "#334155" : "#F1F5F9" },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() => setCreatePostVisible(true)}
+                style={styles.quickPostAction}
+              >
+                <Ionicons name="image" size={18} color="#10B981" />
+                <Text
+                  style={[
+                    styles.quickPostActionText,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Photo
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSelectedCategory("items_sale");
+                  setCreatePostVisible(true);
+                }}
+                style={styles.quickPostAction}
+              >
+                <Feather name="shopping-bag" size={16} color="#F59E0B" />
+                <Text
+                  style={[
+                    styles.quickPostActionText,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Marketplace
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setCreateStoryVisible(true)}
+                style={styles.quickPostAction}
+              >
+                <Ionicons name="add-circle" size={18} color="#2563EB" />
+                <Text
+                  style={[
+                    styles.quickPostActionText,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Story
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* FACEBOOK STORY REELS CAROUSEL */}
+          <View style={styles.storiesContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.storiesScroll}
+            >
+              {/* "Create Story" Card (Facebook Style) */}
+              <TouchableOpacity
+                onPress={() => setCreateStoryVisible(true)}
+                style={[
+                  styles.createStoryCard,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+                activeOpacity={0.85}
+              >
+                <View style={styles.createStoryTopHalf}>
+                  {currentAvatar ? (
+                    <Image
+                      source={{ uri: currentAvatar }}
+                      style={styles.createStoryAvatarBg}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.createStoryAvatarPlaceholder,
+                        { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.createStoryInitials,
+                          { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                        ]}
+                      >
+                        {currentDisplayName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Overlapping Blue Plus Button */}
+                <View style={styles.createStoryPlusIconWrap}>
+                  <View style={styles.createStoryPlusCircle}>
+                    <Ionicons name="add" size={18} color="#FFFFFF" />
+                  </View>
+                </View>
+
+                <View style={styles.createStoryBottomHalf}>
+                  <Text
+                    style={[
+                      styles.createStoryLabel,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    Create story
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Community Story Cards */}
+              {displayStories.map((story, idx) => (
+                <TouchableOpacity
+                  key={story.id || idx}
+                  onPress={() => {
+                    setSelectedStoryIndex(idx);
+                    setStoryViewerVisible(true);
+                  }}
+                  style={styles.storyCard}
+                  activeOpacity={0.88}
+                >
+                  {story.mediaUrl ? (
+                    <Image
+                      source={{ uri: story.mediaUrl }}
+                      style={styles.storyImageBg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.storyTextCardBg}>
+                      <Ionicons name="sparkles" size={24} color="#93C5FD" />
+                    </View>
+                  )}
+
+                  {/* Gradient shadow overlay */}
+                  <View style={styles.storyGradientOverlay} />
+
+                  {/* Top-left Author Avatar with Blue Story Ring */}
+                  <View style={styles.storyRingWrapper}>
+                    {story.authorAvatar ? (
+                      <Image
+                        source={{ uri: story.authorAvatar }}
+                        style={styles.storyAuthorAvatar}
+                      />
+                    ) : (
+                      <View style={styles.storyAuthorAvatarPlaceholder}>
+                        <Text style={styles.storyAuthorInitial}>
+                          {story.authorName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Bottom Author Name */}
+                  <Text style={styles.storyAuthorName} numberOfLines={2}>
+                    {story.authorName}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Scope Filter Switch (All Posts | Friends Only | My Posts) */}
+          <View style={styles.scopeRow}>
+            {(["all", "friends", "my"] as const).map((sc) => {
+              const isActive = feedScope === sc;
+              const label =
+                sc === "all"
+                  ? "All Community"
+                  : sc === "friends"
+                    ? `Friends (${acceptedFriends.length})`
+                    : "My Posts";
+              return (
+                <TouchableOpacity
+                  key={sc}
+                  onPress={() => setFeedScope(sc)}
+                  style={[
+                    styles.scopeChip,
+                    {
+                      backgroundColor: isActive
+                        ? "#2563EB"
+                        : isDark
+                          ? "#1E293B"
+                          : "#FFFFFF",
+                      borderColor: isActive
+                        ? "#2563EB"
+                        : isDark
+                          ? "#334155"
+                          : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.scopeChipText,
+                      {
+                        color: isActive
+                          ? "#FFFFFF"
+                          : isDark
+                            ? "#CBD5E1"
+                            : "#475569",
+                        fontWeight: isActive ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Horizontal Topic Category Filter Bar */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryScroll}
+          >
+            {CATEGORIES.map((catKey) => {
+              const conf = CATEGORY_LABELS[catKey];
+              const isSelected = selectedCategory === catKey;
+              return (
+                <TouchableOpacity
+                  key={catKey}
+                  onPress={() => setSelectedCategory(catKey)}
+                  style={[
+                    styles.categoryChip,
+                    {
+                      backgroundColor: isSelected
+                        ? conf.color
+                        : isDark
+                          ? "#1E293B"
+                          : "#FFFFFF",
+                      borderColor: isSelected
+                        ? conf.color
+                        : isDark
+                          ? "#334155"
+                          : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name={conf.icon as any}
+                    size={13}
+                    color={isSelected ? "#FFFFFF" : conf.color}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      {
+                        color: isSelected
+                          ? "#FFFFFF"
+                          : isDark
+                            ? "#E2E8F0"
+                            : "#334155",
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {conf.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Posts Stream */}
+          {loadingPosts ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text
+                style={[
+                  styles.loadingText,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Syncing Splitzy Community...
+              </Text>
+            </View>
+          ) : filteredPosts.length === 0 ? (
+            <View>
+              {/* If no posts yet, render People You May Know here */}
+              {renderPeopleYouMayKnowSection()}
+
+              <View
+                style={[
+                  styles.emptyCard,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="chatbubbles-outline"
+                  size={48}
+                  color={isDark ? "#475569" : "#CBD5E1"}
+                />
+                <Text
+                  style={[
+                    styles.emptyTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  {selectedCategory !== "all"
+                    ? `No posts in ${CATEGORY_LABELS[selectedCategory]?.label}`
+                    : feedScope === "friends"
+                      ? "No posts from friends yet"
+                      : "No community posts yet"}
+                </Text>
+                <Text
+                  style={[
+                    styles.emptySub,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Be the first to share an update, roomie hack, or item for the
+                  community!
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setCreatePostVisible(true)}
+                  style={styles.emptyCreateBtn}
+                >
+                  <Feather name="plus-circle" size={18} color="#FFFFFF" />
+                  <Text style={styles.emptyCreateBtnText}>
+                    Create First Post
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            filteredPosts.map((post, postIndex) => {
+              return (
+                <React.Fragment key={post.id}>
+                  {renderFacebookPostCard(post)}
+
+                  {/* Insert "People You May Know" after 1st post (index 0) */}
+                  {postIndex === 0 && renderPeopleYouMayKnowSection()}
+                </React.Fragment>
+              );
+            })
+          )}
+        </ScrollView>
+      ) : (
+        /* FACEBOOK-STYLE FRIENDS & NETWORK VIEW */
+        <View style={styles.networkContainer}>
+          {/* Facebook Friends Top Title & Search Button */}
+          <View
+            style={[
+              styles.fbFriendsTopBar,
+              {
+                backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+                borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+              },
+            ]}
+          >
+            <View style={styles.fbFriendsTitleRow}>
+              <Text
+                style={[
+                  styles.fbFriendsMainTitle,
+                  { color: isDark ? "#F8FAFC" : "#050505" },
+                ]}
+              >
+                Friends
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => setShowNetworkSearch(!showNetworkSearch)}
+                style={[
+                  styles.fbFriendsSearchIconBtn,
+                  { backgroundColor: isDark ? "#334155" : "#F1F5F9" },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Feather
+                  name={showNetworkSearch ? "x" : "search"}
+                  size={18}
+                  color={isDark ? "#F8FAFC" : "#050505"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Facebook Filter Pills: [ Suggestions ] [ Your Friends ] */}
+            <View style={styles.fbFriendsPillsRow}>
+              <TouchableOpacity
+                onPress={() =>
+                  setFriendsFilter(
+                    friendsFilter === "suggestions" ? "all" : "suggestions",
+                  )
+                }
+                style={[
+                  styles.fbFriendsPill,
+                  {
+                    backgroundColor:
+                      friendsFilter === "suggestions"
+                        ? "#1877F2"
+                        : isDark
+                          ? "#334155"
+                          : "#E4E6EB",
+                  },
+                ]}
+                activeOpacity={0.75}
+              >
+                <Text
+                  style={[
+                    styles.fbFriendsPillText,
+                    {
+                      color:
+                        friendsFilter === "suggestions"
+                          ? "#FFFFFF"
+                          : isDark
+                            ? "#F8FAFC"
+                            : "#050505",
+                    },
+                  ]}
+                >
+                  Suggestions
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() =>
+                  setFriendsFilter(
+                    friendsFilter === "friends" ? "all" : "friends",
+                  )
+                }
+                style={[
+                  styles.fbFriendsPill,
+                  {
+                    backgroundColor:
+                      friendsFilter === "friends"
+                        ? "#1877F2"
+                        : isDark
+                          ? "#334155"
+                          : "#E4E6EB",
+                  },
+                ]}
+                activeOpacity={0.75}
+              >
+                <Text
+                  style={[
+                    styles.fbFriendsPillText,
+                    {
+                      color:
+                        friendsFilter === "friends"
+                          ? "#FFFFFF"
+                          : isDark
+                            ? "#F8FAFC"
+                            : "#050505",
+                    },
+                  ]}
+                >
+                  Your Friends ({acceptedFriends.length})
+                </Text>
+              </TouchableOpacity>
+
+              {friendsFilter !== "all" && (
+                <TouchableOpacity
+                  onPress={() => setFriendsFilter("all")}
+                  style={[
+                    styles.fbFriendsPill,
+                    { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.fbFriendsPillText,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    All
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Expandable Search Input */}
+            {showNetworkSearch && (
+              <View
+                style={[
+                  styles.searchBar,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                    marginTop: 10,
+                  },
+                ]}
+              >
+                <Feather
+                  name="search"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+                <TextInput
+                  style={[
+                    styles.searchInput,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                  placeholder="Search friends & members..."
+                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  autoFocus
+                />
+                {searchQuery ? (
+                  <TouchableOpacity onPress={() => setSearchQuery("")}>
+                    <Feather
+                      name="x"
+                      size={16}
+                      color={isDark ? "#94A3B8" : "#64748B"}
+                    />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+          </View>
+
+          {/* Main Content Area */}
+          <ScrollView
+            style={styles.networkScrollView}
+            contentContainerStyle={[
+              styles.networkScrollContent,
+              { paddingBottom: insets.bottom + 80 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {friendsFilter === "friends" ? (
+              /* YOUR FRIENDS VIEW */
+              <View style={styles.fbFriendsSection}>
+                <View style={styles.fbSectionHeaderRow}>
+                  <Text
+                    style={[
+                      styles.fbSectionTitle,
+                      { color: isDark ? "#F8FAFC" : "#050505" },
+                    ]}
+                  >
+                    Your Friends ({acceptedFriends.length})
+                  </Text>
+                </View>
+
+                {acceptedFriends.length === 0 ? (
+                  <View
+                    style={[
+                      styles.emptyCard,
+                      {
+                        backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                        borderColor: isDark ? "#334155" : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="people-outline"
+                      size={48}
+                      color={isDark ? "#475569" : "#CBD5E1"}
+                    />
+                    <Text
+                      style={[
+                        styles.emptyTitle,
+                        { color: isDark ? "#F8FAFC" : "#0F172A" },
+                      ]}
+                    >
+                      No friends yet
+                    </Text>
+                    <Text
+                      style={[
+                        styles.emptySub,
+                        { color: isDark ? "#94A3B8" : "#64748B" },
+                      ]}
+                    >
+                      Check out "Suggestions" or accept incoming requests to
+                      build your roommate network!
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setFriendsFilter("all")}
+                      style={styles.emptyCreateBtn}
+                    >
+                      <Feather name="search" size={16} color="#FFFFFF" />
+                      <Text style={styles.emptyCreateBtnText}>
+                        Discover People
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  acceptedFriends.map((f) => {
+                    const friendRawName =
+                      f.senderId === currentUid ? f.receiverName : f.senderName;
+                    const friendEmail =
+                      f.senderId === currentUid
+                        ? f.receiverEmail
+                        : f.senderEmail;
+                    const friendCleanName = formatAuthorDisplayName(
+                      friendRawName,
+                      friendEmail,
+                    );
+                    const friendAvatar =
+                      f.senderId === currentUid
+                        ? f.receiverAvatar
+                        : f.senderAvatar;
+                    const friendUid =
+                      f.senderId === currentUid ? f.receiverId : f.senderId;
+
+                    return (
+                      <View
+                        key={f.id}
+                        style={[
+                          styles.fbFriendRowCard,
+                          {
+                            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                            borderBottomColor: isDark ? "#334155" : "#F1F5F9",
+                          },
+                        ]}
+                      >
+                        <TouchableOpacity
+                          onPress={() =>
+                            handleOpenUserProfile({
+                              uid: friendUid,
+                              name: friendCleanName,
+                              avatar: friendAvatar,
+                              email: friendEmail,
+                              role: "Splitzy Friend",
+                            })
+                          }
+                          activeOpacity={0.8}
+                          style={styles.fbFriendRowAvatarWrap}
+                        >
+                          {friendAvatar ? (
+                            <Image
+                              source={{ uri: friendAvatar }}
+                              style={styles.fbFriendRowAvatar}
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                styles.fbFriendRowAvatarPlaceholder,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#334155"
+                                    : "#DBEAFE",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.fbFriendRowInitial,
+                                  { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                                ]}
+                              >
+                                {friendCleanName.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+
+                        <View style={styles.fbFriendRowInfo}>
+                          <TouchableOpacity
+                            onPress={() =>
+                              handleOpenUserProfile({
+                                uid: friendUid,
+                                name: friendCleanName,
+                                avatar: friendAvatar,
+                                email: friendEmail,
+                                role: "Splitzy Friend",
+                              })
+                            }
+                            activeOpacity={0.8}
+                          >
+                            <Text
+                              style={[
+                                styles.fbFriendRowName,
+                                { color: isDark ? "#F8FAFC" : "#050505" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {friendCleanName}
+                            </Text>
+                          </TouchableOpacity>
+                          <Text
+                            style={[
+                              styles.fbFriendRowSub,
+                              { color: isDark ? "#94A3B8" : "#64748B" },
+                            ]}
+                          >
+                            Splitzy Friend • 4 mutual friends
+                          </Text>
+
+                          <View style={styles.fbFriendRowActions}>
+                            <TouchableOpacity
+                              onPress={() =>
+                                handleOpenUserProfile({
+                                  uid: friendUid,
+                                  name: friendCleanName,
+                                  avatar: friendAvatar,
+                                  email: friendEmail,
+                                  role: "Splitzy Friend",
+                                })
+                              }
+                              style={[
+                                styles.fbFriendViewProfileBtn,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#334155"
+                                    : "#E4E6EB",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.fbFriendViewProfileText,
+                                  { color: isDark ? "#F8FAFC" : "#050505" },
+                                ]}
+                              >
+                                View Profile
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => {
+                                Alert.alert(
+                                  "Friend Options",
+                                  `Connection with ${friendCleanName}`,
+                                  [
+                                    {
+                                      text: "Remove Friend",
+                                      style: "destructive",
+                                      onPress: () => handleDeclineRequest(f.id),
+                                    },
+                                    { text: "Cancel", style: "cancel" },
+                                  ],
+                                );
+                              }}
+                              style={[
+                                styles.fbFriendMoreBtn,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#334155"
+                                    : "#E4E6EB",
+                                },
+                              ]}
+                            >
+                              <Feather
+                                name="more-horizontal"
+                                size={18}
+                                color={isDark ? "#94A3B8" : "#64748B"}
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            ) : (
+              /* UNIFIED FACEBOOK VIEW (Friend Requests + People You May Know) OR Pure Suggestions */
+              <>
+                {/* 1. FRIEND REQUESTS SECTION (Shown when not filtering to pure suggestions) */}
+                {friendsFilter !== "suggestions" && (
+                  <View style={styles.fbFriendsSection}>
+                    <View style={styles.fbSectionHeaderRow}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.fbSectionTitle,
+                            { color: isDark ? "#F8FAFC" : "#050505" },
+                          ]}
+                        >
+                          Friend Requests
+                        </Text>
+                        {allIncomingRequests.length > 0 && (
+                          <Text style={styles.fbSectionBadgeCount}>
+                            {allIncomingRequests.length}
+                          </Text>
+                        )}
+                      </View>
+                      {allIncomingRequests.length > 0 && (
+                        <TouchableOpacity
+                          onPress={() =>
+                            Alert.alert(
+                              "Friend Requests",
+                              `You have ${allIncomingRequests.length} pending friend requests.`,
+                            )
+                          }
+                        >
+                          <Text style={styles.fbSeeAllLink}>See all</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {allIncomingRequests.length === 0 ? (
+                      <View style={styles.fbNoRequestsCard}>
+                        <Ionicons
+                          name="mail-unread-outline"
+                          size={24}
+                          color={isDark ? "#64748B" : "#94A3B8"}
+                        />
+                        <Text
+                          style={[
+                            styles.fbNoRequestsText,
+                            { color: isDark ? "#94A3B8" : "#64748B" },
+                          ]}
+                        >
+                          No pending requests right now
+                        </Text>
+                      </View>
+                    ) : (
+                      allIncomingRequests.map((req) => {
+                        const isProcessing = processingActionId === req.id;
+                        const senderCleanName = formatAuthorDisplayName(
+                          req.senderName,
+                          req.senderEmail,
+                        );
+
+                        return (
+                          <View
+                            key={req.id}
+                            style={[
+                              styles.fbReqCard,
+                              {
+                                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                                borderBottomColor: isDark
+                                  ? "#334155"
+                                  : "#F1F5F9",
+                              },
+                            ]}
+                          >
+                            {/* Large Profile Avatar (tap to open User Profile) */}
+                            <TouchableOpacity
+                              onPress={() =>
+                                handleOpenUserProfile({
+                                  uid: req.senderId,
+                                  name: senderCleanName,
+                                  avatar: req.senderAvatar,
+                                  email: req.senderEmail,
+                                  role: "Splitzy Resident",
+                                })
+                              }
+                              activeOpacity={0.8}
+                              style={styles.fbReqAvatarWrap}
+                            >
+                              {req.senderAvatar ? (
+                                <Image
+                                  source={{ uri: req.senderAvatar }}
+                                  style={styles.fbReqAvatar}
+                                />
+                              ) : (
+                                <View
+                                  style={[
+                                    styles.fbReqAvatarPlaceholder,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#334155"
+                                        : "#DBEAFE",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.fbReqAvatarInitials,
+                                      {
+                                        color: isDark ? "#94A3B8" : "#1D4ED8",
+                                      },
+                                    ]}
+                                  >
+                                    {senderCleanName.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                              )}
+                            </TouchableOpacity>
+
+                            {/* Details and Action Buttons on Right */}
+                            <View style={styles.fbReqBody}>
+                              <View style={styles.fbReqHeaderRow}>
+                                <TouchableOpacity
+                                  onPress={() =>
+                                    handleOpenUserProfile({
+                                      uid: req.senderId,
+                                      name: senderCleanName,
+                                      avatar: req.senderAvatar,
+                                      email: req.senderEmail,
+                                      role: "Splitzy Resident",
+                                    })
+                                  }
+                                  activeOpacity={0.8}
+                                  style={{ flex: 1 }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.fbReqName,
+                                      { color: isDark ? "#F8FAFC" : "#050505" },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {senderCleanName}
+                                  </Text>
+                                </TouchableOpacity>
+                                <Text
+                                  style={[
+                                    styles.fbReqTime,
+                                    { color: isDark ? "#94A3B8" : "#64748B" },
+                                  ]}
+                                >
+                                  2d
+                                </Text>
+                              </View>
+
+                              <Text
+                                style={[
+                                  styles.fbReqMutual,
+                                  { color: isDark ? "#94A3B8" : "#64748B" },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                4 mutual friends • Roommate in Greenwood Villa
+                              </Text>
+
+                              {/* Two Action Buttons: Confirm & Delete */}
+                              <View style={styles.fbReqBtnRow}>
+                                <TouchableOpacity
+                                  onPress={() => handleAcceptRequest(req.id)}
+                                  disabled={isProcessing}
+                                  style={styles.fbConfirmBtn}
+                                  activeOpacity={0.8}
+                                >
+                                  {isProcessing ? (
+                                    <ActivityIndicator
+                                      size="small"
+                                      color="#FFFFFF"
+                                    />
+                                  ) : (
+                                    <Text style={styles.fbConfirmBtnText}>
+                                      Confirm
+                                    </Text>
+                                  )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  onPress={() => handleDeclineRequest(req.id)}
+                                  disabled={isProcessing}
+                                  style={[
+                                    styles.fbDeleteBtn,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#334155"
+                                        : "#E4E6EB",
+                                    },
+                                  ]}
+                                  activeOpacity={0.8}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.fbDeleteBtnText,
+                                      {
+                                        color: isDark ? "#F8FAFC" : "#050505",
+                                      },
+                                    ]}
+                                  >
+                                    Delete
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                )}
+
+                {/* Hairline Divider between sections */}
+                {friendsFilter !== "suggestions" && (
+                  <View
+                    style={[
+                      styles.fbSectionDivider,
+                      { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
+                    ]}
+                  />
+                )}
+
+                {/* 2. PEOPLE YOU MAY KNOW SECTION */}
+                <View style={styles.fbFriendsSection}>
+                  <View style={styles.fbSectionHeaderRow}>
+                    <Text
+                      style={[
+                        styles.fbSectionTitle,
+                        { color: isDark ? "#F8FAFC" : "#050505" },
+                      ]}
+                    >
+                      People You May Know
+                    </Text>
+                  </View>
+
+                  {loadingMembers ? (
+                    <View style={styles.centerBox}>
+                      <ActivityIndicator size="large" color="#1877F2" />
+                      <Text
+                        style={[
+                          styles.loadingText,
+                          { color: isDark ? "#94A3B8" : "#64748B" },
+                        ]}
+                      >
+                        Finding roommates and members...
+                      </Text>
+                    </View>
+                  ) : peopleYouMayKnow.length === 0 ? (
+                    <View
+                      style={[
+                        styles.emptyCard,
+                        {
+                          backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                          borderColor: isDark ? "#334155" : "#E2E8F0",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="people-outline"
+                        size={48}
+                        color={isDark ? "#475569" : "#CBD5E1"}
+                      />
+                      <Text
+                        style={[
+                          styles.emptyTitle,
+                          { color: isDark ? "#F8FAFC" : "#0F172A" },
+                        ]}
+                      >
+                        No suggestions right now
+                      </Text>
+                      <Text
+                        style={[
+                          styles.emptySub,
+                          { color: isDark ? "#94A3B8" : "#64748B" },
+                        ]}
+                      >
+                        New residents and roommates joining Splitzy will appear
+                        here.
+                      </Text>
+                    </View>
+                  ) : (
+                    peopleYouMayKnow.map((member) => {
+                      const isProcessing = processingActionId === member.uid;
+                      const isSent = member.friendshipStatus === "pending_sent";
+                      const cleanMemberName = formatAuthorDisplayName(
+                        member.name,
+                        member.email,
+                      );
+
+                      return (
+                        <View
+                          key={member.uid}
+                          style={[
+                            styles.fbReqCard,
+                            {
+                              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                              borderBottomColor: isDark ? "#334155" : "#F1F5F9",
+                            },
+                          ]}
+                        >
+                          {/* Large Profile Avatar (tap to open User Profile) */}
+                          <TouchableOpacity
+                            onPress={() =>
+                              handleOpenUserProfile({
+                                uid: member.uid,
+                                name: cleanMemberName,
+                                avatar: member.avatar,
+                                email: member.email,
+                                role: member.role,
+                                householdName: member.householdName,
+                              })
+                            }
+                            activeOpacity={0.8}
+                            style={styles.fbReqAvatarWrap}
+                          >
+                            {member.avatar ? (
+                              <Image
+                                source={{ uri: member.avatar }}
+                                style={styles.fbReqAvatar}
+                              />
+                            ) : (
+                              <View
+                                style={[
+                                  styles.fbReqAvatarPlaceholder,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#334155"
+                                      : "#DBEAFE",
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.fbReqAvatarInitials,
+                                    {
+                                      color: isDark ? "#94A3B8" : "#1D4ED8",
+                                    },
+                                  ]}
+                                >
+                                  {cleanMemberName.charAt(0).toUpperCase()}
+                                </Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+
+                          {/* Details and Action Buttons on Right */}
+                          <View style={styles.fbReqBody}>
+                            <TouchableOpacity
+                              onPress={() =>
+                                handleOpenUserProfile({
+                                  uid: member.uid,
+                                  name: cleanMemberName,
+                                  avatar: member.avatar,
+                                  email: member.email,
+                                  role: member.role,
+                                  householdName: member.householdName,
+                                })
+                              }
+                              activeOpacity={0.8}
+                            >
+                              <Text
+                                style={[
+                                  styles.fbReqName,
+                                  { color: isDark ? "#F8FAFC" : "#050505" },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {cleanMemberName}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <Text
+                              style={[
+                                styles.fbReqMutual,
+                                { color: isDark ? "#94A3B8" : "#64748B" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {member.householdName
+                                ? `${member.householdName} • 6 mutual friends`
+                                : "6 mutual friends • Splitzy Resident"}
+                            </Text>
+
+                            {/* Two Action Buttons: Add Friend & Remove */}
+                            <View style={styles.fbReqBtnRow}>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  if (!isSent && !isProcessing) {
+                                    handleSendFriendRequest(member);
+                                  }
+                                }}
+                                disabled={isSent || isProcessing}
+                                style={[
+                                  styles.fbConfirmBtn,
+                                  {
+                                    backgroundColor: isSent
+                                      ? "#10B981"
+                                      : "#1877F2",
+                                  },
+                                ]}
+                                activeOpacity={0.8}
+                              >
+                                {isProcessing ? (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color="#FFFFFF"
+                                  />
+                                ) : (
+                                  <Text style={styles.fbConfirmBtnText}>
+                                    {isSent ? "Requested" : "Add Friend"}
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() =>
+                                  handleDismissSuggestion(member.uid)
+                                }
+                                style={[
+                                  styles.fbDeleteBtn,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#334155"
+                                      : "#E4E6EB",
+                                  },
+                                ]}
+                                activeOpacity={0.8}
+                              >
+                                <Text
+                                  style={[
+                                    styles.fbDeleteBtnText,
+                                    {
+                                      color: isDark ? "#F8FAFC" : "#050505",
+                                    },
+                                  ]}
+                                >
+                                  Remove
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Floating Action Button (FAB) for Creating Post */}
+      <TouchableOpacity
+        onPress={() => setCreatePostVisible(true)}
+        style={styles.fab}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="create-outline" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {/* Modals */}
+      <CreatePostModal
+        visible={createPostVisible}
+        onClose={() => setCreatePostVisible(false)}
+        currentUser={currentUser}
+      />
+
+      <PostCommentsModal
+        visible={!!activePostForComments}
+        post={activePostForComments}
+        onClose={() => setActivePostForComments(null)}
+        currentUser={currentUser}
+      />
+
+      <CreateStoryModal
+        visible={createStoryVisible}
+        onClose={() => setCreateStoryVisible(false)}
+        currentUser={currentUser}
+      />
+
+      <StoryViewerModal
+        visible={storyViewerVisible}
+        stories={displayStories}
+        initialIndex={selectedStoryIndex}
+        onClose={() => setStoryViewerVisible(false)}
+        onLikeStory={handleLikeStory}
+      />
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backBtn: {
+    padding: 6,
+    marginRight: 8,
+  },
+  headerTitleWrap: {
+    flex: 1,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  headerPostBtn: {
+    backgroundColor: "#2563EB",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mainTabsContainer: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+  },
+  mainTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    gap: 7,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  mainTabBtnActive: {
+    borderBottomColor: "#2563EB",
+  },
+  mainTabBtnText: {
+    fontSize: 14,
+  },
+  tabBadge: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  tabBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  feedScrollView: {
+    flex: 1,
+  },
+  feedScrollContent: {
+    paddingTop: 10,
+  },
+  /* Quick Post Card */
+  quickPostCard: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+    borderRadius: 12,
+  },
+  quickPostRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  quickPostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  quickPostAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickPostAvatarInitials: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  quickPostInputFake: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+  },
+  quickPostPlaceholder: {
+    fontSize: 14,
+  },
+  quickPostFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+  },
+  quickPostAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  quickPostActionText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  /* Story Reels Section */
+  storiesContainer: {
+    marginBottom: 12,
+  },
+  storiesScroll: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  createStoryCard: {
+    width: 110,
+    height: 185,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+    position: "relative",
+  },
+  createStoryTopHalf: {
+    height: "65%",
+    width: "100%",
+  },
+  createStoryAvatarBg: {
+    width: "100%",
+    height: "100%",
+  },
+  createStoryAvatarPlaceholder: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  createStoryInitials: {
+    fontSize: 28,
+    fontWeight: "800",
+  },
+  createStoryPlusIconWrap: {
+    position: "absolute",
+    top: "55%",
+    alignSelf: "center",
+    zIndex: 10,
+  },
+  createStoryPlusCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#2563EB",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 3,
+  },
+  createStoryBottomHalf: {
+    height: "35%",
+    width: "100%",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingBottom: 8,
+  },
+  createStoryLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  storyCard: {
+    width: 110,
+    height: 185,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+    justifyContent: "space-between",
+    padding: 8,
+  },
+  storyImageBg: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 110,
+    height: 185,
+  },
+  storyTextCardBg: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 110,
+    height: 185,
+    backgroundColor: "#1E3A8A",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyGradientOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: 110,
+    height: 185,
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  storyRingWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2.5,
+    borderColor: "#2563EB",
+    padding: 1.5,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyAuthorAvatar: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 16,
+  },
+  storyAuthorAvatarPlaceholder: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 16,
+    backgroundColor: "#2563EB",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyAuthorInitial: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  storyAuthorName: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowRadius: 3,
+  },
+  /* Scope & Categories */
+  scopeRow: {
+    flexDirection: "row",
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  scopeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  scopeChipText: {
+    fontSize: 12,
+  },
+  categoryScroll: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  categoryChipText: {
+    fontSize: 12,
+  },
+  /* Facebook Post Card */
+  fbPostCard: {
+    borderWidth: 0.5,
+  },
+  fbPostHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  fbPostAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    marginRight: 10,
+  },
+  fbPostAvatarPlaceholder: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  fbPostAvatarInitials: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  fbPostAuthorInfo: {
+    flex: 1,
+  },
+  fbAuthorNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  fbAuthorName: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  hostBadge: {
+    backgroundColor: "#F59E0B",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  hostBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  fbMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+    gap: 4,
+  },
+  fbTimeText: {
+    fontSize: 12,
+  },
+  fbDotSeparator: {
+    fontSize: 12,
+  },
+  fbCategoryTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  fbCategoryTagText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  fbMoreBtn: {
+    padding: 6,
+  },
+  fbContentText: {
+    fontSize: 15,
+    lineHeight: 22,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  /* Media */
+  fbImagesContainer: {
+    width: "100%",
+    marginBottom: 8,
+  },
+  fbSingleImage: {
+    width: "100%",
+    height: 290,
+  },
+  fbMultiImageGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 2,
+  },
+  fbGridImage: {
+    width: "49.5%",
+    height: 180,
+  },
+  /* Facebook Stats Row */
+  fbStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderTopWidth: 1,
+  },
+  fbReactionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  fbReactionBubbles: {
+    flexDirection: "row",
+  },
+  fbLikeBubble: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#2563EB",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 2,
+  },
+  fbHeartBubble: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#EF4444",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: -4,
+  },
+  fbStatsText: {
+    fontSize: 12,
+  },
+  fbRightStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  /* Facebook Action Bar Wrap & Floating Reaction Dock */
+  fbActionBarWrap: {
+    position: "relative",
+    zIndex: 50,
+  },
+  reactionBackdrop: {
+    position: "absolute",
+    top: -260,
+    bottom: -80,
+    left: -40,
+    right: -40,
+    zIndex: 90,
+  },
+  fbReactionDock: {
+    position: "absolute",
+    bottom: 46,
+    left: 8,
+    zIndex: 100,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 36,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 12,
+    gap: 4,
+  },
+  fbReactionDockItem: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 18,
+    minWidth: 42,
+  },
+  fbReactionDockEmoji: {
+    fontSize: 26,
+    marginBottom: 2,
+  },
+  fbReactionDockLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  fbReactBtnEmoji: {
+    fontSize: 18,
+    marginRight: 2,
+  },
+  fbBubbleCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+    marginRight: -4,
+  },
+  fbBubbleEmoji: {
+    fontSize: 9,
+  },
+  /* Facebook Action Bar */
+  fbActionBar: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    paddingVertical: 3,
+  },
+  fbActionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 7,
+    gap: 6,
+  },
+  fbActionBtnText: {
+    fontSize: 13,
+  },
+  /* Inline comment */
+  fbInlineCommentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  fbMiniCommentAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  fbMiniCommentAvatarPlaceholder: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fbMiniCommentInitial: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  fbInlineCommentInput: {
+    flex: 1,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  fbInlineCommentPlaceholder: {
+    fontSize: 13,
+  },
+  /* People You May Know Section */
+  pymkSectionCard: {
+    borderWidth: 0.5,
+    paddingVertical: 12,
+  },
+  pymkHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  pymkTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  pymkTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  pymkSeeAllText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  pymkScrollContent: {
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  pymkCard: {
+    width: 250,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: "hidden",
+    position: "relative",
+  },
+  pymkDismissBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  pymkAvatarWrap: {
+    width: "100%",
+    height: 195,
+  },
+  pymkAvatar: {
+    width: "100%",
+    height: "100%",
+  },
+  pymkAvatarPlaceholder: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  pymkInitial: {
+    fontSize: 48,
+    fontWeight: "700",
+  },
+  pymkBody: {
+    padding: 12,
+    gap: 4,
+  },
+  pymkName: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  pymkSub: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  pymkAddBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  pymkAddBtnSent: {
+    backgroundColor: "#10B981",
+  },
+  pymkAddBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  pymkRemoveBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  pymkRemoveBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  /* Network Styles */
+  networkContainer: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  networkSubTabs: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+  },
+  networkSubTabBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  networkSubTabBtnActive: {
+    borderBottomColor: "#2563EB",
+  },
+  networkSubTabText: {
+    fontSize: 13,
+  },
+  requestsLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  subTabBadge: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  subTabBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  searchWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 40,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+  },
+  networkScrollView: {
+    flex: 1,
+  },
+  networkScrollContent: {
+    padding: 4,
+    gap: 4,
+  },
+  memberCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  memberAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    marginRight: 12,
+  },
+  memberAvatarPlaceholder: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  memberAvatarInitials: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  memberHousehold: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  memberRole: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  addFriendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  addFriendBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  pendingSentBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+  },
+  pendingSentBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  acceptMiniBtn: {
+    backgroundColor: "#10B981",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+  },
+  acceptMiniBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  friendBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  friendBadgeText: {
+    color: "#10B981",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  requestCard: {
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+  },
+  requestHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  requestActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  confirmBtn: {
+    flex: 1,
+    backgroundColor: "#2563EB",
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  deleteReqBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteReqBtnText: {
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  moreFriendBtn: {
+    padding: 6,
+  },
+  /* Empty & Loading */
+  centerBox: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 13,
+  },
+  emptyCard: {
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  emptySub: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  emptyCreateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
+    gap: 8,
+  },
+  emptyCreateBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  fab: {
+    position: "absolute",
+    bottom: 24,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#2563EB",
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 6,
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+  },
+  /* Facebook Friends & Network Styles */
+  fbFriendsTopBar: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  fbFriendsTitleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  fbFriendsMainTitle: {
+    fontSize: 26,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  fbFriendsSearchIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbFriendsPillsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 10,
+  },
+  fbFriendsPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbFriendsPillText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  fbFriendsSection: {
+    paddingTop: 14,
+  },
+  fbSectionHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  fbSectionTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  fbSectionBadgeCount: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#E11D48",
+  },
+  fbSeeAllLink: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1877F2",
+  },
+  fbNoRequestsCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  fbNoRequestsText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  fbSectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 14,
+    marginHorizontal: 16,
+  },
+  fbReqCard: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  fbReqAvatarWrap: {
+    marginRight: 14,
+  },
+  fbReqAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  fbReqAvatarPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbReqAvatarInitials: {
+    fontSize: 28,
+    fontWeight: "800",
+  },
+  fbReqBody: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  fbReqHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  fbReqName: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  fbReqTime: {
+    fontSize: 12,
+  },
+  fbReqMutual: {
+    fontSize: 13,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  fbReqBtnRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  fbConfirmBtn: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "#1877F2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbConfirmBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  fbDeleteBtn: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbDeleteBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  fbFriendRowCard: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  fbFriendRowAvatarWrap: {
+    marginRight: 14,
+  },
+  fbFriendRowAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+  },
+  fbFriendRowAvatarPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbFriendRowInitial: {
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  fbFriendRowInfo: {
+    flex: 1,
+  },
+  fbFriendRowName: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  fbFriendRowSub: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  fbFriendRowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+  },
+  fbFriendViewProfileBtn: {
+    flex: 1,
+    height: 34,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fbFriendViewProfileText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  fbFriendMoreBtn: {
+    width: 38,
+    height: 34,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

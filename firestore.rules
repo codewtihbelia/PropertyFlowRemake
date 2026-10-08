@@ -324,5 +324,48 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isSuperAdmin();
     }
+
+    // Splitzy Community Posts & Comments
+    match /communityPosts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isSuperAdmin());
+
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+        allow update: if isAuthenticated();
+        allow delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isSuperAdmin());
+      }
+    }
+
+    // Splitzy Community Friendships & Social Connections
+    match /communityFriendships/{friendshipId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        isSuperAdmin()
+      );
+    }
+
+    // Splitzy Community Stories & Reels
+    match /communityStories/{storyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isSuperAdmin());
+    }
+
+    // Direct Messages between Friends & Community Members
+    match /directMessages/{msgId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

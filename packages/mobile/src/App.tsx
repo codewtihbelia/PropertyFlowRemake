@@ -42,6 +42,7 @@ import { PaymentMethodConfigurationScreen } from "./screens/PaymentMethodConfigu
 import { NotificationsScreen } from "./screens/NotificationsScreen";
 import { TermsOfServiceScreen } from "./screens/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "./screens/PrivacyPolicyScreen";
+import { CommunityScreen } from "./screens/CommunityScreen";
 import {
   registerForPushNotificationsAsync,
   setupNotificationChannelsAsync,
@@ -103,7 +104,8 @@ type OverlayScreen =
   | "host_application"
   | "payment_method_configuration"
   | "terms_of_service"
-  | "privacy_policy";
+  | "privacy_policy"
+  | "community";
 
 interface NavItemConfig {
   key: MainTab;
@@ -273,6 +275,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     "details" | "create" | "join"
   >("details");
   const [overlayScreen, setOverlayScreen] = useState<OverlayScreen>("none");
+  const [activeDirectChatUserId, setActiveDirectChatUserId] = useState<
+    string | null
+  >(null);
   const [selectedExpense, setSelectedExpense] = useState<any>(null);
   const [attendanceHasUnsavedChanges, setAttendanceHasUnsavedChanges] =
     useState<boolean>(false);
@@ -344,6 +349,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     isInitialLoad.current = true;
     setCurrentTab("home");
     setOverlayScreen("none");
+    setActiveDirectChatUserId(null);
     setBillsInitialSubView("overview");
   };
 
@@ -1058,6 +1064,67 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return <PrivacyPolicyScreen onBack={() => setOverlayScreen("none")} />;
   }
 
+  if (overlayScreen === "community") {
+    const rawName =
+      userProfile?.displayName ||
+      userProfile?.name ||
+      userProfile?.fullName ||
+      (userProfile?.firstName
+        ? `${userProfile.firstName} ${userProfile.lastName || ""}`.trim()
+        : null) ||
+      auth.currentUser?.displayName ||
+      (currentUser.name && currentUser.name !== "Resident"
+        ? currentUser.name
+        : null);
+
+    const activeEmail = auth.currentUser?.email || currentUser.email || "";
+    const emailFallback = activeEmail.includes("@")
+      ? activeEmail
+          .split("@")[0]
+          .replace(/[._-]/g, " ")
+          .split(" ")
+          .filter(Boolean)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ")
+      : "Splitzy Member";
+
+    const resolvedCommunityName = rawName || emailFallback;
+
+    return (
+      <CommunityScreen
+        onBack={() => setOverlayScreen("none")}
+        onNavigateToSplitzyProfile={() => {
+          setOverlayScreen("none");
+          setCurrentTab("profile");
+        }}
+        onOpenDirectChat={(targetUserId) => {
+          setActiveDirectChatUserId(targetUserId);
+          setOverlayScreen("messages");
+        }}
+        currentUser={{
+          uid: auth.currentUser?.uid,
+          name: resolvedCommunityName,
+          displayName: resolvedCommunityName,
+          email: activeEmail,
+          role: currentUser.role || userProfile?.role || "Member",
+          householdName: userProfile?.householdName || undefined,
+          photoURL:
+            userProfile?.profilePicture ||
+            userProfile?.photoURL ||
+            auth.currentUser?.photoURL ||
+            currentUser.avatar ||
+            undefined,
+          profilePicture:
+            userProfile?.profilePicture ||
+            userProfile?.photoURL ||
+            auth.currentUser?.photoURL ||
+            currentUser.avatar ||
+            undefined,
+        }}
+      />
+    );
+  }
+
   if (overlayScreen === "messages") {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1067,8 +1134,12 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           backgroundColor="transparent"
         />
         <MessagesScreen
-          onBack={() => setOverlayScreen("none")}
+          onBack={() => {
+            setActiveDirectChatUserId(null);
+            setOverlayScreen("none");
+          }}
           householdId={householdId}
+          initialTargetUserId={activeDirectChatUserId || undefined}
           currentUser={{
             ...currentUser,
             photoURL:
@@ -1183,9 +1254,20 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       case "messages":
         return (
           <MessagesScreen
-            onBack={() => setCurrentTab("home")}
+            onBack={() => {
+              setActiveDirectChatUserId(null);
+              setCurrentTab("home");
+            }}
             householdId={householdId}
-            currentUser={currentUser}
+            initialTargetUserId={activeDirectChatUserId || undefined}
+            currentUser={{
+              ...currentUser,
+              photoURL:
+                userProfile?.profilePicture ||
+                userProfile?.photoURL ||
+                auth.currentUser?.photoURL ||
+                undefined,
+            }}
             onOpenSettleDues={() => {
               setOverlayScreen("settle_dues");
             }}
@@ -1213,6 +1295,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenOnboarding={() => setRootFlow("onboarding")}
             onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
             onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
+            onOpenCommunity={() => setOverlayScreen("community")}
             onSignOut={async () => {
               const savedUser = await authPinService.getLastPinUser();
               await performCleanSignOut();

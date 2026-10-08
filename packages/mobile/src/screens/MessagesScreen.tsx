@@ -14,6 +14,8 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -21,6 +23,7 @@ import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { useTheme } from "../context/ThemeContext";
 import { mobileDataService } from "../services/firebaseDataService";
+import { communityService } from "../services/communityService";
 import { auth } from "../firebase/config";
 import { playMessengerPopChime } from "../utils/soundEffects";
 
@@ -34,6 +37,7 @@ export interface MessagesScreenProps {
     role?: string;
     photoURL?: string;
   };
+  initialTargetUserId?: string;
   onOpenSettleDues?: () => void;
   onOpenAddExpense?: () => void;
   loading?: boolean;
@@ -187,13 +191,22 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   onBack,
   householdId,
   currentUser = { name: "Resident", avatar: "R" },
+  initialTargetUserId,
   onOpenSettleDues,
   onOpenAddExpense,
 }) => {
-  const { onScroll, keyboardHeight: contextKeyboardHeight } =
-    useNavVisibility();
+  const {
+    onScroll,
+    keyboardHeight: contextKeyboardHeight,
+    hideNav,
+    showNav,
+  } = useNavVisibility();
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const windowDims = useWindowDimensions();
+  const screenHeight = Dimensions.get("screen").height;
+  const isWindowResizedBySystem = screenHeight - windowDims.height > 120;
+
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
     insets.top,
@@ -234,6 +247,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [householdNotes, setHouseholdNotes] = useState<
     Record<string, { note: string; emoji?: string; updatedAt: string }>
   >({});
+  const [acceptedCommunityFriends, setAcceptedCommunityFriends] = useState<
+    any[]
+  >([]);
+  const [directMessages, setDirectMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Strict helper: only active approved members belong in the group chat and direct messages
@@ -290,39 +307,96 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   >({});
   const [localKeyboardHeight, setLocalKeyboardHeight] = useState(0);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const keyboardHeight = Math.max(
     localKeyboardHeight,
     contextKeyboardHeight || 0,
   );
+  const keyboardActive = isKeyboardOpen || isInputFocused || keyboardHeight > 0;
+
+  // Auto-hide bottom floating navigation menu while inside full-screen chat thread
+  useEffect(() => {
+    if (activeThread) {
+      hideNav();
+    } else {
+      showNav();
+    }
+  }, [activeThread, hideNav, showNav]);
 
   useEffect(() => {
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    return () => {
+      showNav();
+    };
+  }, [showNav]);
 
+  useEffect(() => {
     const onShow = (e: any) => {
       const h = e?.endCoordinates?.height || 0;
-      setLocalKeyboardHeight(h);
+      if (h > 0) {
+        setLocalKeyboardHeight(h);
+      }
       setIsKeyboardOpen(true);
       setTimeout(() => {
         messageScrollRef.current?.scrollToEnd({ animated: true });
-      }, 60);
+      }, 80);
     };
 
     const onHide = () => {
       setLocalKeyboardHeight(0);
       setIsKeyboardOpen(false);
+      setIsInputFocused(false);
     };
 
-    const showSub = Keyboard.addListener(showEvent, onShow);
-    const hideSub = Keyboard.addListener(hideEvent, onHide);
+    const showSub1 = Keyboard.addListener("keyboardWillShow", onShow);
+    const showSub2 = Keyboard.addListener("keyboardDidShow", onShow);
+    const hideSub1 = Keyboard.addListener("keyboardWillHide", onHide);
+    const hideSub2 = Keyboard.addListener("keyboardDidHide", onHide);
 
     return () => {
-      showSub.remove();
-      hideSub.remove();
+      showSub1.remove();
+      showSub2.remove();
+      hideSub1.remove();
+      hideSub2.remove();
     };
   }, []);
+
+  const defaultBottomPadding = Math.max(
+    bottomInset,
+    Platform.OS === "android" ? 20 : 12,
+  );
+
+  const chatInputBottomPadding = useMemo(() => {
+    if (!keyboardActive) {
+      return defaultBottomPadding;
+    }
+
+    if (Platform.OS === "android") {
+      if (isWindowResizedBySystem) {
+        // OS already resized the window above keyboard; provide a clean 14px cushion
+        return 14;
+      }
+      // Translucent mode on Android: window is full-screen and does not resize.
+      // Elevate input container above keyboard plus the system navigation bar with a 14px cushion.
+      const effectiveHeight = keyboardHeight > 0 ? keyboardHeight : 285;
+      const navBarHeight = insets.bottom > 0 ? insets.bottom : 24;
+      return effectiveHeight + navBarHeight + 14;
+    }
+
+    if (Platform.OS === "ios") {
+      // On iOS, KeyboardAvoidingView (behavior="padding") lifts the container by keyboardHeight.
+      // Provide a generous 14px cushion above the soft keyboard.
+      return 14;
+    }
+
+    // Web / other platforms
+    return 14;
+  }, [
+    keyboardActive,
+    isWindowResizedBySystem,
+    keyboardHeight,
+    insets.bottom,
+    defaultBottomPadding,
+  ]);
 
   const handleToggleMessage = (msgId: string) => {
     setToggledMessageIds((prev) => ({
@@ -408,6 +482,71 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     };
   }, [householdId, currentUid]);
 
+  // 1b. Subscribe to real-time accepted community friendships (friends outside or inside the group)
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsub = communityService.subscribeFriendships(
+      currentUid,
+      (allFriendships) => {
+        const accepted = (allFriendships || []).filter(
+          (f) => f.status === "accepted" || (f as any).status === "friends",
+        );
+        const mapped = accepted.map((f) => {
+          const isSender = f.senderId === currentUid;
+          const friendUid = isSender ? f.receiverId : f.senderId;
+          const friendName = isSender ? f.receiverName : f.senderName;
+          const friendAvatar = isSender ? f.receiverAvatar : f.senderAvatar;
+          const friendEmail = isSender ? f.receiverEmail : f.senderEmail;
+          return {
+            userId: friendUid,
+            memberId: friendUid,
+            id: friendUid,
+            displayName: friendName,
+            name: friendName,
+            email: friendEmail,
+            photoURL: friendAvatar,
+            profilePicture: friendAvatar,
+            role: "Friend",
+            isOutsideFriend: true,
+            friendshipId: f.id,
+          };
+        });
+        setAcceptedCommunityFriends(mapped);
+      },
+    );
+    return () => unsub();
+  }, [currentUid]);
+
+  // 1c. Subscribe to direct messages across contacts
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsub = mobileDataService.listenToDirectMessages(
+      currentUid,
+      (msgs) => {
+        setDirectMessages(msgs || []);
+      },
+    );
+    return () => unsub();
+  }, [currentUid]);
+
+  // Merge household messages and direct messages deduplicated by id
+  const combinedMessages = useMemo(() => {
+    const map = new Map<string, any>();
+    rawMessages.forEach((m) => {
+      if (m?.id) map.set(m.id, m);
+    });
+    directMessages.forEach((m) => {
+      if (m?.id) map.set(m.id, m);
+    });
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+      const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+      return timeA - timeB;
+    });
+    return list;
+  }, [rawMessages, directMessages]);
+
   // Real bills group members (excluding the current user, strictly active members only)
   const billsGroupMembers = useMemo(() => {
     return householdMembers.filter((m) => {
@@ -416,6 +555,40 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       return uid && uid !== currentUid && uid !== `mem_${currentUid}`;
     });
   }, [householdMembers, currentUid]);
+
+  // Combine household members with accepted friends from outside the household group
+  const allDirectMembers = useMemo(() => {
+    const list: any[] = [...billsGroupMembers];
+    const existingUids = new Set<string>();
+
+    billsGroupMembers.forEach((m) => {
+      const u = String(m.userId || m.memberId || m.id || "");
+      if (u) {
+        existingUids.add(u);
+        existingUids.add(u.replace(/^mem_/, ""));
+      }
+    });
+
+    acceptedCommunityFriends.forEach((friend) => {
+      const friendUid = String(
+        friend.userId || friend.memberId || friend.id || "",
+      );
+      const cleanUid = friendUid.replace(/^mem_/, "");
+      if (
+        friendUid &&
+        friendUid !== currentUid &&
+        cleanUid !== currentUid &&
+        !existingUids.has(friendUid) &&
+        !existingUids.has(cleanUid)
+      ) {
+        list.push(friend);
+        existingUids.add(friendUid);
+        existingUids.add(cleanUid);
+      }
+    });
+
+    return list;
+  }, [billsGroupMembers, acceptedCommunityFriends, currentUid]);
 
   const isHost =
     userProfile?.role === "HOST" ||
@@ -476,7 +649,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       }
     >();
 
-    householdMembers.forEach((member) => {
+    const allKnown = [...householdMembers, ...allDirectMembers];
+    allKnown.forEach((member) => {
       const uids = [member.userId, member.memberId, member.id].filter(Boolean);
       const name =
         member.displayName ||
@@ -523,7 +697,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     return map;
-  }, [householdMembers, activeThread]);
+  }, [householdMembers, allDirectMembers, activeThread]);
 
   // Format a Firestore message document into ChatMessage
   const formatChatMessage = (m: any): ChatMessage => {
@@ -546,55 +720,61 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const conversations: ConversationItem[] = useMemo(() => {
     const list: ConversationItem[] = [];
 
-    // A. Pinned Household Group Conversation
-    const groupName =
-      householdInfo?.householdName || householdInfo?.name || "Bills Group Chat";
-    const groupMsgs = rawMessages.filter(
-      (m) =>
-        m.conversationId === "household_group" ||
-        (!m.conversationId && !m.recipientId),
-    );
-    const lastGroupMsg =
-      groupMsgs.length > 0 ? groupMsgs[groupMsgs.length - 1] : null;
-    const groupUnread = groupMsgs.filter(
-      (m) =>
-        m.senderId !== currentUid && !(m.readBy || []).includes(currentUid),
-    ).length;
+    // A. Pinned Household Group Conversation (if household exists)
+    if (householdId) {
+      const groupName =
+        householdInfo?.householdName ||
+        householdInfo?.name ||
+        "Bills Group Chat";
+      const groupMsgs = combinedMessages.filter(
+        (m) =>
+          m.conversationId === "household_group" ||
+          (!m.conversationId &&
+            !m.recipientId &&
+            m.householdId === householdId),
+      );
+      const lastGroupMsg =
+        groupMsgs.length > 0 ? groupMsgs[groupMsgs.length - 1] : null;
+      const groupUnread = groupMsgs.filter(
+        (m) =>
+          m.senderId !== currentUid && !(m.readBy || []).includes(currentUid),
+      ).length;
 
-    const groupLastTimeIso =
-      lastGroupMsg?.createdAt || lastGroupMsg?.timestamp || "";
-    const groupLastTimeMs = groupLastTimeIso
-      ? new Date(groupLastTimeIso).getTime()
-      : 0;
+      const groupLastTimeIso =
+        lastGroupMsg?.createdAt || lastGroupMsg?.timestamp || "";
+      const groupLastTimeMs = groupLastTimeIso
+        ? new Date(groupLastTimeIso).getTime()
+        : 0;
 
-    list.push({
-      id: "household_group",
-      type: "group",
-      name: groupName,
-      initials: getInitials(groupName) || "BG",
-      avatarBg: "#2563EB",
-      avatarColor: "#FFFFFF",
-      isOnline: true,
-      onlineStatusLabel: `${householdMembers.length || 1} members`,
-      pinned: true,
-      unreadCount: groupUnread,
-      timestamp: groupLastTimeIso ? formatMessageTime(groupLastTimeIso) : "",
-      lastMessageTimestampMs: isNaN(groupLastTimeMs) ? 0 : groupLastTimeMs,
-      lastMessage: lastGroupMsg
-        ? (lastGroupMsg.senderId === currentUid
-            ? "You: "
-            : `${(lastGroupMsg.senderName || "Member").split(" ")[0]}: `) +
-          lastGroupMsg.text
-        : "No messages yet. Send a friendly hello!",
-      categoryTag: lastGroupMsg?.meta?.category
-        ? `${lastGroupMsg.meta.category}: ${lastGroupMsg.meta.amount || ""}`
-        : undefined,
-      userShare: lastGroupMsg?.meta?.share,
-      messages: groupMsgs.map(formatChatMessage),
-    });
+      list.push({
+        id: "household_group",
+        type: "group",
+        name: groupName,
+        initials: getInitials(groupName) || "BG",
+        avatarBg: "#2563EB",
+        avatarColor: "#FFFFFF",
+        isOnline: true,
+        onlineStatusLabel: `${householdMembers.length || 1} members`,
+        pinned: true,
+        unreadCount: groupUnread,
+        timestamp: groupLastTimeIso ? formatMessageTime(groupLastTimeIso) : "",
+        lastMessageTimestampMs: isNaN(groupLastTimeMs) ? 0 : groupLastTimeMs,
+        lastMessage: lastGroupMsg
+          ? (lastGroupMsg.senderId === currentUid
+              ? "You: "
+              : `${(lastGroupMsg.senderName || "Member").split(" ")[0]}: `) +
+            lastGroupMsg.text
+          : "No messages yet. Send a friendly hello!",
+        categoryTag: lastGroupMsg?.meta?.category
+          ? `${lastGroupMsg.meta.category}: ${lastGroupMsg.meta.amount || ""}`
+          : undefined,
+        userShare: lastGroupMsg?.meta?.share,
+        messages: groupMsgs.map(formatChatMessage),
+      });
+    }
 
-    // B. Direct 1-on-1 conversations for each bills group member
-    billsGroupMembers.forEach((member) => {
+    // B. Direct 1-on-1 conversations for household roommates AND outside community friends
+    allDirectMembers.forEach((member) => {
       const memberUid = member.userId || member.memberId;
       const memberName =
         member.displayName ||
@@ -608,7 +788,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         ];
       const convId = "dm_" + [currentUid, memberUid].sort().join("_");
 
-      const directMsgs = rawMessages.filter(
+      const directMsgs = combinedMessages.filter(
         (m) =>
           m.conversationId === convId ||
           (m.senderId === memberUid && m.recipientId === currentUid) ||
@@ -625,7 +805,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       const isHost =
         (member.role || "").toUpperCase() === "HOST" ||
         householdInfo?.hostId === memberUid;
-      const roleLabel = isHost ? "Host" : "Payor";
+      const roleLabel = isHost
+        ? "Host"
+        : member.isOutsideFriend
+          ? "Friend"
+          : "Payor";
 
       // Legitimate presence calculation
       const memberPresence = computePresence(
@@ -698,7 +882,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     });
 
     return list;
-  }, [rawMessages, householdInfo, billsGroupMembers, currentUid]);
+  }, [
+    combinedMessages,
+    householdId,
+    householdInfo,
+    allDirectMembers,
+    currentUid,
+  ]);
 
   // Keep activeThread synced with updated live messages
   useEffect(() => {
@@ -709,19 +899,34 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   }, [conversations]);
 
+  // Auto-focus thread if initialTargetUserId is supplied
+  useEffect(() => {
+    if (initialTargetUserId && !activeThread) {
+      const match = conversations.find(
+        (c) => c.targetUserId === initialTargetUserId,
+      );
+      if (match) {
+        setActiveThread(match);
+      }
+    }
+  }, [initialTargetUserId, conversations, activeThread]);
+
   // Mark messages in active thread as read
   useEffect(() => {
-    if (!activeThread || !householdId || !currentUid) return;
+    if (!activeThread || !currentUid) return;
     const unreadIds = activeThread.messages
       .filter((m) => !m.isMe && !(m.readBy || []).includes(currentUid))
       .map((m) => m.id);
 
     if (unreadIds.length > 0) {
-      mobileDataService.markHouseholdMessagesRead(
-        householdId,
-        unreadIds,
-        currentUid,
-      );
+      if (householdId) {
+        mobileDataService.markHouseholdMessagesRead(
+          householdId,
+          unreadIds,
+          currentUid,
+        );
+      }
+      mobileDataService.markDirectMessagesRead(unreadIds, currentUid);
     }
   }, [
     activeThread?.id,
@@ -850,21 +1055,32 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Send a new message inside active thread
   const handleSendMessage = async () => {
     const trimmed = chatInputText.trim();
-    if (!trimmed || !activeThread || !householdId) return;
+    if (!trimmed || !activeThread) return;
 
     setChatInputText("");
     setIsSending(true);
 
     try {
       const isDirect = activeThread.type === "direct";
-      await mobileDataService.sendHouseholdMessage(householdId, {
-        conversationId: activeThread.id,
-        senderId: currentUid,
-        senderName: currentUserName,
-        text: trimmed,
-        recipientId: isDirect ? activeThread.targetUserId : undefined,
-        type: "text",
-      });
+      if (isDirect && activeThread.targetUserId) {
+        await mobileDataService.sendDirectMessage({
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          recipientId: activeThread.targetUserId,
+          text: trimmed,
+          type: "text",
+          householdId: householdId || undefined,
+        });
+      } else if (householdId) {
+        await mobileDataService.sendHouseholdMessage(householdId, {
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          text: trimmed,
+          type: "text",
+        });
+      }
     } catch (err: any) {
       console.warn("Error sending message:", err);
       Alert.alert("Failed to send", "Please check your network connection.");
@@ -1207,8 +1423,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     );
   }
 
-  // Guard 2: Group membership required to chat
-  if (!householdId) {
+  // Guard 2: Group membership or friends required to chat
+  if (!householdId && allDirectMembers.length === 0) {
     return (
       <View
         style={[
@@ -1293,7 +1509,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               marginBottom: 8,
             }}
           >
-            Group Membership Required
+            No Active Conversations
           </Text>
           <Text
             style={{
@@ -1306,8 +1522,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               maxWidth: 300,
             }}
           >
-            You must be an active member of a household group to access group
-            chats and roommate messaging.
+            Join a household group or connect with friends in Splitzy Community
+            to start chatting and splitting expenses.
           </Text>
           {onBack && (
             <TouchableOpacity
@@ -1614,7 +1830,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           style={styles.chatScrollList}
           contentContainerStyle={styles.chatScrollContent}
           keyboardShouldPersistTaps="handled"
-          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={false}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => {
             messageScrollRef.current?.scrollToEnd({ animated: true });
@@ -2004,15 +2221,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           style={[
             styles.capsuleInputOuterContainer,
             {
-              paddingBottom:
-                Platform.OS === "android" && keyboardHeight > 0
-                  ? keyboardHeight + 8
-                  : isKeyboardOpen
-                    ? 8
-                    : Math.max(
-                        bottomInset,
-                        Platform.OS === "android" ? 20 : 12,
-                      ),
+              paddingBottom: chatInputBottomPadding,
               backgroundColor: isDark ? "#181A20" : "#FFFFFF",
               borderTopColor: isDark ? "rgba(255,255,255,0.08)" : "#F1F5F9",
             },
@@ -2071,9 +2280,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 onChangeText={setChatInputText}
                 onSubmitEditing={handleSendMessage}
                 onFocus={() => {
+                  setIsInputFocused(true);
+                  setIsKeyboardOpen(true);
                   setTimeout(() => {
                     messageScrollRef.current?.scrollToEnd({ animated: true });
                   }, 100);
+                }}
+                onBlur={() => {
+                  setIsInputFocused(false);
                 }}
                 returnKeyType="send"
                 multiline={false}
@@ -3516,9 +3730,19 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   styles.noteViewerBottomContainer,
                   {
                     paddingBottom:
-                      Platform.OS === "android" && keyboardHeight > 0
-                        ? keyboardHeight + 12
-                        : Math.max(bottomInset + 10, insets.bottom + 16),
+                      Platform.OS === "android"
+                        ? isWindowResizedBySystem
+                          ? 14
+                          : (keyboardHeight > 0
+                              ? keyboardHeight
+                              : keyboardActive
+                                ? 285
+                                : 0) +
+                            (insets.bottom > 0 ? insets.bottom : 24) +
+                            14
+                        : keyboardActive
+                          ? 14
+                          : Math.max(bottomInset + 10, insets.bottom + 16),
                   },
                 ]}
               >

@@ -38,6 +38,7 @@ interface ProfileScreenProps {
   onOpenHostApplication?: () => void;
   onOpenTermsOfService?: () => void;
   onOpenPrivacyPolicy?: () => void;
+  onOpenCommunity?: () => void;
   onSignOut?: () => void;
   currentUser?: { name: string; role: string; email: string };
 }
@@ -51,6 +52,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenHostApplication,
   onOpenTermsOfService,
   onOpenPrivacyPolicy,
+  onOpenCommunity,
   onSignOut,
   currentUser = {
     name: "Resident",
@@ -791,35 +793,54 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             @{usernameHandle} • {userEmail}
           </Text>
 
-          {/* Edit Profile Pill Button */}
-          <TouchableOpacity
-            style={[
-              styles.editProfilePill,
-              isDark && {
-                backgroundColor: colors.surfaceInset,
-                borderColor: colors.border,
-              },
-            ]}
-            activeOpacity={0.75}
-            onPress={() => {
-              setDisplayNameInput(displayName);
-              setShowEditProfileModal(true);
-            }}
-          >
-            <Feather
-              name="edit-3"
-              size={13}
-              color={isDark ? colors.text : "#0F172A"}
-            />
-            <Text
+          {/* Hero Action Buttons Row */}
+          <View style={styles.heroButtonRow}>
+            <TouchableOpacity
               style={[
-                styles.editProfilePillText,
-                isDark && { color: colors.text },
+                styles.editProfilePill,
+                isDark && {
+                  backgroundColor: colors.surfaceInset,
+                  borderColor: colors.border,
+                },
               ]}
+              activeOpacity={0.75}
+              onPress={() => {
+                setDisplayNameInput(displayName);
+                setShowEditProfileModal(true);
+              }}
             >
-              Edit Profile
-            </Text>
-          </TouchableOpacity>
+              <Feather
+                name="edit-3"
+                size={13}
+                color={isDark ? colors.text : "#0F172A"}
+              />
+              <Text
+                style={[
+                  styles.editProfilePillText,
+                  isDark && { color: colors.text },
+                ]}
+              >
+                Edit Profile
+              </Text>
+            </TouchableOpacity>
+
+            {onOpenCommunity && (
+              <TouchableOpacity
+                style={[
+                  styles.communityProfilePill,
+                  isDark && {
+                    backgroundColor: "rgba(37, 99, 235, 0.15)",
+                    borderColor: "rgba(37, 99, 235, 0.35)",
+                  },
+                ]}
+                activeOpacity={0.75}
+                onPress={onOpenCommunity}
+              >
+                <Ionicons name="globe-outline" size={14} color="#2563EB" />
+                <Text style={styles.communityProfilePillText}>Community</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Thin Divider */}
           <View
@@ -939,6 +960,55 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Community Profile & Public Feed Quick Shortcut Banner */}
+        {onOpenCommunity && (
+          <TouchableOpacity
+            style={[
+              styles.communityBannerCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={onOpenCommunity}
+            activeOpacity={0.8}
+          >
+            <View style={styles.communityBannerIconWrap}>
+              <Ionicons name="people" size={20} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                <Text
+                  style={[
+                    styles.communityBannerTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Community Profile & Posts
+                </Text>
+                <View style={styles.communityLiveBadge}>
+                  <Text style={styles.communityLiveBadgeText}>SOCIAL</Text>
+                </View>
+              </View>
+              <Text
+                style={[
+                  styles.communityBannerSub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                View your public posts, roommate connections & friendships
+              </Text>
+            </View>
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#94A3B8"}
+            />
+          </TouchableOpacity>
+        )}
 
         {/* SECTION: ACCOUNT & MONEY */}
         <Text
@@ -1713,6 +1783,84 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+
+        {/* SECTION: COMMUNITY & SOCIAL */}
+        <Text
+          style={[
+            styles.sectionHeader,
+            isDark && { color: colors.textSecondary },
+          ]}
+        >
+          Community & Social
+        </Text>
+        <View
+          style={[
+            styles.groupedCard,
+            isDark && {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.cardItemRow}
+            onPress={() => onOpenCommunity && onOpenCommunity()}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
+                styles.itemIconBox,
+                {
+                  backgroundColor: isDark ? "#1E3A8A40" : "#EFF6FF",
+                },
+              ]}
+            >
+              <Ionicons name="globe-outline" size={20} color="#2563EB" />
+            </View>
+            <View style={styles.itemContent}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                <Text
+                  style={[styles.itemTitle, isDark && { color: colors.text }]}
+                >
+                  Splitzy Community
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: "#2563EB",
+                    paddingHorizontal: 6,
+                    paddingVertical: 1.5,
+                    borderRadius: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#FFFFFF",
+                      fontSize: 10,
+                      fontWeight: "800",
+                    }}
+                  >
+                    HUB
+                  </Text>
+                </View>
+              </View>
+              <Text
+                style={[
+                  styles.itemSubtitle,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Share posts, meet new friends & connect across Splitzy
+              </Text>
+            </View>
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={isDark ? colors.textMuted : "#CBD5E1"}
+            />
+          </TouchableOpacity>
         </View>
 
         {/* SECTION: HOUSEHOLD & MANAGEMENT */}
@@ -2898,6 +3046,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  heroButtonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 14,
+    marginBottom: 20,
+  },
   editProfilePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -2908,13 +3064,70 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    marginTop: 14,
-    marginBottom: 20,
   },
   editProfilePillText: {
     fontSize: 13,
     fontWeight: "700",
     color: "#0F172A",
+  },
+  communityProfilePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.25)",
+  },
+  communityProfilePillText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+
+  communityBannerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    gap: 12,
+  },
+  communityBannerIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  communityBannerTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  communityLiveBadge: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  communityLiveBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+  },
+  communityBannerSub: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+    lineHeight: 16,
   },
 
   heroDivider: {
