@@ -12,7 +12,9 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import {
@@ -42,11 +44,32 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
   onClose,
   currentUser,
 }) => {
+  const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const [comments, setComments] = useState<CommunityComment[]>([]);
   const [newCommentText, setNewCommentText] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const currentUid = auth.currentUser?.uid || currentUser.uid || "";
   const authorName = formatAuthorDisplayName(
@@ -157,7 +180,13 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
         <View
           style={[
             styles.container,
-            { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" },
+            {
+              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              marginBottom:
+                Platform.OS === "android" && keyboardHeight > 0
+                  ? keyboardHeight
+                  : 0,
+            },
           ]}
         >
           {/* Header */}
@@ -410,6 +439,8 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
               {
                 borderTopColor: isDark ? "#334155" : "#E2E8F0",
                 backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                paddingBottom:
+                  keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 14),
               },
             ]}
           >

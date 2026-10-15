@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   Text,
@@ -12,7 +12,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Keyboard,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "../context/ThemeContext";
@@ -49,6 +51,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
   onStoryCreated,
   currentUser,
 }) => {
+  const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const [selectedImage, setSelectedImage] = useState<{
     uri: string;
@@ -58,6 +61,26 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
   const [caption, setCaption] = useState("");
   const [selectedBgColor, setSelectedBgColor] = useState(BG_GRADIENTS[0]);
   const [isUploading, setIsUploading] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const authorName =
     currentUser.displayName || currentUser.name || "Splitzy Member";
@@ -120,6 +143,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
       await communityService.createStory({
         mediaUrl: mediaUrl || "",
         caption: caption.trim(),
+        backgroundColor: selectedBgColor,
         authorName,
         authorEmail: currentUser.email || "",
         authorAvatar,
@@ -153,7 +177,13 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
         <View
           style={[
             styles.modalContainer,
-            { backgroundColor: isDark ? "#0F172A" : "#FFFFFF" },
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              marginBottom:
+                Platform.OS === "android" && keyboardHeight > 0
+                  ? keyboardHeight
+                  : 0,
+            },
           ]}
         >
           {/* Header */}
@@ -196,7 +226,13 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: Math.max(insets.bottom + 24, 32) },
+            ]}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* Story Preview Canvas */}
             <View
               style={[

@@ -465,9 +465,9 @@ export function WalletScreen({
 
   const dynamicModalOverlayStyle = [
     styles.modalOverlay,
-    effectiveKeyboardHeight > 0 && {
-      paddingBottom: effectiveKeyboardHeight,
-    },
+    effectiveKeyboardHeight > 0
+      ? { paddingBottom: effectiveKeyboardHeight }
+      : { paddingBottom: Math.max(0, insets.bottom) },
   ];
 
   useEffect(() => {
@@ -814,7 +814,7 @@ export function WalletScreen({
     if (!selectedTx) return;
     Alert.alert(
       "Delete Transaction",
-      `Are you sure you want to delete this ${selectedTx.title} record (₱${selectedTx.amount.toLocaleString()})? Your wallet balance will automatically adjust.`,
+      `Are you sure you want to delete this ${selectedTx.title} record (₱${(selectedTx.amount ?? 0).toLocaleString()})? Your wallet balance will automatically adjust.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -1560,7 +1560,7 @@ export function WalletScreen({
           <Text style={styles.heroBalance}>
             {hideBalance
               ? "₱ ••••••"
-              : `₱${balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              : `₱${(balance ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </Text>
 
           <View style={styles.heroActionRow}>
@@ -2669,7 +2669,7 @@ export function WalletScreen({
                         { color: isDark ? colors.text : "#0F172A" },
                       ]}
                     >
-                      ₱{pocket.currentAmount.toLocaleString()}
+                      ₱{(pocket.currentAmount ?? 0).toLocaleString()}
                     </Text>
                     <Text
                       style={[
@@ -2677,7 +2677,7 @@ export function WalletScreen({
                         { color: isDark ? colors.textMuted : "#64748B" },
                       ]}
                     >
-                      / ₱{pocket.targetAmount.toLocaleString()}
+                      / ₱{(pocket.targetAmount ?? 0).toLocaleString()}
                     </Text>
                   </View>
 
@@ -3048,7 +3048,7 @@ export function WalletScreen({
                         : isPositive
                           ? "+₱"
                           : "-₱"}
-                      {tx.amount.toLocaleString()}
+                      {(tx.amount ?? 0).toLocaleString()}
                     </Text>
                     <Text style={styles.txStatusCompleted}>Completed</Text>
                   </View>
@@ -5322,7 +5322,7 @@ export function WalletScreen({
                           { color: isDark ? "#A7F3D0" : "#047857" },
                         ]}
                       >
-                        ₱{cashBal.toLocaleString()} available
+                        ₱{(cashBal ?? 0).toLocaleString()} available
                       </Text>
                     </View>
                   )}
@@ -5498,8 +5498,8 @@ export function WalletScreen({
                       ]}
                     >
                       {isInsufficient
-                        ? `Insufficient cash on hand (₱${cashBal.toLocaleString()} available)`
-                        : `Cash on hand after expense: ₱${Math.max(0, cashBal - expenseAmt).toLocaleString()}`}
+                        ? `Insufficient cash on hand (₱${(cashBal ?? 0).toLocaleString()} available)`
+                        : `Cash on hand after expense: ₱${Math.max(0, (cashBal ?? 0) - expenseAmt).toLocaleString()}`}
                     </Text>
                   </View>
 
@@ -5524,7 +5524,7 @@ export function WalletScreen({
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <Text style={styles.modalPrimaryBtnText}>
-                        Log ₱{expenseAmt.toLocaleString()} Cash Spent
+                        Log ₱{(expenseAmt ?? 0).toLocaleString()} Cash Spent
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -5655,7 +5655,7 @@ export function WalletScreen({
                     </View>
                     <Text style={styles.cashAutoHealthAmount}>
                       ₱
-                      {cashBal.toLocaleString("en-US", {
+                      {(cashBal ?? 0).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -6094,8 +6094,8 @@ export function WalletScreen({
               ]}
             >
               {pocketActionType === "deposit"
-                ? `Move funds from your wallet balance (₱${balance.toLocaleString()} available)`
-                : `Move funds back to your wallet balance (₱${selectedPocket?.currentAmount.toLocaleString()} in pocket)`}
+                ? `Move funds from your wallet balance (₱${(balance ?? 0).toLocaleString()} available)`
+                : `Move funds back to your wallet balance (₱${(selectedPocket?.currentAmount ?? 0).toLocaleString()} in pocket)`}
             </Text>
 
             <ScrollView
@@ -6526,7 +6526,7 @@ export function WalletScreen({
                     : "Payment Receipt"}
               </Text>
               <Text style={styles.receiptAmount}>
-                ₱{selectedTx?.amount.toLocaleString()}
+                ₱{(selectedTx?.amount ?? 0).toLocaleString()}
               </Text>
 
               {/* Prominent Expense Note / Source Box */}
@@ -7382,8 +7382,13 @@ export function WalletScreen({
                             ]}
                           >
                             Insufficient balance on {fundingCard.name}.
-                            Available: ₱{fundingBal.toLocaleString()} (Short by
-                            ₱{(sendVal - fundingBal).toLocaleString()}).
+                            Available: ₱{(fundingBal ?? 0).toLocaleString()}{" "}
+                            (Short by ₱
+                            {Math.max(
+                              0,
+                              (sendVal ?? 0) - (fundingBal ?? 0),
+                            ).toLocaleString()}
+                            ).
                           </Text>
                         </View>
                       </View>
@@ -7805,8 +7810,9 @@ export function WalletScreen({
                         <Text
                           style={[styles.simPreviewText, { color: "#EF4444" }]}
                         >
-                          Insufficient balance on {defaultCard.name} (₱
-                          {(defaultCard.balance || 0).toLocaleString()}{" "}
+                          Insufficient balance on {defaultCard?.name || "card"}{" "}
+                          (₱
+                          {(defaultCard?.balance || 0).toLocaleString()}{" "}
                           available). Top up or rebalance funds to pay ₱650.00.
                         </Text>
                       </View>
@@ -10209,7 +10215,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderTopWidth: 1,
-    marginBottom: 24,
   },
   walkthroughNavBackBtn: {
     flexDirection: "row",

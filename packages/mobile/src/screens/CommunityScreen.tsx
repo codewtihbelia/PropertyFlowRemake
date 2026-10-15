@@ -13,6 +13,7 @@ import {
   RefreshControl,
   Platform,
   StatusBar,
+  Modal,
 } from "react-native";
 import {
   SafeAreaView,
@@ -32,11 +33,14 @@ import {
   CATEGORY_LABELS,
   formatAuthorDisplayName,
   FB_6_REACTIONS,
+  isStoryActive,
+  calculateStoryTimeRemaining,
 } from "../services/communityService";
 import { CreatePostModal } from "../components/CreatePostModal";
 import { PostCommentsModal } from "../components/PostCommentsModal";
 import { CreateStoryModal } from "../components/CreateStoryModal";
 import { StoryViewerModal } from "../components/StoryViewerModal";
+import { EditStoryModal } from "../components/EditStoryModal";
 import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
 
 export { FB_6_REACTIONS };
@@ -98,6 +102,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const [createStoryVisible, setCreateStoryVisible] = useState(false);
   const [storyViewerVisible, setStoryViewerVisible] = useState(false);
   const [selectedStoryIndex, setSelectedStoryIndex] = useState(0);
+  const [editingStory, setEditingStory] = useState<CommunityStory | null>(null);
+  const [storyActionTarget, setStoryActionTarget] =
+    useState<CommunityStory | null>(null);
+  const [showStoryArchive, setShowStoryArchive] = useState(false);
+  const [viewingArchiveList, setViewingArchiveList] = useState<
+    CommunityStory[]
+  >([]);
 
   // Modals
   const [createPostVisible, setCreatePostVisible] = useState(false);
@@ -192,10 +203,54 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     loadMembers();
   }, [loadMembers]);
 
-  // 100% Real cloud-synced stories
+  // 100% Real cloud-synced stories (Active within 24 hours only)
   const displayStories = useMemo(() => {
-    return cloudStories;
+    return cloudStories.filter((s) => isStoryActive(s));
   }, [cloudStories]);
+
+  // Current user's archived stories (expired after 24h or manually archived)
+  const myArchivedStories = useMemo(() => {
+    if (!currentUid) return [];
+    return cloudStories.filter(
+      (s) =>
+        (s.authorId === currentUid ||
+          s.authorId === `mem_${currentUid}` ||
+          `mem_${s.authorId}` === currentUid) &&
+        (!isStoryActive(s) || s.isArchived),
+    );
+  }, [cloudStories, currentUid]);
+
+  // All stories created by the current user
+  const myAllStories = useMemo(() => {
+    if (!currentUid) return [];
+    return cloudStories.filter(
+      (s) =>
+        s.authorId === currentUid ||
+        s.authorId === `mem_${currentUid}` ||
+        `mem_${s.authorId}` === currentUid,
+    );
+  }, [cloudStories, currentUid]);
+
+  // Story management handlers
+  const handleDeleteStory = useCallback(async (story: CommunityStory) => {
+    try {
+      await communityService.deleteStory(story.id);
+      setCloudStories((prev) => prev.filter((s) => s.id !== story.id));
+      setStoryViewerVisible(false);
+      setStoryActionTarget(null);
+      Alert.alert("Story Deleted", "Your story has been permanently removed.");
+    } catch (err: any) {
+      console.warn("Failed to delete story:", err);
+      Alert.alert("Delete Failed", err?.message || "Could not delete story.");
+    }
+  }, []);
+
+  const handleStoryUpdated = useCallback((updated: CommunityStory) => {
+    setCloudStories((prev) =>
+      prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)),
+    );
+    setEditingStory(null);
+  }, []);
 
   // Real incoming requests from Firestore only
   const allIncomingRequests = useMemo(() => {
@@ -1717,8 +1772,36 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             </View>
           </View>
 
-          {/* FACEBOOK STORY REELS CAROUSEL */}
+          {/* FACEBOOK STORY REELS CAROUSEL (24h Ephemeral Stories) */}
           <View style={styles.storiesContainer}>
+            <View style={styles.storiesHeaderRow}>
+              <View style={styles.storiesTitleGroup}>
+                <Ionicons name="sparkles" size={14} color="#2563EB" />
+                <Text
+                  style={[
+                    styles.storiesSectionTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Stories
+                </Text>
+                <Text style={styles.storiesExpiryBadge}>· 24h</Text>
+              </View>
+
+              {myArchivedStories.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setShowStoryArchive(true)}
+                  style={styles.archiveHeaderBtn}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Ionicons name="archive-outline" size={13} color="#2563EB" />
+                  <Text style={styles.archiveHeaderBtnText}>
+                    My Archive ({myArchivedStories.length})
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -1781,53 +1864,103 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
               </TouchableOpacity>
 
               {/* Community Story Cards */}
-              {displayStories.map((story, idx) => (
-                <TouchableOpacity
-                  key={story.id || idx}
-                  onPress={() => {
-                    setSelectedStoryIndex(idx);
-                    setStoryViewerVisible(true);
-                  }}
-                  style={styles.storyCard}
-                  activeOpacity={0.88}
-                >
-                  {story.mediaUrl ? (
-                    <Image
-                      source={{ uri: story.mediaUrl }}
-                      style={styles.storyImageBg}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.storyTextCardBg}>
-                      <Ionicons name="sparkles" size={24} color="#93C5FD" />
-                    </View>
-                  )}
+              {displayStories.map((story, idx) => {
+                const isOwnStory = Boolean(
+                  currentUid &&
+                  (story.authorId === currentUid ||
+                    story.authorId === `mem_${currentUid}` ||
+                    `mem_${story.authorId}` === currentUid),
+                );
+                const remaining = calculateStoryTimeRemaining(story);
 
-                  {/* Gradient shadow overlay */}
-                  <View style={styles.storyGradientOverlay} />
-
-                  {/* Top-left Author Avatar with Blue Story Ring */}
-                  <View style={styles.storyRingWrapper}>
-                    {story.authorAvatar ? (
+                return (
+                  <TouchableOpacity
+                    key={story.id || idx}
+                    onPress={() => {
+                      setSelectedStoryIndex(idx);
+                      setStoryViewerVisible(true);
+                    }}
+                    style={styles.storyCard}
+                    activeOpacity={0.88}
+                  >
+                    {story.mediaUrl ? (
                       <Image
-                        source={{ uri: story.authorAvatar }}
-                        style={styles.storyAuthorAvatar}
+                        source={{ uri: story.mediaUrl }}
+                        style={styles.storyImageBg}
+                        resizeMode="cover"
                       />
                     ) : (
-                      <View style={styles.storyAuthorAvatarPlaceholder}>
-                        <Text style={styles.storyAuthorInitial}>
-                          {story.authorName.charAt(0).toUpperCase()}
-                        </Text>
+                      <View
+                        style={[
+                          styles.storyTextCardBg,
+                          story.backgroundColor
+                            ? { backgroundColor: story.backgroundColor }
+                            : null,
+                        ]}
+                      >
+                        <Ionicons name="sparkles" size={24} color="#93C5FD" />
+                        {story.caption ? (
+                          <Text
+                            style={styles.storyCardCaption}
+                            numberOfLines={3}
+                          >
+                            {story.caption}
+                          </Text>
+                        ) : null}
                       </View>
                     )}
-                  </View>
 
-                  {/* Bottom Author Name */}
-                  <Text style={styles.storyAuthorName} numberOfLines={2}>
-                    {story.authorName}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    {/* Gradient shadow overlay */}
+                    <View style={styles.storyGradientOverlay} />
+
+                    {/* Top-left Author Avatar with Blue Story Ring */}
+                    <View style={styles.storyRingWrapper}>
+                      {story.authorAvatar ? (
+                        <Image
+                          source={{ uri: story.authorAvatar }}
+                          style={styles.storyAuthorAvatar}
+                        />
+                      ) : (
+                        <View style={styles.storyAuthorAvatarPlaceholder}>
+                          <Text style={styles.storyAuthorInitial}>
+                            {story.authorName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Top-right menu trigger for own story */}
+                    {isOwnStory && (
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          setStoryActionTarget(story);
+                        }}
+                        style={styles.storyCardMenuBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Feather
+                          name="more-horizontal"
+                          size={15}
+                          color="#FFFFFF"
+                        />
+                      </TouchableOpacity>
+                    )}
+
+                    {/* Remaining expiry countdown badge */}
+                    <View style={styles.storyCardExpiryWrap}>
+                      <Text style={styles.storyCardExpiryText}>
+                        {remaining.label}
+                      </Text>
+                    </View>
+
+                    {/* Bottom Author Name */}
+                    <Text style={styles.storyAuthorName} numberOfLines={1}>
+                      {isOwnStory ? "Your story" : story.authorName}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -2887,7 +3020,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
       {/* Floating Action Button (FAB) for Creating Post */}
       <TouchableOpacity
         onPress={() => setCreatePostVisible(true)}
-        style={styles.fab}
+        style={[styles.fab, { bottom: Math.max(24, insets.bottom + 84) }]}
         activeOpacity={0.85}
       >
         <Ionicons name="create-outline" size={24} color="#FFFFFF" />
@@ -2915,11 +3048,442 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
       <StoryViewerModal
         visible={storyViewerVisible}
-        stories={displayStories}
+        stories={
+          viewingArchiveList.length > 0 ? viewingArchiveList : displayStories
+        }
         initialIndex={selectedStoryIndex}
-        onClose={() => setStoryViewerVisible(false)}
+        currentUserId={currentUid}
+        onClose={() => {
+          setStoryViewerVisible(false);
+          setViewingArchiveList([]);
+        }}
         onLikeStory={handleLikeStory}
+        onEditStory={(story) => {
+          setEditingStory(story);
+        }}
+        onDeleteStory={handleDeleteStory}
       />
+
+      <EditStoryModal
+        visible={!!editingStory}
+        story={editingStory}
+        onClose={() => setEditingStory(null)}
+        onStoryUpdated={handleStoryUpdated}
+      />
+
+      {/* Card Three-Dots Quick Action Menu Modal */}
+      {storyActionTarget && (
+        <Modal
+          visible={!!storyActionTarget}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setStoryActionTarget(null)}
+        >
+          <TouchableOpacity
+            style={styles.cardMenuBackdrop}
+            activeOpacity={1}
+            onPress={() => setStoryActionTarget(null)}
+          >
+            <View
+              style={[
+                styles.cardMenuSheet,
+                {
+                  backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                  borderColor: isDark ? "#334155" : "#E2E8F0",
+                },
+              ]}
+            >
+              <View style={styles.cardMenuHandle} />
+              <View style={styles.cardMenuHeader}>
+                <Text
+                  style={[
+                    styles.cardMenuTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Manage Your Story
+                </Text>
+                <Text
+                  style={[
+                    styles.cardMenuSubtitle,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  {calculateStoryTimeRemaining(storyActionTarget).isExpired
+                    ? "Expired"
+                    : `Active · ${calculateStoryTimeRemaining(storyActionTarget).label}`}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#0F172A" : "#F8FAFC" },
+                ]}
+                onPress={() => {
+                  const target = storyActionTarget;
+                  setStoryActionTarget(null);
+                  const idx = displayStories.findIndex(
+                    (s) => s.id === target.id,
+                  );
+                  setSelectedStoryIndex(idx >= 0 ? idx : 0);
+                  setStoryViewerVisible(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#1E293B" : "#EFF6FF" },
+                  ]}
+                >
+                  <Ionicons name="eye-outline" size={18} color="#2563EB" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    View Story
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    Open fullscreen playback
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#0F172A" : "#F8FAFC" },
+                ]}
+                onPress={() => {
+                  const target = storyActionTarget;
+                  setStoryActionTarget(null);
+                  setEditingStory(target);
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#1E293B" : "#EFF6FF" },
+                  ]}
+                >
+                  <Feather name="edit-2" size={18} color="#2563EB" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    Edit Story
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    Update caption and styling
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#0F172A" : "#F8FAFC" },
+                ]}
+                onPress={() => {
+                  const target = storyActionTarget;
+                  setStoryActionTarget(null);
+                  Alert.alert(
+                    "Delete Story?",
+                    "Are you sure you want to permanently delete this story?",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete",
+                        style: "destructive",
+                        onPress: () => handleDeleteStory(target),
+                      },
+                    ],
+                  );
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#451A1A" : "#FEE2E2" },
+                  ]}
+                >
+                  <Feather name="trash-2" size={18} color="#EF4444" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[styles.cardMenuItemTitle, { color: "#EF4444" }]}
+                  >
+                    Delete Story
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    Remove this story completely
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuCancelBtn,
+                  { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
+                ]}
+                onPress={() => setStoryActionTarget(null)}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.cardMenuCancelText,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Story Archive Modal (User's Private Archive of Expired Stories) */}
+      <Modal
+        visible={showStoryArchive}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowStoryArchive(false)}
+      >
+        <View
+          style={[
+            styles.archiveModalContainer,
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              paddingTop: insets.top > 0 ? insets.top : 16,
+              paddingBottom: insets.bottom > 0 ? insets.bottom : 16,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.archiveModalHeader,
+              { borderBottomColor: isDark ? "#1E293B" : "#F1F5F9" },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() => setShowStoryArchive(false)}
+              style={styles.archiveCloseBtn}
+            >
+              <Feather
+                name="x"
+                size={22}
+                color={isDark ? "#94A3B8" : "#64748B"}
+              />
+            </TouchableOpacity>
+
+            <View style={{ alignItems: "center" }}>
+              <Text
+                style={[
+                  styles.archiveModalTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A" },
+                ]}
+              >
+                My Story Archive
+              </Text>
+              <Text
+                style={[
+                  styles.archiveModalSub,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {myArchivedStories.length} expired{" "}
+                {myArchivedStories.length === 1 ? "story" : "stories"}
+              </Text>
+            </View>
+
+            <View style={{ width: 36 }} />
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.archiveScrollContent}
+          >
+            <View
+              style={[
+                styles.archiveIntroCard,
+                {
+                  backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
+                  borderColor: isDark ? "#334155" : "#BFDBFE",
+                },
+              ]}
+            >
+              <Ionicons name="time" size={20} color="#2563EB" />
+              <Text
+                style={[
+                  styles.archiveIntroText,
+                  { color: isDark ? "#CBD5E1" : "#1E40AF" },
+                ]}
+              >
+                Stories automatically hide from the public feed 24 hours after
+                posting and are saved here in your private archive.
+              </Text>
+            </View>
+
+            {myArchivedStories.length === 0 ? (
+              <View style={styles.archiveEmptyState}>
+                <Ionicons
+                  name="file-tray-outline"
+                  size={48}
+                  color={isDark ? "#475569" : "#CBD5E1"}
+                />
+                <Text
+                  style={[
+                    styles.archiveEmptyTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  No archived stories yet
+                </Text>
+                <Text
+                  style={[
+                    styles.archiveEmptySub,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  When your stories reach the 24-hour mark, they will appear
+                  here safely preserved.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.archiveGrid}>
+                {myArchivedStories.map((story, aIdx) => (
+                  <View
+                    key={story.id || aIdx}
+                    style={[
+                      styles.archiveCard,
+                      {
+                        backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                        borderColor: isDark ? "#334155" : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      onPress={() => {
+                        setViewingArchiveList(myArchivedStories);
+                        setSelectedStoryIndex(aIdx);
+                        setStoryViewerVisible(true);
+                      }}
+                      style={styles.archiveCardMedia}
+                      activeOpacity={0.85}
+                    >
+                      {story.mediaUrl ? (
+                        <Image
+                          source={{ uri: story.mediaUrl }}
+                          style={styles.archiveMediaImg}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.archiveMediaTextBg,
+                            story.backgroundColor
+                              ? { backgroundColor: story.backgroundColor }
+                              : null,
+                          ]}
+                        >
+                          <Ionicons name="sparkles" size={20} color="#93C5FD" />
+                          <Text
+                            style={styles.archiveMediaCaption}
+                            numberOfLines={3}
+                          >
+                            {story.caption || "Text story"}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.archiveExpiredTag}>
+                        <Text style={styles.archiveExpiredTagText}>
+                          Expired
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <View style={styles.archiveCardInfo}>
+                      <Text
+                        style={[
+                          styles.archiveDateText,
+                          { color: isDark ? "#94A3B8" : "#64748B" },
+                        ]}
+                      >
+                        {formatTimeAgo(story.createdAt)}
+                      </Text>
+
+                      <View style={styles.archiveCardActions}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingStory(story);
+                          }}
+                          style={styles.archiveActionIcon}
+                        >
+                          <Feather
+                            name="edit-2"
+                            size={15}
+                            color={isDark ? "#94A3B8" : "#64748B"}
+                          />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => {
+                            Alert.alert(
+                              "Delete Archived Story?",
+                              "Are you sure you want to delete this story from your archive?",
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                  text: "Delete",
+                                  style: "destructive",
+                                  onPress: () => handleDeleteStory(story),
+                                },
+                              ],
+                            );
+                          }}
+                          style={styles.archiveActionIcon}
+                        >
+                          <Feather name="trash-2" size={15} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -3061,6 +3625,40 @@ const styles = StyleSheet.create({
   storiesContainer: {
     marginBottom: 12,
   },
+  storiesHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  storiesTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  storiesSectionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  storiesExpiryBadge: {
+    fontSize: 12,
+    color: "#2563EB",
+    fontWeight: "600",
+  },
+  archiveHeaderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  archiveHeaderBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
   storiesScroll: {
     paddingHorizontal: 12,
     gap: 8,
@@ -3189,6 +3787,242 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowRadius: 3,
+  },
+  storyCardMenuBtn: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  storyCardExpiryWrap: {
+    position: "absolute",
+    bottom: 24,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  storyCardExpiryText: {
+    color: "#93C5FD",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  storyCardCaption: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+    paddingHorizontal: 8,
+    marginTop: 6,
+  },
+  /* Card Menu Action Sheet */
+  cardMenuBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+  },
+  cardMenuSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
+    borderTopWidth: 1,
+  },
+  cardMenuHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: "#94A3B8",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  cardMenuHeader: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  cardMenuTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  cardMenuSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  cardMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  cardMenuIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  cardMenuItemBody: {
+    flex: 1,
+  },
+  cardMenuItemTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  cardMenuItemDesc: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  cardMenuCancelBtn: {
+    marginTop: 6,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  cardMenuCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  /* Archive Modal */
+  archiveModalContainer: {
+    flex: 1,
+  },
+  archiveModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  archiveCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveModalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  archiveModalSub: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  archiveScrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  archiveIntroCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 20,
+  },
+  archiveIntroText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  archiveEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+    paddingHorizontal: 24,
+  },
+  archiveEmptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  archiveEmptySub: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  archiveGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  archiveCard: {
+    width: "48%",
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: "hidden",
+    marginBottom: 4,
+  },
+  archiveCardMedia: {
+    width: "100%",
+    height: 160,
+    position: "relative",
+    backgroundColor: "#000000",
+  },
+  archiveMediaImg: {
+    width: "100%",
+    height: "100%",
+  },
+  archiveMediaTextBg: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#1E3A8A",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  archiveMediaCaption: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  archiveExpiredTag: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  archiveExpiredTagText: {
+    color: "#FCA5A5",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  archiveCardInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  archiveDateText: {
+    fontSize: 11,
+  },
+  archiveCardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  archiveActionIcon: {
+    padding: 4,
   },
   /* Scope & Categories */
   scopeRow: {

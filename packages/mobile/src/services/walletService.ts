@@ -341,6 +341,8 @@ function isCardMatchTx(
   isDefaultCard: boolean = false,
 ): boolean {
   if (!tx || !card) return false;
+
+  // 1. Direct referenceId match: if referenceId specifies a card ID, check if it matches this card
   if (
     tx.referenceId &&
     (tx.referenceId === card.id ||
@@ -349,6 +351,33 @@ function isCardMatchTx(
   ) {
     return true;
   }
+
+  // If the transaction referenceId points to another card ID or explicit card reference,
+  // then this transaction explicitly belongs to another card! It must NEVER match this card or default fallback.
+  if (
+    tx.referenceId &&
+    tx.referenceId !== card.id &&
+    !tx.referenceId.startsWith(card.id) &&
+    !tx.referenceId.includes(card.id) &&
+    (tx.referenceId.startsWith("card_") ||
+      tx.type === "expense_simulation" ||
+      tx.type === "cash_expense")
+  ) {
+    return false;
+  }
+
+  // Expense simulations are strictly card-specific: NEVER match default card or unintended cards
+  if (tx.type === "expense_simulation") {
+    if (tx.referenceId === card.id) return true;
+    if (tx.paymentMethodUsed) {
+      const p = tx.paymentMethodUsed.toLowerCase().trim();
+      const c = card.name.toLowerCase().trim();
+      return p === c || p.includes(c) || c.includes(p);
+    }
+    return false;
+  }
+
+  // 2. Direct paymentMethodUsed match
   if (tx.paymentMethodUsed) {
     const p = tx.paymentMethodUsed.toLowerCase().trim();
     const c = card.name.toLowerCase().trim();
@@ -372,28 +401,43 @@ function isCardMatchTx(
         p === "wallet" ||
         p === "default card" ||
         p === "primary card" ||
-        p === "digital cash" ||
-        p === "cash on hand") &&
+        p === "digital cash") &&
       isDefaultCard
     ) {
       return true;
     }
+    if (
+      (p === "cash on hand" || p === "cash") &&
+      (card.type === "cash" ||
+        card.id === "card_cash_hand" ||
+        card.name.toLowerCase().includes("cash"))
+    ) {
+      return true;
+    }
   }
+
+  // 3. Cash expenses should only match cash cards
   if (
     tx.type === "cash_expense" &&
     (card.type === "cash" ||
       card.id === "card_cash_hand" ||
-      card.name.toLowerCase().includes("cash") ||
-      isDefaultCard)
+      card.name.toLowerCase().includes("cash"))
   ) {
     return true;
   }
+
+  // 4. Default fallback: only for generic, untargeted transactions (NEVER expense_simulation which is always card-specific)
   if (
     isDefaultCard &&
+    !tx.referenceId?.startsWith("card_") &&
+    (!tx.paymentMethodUsed ||
+      tx.paymentMethodUsed.toLowerCase() === "splitzy wallet" ||
+      tx.paymentMethodUsed.toLowerCase() === "wallet" ||
+      tx.paymentMethodUsed.toLowerCase() === "default card" ||
+      tx.paymentMethodUsed.toLowerCase() === "primary card") &&
     (tx.type === "cash_in" ||
       tx.type === "debt_settlement" ||
-      tx.type === "bill_payment" ||
-      tx.type === "expense_simulation")
+      tx.type === "bill_payment")
   ) {
     return true;
   }
@@ -1462,6 +1506,10 @@ class WalletService {
     updatedCards[cardIndex] = {
       ...card,
       balance: Math.max(0, availableBal - amount),
+      initialBalance:
+        typeof card.initialBalance === "number"
+          ? card.initialBalance
+          : availableBal,
     };
 
     const newTotalBalance = updatedCards.reduce(
@@ -1494,7 +1542,7 @@ class WalletService {
       updatedAt: new Date().toISOString(),
     };
 
-    const reconciled = reconcileWalletState(updated);
+    const reconciled = reconcileWalletState(updated, current);
     await this.persist(userId, reconciled);
     return {
       success: true,

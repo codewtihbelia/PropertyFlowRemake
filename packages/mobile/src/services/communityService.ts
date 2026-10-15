@@ -146,6 +146,14 @@ export interface CommunityMember {
   friendshipId?: string;
 }
 
+export interface StoryViewerInfo {
+  uid: string;
+  name: string;
+  avatar?: string;
+  email?: string;
+  viewedAt: string;
+}
+
 export interface CommunityStory {
   id: string;
   authorId: string;
@@ -154,9 +162,53 @@ export interface CommunityStory {
   authorEmail?: string;
   mediaUrl: string;
   caption?: string;
+  backgroundColor?: string;
   createdAt: string;
+  expiresAt?: string;
+  updatedAt?: string;
+  isArchived?: boolean;
   views?: string[];
+  viewerDetails?: StoryViewerInfo[];
   likes?: string[];
+}
+
+/**
+ * Check if a story is active (within 24 hours of creation and not archived).
+ */
+export function isStoryActive(story: CommunityStory): boolean {
+  if (story.isArchived) return false;
+  const createdMs = new Date(story.createdAt).getTime();
+  if (isNaN(createdMs)) return true;
+  const ageMs = Date.now() - createdMs;
+  return ageMs < 24 * 60 * 60 * 1000;
+}
+
+/**
+ * Calculate human-readable countdown remaining before a 24-hour story expires.
+ */
+export function calculateStoryTimeRemaining(story: CommunityStory): {
+  isExpired: boolean;
+  label: string;
+  hoursLeft: number;
+} {
+  const createdMs = new Date(story.createdAt).getTime();
+  if (isNaN(createdMs))
+    return { isExpired: false, label: "24h left", hoursLeft: 24 };
+  const expiryMs = createdMs + 24 * 60 * 60 * 1000;
+  const remainingMs = expiryMs - Date.now();
+  if (remainingMs <= 0 || story.isArchived) {
+    return { isExpired: true, label: "Expired", hoursLeft: 0 };
+  }
+  const hours = Math.floor(remainingMs / (60 * 60 * 1000));
+  const mins = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+  if (hours > 0) {
+    return { isExpired: false, label: `${hours}h left`, hoursLeft: hours };
+  }
+  return {
+    isExpired: false,
+    label: `${Math.max(1, mins)}m left`,
+    hoursLeft: 0,
+  };
 }
 
 export function formatAuthorDisplayName(name?: string, email?: string): string {
@@ -272,7 +324,7 @@ class CommunityService {
    */
   subscribeStories(callback: (stories: CommunityStory[]) => void): () => void {
     const storiesRef = collection(db, "communityStories");
-    const q = query(storiesRef, orderBy("createdAt", "desc"), limit(25));
+    const q = query(storiesRef, orderBy("createdAt", "desc"), limit(60));
 
     return onSnapshot(
       q,
@@ -291,8 +343,15 @@ class CommunityService {
             authorEmail: data.authorEmail || "",
             mediaUrl: data.mediaUrl || "",
             caption: data.caption || "",
+            backgroundColor: data.backgroundColor || undefined,
             createdAt: data.createdAt || new Date().toISOString(),
+            expiresAt: data.expiresAt || undefined,
+            updatedAt: data.updatedAt || undefined,
+            isArchived: data.isArchived === true,
             views: Array.isArray(data.views) ? data.views : [],
+            viewerDetails: Array.isArray(data.viewerDetails)
+              ? data.viewerDetails
+              : [],
             likes: Array.isArray(data.likes) ? data.likes : [],
           });
         });
@@ -306,11 +365,12 @@ class CommunityService {
   }
 
   /**
-   * Create a new community story.
+   * Create a new community story with 24-hour expiration calculation.
    */
   async createStory(params: {
     mediaUrl: string;
     caption?: string;
+    backgroundColor?: string;
     authorName?: string;
     authorEmail?: string;
     authorAvatar?: string;
@@ -320,14 +380,27 @@ class CommunityService {
 
     const storiesRef = collection(db, "communityStories");
     const newDocRef = doc(storiesRef);
-    const now = new Date().toISOString();
+    const now = new Date();
+    const createdAt = now.toISOString();
+    // Expiration timestamp is set strictly 24 hours after creation
+    const expiresAt = new Date(
+      now.getTime() + 24 * 60 * 60 * 1000,
+    ).toISOString();
 
     const cleanAuthorName = formatAuthorDisplayName(
       params.authorName || auth.currentUser?.displayName || undefined,
       params.authorEmail || auth.currentUser?.email || undefined,
     );
 
-    const storyData = {
+    const initialViewer: StoryViewerInfo = {
+      uid: currentUid,
+      name: cleanAuthorName,
+      avatar: params.authorAvatar || auth.currentUser?.photoURL || "",
+      email: params.authorEmail || auth.currentUser?.email || "",
+      viewedAt: createdAt,
+    };
+
+    const storyData: Record<string, any> = {
       id: newDocRef.id,
       authorId: currentUid,
       authorName: cleanAuthorName,
@@ -335,13 +408,136 @@ class CommunityService {
       authorAvatar: params.authorAvatar || auth.currentUser?.photoURL || "",
       mediaUrl: params.mediaUrl,
       caption: params.caption || "",
-      createdAt: now,
+      backgroundColor: params.backgroundColor || "#2563EB",
+      createdAt,
+      expiresAt,
+      isArchived: false,
       views: [currentUid],
+      viewerDetails: [initialViewer],
       likes: [],
     };
 
     await setDoc(newDocRef, storyData);
     return newDocRef.id;
+  }
+
+  /**
+   * Record a member viewing a story.
+   */
+  async recordStoryView(
+    storyId: string,
+    viewer: {
+      uid: string;
+      name?: string;
+      avatar?: string;
+      email?: string;
+    },
+  ): Promise<void> {
+    if (!viewer.uid || !storyId) return;
+
+    try {
+      const storyRef = doc(db, "communityStories", storyId);
+      const snap = await getDoc(storyRef);
+      if (!snap.exists()) return;
+
+      const data = snap.data();
+      const existingViews: string[] = Array.isArray(data.views)
+        ? data.views
+        : [];
+      const existingDetails: StoryViewerInfo[] = Array.isArray(
+        data.viewerDetails,
+      )
+        ? data.viewerDetails
+        : [];
+
+      const cleanViewerName = formatAuthorDisplayName(
+        viewer.name,
+        viewer.email,
+      );
+      const isAlreadyInViews = existingViews.includes(viewer.uid);
+      const isAlreadyInDetails = existingDetails.some(
+        (d) => d.uid === viewer.uid,
+      );
+
+      if (isAlreadyInViews && isAlreadyInDetails) {
+        return; // Already recorded
+      }
+
+      const updatedViews = isAlreadyInViews
+        ? existingViews
+        : [...existingViews, viewer.uid];
+      const newViewerEntry: StoryViewerInfo = {
+        uid: viewer.uid,
+        name: cleanViewerName,
+        avatar: viewer.avatar || "",
+        email: viewer.email || "",
+        viewedAt: new Date().toISOString(),
+      };
+
+      const updatedDetails = isAlreadyInDetails
+        ? existingDetails
+        : [...existingDetails, newViewerEntry];
+
+      await updateDoc(storyRef, {
+        views: updatedViews,
+        viewerDetails: updatedDetails,
+      });
+    } catch (err) {
+      console.warn("[CommunityService] Failed to record story view:", err);
+    }
+  }
+
+  /**
+   * Update an existing story's caption and background styling (author only).
+   */
+  async updateStory(
+    storyId: string,
+    params: {
+      caption?: string;
+      backgroundColor?: string;
+    },
+  ): Promise<void> {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) throw new Error("Must be logged in to update a story.");
+
+    const storyRef = doc(db, "communityStories", storyId);
+    const updatePayload: Record<string, any> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (params.caption !== undefined) {
+      updatePayload.caption = params.caption.trim();
+    }
+    if (params.backgroundColor !== undefined) {
+      updatePayload.backgroundColor = params.backgroundColor;
+    }
+
+    await updateDoc(storyRef, updatePayload);
+  }
+
+  /**
+   * Delete a story permanently from Firestore.
+   */
+  async deleteStory(storyId: string): Promise<void> {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) throw new Error("Must be logged in to delete a story.");
+
+    const storyRef = doc(db, "communityStories", storyId);
+    await deleteDoc(storyRef);
+  }
+
+  /**
+   * Manually archive a story so it hides from the public feed while remaining in archive.
+   */
+  async archiveStory(storyId: string): Promise<void> {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) throw new Error("Must be logged in to archive a story.");
+
+    const storyRef = doc(db, "communityStories", storyId);
+    await updateDoc(storyRef, {
+      isArchived: true,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   /**

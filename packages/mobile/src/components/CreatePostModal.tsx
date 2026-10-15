@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   Text,
@@ -12,7 +12,9 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "../context/ThemeContext";
@@ -63,6 +65,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   onPostCreated,
   currentUser,
 }) => {
+  const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const [content, setContent] = useState("");
   const [selectedCategory, setSelectedCategory] =
@@ -70,6 +73,26 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   const [images, setImages] = useState<PostImageItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState("");
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      },
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const authorName = formatAuthorDisplayName(
     currentUser.displayName || currentUser.name,
@@ -193,7 +216,13 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
         <View
           style={[
             styles.container,
-            { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" },
+            {
+              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              marginBottom:
+                Platform.OS === "android" && keyboardHeight > 0
+                  ? keyboardHeight
+                  : 0,
+            },
           ]}
         >
           {/* Header */}
@@ -437,6 +466,8 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
               {
                 borderTopColor: isDark ? "#334155" : "#E2E8F0",
                 backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                paddingBottom:
+                  keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 14),
               },
             ]}
           >
