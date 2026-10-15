@@ -14,6 +14,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
+import { pushDispatchService } from "./pushDispatchService";
 
 export type CommunityCategory =
   | "all"
@@ -418,6 +419,21 @@ class CommunityService {
     };
 
     await setDoc(newDocRef, storyData);
+
+    // Asynchronously dispatch high-priority push notification to friends & roommates
+    try {
+      pushDispatchService
+        .sendCommunityStoryPush({
+          storyId: newDocRef.id,
+          authorId: currentUid,
+          authorName: cleanAuthorName,
+          caption: params.caption,
+        })
+        .catch((e) =>
+          console.warn("[CommunityService] push error on story:", e),
+        );
+    } catch {}
+
     return newDocRef.id;
   }
 
@@ -605,6 +621,22 @@ class CommunityService {
     };
 
     await setDoc(newDocRef, postData);
+
+    // Asynchronously dispatch high-priority push notification to friends & roommates
+    try {
+      pushDispatchService
+        .sendCommunityPostPush({
+          postId: newDocRef.id,
+          authorId: currentUid,
+          authorName: cleanAuthorName,
+          content: params.content.trim(),
+          category: params.category,
+        })
+        .catch((e) =>
+          console.warn("[CommunityService] push error on post:", e),
+        );
+    } catch {}
+
     return newDocRef.id;
   }
 
@@ -655,6 +687,36 @@ class CommunityService {
       reactions: updatedReactions,
       updatedAt: new Date().toISOString(),
     });
+
+    // Asynchronously notify post author if this was an added/updated reaction
+    if (!isAlreadyLiked || existingReaction !== reaction) {
+      getDoc(postRef)
+        .then((snap) => {
+          if (snap.exists()) {
+            const postData = snap.data();
+            const authorId = postData?.authorId;
+            if (authorId && authorId !== currentUid) {
+              const reactorName = formatAuthorDisplayName(
+                auth.currentUser?.displayName || undefined,
+                auth.currentUser?.email || undefined,
+              );
+              pushDispatchService
+                .sendCommunityReactionPush({
+                  postId,
+                  postAuthorId: authorId,
+                  reactorId: currentUid,
+                  reactorName,
+                  reactionType: reaction,
+                  postSnippet: postData?.content,
+                })
+                .catch((e) =>
+                  console.warn("[CommunityService] push error on reaction:", e),
+                );
+            }
+          }
+        })
+        .catch(() => {});
+    }
 
     return updatedLikes.includes(currentUid);
   }
@@ -745,6 +807,31 @@ class CommunityService {
         err,
       );
     }
+
+    // Asynchronously notify post author
+    getDoc(postRef)
+      .then((snap) => {
+        if (snap.exists()) {
+          const postData = snap.data();
+          const authorId = postData?.authorId;
+          if (authorId && authorId !== currentUid) {
+            pushDispatchService
+              .sendCommunityCommentPush({
+                postId,
+                postAuthorId: authorId,
+                commentId: commentDocRef.id,
+                commenterId: currentUid,
+                commenterName: commentData.authorName,
+                commentText: commentData.content,
+                postSnippet: postData?.content,
+              })
+              .catch((e) =>
+                console.warn("[CommunityService] push error on comment:", e),
+              );
+          }
+        }
+      })
+      .catch(() => {});
 
     return commentDocRef.id;
   }

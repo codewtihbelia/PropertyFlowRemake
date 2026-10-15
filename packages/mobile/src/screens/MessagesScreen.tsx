@@ -16,6 +16,7 @@ import {
   Modal,
   Dimensions,
   useWindowDimensions,
+  LayoutAnimation,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -187,6 +188,52 @@ function computePresence(lastActiveIso?: string): {
   }
 }
 
+export function isNoteExpired(updatedAt?: string, expiresAt?: string): boolean {
+  const now = Date.now();
+  if (expiresAt) {
+    const exp = new Date(expiresAt).getTime();
+    if (!isNaN(exp)) return now >= exp;
+  }
+  if (updatedAt) {
+    const updated = new Date(updatedAt).getTime();
+    if (!isNaN(updated)) return now - updated >= 24 * 60 * 60 * 1000;
+  }
+  return false;
+}
+
+export function formatNoteRemainingTime(
+  updatedAt?: string,
+  expiresAt?: string,
+): string {
+  const now = Date.now();
+  let expMs = 0;
+  if (expiresAt) {
+    const parsed = new Date(expiresAt).getTime();
+    if (!isNaN(parsed)) expMs = parsed;
+  }
+  if (!expMs && updatedAt) {
+    const parsed = new Date(updatedAt).getTime();
+    if (!isNaN(parsed)) expMs = parsed + 24 * 60 * 60 * 1000;
+  }
+  if (!expMs) return "Expires in 24h";
+
+  const diffMs = expMs - now;
+  if (diffMs <= 0) return "Expired";
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+
+  if (hours >= 1) {
+    return remMins > 0
+      ? `Expires in ${hours}h ${remMins}m`
+      : `Expires in ${hours}h`;
+  }
+  if (mins >= 1) {
+    return `Expires in ${mins}m`;
+  }
+  return "Expires in <1m";
+}
+
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   onBack,
   householdId,
@@ -203,10 +250,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   } = useNavVisibility();
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const windowDims = useWindowDimensions();
-  const screenHeight = Dimensions.get("screen").height;
-  const isWindowResizedBySystem = screenHeight - windowDims.height > 120;
-
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
     insets.top,
@@ -245,7 +288,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [householdInfo, setHouseholdInfo] = useState<any>(null);
   const [rawMessages, setRawMessages] = useState<any[]>([]);
   const [householdNotes, setHouseholdNotes] = useState<
-    Record<string, { note: string; emoji?: string; updatedAt: string }>
+    Record<
+      string,
+      { note: string; emoji?: string; updatedAt: string; expiresAt?: string }
+    >
   >({});
   const [acceptedCommunityFriends, setAcceptedCommunityFriends] = useState<
     any[]
@@ -331,6 +377,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   useEffect(() => {
     const onShow = (e: any) => {
+      if (Platform.OS === "android") {
+        try {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        } catch {}
+      }
       const h = e?.endCoordinates?.height || 0;
       if (h > 0) {
         setLocalKeyboardHeight(h);
@@ -342,6 +393,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     };
 
     const onHide = () => {
+      if (Platform.OS === "android") {
+        try {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        } catch {}
+      }
       setLocalKeyboardHeight(0);
       setIsKeyboardOpen(false);
       setIsInputFocused(false);
@@ -371,30 +427,29 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     if (Platform.OS === "android") {
-      if (isWindowResizedBySystem) {
-        // OS already resized the window above keyboard; provide a clean 14px cushion
-        return 14;
-      }
-      // Translucent mode on Android: window is full-screen and does not resize.
-      // Elevate input container above keyboard plus the system navigation bar with a 14px cushion.
-      const effectiveHeight = keyboardHeight > 0 ? keyboardHeight : 285;
-      const navBarHeight = insets.bottom > 0 ? insets.bottom : 24;
-      return effectiveHeight + navBarHeight + 14;
+      // In Android translucent status bar mode, the window does not automatically resize.
+      // Elevate input container above the soft keyboard with a clean 12px cushion.
+      const effectiveHeight =
+        keyboardHeight > 0
+          ? keyboardHeight
+          : contextKeyboardHeight > 0
+            ? contextKeyboardHeight
+            : 290;
+      return effectiveHeight + 12;
     }
 
     if (Platform.OS === "ios") {
       // On iOS, KeyboardAvoidingView (behavior="padding") lifts the container by keyboardHeight.
-      // Provide a generous 14px cushion above the soft keyboard.
-      return 14;
+      // Provide a clean 12px cushion inside the elevated container.
+      return 12;
     }
 
     // Web / other platforms
-    return 14;
+    return 12;
   }, [
     keyboardActive,
-    isWindowResizedBySystem,
     keyboardHeight,
-    insets.bottom,
+    contextKeyboardHeight,
     defaultBottomPadding,
   ]);
 
@@ -409,6 +464,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [showRequestSplitModal, setShowRequestSplitModal] = useState(false);
   const [showComposeModal, setShowComposeModal] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
+  const [showNoteActionMenu, setShowNoteActionMenu] = useState(false);
 
   // Thought Note Form state (optional emoji)
   const [noteInputText, setNoteInputText] = useState("");
@@ -418,7 +474,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Viewing Roommate Note Modal (matching reference screenshot)
   const [viewingNoteData, setViewingNoteData] = useState<{
     member: any;
-    note: { note: string; emoji?: string; updatedAt: string };
+    note: {
+      note: string;
+      emoji?: string;
+      updatedAt: string;
+      expiresAt?: string;
+    };
   } | null>(null);
   const [noteReplyText, setNoteReplyText] = useState("");
   const [isSendingNoteReply, setIsSendingNoteReply] = useState(false);
@@ -466,10 +527,16 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       householdId,
       (notes) => {
         setHouseholdNotes(notes || {});
-        // Pre-fill note input if user already has a note
+        // Pre-fill note input if user already has an active note
         if (currentUid && notes && notes[currentUid]) {
-          setNoteInputText(notes[currentUid].note || "");
-          setSelectedNoteEmoji(notes[currentUid].emoji || "");
+          const myNote = notes[currentUid];
+          if (!isNoteExpired(myNote.updatedAt, myNote.expiresAt)) {
+            setNoteInputText(myNote.note || "");
+            setSelectedNoteEmoji(myNote.emoji || "");
+          } else {
+            setNoteInputText("");
+            setSelectedNoteEmoji("");
+          }
         }
       },
     );
@@ -622,7 +689,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const currentUserMember = householdMembers.find(
     (m) => (m.userId || m.memberId) === currentUid,
   );
-  const currentUserNote =
+  const rawCurrentUserNote =
     householdNotes[currentUid] ||
     (currentUserMember?.thoughtNote
       ? {
@@ -633,8 +700,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               ? String(currentUserMember.thoughtEmoji).trim()
               : "",
           updatedAt: currentUserMember.noteUpdatedAt || "",
+          expiresAt: currentUserMember.noteExpiresAt || "",
         }
       : undefined);
+
+  const currentUserNote =
+    rawCurrentUserNote &&
+    !isNoteExpired(rawCurrentUserNote.updatedAt, rawCurrentUserNote.expiresAt)
+      ? rawCurrentUserNote
+      : undefined;
 
   // Map of userId/memberId to profile avatar data & initials for fast synchronous lookup in chat messages
   const memberAvatarMap = useMemo(() => {
@@ -993,9 +1067,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       );
       playMessengerPopChime();
       setShowNoteModal(false);
+      setShowNoteActionMenu(false);
       Alert.alert(
-        "Note Shared",
-        "Your roommates can now see your thought bubble!",
+        currentUserNote ? "Note Updated" : "Note Shared",
+        currentUserNote
+          ? "Your thought note has been updated and renewed for another 24 hours!"
+          : "Your roommates can now see your thought note for the next 24 hours!",
       );
     } catch (e) {
       console.warn("Error saving note:", e);
@@ -1005,7 +1082,22 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
-  // Clear Thought Note
+  // Clear Thought Note with confirmation alert
+  const confirmClearNote = () => {
+    Alert.alert(
+      "Remove Thought Note",
+      "Are you sure you want to remove your thought note? It will disappear immediately from the messages screen for all roommates.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: handleClearNote,
+        },
+      ],
+    );
+  };
+
   const handleClearNote = async () => {
     if (!householdId || !currentUid) return;
     setIsSavingNote(true);
@@ -1014,6 +1106,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       setNoteInputText("");
       setSelectedNoteEmoji("");
       setShowNoteModal(false);
+      setShowNoteActionMenu(false);
       Alert.alert("Note Removed", "Your thought note has been cleared.");
     } catch (e) {
       console.warn("Error clearing note:", e);
@@ -2631,7 +2724,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           <TouchableOpacity
             style={styles.storyCard}
             activeOpacity={0.8}
-            onPress={() => setShowNoteModal(true)}
+            onPress={() => {
+              if (currentUserNote) {
+                setShowNoteActionMenu(true);
+              } else {
+                setNoteInputText("");
+                setSelectedNoteEmoji("");
+                setShowNoteModal(true);
+              }
+            }}
           >
             {/* Thought bubble if note exists */}
             {currentUserNote ? (
@@ -2720,6 +2821,30 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             >
               {currentUserNote ? "Edit note" : "Your note"}
             </Text>
+
+            {/* Dedicated action menu button on card when user has an active note */}
+            {currentUserNote && (
+              <TouchableOpacity
+                style={[
+                  styles.cardActionMenuBtn,
+                  {
+                    backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+                    borderColor: isDark ? "rgba(255,255,255,0.08)" : "#E2E8F0",
+                  },
+                ]}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setShowNoteActionMenu(true);
+                }}
+              >
+                <Feather
+                  name="more-horizontal"
+                  size={12}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            )}
           </TouchableOpacity>
 
           {/* Cards 1..N: Real Bills Group Members with Presence and Notes */}
@@ -2745,7 +2870,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             );
 
             // Roommate's note
-            const memberNote =
+            const rawMemberNote =
               householdNotes[memberUid] ||
               (member.thoughtNote
                 ? {
@@ -2756,8 +2881,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                         ? String(member.thoughtEmoji).trim()
                         : "",
                     updatedAt: member.noteUpdatedAt || "",
+                    expiresAt: member.noteExpiresAt || "",
                   }
                 : undefined);
+
+            const memberNote =
+              rawMemberNote &&
+              !isNoteExpired(rawMemberNote.updatedAt, rawMemberNote.expiresAt)
+                ? rawMemberNote
+                : undefined;
 
             return (
               <TouchableOpacity
@@ -3251,8 +3383,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       <SmoothBottomSheetModal
         visible={showNoteModal}
         onClose={() => setShowNoteModal(false)}
-        title={currentUserNote ? "Update your thought" : "Share a thought"}
-        subtitle="Post a note to your roommates that floats above your avatar for everyone to see."
+        title={currentUserNote ? "Edit your thought" : "Share a thought"}
+        subtitle={
+          currentUserNote
+            ? `${formatNoteRemainingTime(currentUserNote.updatedAt, currentUserNote.expiresAt)} · Updates will renew your note for 24 hours.`
+            : "Post a note to your roommates that floats above your avatar. Automatically expires after 24 hours."
+        }
         icon={<Ionicons name="chatbubble-ellipses" size={20} color="#2563EB" />}
         maxHeight="78%"
         showChipBar={true}
@@ -3301,6 +3437,34 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   {currentUserAvatar}
                 </Text>
               )}
+            </View>
+
+            {/* Expiration badge / indicator under preview */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                marginTop: 6,
+              }}
+            >
+              <Feather
+                name="clock"
+                size={13}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "600",
+                  color: isDark ? "#60A5FA" : "#2563EB",
+                }}
+              >
+                {currentUserNote
+                  ? `${formatNoteRemainingTime(currentUserNote.updatedAt, currentUserNote.expiresAt)} (resets to 24h on save)`
+                  : "Expires automatically 24 hours after sharing"}
+              </Text>
             </View>
           </View>
 
@@ -3449,11 +3613,17 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     backgroundColor: isDark
                       ? "rgba(239, 68, 68, 0.15)"
                       : "#FEF2F2",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    paddingHorizontal: 14,
                   },
                 ]}
-                onPress={handleClearNote}
+                onPress={confirmClearNote}
                 disabled={isSavingNote}
               >
+                <Feather name="trash-2" size={15} color="#EF4444" />
                 <Text
                   style={{
                     color: "#EF4444",
@@ -3461,7 +3631,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     fontWeight: "700",
                   }}
                 >
-                  Clear Note
+                  Remove Note
                 </Text>
               </TouchableOpacity>
             )}
@@ -3478,11 +3648,169 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               {isSavingNote ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.modalSubmitBtnText}>Share Note</Text>
+                <Text style={styles.modalSubmitBtnText}>
+                  {currentUserNote ? "Update Note" : "Share Note"}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
         </ScrollView>
+      </SmoothBottomSheetModal>
+
+      {/* MODAL: Dedicated Action Menu for Active Note */}
+      <SmoothBottomSheetModal
+        visible={showNoteActionMenu}
+        onClose={() => setShowNoteActionMenu(false)}
+        title="Your Thought Note"
+        subtitle={
+          currentUserNote
+            ? `${formatNoteRemainingTime(currentUserNote.updatedAt, currentUserNote.expiresAt)} · Visible to roommates`
+            : "Manage your thought note"
+        }
+        icon={<Ionicons name="chatbubble-ellipses" size={20} color="#2563EB" />}
+        maxHeight="48%"
+        showChipBar={true}
+      >
+        <View
+          style={{ gap: 12, paddingBottom: Math.max(30, insets.bottom + 16) }}
+        >
+          {currentUserNote && (
+            <View
+              style={{
+                backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                borderRadius: 14,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: isDark ? "rgba(255,255,255,0.08)" : "#E2E8F0",
+                gap: 6,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontWeight: "600",
+                  color: isDark ? "#FFFFFF" : "#0F172A",
+                }}
+              >
+                {currentUserNote.emoji ? `${currentUserNote.emoji} ` : ""}
+                {currentUserNote.note}
+              </Text>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                <Feather
+                  name="clock"
+                  size={12}
+                  color={isDark ? "#60A5FA" : "#2563EB"}
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: isDark ? "#60A5FA" : "#2563EB",
+                  }}
+                >
+                  {formatNoteRemainingTime(
+                    currentUserNote.updatedAt,
+                    currentUserNote.expiresAt,
+                  )}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Edit Note Action Button */}
+          <TouchableOpacity
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: 12,
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+            }}
+            onPress={() => {
+              setShowNoteActionMenu(false);
+              if (currentUserNote) {
+                setNoteInputText(currentUserNote.note || "");
+                setSelectedNoteEmoji(currentUserNote.emoji || "");
+              }
+              setShowNoteModal(true);
+            }}
+          >
+            <Feather
+              name="edit-2"
+              size={18}
+              color={isDark ? "#60A5FA" : "#2563EB"}
+            />
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "700",
+                  color: isDark ? "#FFFFFF" : "#0F172A",
+                }}
+              >
+                Edit Note
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? "#94A3B8" : "#64748B",
+                }}
+              >
+                Change thought text or icon (resets 24h timer)
+              </Text>
+            </View>
+            <Feather
+              name="chevron-right"
+              size={16}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Remove Note Action Button */}
+          <TouchableOpacity
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: 12,
+              backgroundColor: isDark ? "rgba(239,68,68,0.12)" : "#FEF2F2",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(239,68,68,0.25)" : "#FCA5A5",
+            }}
+            onPress={() => {
+              setShowNoteActionMenu(false);
+              confirmClearNote();
+            }}
+          >
+            <Feather name="trash-2" size={18} color="#EF4444" />
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "700",
+                  color: "#EF4444",
+                }}
+              >
+                Remove Note
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? "#F87171" : "#DC2626",
+                }}
+              >
+                Immediately clears note from messages screen
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#EF4444" />
+          </TouchableOpacity>
+        </View>
       </SmoothBottomSheetModal>
 
       {/* MODAL 2: FULL-SCREEN AUTHENTIC FACEBOOK MESSENGER NOTE VIEWER & REPLY */}
@@ -3581,7 +3909,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       { color: isDark ? "#94A3B8" : "#64748B" },
                     ]}
                   >
-                    {formatMessageTime(viewingNoteData.note.updatedAt)}
+                    {formatMessageTime(viewingNoteData.note.updatedAt)} ·{" "}
+                    {formatNoteRemainingTime(
+                      viewingNoteData.note.updatedAt,
+                      viewingNoteData.note.expiresAt,
+                    )}
                   </Text>
                 </View>
               </View>
@@ -3718,6 +4050,41 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   </Text>
                 )}
               </TouchableOpacity>
+
+              {/* 24-hour Expiration countdown indicator */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  marginTop: 18,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                  backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                  borderWidth: 1,
+                  borderColor: isDark ? "rgba(255,255,255,0.08)" : "#E2E8F0",
+                }}
+              >
+                <Feather
+                  name="clock"
+                  size={13}
+                  color={isDark ? "#60A5FA" : "#2563EB"}
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: isDark ? "#CBD5E1" : "#475569",
+                  }}
+                >
+                  {formatNoteRemainingTime(
+                    viewingNoteData.note.updatedAt,
+                    viewingNoteData.note.expiresAt,
+                  )}
+                </Text>
+              </View>
             </View>
 
             {/* Bottom Section: Quick Reaction Pills & Reply Input Bar */}
@@ -3731,17 +4098,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   {
                     paddingBottom:
                       Platform.OS === "android"
-                        ? isWindowResizedBySystem
-                          ? 14
-                          : (keyboardHeight > 0
+                        ? keyboardActive
+                          ? (keyboardHeight > 0
                               ? keyboardHeight
-                              : keyboardActive
-                                ? 285
-                                : 0) +
-                            (insets.bottom > 0 ? insets.bottom : 24) +
-                            14
+                              : contextKeyboardHeight > 0
+                                ? contextKeyboardHeight
+                                : 290) + 12
+                          : Math.max(bottomInset + 10, insets.bottom + 16)
                         : keyboardActive
-                          ? 14
+                          ? 12
                           : Math.max(bottomInset + 10, insets.bottom + 16),
                   },
                 ]}
@@ -4360,6 +4725,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     maxWidth: 70,
+  },
+  cardActionMenuBtn: {
+    marginTop: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   noMembersHintWrap: {
     paddingHorizontal: 12,

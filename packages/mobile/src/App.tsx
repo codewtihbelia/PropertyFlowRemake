@@ -396,6 +396,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     text: string;
   } | null>(null);
 
+  const [communityInitialTarget, setCommunityInitialTarget] = useState<{
+    type?: string;
+    postId?: string;
+    storyId?: string;
+    commentId?: string;
+  } | null>(null);
+
   const seenMessageIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
 
@@ -409,6 +416,14 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       if (!data) return;
       if (data.screen === "messages") {
         setOverlayScreen("messages");
+      } else if (data.screen === "community") {
+        setCommunityInitialTarget({
+          type: data.type || "post",
+          postId: data.postId,
+          storyId: data.storyId,
+          commentId: data.commentId,
+        });
+        setOverlayScreen("community");
       } else if (data.screen === "group_manage") {
         setCurrentTab("groups");
         setManageGroupInitialView("details");
@@ -1092,12 +1107,19 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
 
     return (
       <CommunityScreen
-        onBack={() => setOverlayScreen("none")}
+        onBack={() => {
+          setCommunityInitialTarget(null);
+          setOverlayScreen("none");
+        }}
+        initialTarget={communityInitialTarget}
+        onClearInitialTarget={() => setCommunityInitialTarget(null)}
         onNavigateToSplitzyProfile={() => {
+          setCommunityInitialTarget(null);
           setOverlayScreen("none");
           setCurrentTab("profile");
         }}
         onOpenDirectChat={(targetUserId) => {
+          setCommunityInitialTarget(null);
           setActiveDirectChatUserId(targetUserId);
           setOverlayScreen("messages");
         }}

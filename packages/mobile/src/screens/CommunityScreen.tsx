@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import {
   StyleSheet,
   Text,
@@ -45,6 +51,13 @@ import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
 
 export { FB_6_REACTIONS };
 
+export interface CommunityInitialTarget {
+  type?: "post" | "story" | "comment" | "reaction" | string;
+  postId?: string;
+  storyId?: string;
+  commentId?: string;
+}
+
 interface CommunityScreenProps {
   onBack: () => void;
   currentUser?: {
@@ -63,6 +76,8 @@ interface CommunityScreenProps {
     targetUserAvatar?: string,
   ) => void;
   onNavigateToSplitzyProfile?: () => void;
+  initialTarget?: CommunityInitialTarget | null;
+  onClearInitialTarget?: () => void;
 }
 
 const CATEGORIES: CommunityCategory[] = [
@@ -80,6 +95,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   currentUser = {},
   onOpenDirectChat,
   onNavigateToSplitzyProfile,
+  initialTarget,
+  onClearInitialTarget,
 }) => {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
@@ -230,6 +247,37 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         `mem_${s.authorId}` === currentUid,
     );
   }, [cloudStories, currentUid]);
+
+  // Deep link handler when tapped from a push notification
+  const handledInitialTargetRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!initialTarget) return;
+    const targetKey = `${initialTarget.type}_${initialTarget.postId || ""}_${initialTarget.storyId || ""}_${initialTarget.commentId || ""}`;
+    if (handledInitialTargetRef.current === targetKey) return;
+
+    if (initialTarget.storyId && displayStories.length > 0) {
+      const idx = displayStories.findIndex(
+        (s) => s.id === initialTarget.storyId,
+      );
+      if (idx !== -1) {
+        handledInitialTargetRef.current = targetKey;
+        setSelectedStoryIndex(idx);
+        setStoryViewerVisible(true);
+        if (onClearInitialTarget) onClearInitialTarget();
+      }
+    } else if (initialTarget.postId && posts.length > 0) {
+      const foundPost = posts.find((p) => p.id === initialTarget.postId);
+      if (foundPost) {
+        handledInitialTargetRef.current = targetKey;
+        setActiveMainTab("feed");
+        if (initialTarget.type === "comment" || initialTarget.commentId) {
+          setActivePostForComments(foundPost);
+        }
+        if (onClearInitialTarget) onClearInitialTarget();
+      }
+    }
+  }, [initialTarget, displayStories, posts, onClearInitialTarget]);
 
   // Story management handlers
   const handleDeleteStory = useCallback(async (story: CommunityStory) => {

@@ -510,6 +510,314 @@ class PushDispatchService {
       );
     }
   }
+
+  /**
+   * Resolves recipient user IDs for a community author.
+   * Fetches:
+   * 1. All accepted friends from communityFriendships (bidirectional)
+   * 2. All members of the author's household (if householdId is provided or detected)
+   * Excludes the author and strips any "mem_" prefixes.
+   */
+  public async getCommunityRecipientsForAuthor(
+    authorId: string,
+    householdId?: string,
+  ): Promise<string[]> {
+    if (!authorId) return [];
+
+    const cleanAuthorId = String(authorId).replace(/^mem_/, "").trim();
+    const recipientSet = new Set<string>();
+
+    // 1. Fetch accepted friends from communityFriendships (where senderId == authorId OR receiverId == authorId)
+    try {
+      const friendshipsRef = collection(db, "communityFriendships");
+
+      const [sentSnap, receivedSnap] = await Promise.all([
+        getDocs(
+          query(
+            friendshipsRef,
+            where("senderId", "==", cleanAuthorId),
+            where("status", "==", "accepted"),
+          ),
+        ),
+        getDocs(
+          query(
+            friendshipsRef,
+            where("receiverId", "==", cleanAuthorId),
+            where("status", "==", "accepted"),
+          ),
+        ),
+      ]);
+
+      sentSnap.docs.forEach((d) => {
+        const data = d.data();
+        const friendId = String(data.receiverId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        if (friendId && friendId !== cleanAuthorId) {
+          recipientSet.add(friendId);
+        }
+      });
+
+      receivedSnap.docs.forEach((d) => {
+        const data = d.data();
+        const friendId = String(data.senderId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        if (friendId && friendId !== cleanAuthorId) {
+          recipientSet.add(friendId);
+        }
+      });
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Error resolving accepted friends for push:",
+        err,
+      );
+    }
+
+    // 2. Fetch household roommates
+    try {
+      let activeHouseholdId = householdId;
+      if (!activeHouseholdId) {
+        // Look up the author's user document
+        const userDoc = await getDoc(doc(db, "users", cleanAuthorId)).catch(
+          () => null,
+        );
+        if (userDoc?.exists()) {
+          const userData = userDoc.data();
+          activeHouseholdId =
+            userData?.householdId || userData?.currentHouseholdId;
+        }
+      }
+
+      if (activeHouseholdId) {
+        const membersSnap = await getDocs(
+          collection(db, `households/${activeHouseholdId}/members`),
+        );
+        membersSnap.docs.forEach((d) => {
+          const mData = d.data();
+          const raw = mData.userId || mData.memberId || d.id;
+          const cleanId = String(raw || "")
+            .replace(/^mem_/, "")
+            .trim();
+          if (cleanId && cleanId !== cleanAuthorId) {
+            recipientSet.add(cleanId);
+          }
+        });
+      }
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Error resolving household members for push:",
+        err,
+      );
+    }
+
+    const recipientList = Array.from(recipientSet);
+    console.log(
+      `[PushDispatch] Resolved ${recipientList.length} community recipient(s) for author ${cleanAuthorId}:`,
+      recipientList,
+    );
+    return recipientList;
+  }
+
+  /**
+   * Dispatches high-priority push notifications to friends & household roommates
+   * when a user creates a new community post.
+   */
+  public async sendCommunityPostPush(params: {
+    postId: string;
+    authorId: string;
+    authorName: string;
+    content: string;
+    category?: string;
+    householdId?: string;
+  }): Promise<void> {
+    try {
+      const recipientUserIds = await this.getCommunityRecipientsForAuthor(
+        params.authorId,
+        params.householdId,
+      );
+      if (recipientUserIds.length === 0) return;
+
+      const tokens = await this.getPushTokensForUsers(recipientUserIds);
+      if (tokens.length === 0) return;
+
+      const cleanSnippet =
+        params.content.length > 90
+          ? `${params.content.substring(0, 87)}...`
+          : params.content;
+
+      await this.sendPushToTokens(tokens, {
+        title: `Splitzy Community • ${params.authorName}`,
+        body: cleanSnippet
+          ? `${params.authorName} posted: "${cleanSnippet}"`
+          : `${params.authorName} shared a new post!`,
+        data: {
+          screen: "community",
+          type: "post",
+          postId: params.postId,
+          authorId: params.authorId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending community post push:", err);
+    }
+  }
+
+  /**
+   * Dispatches high-priority push notifications to friends & household roommates
+   * when a user creates a new 24h story.
+   */
+  public async sendCommunityStoryPush(params: {
+    storyId: string;
+    authorId: string;
+    authorName: string;
+    caption?: string;
+    householdId?: string;
+  }): Promise<void> {
+    try {
+      const recipientUserIds = await this.getCommunityRecipientsForAuthor(
+        params.authorId,
+        params.householdId,
+      );
+      if (recipientUserIds.length === 0) return;
+
+      const tokens = await this.getPushTokensForUsers(recipientUserIds);
+      if (tokens.length === 0) return;
+
+      const captionSnippet =
+        params.caption && params.caption.trim().length > 0
+          ? ` "${params.caption.length > 60 ? `${params.caption.substring(0, 57)}...` : params.caption}"`
+          : "";
+
+      await this.sendPushToTokens(tokens, {
+        title: `New Story • ${params.authorName}`,
+        body: `${params.authorName} shared a new story${captionSnippet}. Tap to view before it expires!`,
+        data: {
+          screen: "community",
+          type: "story",
+          storyId: params.storyId,
+          authorId: params.authorId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending community story push:", err);
+    }
+  }
+
+  /**
+   * Dispatches push notification when someone comments on a community post.
+   * Alerts the post author directly.
+   */
+  public async sendCommunityCommentPush(params: {
+    postId: string;
+    postAuthorId: string;
+    commentId: string;
+    commenterId: string;
+    commenterName: string;
+    commentText: string;
+    postSnippet?: string;
+  }): Promise<void> {
+    try {
+      const cleanAuthorId = String(params.postAuthorId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanCommenterId = String(params.commenterId || "")
+        .replace(/^mem_/, "")
+        .trim();
+
+      // Do not notify self
+      if (!cleanAuthorId || cleanAuthorId === cleanCommenterId) return;
+
+      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
+      if (tokens.length === 0) return;
+
+      const cleanComment =
+        params.commentText.length > 90
+          ? `${params.commentText.substring(0, 87)}...`
+          : params.commentText;
+
+      await this.sendPushToTokens(tokens, {
+        title: "Splitzy Community",
+        body: `${params.commenterName} commented on your post: "${cleanComment}"`,
+        data: {
+          screen: "community",
+          type: "comment",
+          postId: params.postId,
+          commentId: params.commentId,
+          commenterId: cleanCommenterId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending community comment push:", err);
+    }
+  }
+
+  /**
+   * Dispatches push notification when someone reacts to a community post.
+   */
+  public async sendCommunityReactionPush(params: {
+    postId: string;
+    postAuthorId: string;
+    reactorId: string;
+    reactorName: string;
+    reactionType: string;
+    postSnippet?: string;
+  }): Promise<void> {
+    try {
+      const cleanAuthorId = String(params.postAuthorId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanReactorId = String(params.reactorId || "")
+        .replace(/^mem_/, "")
+        .trim();
+
+      // Do not notify self
+      if (!cleanAuthorId || cleanAuthorId === cleanReactorId) return;
+
+      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
+      if (tokens.length === 0) return;
+
+      const emojiMap: Record<string, string> = {
+        like: "👍",
+        love: "❤️",
+        care: "🥰",
+        haha: "😆",
+        wow: "😮",
+        sad: "😢",
+        angry: "😡",
+      };
+      const reactionEmoji = emojiMap[params.reactionType] || "❤️";
+
+      const snippet = params.postSnippet
+        ? `: "${params.postSnippet.length > 50 ? `${params.postSnippet.substring(0, 47)}...` : params.postSnippet}"`
+        : ".";
+
+      await this.sendPushToTokens(tokens, {
+        title: "Splitzy Community",
+        body: `${params.reactorName} reacted ${reactionEmoji} to your post${snippet}`,
+        data: {
+          screen: "community",
+          type: "reaction",
+          postId: params.postId,
+          reactionType: params.reactionType,
+          reactorId: cleanReactorId,
+        },
+        channelId: "high_priority",
+        sound: "default",
+      });
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Error sending community reaction push:",
+        err,
+      );
+    }
+  }
 }
 
 export const pushDispatchService = new PushDispatchService();
