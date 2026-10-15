@@ -243,6 +243,45 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
     }
   };
 
+  const formatTimeAgo = (isoString?: string) => {
+    if (!isoString) return "";
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "";
+    const now = Date.now();
+    const diff = Math.max(0, now - date.getTime());
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(diff / 86400000);
+    if (days === 1) return "Yesterday";
+    if (days < 7) return `${days}d ago`;
+
+    const currentYear = new Date().getFullYear();
+    const postYear = date.getFullYear();
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    if (postYear === currentYear) {
+      return `${month} ${day}`;
+    }
+    return `${month} ${day}, ${postYear}`;
+  };
+
   const renderPostCard = (post: CommunityPost) => {
     const isLiked = currentUid ? post.likes.includes(currentUid) : false;
     const catConf = CATEGORY_LABELS[post.category] || CATEGORY_LABELS.general;
@@ -335,10 +374,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   { color: isDark ? "#94A3B8" : "#64748B" },
                 ]}
               >
-                {new Date(post.createdAt).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                })}
+                {formatTimeAgo(post.createdAt)}
               </Text>
               <Text style={styles.fbMetaDot}>•</Text>
               <View
@@ -685,7 +721,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             ]}
           >
             {user.householdName
-              ? `Lives in ${user.householdName}`
+              ? `Member of ${user.householdName}`
               : user.role || "Splitzy Resident Member"}
           </Text>
 
@@ -1189,7 +1225,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                     { color: isDark ? "#CBD5E1" : "#334155" },
                   ]}
                 >
-                  Lives in{" "}
+                  Member of{" "}
                   <Text style={{ fontWeight: "700" }}>
                     {user.householdName || "Splitzy Resident Living"}
                   </Text>
@@ -1211,7 +1247,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 >
                   From{" "}
                   <Text style={{ fontWeight: "700" }}>
-                    {user.location || "San Francisco, California"}
+                    {user.location || "Philippines"}
                   </Text>
                 </Text>
               </View>

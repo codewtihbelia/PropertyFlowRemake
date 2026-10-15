@@ -48,6 +48,36 @@ import { CreateStoryModal } from "../components/CreateStoryModal";
 import { StoryViewerModal } from "../components/StoryViewerModal";
 import { EditStoryModal } from "../components/EditStoryModal";
 import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import * as Clipboard from "expo-clipboard";
+
+const AVATAR_PALETTES = [
+  { bg: "#EFF6FF", text: "#2563EB", darkBg: "#1E293B", darkText: "#60A5FA" },
+  { bg: "#FEF3C7", text: "#D97706", darkBg: "#33220A", darkText: "#FBBF24" },
+  { bg: "#F3E8FF", text: "#7E22CE", darkBg: "#2B1A3D", darkText: "#C084FC" },
+  { bg: "#E0F2FE", text: "#0284C7", darkBg: "#0C2E4E", darkText: "#38BDF8" },
+  { bg: "#DCFCE7", text: "#16A34A", darkBg: "#0F331E", darkText: "#4ADE80" },
+  { bg: "#FEE2E2", text: "#DC2626", darkBg: "#3B1414", darkText: "#F87171" },
+  { bg: "#FCE7F3", text: "#DB2777", darkBg: "#3B1528", darkText: "#F472B6" },
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+function getAvatarPalette(str: string, isDark: boolean) {
+  const index = Math.abs(hashString(str || "Splitzy")) % AVATAR_PALETTES.length;
+  const p = AVATAR_PALETTES[index];
+  return {
+    bg: isDark ? p.darkBg : p.bg,
+    text: isDark ? p.darkText : p.text,
+  };
+}
 
 export { FB_6_REACTIONS };
 
@@ -131,6 +161,11 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const [createPostVisible, setCreatePostVisible] = useState(false);
   const [activePostForComments, setActivePostForComments] =
     useState<CommunityPost | null>(null);
+  const [activePostForMenu, setActivePostForMenu] =
+    useState<CommunityPost | null>(null);
+  const [failedAvatarUids, setFailedAvatarUids] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Friendships & Discovery states
   const [friendships, setFriendships] = useState<CommunityFriendship[]>([]);
@@ -219,6 +254,42 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   useEffect(() => {
     loadMembers();
   }, [loadMembers]);
+
+  // Map of uid to latest cloud avatar URL from live user records
+  const userLiveAvatarMap = useMemo(() => {
+    const map = new Map<string, string>();
+    discoveredMembers.forEach((m) => {
+      const a = (m.avatar || "").trim();
+      if (a) {
+        map.set(m.uid, a);
+        map.set(`mem_${m.uid}`, a);
+      }
+    });
+    // Also include currentUser's latest avatar
+    const myPic = (
+      currentUser.photoURL ||
+      currentUser.profilePicture ||
+      ""
+    ).trim();
+    if (currentUid && myPic) {
+      map.set(currentUid, myPic);
+      map.set(`mem_${currentUid}`, myPic);
+    }
+    return map;
+  }, [discoveredMembers, currentUser, currentUid]);
+
+  const resolveMemberAvatar = useCallback(
+    (uid?: string, fallbackAvatar?: string) => {
+      if (!uid) return fallbackAvatar || "";
+      const cleanUid = String(uid).replace(/^mem_/, "").trim();
+      return (
+        userLiveAvatarMap.get(cleanUid) ||
+        userLiveAvatarMap.get(`mem_${cleanUid}`) ||
+        (fallbackAvatar || "").trim()
+      );
+    },
+    [userLiveAvatarMap],
+  );
 
   // 100% Real cloud-synced stories (Active within 24 hours only)
   const displayStories = useMemo(() => {
@@ -609,15 +680,41 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
   const formatTimeAgo = (isoString?: string) => {
     if (!isoString) return "";
-    const diff = Math.max(0, Date.now() - new Date(isoString).getTime());
+    const date = new Date(isoString);
+    const now = Date.now();
+    const diff = Math.max(0, now - date.getTime());
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "Just now";
     if (mins < 60) return `${mins}m ago`;
     const hours = Math.floor(mins / 60);
     if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 86400000);
+    const days = Math.floor(diff / 86400000);
     if (days === 1) return "Yesterday";
-    return `${days}d ago`;
+    if (days < 7) return `${days}d ago`;
+
+    // Over 7 days: clean formatted calendar date
+    const currentYear = new Date().getFullYear();
+    const postYear = date.getFullYear();
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    if (postYear === currentYear) {
+      return `${month} ${day}`;
+    }
+    return `${month} ${day}, ${postYear}`;
   };
 
   // Render a Facebook-style post card
@@ -749,28 +846,48 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
               flex: 1,
             }}
           >
-            {post.authorAvatar ? (
-              <Image
-                source={{ uri: post.authorAvatar }}
-                style={styles.fbPostAvatar}
-              />
-            ) : (
-              <View
-                style={[
-                  styles.fbPostAvatarPlaceholder,
-                  { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
-                ]}
-              >
-                <Text
+            {(() => {
+              const liveAuthorAvatar = resolveMemberAvatar(
+                post.authorId,
+                post.authorAvatar,
+              );
+              const authorPalette = getAvatarPalette(
+                post.authorId || authorNameResolved,
+                isDark,
+              );
+              const authorFailed = failedAvatarUids.has(post.authorId);
+
+              if (liveAuthorAvatar && !authorFailed) {
+                return (
+                  <Image
+                    source={{ uri: liveAuthorAvatar }}
+                    style={styles.fbPostAvatar}
+                    onError={() =>
+                      setFailedAvatarUids((prev) =>
+                        new Set(prev).add(post.authorId),
+                      )
+                    }
+                  />
+                );
+              }
+              return (
+                <View
                   style={[
-                    styles.fbPostAvatarInitials,
-                    { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                    styles.fbPostAvatarPlaceholder,
+                    { backgroundColor: authorPalette.bg },
                   ]}
                 >
-                  {authorNameResolved.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+                  <Text
+                    style={[
+                      styles.fbPostAvatarInitials,
+                      { color: authorPalette.text, fontWeight: "700" },
+                    ]}
+                  >
+                    {authorNameResolved.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              );
+            })()}
 
             <View style={styles.fbPostAuthorInfo}>
               <View style={styles.fbAuthorNameRow}>
@@ -846,25 +963,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
           {/* Right Action Menu */}
           <TouchableOpacity
-            onPress={() => {
-              if (isAuthor) {
-                Alert.alert("Post Options", "Manage your community post:", [
-                  {
-                    text: "Share",
-                    onPress: () => handleSharePost(post),
-                  },
-                  {
-                    text: "Delete Post",
-                    style: "destructive",
-                    onPress: () => handleDeletePost(post),
-                  },
-                  { text: "Cancel", style: "cancel" },
-                ]);
-              } else {
-                handleSharePost(post);
-              }
-            }}
+            onPress={() => setActivePostForMenu(post)}
             style={styles.fbMoreBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Feather
               name="more-horizontal"
@@ -1330,44 +1431,63 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 </TouchableOpacity>
 
                 {/* Portrait Picture / Avatar */}
-                <TouchableOpacity
-                  onPress={() =>
-                    handleOpenUserProfile({
-                      uid: member.uid,
-                      name: cleanName,
-                      avatar: member.avatar,
-                      email: member.email,
-                      role: member.role,
-                      householdName: member.householdName,
-                    })
-                  }
-                  activeOpacity={0.85}
-                  style={styles.pymkAvatarWrap}
-                >
-                  {member.avatar ? (
-                    <Image
-                      source={{ uri: member.avatar }}
-                      style={styles.pymkAvatar}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.pymkAvatarPlaceholder,
-                        { backgroundColor: isDark ? "#1E293B" : "#DBEAFE" },
-                      ]}
+                {(() => {
+                  const liveMemberAvatar = resolveMemberAvatar(
+                    member.uid,
+                    member.avatar,
+                  );
+                  const isMemberAvatarFailed = failedAvatarUids.has(member.uid);
+                  const memberPalette = getAvatarPalette(
+                    member.uid || cleanName,
+                    isDark,
+                  );
+
+                  return (
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleOpenUserProfile({
+                          uid: member.uid,
+                          name: cleanName,
+                          avatar: liveMemberAvatar,
+                          email: member.email,
+                          role: member.role,
+                          householdName: member.householdName,
+                        })
+                      }
+                      activeOpacity={0.85}
+                      style={styles.pymkAvatarWrap}
                     >
-                      <Text
-                        style={[
-                          styles.pymkInitial,
-                          { color: isDark ? "#93C5FD" : "#2563EB" },
-                        ]}
-                      >
-                        {cleanName.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
+                      {liveMemberAvatar && !isMemberAvatarFailed ? (
+                        <Image
+                          source={{ uri: liveMemberAvatar }}
+                          style={styles.pymkAvatar}
+                          resizeMode="cover"
+                          onError={() =>
+                            setFailedAvatarUids((prev) =>
+                              new Set(prev).add(member.uid),
+                            )
+                          }
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.pymkAvatarPlaceholder,
+                            { backgroundColor: memberPalette.bg },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.pymkInitial,
+                              { color: memberPalette.text, fontWeight: "700" },
+                            ]}
+                          >
+                            {cleanName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })()}
 
                 {/* Member Info */}
                 <View style={styles.pymkBody}>
@@ -1376,7 +1496,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                       handleOpenUserProfile({
                         uid: member.uid,
                         name: cleanName,
-                        avatar: member.avatar,
+                        avatar: resolveMemberAvatar(member.uid, member.avatar),
                         email: member.email,
                         role: member.role,
                         householdName: member.householdName,
@@ -1962,20 +2082,54 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                     <View style={styles.storyGradientOverlay} />
 
                     {/* Top-left Author Avatar with Blue Story Ring */}
-                    <View style={styles.storyRingWrapper}>
-                      {story.authorAvatar ? (
-                        <Image
-                          source={{ uri: story.authorAvatar }}
-                          style={styles.storyAuthorAvatar}
-                        />
-                      ) : (
-                        <View style={styles.storyAuthorAvatarPlaceholder}>
-                          <Text style={styles.storyAuthorInitial}>
-                            {story.authorName.charAt(0).toUpperCase()}
-                          </Text>
+                    {(() => {
+                      const liveStoryAvatar = resolveMemberAvatar(
+                        story.authorId,
+                        story.authorAvatar,
+                      );
+                      const isStoryAvatarFailed = failedAvatarUids.has(
+                        story.authorId,
+                      );
+                      const storyPalette = getAvatarPalette(
+                        story.authorId || story.authorName,
+                        isDark,
+                      );
+
+                      return (
+                        <View style={styles.storyRingWrapper}>
+                          {liveStoryAvatar && !isStoryAvatarFailed ? (
+                            <Image
+                              source={{ uri: liveStoryAvatar }}
+                              style={styles.storyAuthorAvatar}
+                              onError={() =>
+                                setFailedAvatarUids((prev) =>
+                                  new Set(prev).add(story.authorId),
+                                )
+                              }
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                styles.storyAuthorAvatarPlaceholder,
+                                { backgroundColor: storyPalette.bg },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.storyAuthorInitial,
+                                  {
+                                    color: storyPalette.text,
+                                    fontWeight: "700",
+                                  },
+                                ]}
+                              >
+                                {story.authorName.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
+                      );
+                    })()}
 
                     {/* Top-right menu trigger for own story */}
                     {isOwnStory && (
@@ -2451,6 +2605,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                         : f.senderAvatar;
                     const friendUid =
                       f.senderId === currentUid ? f.receiverId : f.senderId;
+                    const liveFriendAvatar = resolveMemberAvatar(
+                      friendUid,
+                      friendAvatar,
+                    );
+                    const isFriendAvatarFailed =
+                      failedAvatarUids.has(friendUid);
+                    const friendPalette = getAvatarPalette(
+                      friendUid || friendCleanName,
+                      isDark,
+                    );
 
                     return (
                       <View
@@ -2468,7 +2632,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                             handleOpenUserProfile({
                               uid: friendUid,
                               name: friendCleanName,
-                              avatar: friendAvatar,
+                              avatar: liveFriendAvatar,
                               email: friendEmail,
                               role: "Splitzy Friend",
                             })
@@ -2476,26 +2640,32 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                           activeOpacity={0.8}
                           style={styles.fbFriendRowAvatarWrap}
                         >
-                          {friendAvatar ? (
+                          {liveFriendAvatar && !isFriendAvatarFailed ? (
                             <Image
-                              source={{ uri: friendAvatar }}
+                              source={{ uri: liveFriendAvatar }}
                               style={styles.fbFriendRowAvatar}
+                              onError={() =>
+                                setFailedAvatarUids((prev) =>
+                                  new Set(prev).add(friendUid),
+                                )
+                              }
                             />
                           ) : (
                             <View
                               style={[
                                 styles.fbFriendRowAvatarPlaceholder,
                                 {
-                                  backgroundColor: isDark
-                                    ? "#334155"
-                                    : "#DBEAFE",
+                                  backgroundColor: friendPalette.bg,
                                 },
                               ]}
                             >
                               <Text
                                 style={[
                                   styles.fbFriendRowInitial,
-                                  { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                                  {
+                                    color: friendPalette.text,
+                                    fontWeight: "700",
+                                  },
                                 ]}
                               >
                                 {friendCleanName.charAt(0).toUpperCase()}
@@ -2573,7 +2743,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                   `Connection with ${friendCleanName}`,
                                   [
                                     {
-                                      text: "Remove Friend",
+                                      text: "Unfriend",
                                       style: "destructive",
                                       onPress: () => handleDeclineRequest(f.id),
                                     },
@@ -2669,6 +2839,18 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                           req.senderEmail,
                         );
 
+                        const liveReqAvatar = resolveMemberAvatar(
+                          req.senderId,
+                          req.senderAvatar,
+                        );
+                        const isReqAvatarFailed = failedAvatarUids.has(
+                          req.senderId,
+                        );
+                        const reqPalette = getAvatarPalette(
+                          req.senderId || senderCleanName,
+                          isDark,
+                        );
+
                         return (
                           <View
                             key={req.id}
@@ -2688,7 +2870,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                 handleOpenUserProfile({
                                   uid: req.senderId,
                                   name: senderCleanName,
-                                  avatar: req.senderAvatar,
+                                  avatar: liveReqAvatar,
                                   email: req.senderEmail,
                                   role: "Splitzy Resident",
                                 })
@@ -2696,19 +2878,22 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               activeOpacity={0.8}
                               style={styles.fbReqAvatarWrap}
                             >
-                              {req.senderAvatar ? (
+                              {liveReqAvatar && !isReqAvatarFailed ? (
                                 <Image
-                                  source={{ uri: req.senderAvatar }}
+                                  source={{ uri: liveReqAvatar }}
                                   style={styles.fbReqAvatar}
+                                  onError={() =>
+                                    setFailedAvatarUids((prev) =>
+                                      new Set(prev).add(req.senderId),
+                                    )
+                                  }
                                 />
                               ) : (
                                 <View
                                   style={[
                                     styles.fbReqAvatarPlaceholder,
                                     {
-                                      backgroundColor: isDark
-                                        ? "#334155"
-                                        : "#DBEAFE",
+                                      backgroundColor: reqPalette.bg,
                                     },
                                   ]}
                                 >
@@ -2716,7 +2901,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                     style={[
                                       styles.fbReqAvatarInitials,
                                       {
-                                        color: isDark ? "#94A3B8" : "#1D4ED8",
+                                        color: reqPalette.text,
+                                        fontWeight: "700",
                                       },
                                     ]}
                                   >
@@ -2734,7 +2920,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                     handleOpenUserProfile({
                                       uid: req.senderId,
                                       name: senderCleanName,
-                                      avatar: req.senderAvatar,
+                                      avatar: liveReqAvatar,
                                       email: req.senderEmail,
                                       role: "Splitzy Resident",
                                     })
@@ -2758,7 +2944,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                     { color: isDark ? "#94A3B8" : "#64748B" },
                                   ]}
                                 >
-                                  2d
+                                  {formatTimeAgo(req.createdAt) || "Recently"}
                                 </Text>
                               </View>
 
@@ -2769,7 +2955,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                 ]}
                                 numberOfLines={1}
                               >
-                                4 mutual friends • Roommate in Greenwood Villa
+                                {req.senderEmail
+                                  ? `Splitzy Member • ${req.senderEmail}`
+                                  : "Splitzy Member • Friend Request"}
                               </Text>
 
                               {/* Two Action Buttons: Confirm & Delete */}
@@ -2902,6 +3090,18 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                         member.email,
                       );
 
+                      const liveMemberAvatar = resolveMemberAvatar(
+                        member.uid,
+                        member.avatar,
+                      );
+                      const isMemberAvatarFailed = failedAvatarUids.has(
+                        member.uid,
+                      );
+                      const memberPalette = getAvatarPalette(
+                        member.uid || cleanMemberName,
+                        isDark,
+                      );
+
                       return (
                         <View
                           key={member.uid}
@@ -2919,7 +3119,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               handleOpenUserProfile({
                                 uid: member.uid,
                                 name: cleanMemberName,
-                                avatar: member.avatar,
+                                avatar: liveMemberAvatar,
                                 email: member.email,
                                 role: member.role,
                                 householdName: member.householdName,
@@ -2928,19 +3128,22 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                             activeOpacity={0.8}
                             style={styles.fbReqAvatarWrap}
                           >
-                            {member.avatar ? (
+                            {liveMemberAvatar && !isMemberAvatarFailed ? (
                               <Image
-                                source={{ uri: member.avatar }}
+                                source={{ uri: liveMemberAvatar }}
                                 style={styles.fbReqAvatar}
+                                onError={() =>
+                                  setFailedAvatarUids((prev) =>
+                                    new Set(prev).add(member.uid),
+                                  )
+                                }
                               />
                             ) : (
                               <View
                                 style={[
                                   styles.fbReqAvatarPlaceholder,
                                   {
-                                    backgroundColor: isDark
-                                      ? "#334155"
-                                      : "#DBEAFE",
+                                    backgroundColor: memberPalette.bg,
                                   },
                                 ]}
                               >
@@ -2948,7 +3151,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                   style={[
                                     styles.fbReqAvatarInitials,
                                     {
-                                      color: isDark ? "#94A3B8" : "#1D4ED8",
+                                      color: memberPalette.text,
+                                      fontWeight: "700",
                                     },
                                   ]}
                                 >
@@ -3087,6 +3291,370 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         onClose={() => setActivePostForComments(null)}
         currentUser={currentUser}
       />
+
+      {/* Post Options Bottom Sheet Modal */}
+      {activePostForMenu && (
+        <SmoothBottomSheetModal
+          visible={!!activePostForMenu}
+          onClose={() => setActivePostForMenu(null)}
+          title={
+            activePostForMenu.authorId === currentUid
+              ? "Manage Your Post"
+              : "Post Options"
+          }
+          subtitle={`${resolvePostAuthorName(activePostForMenu)} · ${formatTimeAgo(activePostForMenu.createdAt)}`}
+          icon={
+            <Ionicons
+              name="ellipsis-horizontal-circle-outline"
+              size={20}
+              color="#2563EB"
+            />
+          }
+          maxHeight="60%"
+          showChipBar={true}
+        >
+          <View
+            style={{
+              gap: 10,
+              paddingBottom: Math.max(28, insets.bottom + 16),
+            }}
+          >
+            {/* Share Post */}
+            <TouchableOpacity
+              style={[
+                styles.cardMenuItem,
+                { backgroundColor: isDark ? "#1E222B" : "#F8FAFC" },
+              ]}
+              onPress={() => {
+                const target = activePostForMenu;
+                setActivePostForMenu(null);
+                handleSharePost(target);
+              }}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.cardMenuIconWrap,
+                  { backgroundColor: isDark ? "#1E293B" : "#EFF6FF" },
+                ]}
+              >
+                <Feather name="share-2" size={18} color="#2563EB" />
+              </View>
+              <View style={styles.cardMenuItemBody}>
+                <Text
+                  style={[
+                    styles.cardMenuItemTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Share Post
+                </Text>
+                <Text
+                  style={[
+                    styles.cardMenuItemDesc,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Share via messaging or other apps
+                </Text>
+              </View>
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={isDark ? "#64748B" : "#94A3B8"}
+              />
+            </TouchableOpacity>
+
+            {/* Copy Post Text */}
+            {activePostForMenu.content ? (
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#1E222B" : "#F8FAFC" },
+                ]}
+                onPress={async () => {
+                  const content = activePostForMenu?.content || "";
+                  setActivePostForMenu(null);
+                  try {
+                    await Clipboard.setStringAsync(content);
+                    Alert.alert(
+                      "Copied to Clipboard",
+                      "Post text has been copied to your clipboard.",
+                    );
+                  } catch {
+                    Alert.alert("Post Text", content);
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#1E293B" : "#EFF6FF" },
+                  ]}
+                >
+                  <Feather name="copy" size={18} color="#2563EB" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    Copy Post Text
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    Copy text content to clipboard
+                  </Text>
+                </View>
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? "#64748B" : "#94A3B8"}
+                />
+              </TouchableOpacity>
+            ) : null}
+
+            {/* View Author Profile */}
+            <TouchableOpacity
+              style={[
+                styles.cardMenuItem,
+                { backgroundColor: isDark ? "#1E222B" : "#F8FAFC" },
+              ]}
+              onPress={() => {
+                const target = activePostForMenu;
+                setActivePostForMenu(null);
+                const liveAuthorAvatar = resolveMemberAvatar(
+                  target.authorId,
+                  target.authorAvatar,
+                );
+                handleOpenUserProfile({
+                  uid: target.authorId,
+                  name: resolvePostAuthorName(target),
+                  avatar: liveAuthorAvatar,
+                  email: target.authorEmail,
+                  role: target.authorRole,
+                  householdName: target.authorHouseholdName,
+                });
+              }}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.cardMenuIconWrap,
+                  { backgroundColor: isDark ? "#1E293B" : "#EFF6FF" },
+                ]}
+              >
+                <Feather name="user" size={18} color="#2563EB" />
+              </View>
+              <View style={styles.cardMenuItemBody}>
+                <Text
+                  style={[
+                    styles.cardMenuItemTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  {activePostForMenu.authorId === currentUid
+                    ? "View Your Profile"
+                    : `View ${resolvePostAuthorName(activePostForMenu)}'s Profile`}
+                </Text>
+                <Text
+                  style={[
+                    styles.cardMenuItemDesc,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  View mutual friends, posts, and details
+                </Text>
+              </View>
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={isDark ? "#64748B" : "#94A3B8"}
+              />
+            </TouchableOpacity>
+
+            {/* Hide Post (if not Author) */}
+            {activePostForMenu.authorId !== currentUid && (
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#1E222B" : "#F8FAFC" },
+                ]}
+                onPress={() => {
+                  const hidePostId = activePostForMenu?.id;
+                  setActivePostForMenu(null);
+                  if (hidePostId) {
+                    setPosts((prev) => prev.filter((p) => p.id !== hidePostId));
+                    Alert.alert(
+                      "Post Hidden",
+                      "You won't see this post in your feed anymore.",
+                    );
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" },
+                  ]}
+                >
+                  <Feather
+                    name="eye-off"
+                    size={18}
+                    color={isDark ? "#94A3B8" : "#64748B"}
+                  />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    Hide Post
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    See fewer posts like this in your feed
+                  </Text>
+                </View>
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? "#64748B" : "#94A3B8"}
+                />
+              </TouchableOpacity>
+            )}
+
+            {/* Delete Post (if Author) */}
+            {activePostForMenu.authorId === currentUid && (
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(239,68,68,0.12)"
+                      : "#FEF2F2",
+                    borderWidth: 1,
+                    borderColor: isDark ? "rgba(239,68,68,0.3)" : "#FCA5A5",
+                  },
+                ]}
+                onPress={() => {
+                  const target = activePostForMenu;
+                  setActivePostForMenu(null);
+                  Alert.alert(
+                    "Delete Post?",
+                    "Are you sure you want to permanently delete this post? This cannot be undone.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete",
+                        style: "destructive",
+                        onPress: () => handleDeletePost(target),
+                      },
+                    ],
+                  );
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(239,68,68,0.2)"
+                        : "#FEE2E2",
+                    },
+                  ]}
+                >
+                  <Feather name="trash-2" size={18} color="#EF4444" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: "#EF4444", fontWeight: "700" },
+                    ]}
+                  >
+                    Delete Post
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#FCA5A5" : "#DC2626" },
+                    ]}
+                  >
+                    Permanently remove this post
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#EF4444" />
+              </TouchableOpacity>
+            )}
+
+            {/* Report Post (if not Author) */}
+            {activePostForMenu.authorId !== currentUid && (
+              <TouchableOpacity
+                style={[
+                  styles.cardMenuItem,
+                  { backgroundColor: isDark ? "#1E222B" : "#F8FAFC" },
+                ]}
+                onPress={() => {
+                  setActivePostForMenu(null);
+                  Alert.alert(
+                    "Post Reported",
+                    "Thank you for letting us know. Our community team will review this post.",
+                  );
+                }}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cardMenuIconWrap,
+                    { backgroundColor: isDark ? "#1E293B" : "#FEF3C7" },
+                  ]}
+                >
+                  <Feather name="flag" size={18} color="#F59E0B" />
+                </View>
+                <View style={styles.cardMenuItemBody}>
+                  <Text
+                    style={[
+                      styles.cardMenuItemTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    Report Post
+                  </Text>
+                  <Text
+                    style={[
+                      styles.cardMenuItemDesc,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    Report inappropriate content or spam
+                  </Text>
+                </View>
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? "#64748B" : "#94A3B8"}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        </SmoothBottomSheetModal>
+      )}
 
       <CreateStoryModal
         visible={createStoryVisible}

@@ -1187,8 +1187,13 @@ class CommunityService {
         members.push({
           uid,
           name,
-          email,
-          avatar: data.profilePicture || data.photoURL || "",
+          avatar:
+            data.profilePicture ||
+            data.photoURL ||
+            data.avatar ||
+            data.profilePhoto ||
+            data.photo ||
+            "",
           role: data.role || "Member",
           householdName: data.householdName || "",
           friendshipStatus,

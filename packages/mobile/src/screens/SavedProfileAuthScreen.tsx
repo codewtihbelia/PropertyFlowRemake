@@ -599,7 +599,7 @@ export const SavedProfileAuthScreen: React.FC<SavedProfileAuthScreenProps> = ({
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
                 <Text style={styles.continuePrimaryBtnText}>
-                  {isPasswordExpanded ? "Sign In" : "Continue"}
+                  {isPasswordExpanded ? "Sign In" : "Use Password"}
                 </Text>
               )}
             </TouchableOpacity>
