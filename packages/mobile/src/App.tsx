@@ -43,6 +43,7 @@ import { NotificationsScreen } from "./screens/NotificationsScreen";
 import { TermsOfServiceScreen } from "./screens/TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "./screens/PrivacyPolicyScreen";
 import { CommunityScreen } from "./screens/CommunityScreen";
+import { SuperAdminHubScreen } from "./screens/SuperAdminHubScreen";
 import {
   registerForPushNotificationsAsync,
   setupNotificationChannelsAsync,
@@ -105,7 +106,8 @@ type OverlayScreen =
   | "payment_method_configuration"
   | "terms_of_service"
   | "privacy_policy"
-  | "community";
+  | "community"
+  | "super_admin_hub";
 
 interface NavItemConfig {
   key: MainTab;
@@ -543,7 +545,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     userProfile?.role === "SUPER_ADMIN" ||
     userProfile?.hostApplicationStatus === "APPROVED" ||
     currentUser.role === "HOST" ||
-    currentUser.role === "SUPER ADMIN",
+    currentUser.role === "SUPER ADMIN" ||
+    currentUser.role === "SUPER_ADMIN" ||
+    auth.currentUser?.email === "cebutitans07@gmail.com" ||
+    currentUser.email === "cebutitans07@gmail.com",
   );
 
   useEffect(() => {
@@ -1079,6 +1084,24 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return <PrivacyPolicyScreen onBack={() => setOverlayScreen("none")} />;
   }
 
+  if (overlayScreen === "super_admin_hub") {
+    return (
+      <SuperAdminHubScreen
+        onBack={() => setOverlayScreen("none")}
+        currentUser={{
+          name: currentUser.name,
+          email: currentUser.email,
+          role:
+            userProfile?.role ||
+            (currentUser.email === "cebutitans07@gmail.com" ||
+            auth.currentUser?.email === "cebutitans07@gmail.com"
+              ? "SUPER_ADMIN"
+              : currentUser.role),
+        }}
+      />
+    );
+  }
+
   if (overlayScreen === "community") {
     const rawName =
       userProfile?.displayName ||
@@ -1342,6 +1365,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
             onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
             onOpenCommunity={() => setOverlayScreen("community")}
+            onOpenSuperAdminHub={() => setOverlayScreen("super_admin_hub")}
             onSignOut={async () => {
               const savedUser = await authPinService.getLastPinUser();
               await performCleanSignOut();

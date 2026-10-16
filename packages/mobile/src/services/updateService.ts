@@ -41,16 +41,20 @@ class UpdateService {
       return;
     }
 
-    try {
-      const check = await updates.checkForUpdateAsync();
-      if (check.isAvailable) {
-        // Silently download the new JavaScript bundle and assets in the background
-        await updates.fetchUpdateAsync();
-        // The downloaded bundle will automatically be mounted on the user's next app start.
+    // Defer check by 6 seconds so initial splash, audio chime, and native boot settle cleanly
+    setTimeout(async () => {
+      try {
+        const check = await updates.checkForUpdateAsync();
+        if (check.isAvailable) {
+          // Silently download the new JavaScript bundle and assets in the background
+          await updates.fetchUpdateAsync();
+          // The downloaded bundle will automatically be mounted on the user's next app start.
+        }
+      } catch (err) {
+        // Network failure, concurrent check, or offline mode: silently ignore so user experience is uninterrupted
+        console.warn("[UpdateService] Background check notice:", err);
       }
-    } catch {
-      // Network failure or offline mode: silently ignore so user experience is uninterrupted
-    }
+    }, 6000);
   }
 
   /**

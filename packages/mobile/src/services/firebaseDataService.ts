@@ -13,6 +13,7 @@ import {
   orderBy,
   writeBatch,
   arrayUnion,
+  limit,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { updateProfile as updateAuthProfile } from "firebase/auth";
@@ -1709,6 +1710,416 @@ export const mobileDataService = {
     });
   },
 
+  // --- SUPER ADMIN GOVERNANCE SUITE ---
+  listenToHostApplications(callback: (apps: any[]) => void) {
+    const colRef = collection(db, "hostApplications");
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((d) => {
+          list.push(normalizeHostApplication(d.id, d.data()));
+        });
+        list.sort((a, b) =>
+          String(b.submittedAt || b.createdAt || "").localeCompare(
+            String(a.submittedAt || a.createdAt || ""),
+          ),
+        );
+        callback(list);
+      },
+      (err) => {
+        console.warn("[Firestore Mobile] listenToHostApplications error:", err);
+        callback([]);
+      },
+    );
+  },
+
+  async reviewHostApplication(
+    applicationId: string,
+    status: "APPROVED" | "REJECTED",
+    reviewNotes?: string,
+    reviewerName?: string,
+  ): Promise<void> {
+    const reviewerId = auth.currentUser?.uid || "super_admin";
+    const now = new Date().toISOString();
+
+    const appRef = doc(db, "hostApplications", applicationId);
+    const appSnap = await getDoc(appRef);
+    const appData = appSnap.exists() ? appSnap.data() : null;
+    const applicantUserId =
+      appData?.userId || applicationId.replace("host_app_", "");
+
+    const feedbackText =
+      reviewNotes ||
+      (status === "APPROVED"
+        ? "Application approved by Super Admin"
+        : "Application rejected by Super Admin");
+
+    await updateDoc(appRef, {
+      status,
+      reviewedBy: reviewerId,
+      reviewerName:
+        reviewerName || auth.currentUser?.displayName || "Super Admin",
+      reviewNotes: feedbackText,
+      adminFeedback: feedbackText,
+      reviewedAt: now,
+    });
+
+    if (status === "APPROVED") {
+      await updateDoc(doc(db, "users", applicantUserId), {
+        role: "HOST",
+        hostApplicationStatus: "APPROVED",
+        updatedDate: now,
+      });
+    } else {
+      await updateDoc(doc(db, "users", applicantUserId), {
+        hostApplicationStatus: "REJECTED",
+        updatedDate: now,
+      });
+    }
+
+    // Record audit log
+    await this.recordAdminAuditLog({
+      action:
+        status === "APPROVED"
+          ? "HOST_APPLICATION_APPROVE"
+          : "HOST_APPLICATION_REJECT",
+      entity: "host_application",
+      entityId: applicationId,
+      previousValue: { status: appData?.status || "PENDING" },
+      newValue: { status, reviewNotes: feedbackText },
+      reason: feedbackText,
+    });
+  },
+
+  listenToAllUsers(callback: (users: any[]) => void) {
+    const colRef = collection(db, "users");
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const users: any[] = [];
+        snapshot.forEach((d) => {
+          users.push({ uid: d.id, ...d.data() });
+        });
+        users.sort((a, b) =>
+          String(b.createdDate || "").localeCompare(
+            String(a.createdDate || ""),
+          ),
+        );
+        callback(users);
+      },
+      (err) => {
+        console.warn("[Firestore Mobile] listenToAllUsers error:", err);
+        callback([]);
+      },
+    );
+  },
+
+  async setUserAccountStatus(
+    userId: string,
+    status: "ACTIVE" | "INACTIVE" | "SUSPENDED",
+    reason?: string,
+  ): Promise<void> {
+    const userRef = doc(db, "users", userId);
+    const snap = await getDoc(userRef);
+    const prevStatus = snap.exists() ? snap.data().accountStatus : "ACTIVE";
+    const now = new Date().toISOString();
+
+    await updateDoc(userRef, {
+      accountStatus: status,
+      updatedDate: now,
+    });
+
+    await this.recordAdminAuditLog({
+      action: "USER_STATUS_CHANGE",
+      entity: "user",
+      entityId: userId,
+      previousValue: { status: prevStatus },
+      newValue: { status },
+      reason: reason || `Status set to ${status}`,
+    });
+  },
+
+  async updateUserRole(
+    userId: string,
+    role: "SUPER_ADMIN" | "HOST" | "PAYOR" | "NON_PAYOR",
+    reason?: string,
+  ): Promise<void> {
+    const userRef = doc(db, "users", userId);
+    const snap = await getDoc(userRef);
+    const prevRole = snap.exists() ? snap.data().role : "PAYOR";
+    const now = new Date().toISOString();
+
+    await updateDoc(userRef, {
+      role,
+      updatedDate: now,
+    });
+
+    await this.recordAdminAuditLog({
+      action: "USER_ROLE_CHANGE",
+      entity: "user",
+      entityId: userId,
+      previousValue: { role: prevRole },
+      newValue: { role },
+      reason: reason || `Role elevated/changed to ${role}`,
+    });
+  },
+
+  listenToAllHouseholds(callback: (households: any[]) => void) {
+    const colRef = collection(db, "households");
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((d) => {
+          list.push({ householdId: d.id, id: d.id, ...d.data() });
+        });
+        list.sort((a, b) =>
+          String(b.createdDate || "").localeCompare(
+            String(a.createdDate || ""),
+          ),
+        );
+        callback(list);
+      },
+      (err) => {
+        console.warn("[Firestore Mobile] listenToAllHouseholds error:", err);
+        callback([]);
+      },
+    );
+  },
+
+  async setHouseholdStatus(
+    householdId: string,
+    status: "ACTIVE" | "ARCHIVED",
+    reason?: string,
+  ): Promise<void> {
+    const ref = doc(db, "households", householdId);
+    const snap = await getDoc(ref);
+    const prevStatus = snap.exists() ? snap.data().status : "ACTIVE";
+    const now = new Date().toISOString();
+
+    await updateDoc(ref, {
+      status,
+      updatedDate: now,
+    });
+
+    await this.recordAdminAuditLog({
+      action: "HOUSEHOLD_STATUS_CHANGE",
+      entity: "household",
+      entityId: householdId,
+      previousValue: { status: prevStatus },
+      newValue: { status },
+      reason: reason || `Household status set to ${status}`,
+    });
+  },
+
+  async recordAdminAuditLog(data: {
+    action: string;
+    entity: string;
+    entityId: string;
+    previousValue?: any;
+    newValue?: any;
+    reason?: string;
+  }): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      const logId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const actorId = auth.currentUser?.uid || "super_admin";
+      const actorName =
+        auth.currentUser?.displayName ||
+        auth.currentUser?.email ||
+        "Super Admin";
+
+      await setDoc(doc(db, "auditLogs", logId), {
+        logId,
+        actorId,
+        actorName,
+        role: "SUPER_ADMIN",
+        action: data.action,
+        entity: data.entity,
+        entityId: data.entityId,
+        timestamp: now,
+        previousValue: data.previousValue || null,
+        newValue: data.newValue || null,
+        reason: data.reason || "",
+      });
+    } catch (err) {
+      console.warn("[Firestore Mobile] recordAdminAuditLog error:", err);
+    }
+  },
+
+  listenToAuditLogs(limitCount = 50, callback: (logs: any[]) => void) {
+    try {
+      const q = query(
+        collection(db, "auditLogs"),
+        orderBy("timestamp", "desc"),
+        limit(limitCount),
+      );
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const list: any[] = [];
+          snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+          callback(list);
+        },
+        (err) => {
+          console.warn("[Firestore Mobile] listenToAuditLogs error:", err);
+          callback([]);
+        },
+      );
+    } catch (err) {
+      console.warn("[Firestore Mobile] listenToAuditLogs query error:", err);
+      callback([]);
+      return () => undefined;
+    }
+  },
+
+  listenToPlatformSettings(callback: (settings: any) => void) {
+    const defaultSettings = {
+      maintenanceMode: false,
+      maintenanceMessage: "",
+      announcementBanner: "",
+      minSupportedVersion: "1.0.0",
+      latestVersion: "1.2.0",
+      forceUpdate: false,
+    };
+
+    let unsubSecondary: (() => void) | null = null;
+    let unsubPrimary: (() => void) | null = null;
+    let didSecondaryTrigger = false;
+
+    try {
+      const primaryRef = doc(db, "platform_settings", "global");
+      unsubPrimary = onSnapshot(
+        primaryRef,
+        (snap) => {
+          if (snap.exists()) {
+            callback(snap.data());
+          } else {
+            callback(defaultSettings);
+          }
+        },
+        (err) => {
+          // If primary path encountered permission-denied or error, fall back to systemSettings/platform
+          if (!didSecondaryTrigger) {
+            didSecondaryTrigger = true;
+            try {
+              const secondaryRef = doc(db, "systemSettings", "platform");
+              unsubSecondary = onSnapshot(
+                secondaryRef,
+                (snap2) => {
+                  if (snap2.exists()) {
+                    callback(snap2.data());
+                  } else {
+                    callback(defaultSettings);
+                  }
+                },
+                () => {
+                  // Fall back smoothly to defaults without error
+                  callback(defaultSettings);
+                },
+              );
+            } catch {
+              callback(defaultSettings);
+            }
+          }
+        },
+      );
+
+      return () => {
+        if (unsubPrimary) {
+          try {
+            unsubPrimary();
+          } catch {}
+        }
+        if (unsubSecondary) {
+          try {
+            unsubSecondary();
+          } catch {}
+        }
+      };
+    } catch {
+      callback(defaultSettings);
+      return () => undefined;
+    }
+  },
+
+  async updatePlatformSettings(settings: any): Promise<void> {
+    const now = new Date().toISOString();
+    const payload = {
+      ...settings,
+      updatedAt: now,
+      updatedBy: auth.currentUser?.uid || "super_admin",
+    };
+    try {
+      await setDoc(doc(db, "platform_settings", "global"), payload, {
+        merge: true,
+      });
+    } catch (e) {
+      console.warn(
+        "[updatePlatformSettings] platform_settings write fallback notice:",
+        e,
+      );
+    }
+    try {
+      await setDoc(doc(db, "systemSettings", "platform"), payload, {
+        merge: true,
+      });
+    } catch (e) {
+      console.warn(
+        "[updatePlatformSettings] systemSettings write fallback notice:",
+        e,
+      );
+    }
+    await this.recordAdminAuditLog({
+      action: "PLATFORM_SETTINGS_UPDATE",
+      entity: "platform_settings",
+      entityId: "global",
+      newValue: settings,
+      reason: "Updated system platform settings",
+    });
+  },
+
+  listenToSupportTickets(callback: (tickets: any[]) => void) {
+    const colRef = collection(db, "supportTickets");
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((d) => list.push({ ticketId: d.id, ...d.data() }));
+        list.sort((a, b) =>
+          String(b.createdDate || "").localeCompare(
+            String(a.createdDate || ""),
+          ),
+        );
+        callback(list);
+      },
+      (err) => {
+        console.warn("[Firestore Mobile] listenToSupportTickets error:", err);
+        callback([]);
+      },
+    );
+  },
+
+  async updateSupportTicketStatus(
+    ticketId: string,
+    status: string,
+  ): Promise<void> {
+    const ref = doc(db, "supportTickets", ticketId);
+    const now = new Date().toISOString();
+    await updateDoc(ref, {
+      status,
+      updatedDate: now,
+    });
+    await this.recordAdminAuditLog({
+      action: "SUPPORT_TICKET_STATUS_UPDATE",
+      entity: "support_ticket",
+      entityId: ticketId,
+      newValue: { status },
+      reason: `Support ticket status updated to ${status}`,
+    });
+  },
+
   // --- USER PROFILE ---
   async syncUserProfile(user: {
     uid: string;
@@ -1722,6 +2133,8 @@ export const mobileDataService = {
     const snap = await getDoc(userRef);
     const existing = snap.exists() ? snap.data() : {};
     const preservedRole =
+      user.email === "cebutitans07@gmail.com" ||
+      existing.email === "cebutitans07@gmail.com" ||
       existing.role === "SUPER_ADMIN"
         ? "SUPER_ADMIN"
         : existing.role === "HOST" ||
@@ -1762,6 +2175,13 @@ export const mobileDataService = {
       const snap = await getDoc(userRef);
       if (!snap.exists()) return null;
       const data = snap.data();
+
+      if (
+        data.email === "cebutitans07@gmail.com" ||
+        auth.currentUser?.email === "cebutitans07@gmail.com"
+      ) {
+        data.role = "SUPER_ADMIN";
+      }
 
       // Promote to HOST if user has approved host application
       if (
@@ -1868,72 +2288,112 @@ export const mobileDataService = {
   },
 
   listenToUserProfile(uid: string, callback: (data: any) => void) {
-    const userRef = doc(db, "users", uid);
-    return onSnapshot(
-      userRef,
-      async (snap) => {
-        if (!snap.exists()) {
-          callback(null);
-          return;
-        }
-        const data = snap.data();
-        if (
-          data.hostApplicationStatus === "APPROVED" &&
-          data.role !== "SUPER_ADMIN"
-        ) {
-          data.role = "HOST";
-        }
-        if (data.householdId) {
-          try {
-            const hhSnap = await getDoc(
-              doc(db, "households", data.householdId),
-            );
-            if (!hhSnap.exists()) {
-              // Household was deleted in Firestore
-              const isHost =
-                data.role === "HOST" ||
-                data.hostApplicationStatus === "APPROVED";
-              delete data.householdId;
-              delete data.householdName;
-              delete data.apartmentName;
-              if (isHost && data.role !== "SUPER_ADMIN") {
-                data.role = "HOST";
+    if (!uid || typeof uid !== "string" || !uid.trim()) {
+      callback(null);
+      return () => undefined;
+    }
+
+    const safeUid = uid.trim();
+    const userRef = doc(db, "users", safeUid);
+
+    // Provide cached profile immediately so UI is responsive
+    const cached = this.getCachedProfile(safeUid);
+    if (cached) {
+      callback(cached);
+    }
+
+    try {
+      return onSnapshot(
+        userRef,
+        async (snap) => {
+          if (!snap.exists()) {
+            callback(null);
+            return;
+          }
+          const data = snap.data();
+          if (
+            (data.email === "cebutitans07@gmail.com" ||
+              auth.currentUser?.email === "cebutitans07@gmail.com") &&
+            data.role !== "SUPER_ADMIN"
+          ) {
+            data.role = "SUPER_ADMIN";
+          }
+          if (
+            data.hostApplicationStatus === "APPROVED" &&
+            data.role !== "SUPER_ADMIN"
+          ) {
+            data.role = "HOST";
+          }
+          if (data.householdId) {
+            try {
+              const hhSnap = await getDoc(
+                doc(db, "households", data.householdId),
+              );
+              if (!hhSnap.exists()) {
+                // Household was deleted in Firestore
+                const isHost =
+                  data.role === "HOST" ||
+                  data.hostApplicationStatus === "APPROVED";
+                delete data.householdId;
+                delete data.householdName;
+                delete data.apartmentName;
+                if (isHost && data.role !== "SUPER_ADMIN") {
+                  data.role = "HOST";
+                }
+                updateDoc(userRef, {
+                  householdId: deleteField(),
+                  householdName: deleteField(),
+                  apartmentName: deleteField(),
+                  ...(isHost && data.role !== "SUPER_ADMIN"
+                    ? { role: "HOST" }
+                    : {}),
+                }).catch(() => {});
+              } else {
+                const hhData = hhSnap.data();
+                if (
+                  hhData &&
+                  hhData.hostId === safeUid &&
+                  data.role !== "SUPER_ADMIN"
+                ) {
+                  data.role = "HOST";
+                }
               }
-              updateDoc(userRef, {
-                householdId: deleteField(),
-                householdName: deleteField(),
-                apartmentName: deleteField(),
-                ...(isHost && data.role !== "SUPER_ADMIN"
-                  ? { role: "HOST" }
-                  : {}),
-              }).catch(() => {});
-            } else {
-              const hhData = hhSnap.data();
-              if (
-                hhData &&
-                hhData.hostId === uid &&
-                data.role !== "SUPER_ADMIN"
-              ) {
-                data.role = "HOST";
-              }
+            } catch {
+              // Ignore stale household lookup
             }
-          } catch (err) {
-            console.warn("[Firestore Mobile] Household check err:", err);
           }
-        }
-        _cachedUserProfile = data;
-        if (
-          data.readNotificationIdsV2 &&
-          typeof data.readNotificationIdsV2 === "object"
-        ) {
-          if (mergeUserReadMap(uid, data.readNotificationIdsV2)) {
-            notifyReadSubscribers(uid);
+          _cachedUserProfile = data;
+          if (
+            data.readNotificationIdsV2 &&
+            typeof data.readNotificationIdsV2 === "object"
+          ) {
+            if (mergeUserReadMap(safeUid, data.readNotificationIdsV2)) {
+              notifyReadSubscribers(safeUid);
+            }
           }
-        }
-        callback(data);
-      },
-      (err) => console.warn("[Firestore Mobile] listenToUserProfile:", err),
-    );
+          callback(data);
+        },
+        (err) => {
+          if (err?.code === "permission-denied") {
+            // Expected during sign out or before auth finishes restoring
+            if (!auth.currentUser) {
+              callback(null);
+              return;
+            }
+            // Serve fallback cached profile if available to avoid flashing
+            const fallback = this.getCachedProfile(safeUid);
+            if (fallback) {
+              callback(fallback);
+              return;
+            }
+          }
+          console.warn("[Firestore Mobile] listenToUserProfile:", err);
+        },
+      );
+    } catch (e) {
+      console.warn("[Firestore Mobile] listenToUserProfile setup notice:", e);
+      return () => undefined;
+    }
   },
 
   async ensureHostHousehold(uid: string, cachedProfile?: any): Promise<any> {

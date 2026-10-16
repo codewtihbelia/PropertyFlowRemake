@@ -13,8 +13,6 @@ import {
   useWindowDimensions,
   Image,
   Platform,
-  Animated,
-  Easing,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NavigationBar } from "../utils/safeNavigationBar";
@@ -30,20 +28,17 @@ import {
 } from "firebase/auth";
 import { mobileDataService } from "../services/firebaseDataService";
 import { assets } from "../../assets/assets";
-import { Feather, Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
-import { BlurView } from "expo-blur";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import Constants, { ExecutionEnvironment } from "expo-constants";
-import { authPinService, StoredPinUser } from "../services/authPinService";
+import { authPinService } from "../services/authPinService";
 
 // Complete any pending browser auth session callbacks immediately
 if (typeof WebBrowser.maybeCompleteAuthSession === "function") {
   WebBrowser.maybeCompleteAuthSession();
 }
-import { AuthPinScreen } from "./AuthPinScreen";
-import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { ForgotPasswordScreen } from "./ForgotPasswordScreen";
 import { EmailVerificationScreen } from "./EmailVerificationScreen";
 import { OtpVerificationScreen } from "./OtpVerificationScreen";

@@ -17,6 +17,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
+        request.auth.token.email == 'cebutitans07@gmail.com' ||
         request.auth.token.role == 'SUPER_ADMIN' ||
         (hasUserDoc() && 'role' in getUserData() && getUserData().role == 'SUPER_ADMIN')
       );
@@ -63,16 +64,10 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isUser(userId) || isSuperAdmin() || isAuthenticated();
-      allow create: if isAuthenticated() && (
-        isSuperAdmin() ||
-        request.auth.uid == userId
-      );
-      allow update: if isAuthenticated() && (
-        request.auth.uid == userId ||
-        isSuperAdmin() ||
-        (resource.data.pendingHouseholdId != null && isHouseholdHost(resource.data.pendingHouseholdId)) ||
-        (resource.data.householdId != null && isHouseholdHost(resource.data.householdId))
-      );
+      allow create: if isUser(userId) || isSuperAdmin();
+      allow update: if isUser(userId) || isSuperAdmin() ||
+        (isAuthenticated() && resource.data.pendingHouseholdId != null && isHouseholdHost(resource.data.pendingHouseholdId)) ||
+        (isAuthenticated() && resource.data.householdId != null && isHouseholdHost(resource.data.householdId));
       allow delete: if isSuperAdmin();
 
       match /devices/{deviceId} {
@@ -257,16 +252,20 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && (
         resource.data.recipientId == request.auth.uid ||
+        resource.data.recipientId == ('mem_' + request.auth.uid) ||
         resource.data.recipientId == 'ALL'
       );
-      allow create: if isAuthenticated() && (
-        request.resource.data.recipientId == request.auth.uid ||
-        (request.resource.data.householdId != null && isHouseholdMember(request.resource.data.householdId)) ||
-        isHost(request.resource.data.householdId) ||
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        resource.data.recipientId == request.auth.uid ||
+        resource.data.recipientId == ('mem_' + request.auth.uid) ||
         isSuperAdmin()
       );
-      allow update: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
+      allow delete: if isAuthenticated() && (
+        resource.data.recipientId == request.auth.uid ||
+        resource.data.recipientId == ('mem_' + request.auth.uid) ||
+        isSuperAdmin()
+      );
     }
 
     // Conversations & Messages
@@ -291,9 +290,9 @@ service cloud.firestore {
 
     // Support Tickets
     match /supportTickets/{ticketId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid ||
-        isSuperAdmin()
+      allow read: if isSuperAdmin() || (
+        isAuthenticated() &&
+        resource.data.userId == request.auth.uid
       );
       allow create: if isAuthenticated();
       allow update: if isSuperAdmin() || (
@@ -315,11 +314,16 @@ service cloud.firestore {
     // Audit Logs (Immutable)
     match /auditLogs/{logId} {
       allow read: if isSuperAdmin() || (isAuthenticated() && resource.data.householdId != null && isHouseholdMember(resource.data.householdId));
-      allow create: if isHost(request.resource.data.householdId) || isSuperAdmin();
+      allow create: if isSuperAdmin() || (isAuthenticated() && request.resource.data.householdId != null && isHost(request.resource.data.householdId));
       allow update, delete: if false; // Strict immutability
     }
 
-    // System Settings
+    // Platform Settings & System Settings
+    match /platform_settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
     match /systemSettings/{settingId} {
       allow read: if true;
       allow write: if isSuperAdmin();
@@ -343,14 +347,19 @@ service cloud.firestore {
     // Splitzy Community Friendships & Social Connections
     match /communityFriendships/{friendshipId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow create: if isAuthenticated();
       allow update: if isAuthenticated() && (
         resource.data.senderId == request.auth.uid ||
-        resource.data.receiverId == request.auth.uid
+        resource.data.senderId == ('mem_' + request.auth.uid) ||
+        resource.data.receiverId == request.auth.uid ||
+        resource.data.receiverId == ('mem_' + request.auth.uid) ||
+        isSuperAdmin()
       );
       allow delete: if isAuthenticated() && (
         resource.data.senderId == request.auth.uid ||
+        resource.data.senderId == ('mem_' + request.auth.uid) ||
         resource.data.receiverId == request.auth.uid ||
+        resource.data.receiverId == ('mem_' + request.auth.uid) ||
         isSuperAdmin()
       );
     }

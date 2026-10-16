@@ -36,6 +36,7 @@ interface ProfileScreenProps {
   onOpenReports?: () => void;
   onOpenOnboarding?: () => void;
   onOpenHostApplication?: () => void;
+  onOpenSuperAdminHub?: () => void;
   onOpenTermsOfService?: () => void;
   onOpenPrivacyPolicy?: () => void;
   onOpenCommunity?: () => void;
@@ -50,6 +51,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenReports,
   onOpenOnboarding,
   onOpenHostApplication,
+  onOpenSuperAdminHub,
   onOpenTermsOfService,
   onOpenPrivacyPolicy,
   onOpenCommunity,
@@ -169,6 +171,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     profile?.hostApplicationStatus === "APPROVED" ||
     (household && household.hostId === firebaseUser?.uid) ||
     currentUser.role === "HOST",
+  );
+
+  const isSuperAdmin = Boolean(
+    profile?.role === "SUPER_ADMIN" ||
+    currentUser.role === "SUPER_ADMIN" ||
+    cachedProfile?.role === "SUPER_ADMIN" ||
+    firebaseUser?.email === "cebutitans07@gmail.com" ||
+    currentUser.email === "cebutitans07@gmail.com" ||
+    profile?.email === "cebutitans07@gmail.com",
   );
 
   const displayName =
@@ -2074,6 +2085,85 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     ]}
                   >
                     Request Super Admin approval to create spaces
+                  </Text>
+                </View>
+                <Feather
+                  name="chevron-right"
+                  size={18}
+                  color={isDark ? colors.textMuted : "#CBD5E1"}
+                />
+              </TouchableOpacity>
+            </>
+          )}
+
+          {isSuperAdmin && (
+            <>
+              <View
+                style={[
+                  styles.itemDivider,
+                  isDark && { backgroundColor: colors.borderSubtle },
+                ]}
+              />
+              <TouchableOpacity
+                style={styles.cardItemRow}
+                onPress={onOpenSuperAdminHub}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.itemIconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(225, 29, 72, 0.15)"
+                        : "#FFF1F2",
+                    },
+                  ]}
+                >
+                  <Ionicons name="shield-checkmark" size={18} color="#E11D48" />
+                </View>
+                <View style={styles.itemContent}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.itemTitle,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      Super Admin Hub
+                    </Text>
+                    <View
+                      style={{
+                        backgroundColor: "rgba(225, 29, 72, 0.12)",
+                        paddingHorizontal: 6,
+                        paddingVertical: 1,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 9,
+                          fontWeight: "800",
+                          color: "#E11D48",
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        PLATFORM
+                      </Text>
+                    </View>
+                  </View>
+                  <Text
+                    style={[
+                      styles.itemSubtitle,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Host approvals, users, groups & maintenance
                   </Text>
                 </View>
                 <Feather

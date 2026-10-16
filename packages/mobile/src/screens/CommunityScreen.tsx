@@ -48,9 +48,19 @@ import { CreateStoryModal } from "../components/CreateStoryModal";
 import { StoryViewerModal } from "../components/StoryViewerModal";
 import { EditStoryModal } from "../components/EditStoryModal";
 import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
-import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
-import * as Clipboard from "expo-clipboard";
+import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+
+const safeCopyTextAsync = async (text: string): Promise<boolean> => {
+  try {
+    const Clipboard = require("expo-clipboard");
+    if (Clipboard?.setStringAsync) {
+      await Clipboard.setStringAsync(text);
+      return true;
+    }
+  } catch {}
+  return false;
+};
 
 const AVATAR_PALETTES = [
   { bg: "#EFF6FF", text: "#2563EB", darkBg: "#1E293B", darkText: "#60A5FA" },
@@ -3560,13 +3570,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 onPress={async () => {
                   const content = activePostForMenu?.content || "";
                   setActivePostForMenu(null);
-                  try {
-                    await Clipboard.setStringAsync(content);
+                  const copied = await safeCopyTextAsync(content);
+                  if (copied) {
                     Alert.alert(
                       "Copied to Clipboard",
                       "Post text has been copied to your clipboard.",
                     );
-                  } catch {
+                  } else {
                     Alert.alert("Post Text", content);
                   }
                 }}
