@@ -92,7 +92,6 @@ function getCategoryVisuals(category: NotificationCategory, isDark = false) {
         ),
       };
     case "group_invite":
-    default:
       return {
         bgColor: isDark ? "rgba(147, 51, 234, 0.2)" : "#F3E8FF",
         icon: (
@@ -100,6 +99,18 @@ function getCategoryVisuals(category: NotificationCategory, isDark = false) {
             name="people-outline"
             size={22}
             color={isDark ? "#C084FC" : "#9333EA"}
+          />
+        ),
+      };
+    case "announcement":
+    default:
+      return {
+        bgColor: isDark ? "rgba(37, 99, 235, 0.22)" : "#DBEAFE",
+        icon: (
+          <Ionicons
+            name="megaphone-outline"
+            size={21}
+            color={isDark ? "#60A5FA" : "#2563EB"}
           />
         ),
       };

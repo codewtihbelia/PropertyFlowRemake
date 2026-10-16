@@ -38,6 +38,7 @@ import {
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { getCategoryMeta } from "../services/categoryService";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { GlobalAnnouncementBannerModal } from "../components/GlobalAnnoucementBannerModal";
 import { useTheme } from "../context/ThemeContext";
 import { walletService } from "../services/walletService";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1440,6 +1441,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         backgroundColor="transparent"
       />
 
+      {/* Global Top-down Slide and Fade Announcement Modal */}
+      <GlobalAnnouncementBannerModal
+        onOpenNotifications={onOpenNotifications}
+        onNavigate={onNavigate}
+      />
+
       <Animated.View
         style={{
           flex: 1,
@@ -1562,7 +1569,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               styles.scrollContent,
               {
                 paddingTop: 10,
-                paddingBottom: Math.max(120, insets.bottom + 95),
+                paddingBottom: Math.max(40, insets.bottom + 45),
               },
             ]}
             showsVerticalScrollIndicator={false}

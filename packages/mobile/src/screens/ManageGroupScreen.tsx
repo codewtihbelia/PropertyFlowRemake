@@ -2527,6 +2527,7 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
               style={[
                 styles.primaryPillBtn,
                 isDark && { backgroundColor: colors.primary },
+                { marginBottom: 10 },
               ]}
               onPress={handleUpdateGroup}
             >
@@ -6754,7 +6755,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
     borderRadius: 25,
     paddingVertical: 14,
-    marginBottom: 20,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",

@@ -31,7 +31,8 @@ export type NotificationCategory =
   | "expense_added"
   | "payment_received"
   | "water_calculated"
-  | "group_invite";
+  | "group_invite"
+  | "announcement";
 
 export interface NotificationTextSpan {
   text: string;
@@ -535,7 +536,13 @@ export function buildRealNotificationsList(params: {
 
   // 6. Direct Standalone Cloud Notifications from Firestore `notifications` collection
   cloudNotifications.forEach((cn) => {
-    if (effectiveUid && cn.recipientId && cn.recipientId !== effectiveUid) {
+    if (
+      effectiveUid &&
+      cn.recipientId &&
+      cn.recipientId !== effectiveUid &&
+      cn.recipientId !== "ALL" &&
+      !cn.isBroadcast
+    ) {
       return;
     }
     const docId = cn.id || cn.notificationId;
@@ -548,7 +555,15 @@ export function buildRealNotificationsList(params: {
     let category: NotificationCategory = cn.category || "reminder";
     let actionTarget: MobileNotificationItem["actionTarget"] = "bills";
 
-    if (cn.type === "FRIEND_REQUEST") {
+    if (
+      cn.type === "ANNOUNCEMENT" ||
+      cn.type === "BROADCAST" ||
+      cn.category === "announcement" ||
+      cn.isBroadcast
+    ) {
+      category = "announcement";
+      actionTarget = cn.actionTarget || "announcement";
+    } else if (cn.type === "FRIEND_REQUEST") {
       category = "group_invite";
       actionTarget = "community";
     } else if (
@@ -2077,6 +2092,177 @@ export const mobileDataService = {
       entityId: "global",
       newValue: settings,
       reason: "Updated system platform settings",
+    });
+  },
+
+  async broadcastAnnouncement(data: {
+    id?: string;
+    title: string;
+    message: string;
+    priority?: "INFO" | "ALERT" | "UPDATE" | "EVENT";
+    actionLabel?: string;
+    actionTarget?: string;
+    expiresAt?: string;
+    isActive?: boolean;
+  }): Promise<string> {
+    const now = new Date().toISOString();
+    const id = data.id || `ann_${Date.now()}`;
+    const payload = {
+      id,
+      title: data.title.trim(),
+      message: data.message.trim(),
+      priority: data.priority || "INFO",
+      actionLabel: data.actionLabel?.trim() || "",
+      actionTarget: data.actionTarget?.trim() || "notifications",
+      createdAt: now,
+      updatedAt: now,
+      createdBy: auth.currentUser?.uid || "super_admin",
+      authorName: auth.currentUser?.displayName || "Super Admin",
+      isActive: data.isActive !== false,
+      expiresAt: data.expiresAt || null,
+    };
+
+    // 1. Write to systemAnnouncements collection
+    try {
+      await setDoc(doc(db, "systemAnnouncements", id), payload, {
+        merge: true,
+      });
+    } catch (e) {
+      console.warn(
+        "[broadcastAnnouncement] systemAnnouncements write warning:",
+        e,
+      );
+    }
+
+    // 2. Sync to platform_settings/global so clients get instant real-time event
+    try {
+      await setDoc(
+        doc(db, "platform_settings", "global"),
+        {
+          announcementBanner: payload.message,
+          latestAnnouncement: payload,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    } catch (e) {
+      console.warn(
+        "[broadcastAnnouncement] platform_settings fallback notice:",
+        e,
+      );
+    }
+
+    // 3. Post a broadcast notification doc so all user notification inboxes get the item permanently
+    try {
+      await setDoc(
+        doc(db, "notifications", `broadcast_${id}`),
+        {
+          id: `broadcast_${id}`,
+          notificationId: `broadcast_${id}`,
+          recipientId: "ALL",
+          isBroadcast: true,
+          type: "ANNOUNCEMENT",
+          category: "announcement",
+          title: payload.title,
+          message: payload.message,
+          relatedItemId: id,
+          priority: payload.priority,
+          actionLabel: payload.actionLabel,
+          actionTarget: payload.actionTarget,
+          createdTimestamp: now,
+          data: { announcementId: id, ...payload },
+        },
+        { merge: true },
+      );
+    } catch (e) {
+      console.warn(
+        "[broadcastAnnouncement] broadcast notification write warning:",
+        e,
+      );
+    }
+
+    // 4. Log to audit logs
+    await this.recordAdminAuditLog({
+      action: "BROADCAST_ANNOUNCEMENT",
+      entity: "systemAnnouncements",
+      entityId: id,
+      newValue: payload,
+      reason: `Broadcasted announcement: ${payload.title}`,
+    });
+
+    return id;
+  },
+
+  listenToSystemAnnouncements(callback: (announcements: any[]) => void) {
+    try {
+      const colRef = collection(db, "systemAnnouncements");
+      return onSnapshot(
+        colRef,
+        (snap) => {
+          const list: any[] = [];
+          snap.forEach((d) => {
+            list.push({ id: d.id, ...d.data() });
+          });
+          list.sort((a, b) =>
+            String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
+          );
+          callback(list);
+        },
+        (err) => {
+          console.warn(
+            "[Firestore Mobile] listenToSystemAnnouncements warning:",
+            err,
+          );
+          callback([]);
+        },
+      );
+    } catch {
+      callback([]);
+      return () => {};
+    }
+  },
+
+  async deleteSystemAnnouncement(announcementId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, "systemAnnouncements", announcementId));
+    } catch (e) {
+      console.warn(
+        "[deleteSystemAnnouncement] systemAnnouncements delete notice:",
+        e,
+      );
+    }
+    try {
+      await deleteDoc(doc(db, "notifications", `broadcast_${announcementId}`));
+    } catch {}
+
+    await this.recordAdminAuditLog({
+      action: "DELETE_ANNOUNCEMENT",
+      entity: "systemAnnouncements",
+      entityId: announcementId,
+      reason: `Deleted announcement ${announcementId}`,
+    });
+  },
+
+  async toggleSystemAnnouncementActive(
+    announcementId: string,
+    isActive: boolean,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await updateDoc(doc(db, "systemAnnouncements", announcementId), {
+        isActive,
+        updatedAt: now,
+      });
+    } catch (e) {
+      console.warn("[toggleSystemAnnouncementActive] notice:", e);
+    }
+
+    await this.recordAdminAuditLog({
+      action: "TOGGLE_ANNOUNCEMENT_STATUS",
+      entity: "systemAnnouncements",
+      entityId: announcementId,
+      newValue: { isActive },
+      reason: `Set announcement active=${isActive}`,
     });
   },
 
@@ -6458,56 +6644,79 @@ export const mobileDataService = {
     }
     const q = query(
       collection(db, "notifications"),
-      where("recipientId", "==", userId),
+      where("recipientId", "in", [userId, "ALL"]),
     );
-    return onSnapshot(
-      q,
-      (snap) => {
-        const list: any[] = [];
-        let readUpdated = false;
-        const userMap = getUserReadMap(userId);
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.recipientId && data.recipientId !== userId) return;
-          const docId = d.id || data.notificationId;
-          list.push({ id: docId, ...data });
-          if (data.readStatus === true && data.readByRecipientId === userId) {
-            const scopedDocKey = getScopedNotificationReadKey(userId, docId);
-            if (scopedDocKey && !userMap[scopedDocKey]) {
-              userMap[scopedDocKey] = true;
+
+    const handleSnapshot = (snap: any) => {
+      const list: any[] = [];
+      let readUpdated = false;
+      const userMap = getUserReadMap(userId);
+      snap.forEach((d: any) => {
+        const data = d.data();
+        if (
+          data.recipientId &&
+          data.recipientId !== userId &&
+          data.recipientId !== "ALL" &&
+          !data.isBroadcast
+        ) {
+          return;
+        }
+        const docId = d.id || data.notificationId;
+        list.push({ id: docId, ...data });
+        if (data.readStatus === true && data.readByRecipientId === userId) {
+          const scopedDocKey = getScopedNotificationReadKey(userId, docId);
+          if (scopedDocKey && !userMap[scopedDocKey]) {
+            userMap[scopedDocKey] = true;
+            readUpdated = true;
+          }
+          if (data.relatedItemId) {
+            const scopedItemKey = getScopedNotificationReadKey(
+              userId,
+              data.relatedItemId,
+            );
+            if (scopedItemKey && !userMap[scopedItemKey]) {
+              userMap[scopedItemKey] = true;
               readUpdated = true;
             }
-            if (data.relatedItemId) {
-              const scopedItemKey = getScopedNotificationReadKey(
-                userId,
-                data.relatedItemId,
-              );
-              if (scopedItemKey && !userMap[scopedItemKey]) {
-                userMap[scopedItemKey] = true;
-                readUpdated = true;
-              }
-            }
           }
-        });
-        if (readUpdated) {
-          notifyReadSubscribers(userId);
-          AsyncStorage.setItem(
-            getReadNotificationsStorageKey(userId),
-            JSON.stringify(userMap),
-          ).catch(() => {});
         }
-        list.sort((a, b) =>
-          String(b.createdTimestamp || "").localeCompare(
-            String(a.createdTimestamp || ""),
-          ),
+      });
+      if (readUpdated) {
+        notifyReadSubscribers(userId);
+        AsyncStorage.setItem(
+          getReadNotificationsStorageKey(userId),
+          JSON.stringify(userMap),
+        ).catch(() => {});
+      }
+      list.sort((a, b) =>
+        String(b.createdTimestamp || "").localeCompare(
+          String(a.createdTimestamp || ""),
+        ),
+      );
+      callback(list);
+    };
+
+    try {
+      return onSnapshot(q, handleSnapshot, (err) => {
+        // If 'in' query encounters index constraint, fallback to standard direct query
+        console.warn(
+          "[Firestore Mobile] listenToNotifications fallback query notice:",
+          err?.message || err,
         );
-        callback(list);
-      },
-      (err) => {
-        console.warn("[Firestore Mobile] listenToNotifications:", err);
-        callback([]);
-      },
-    );
+        try {
+          const fallbackQ = query(
+            collection(db, "notifications"),
+            where("recipientId", "==", userId),
+          );
+          return onSnapshot(fallbackQ, handleSnapshot, () => callback([]));
+        } catch {
+          callback([]);
+        }
+      });
+    } catch {
+      callback([]);
+      return () => {};
+    }
   },
 
   listenToReadNotificationIds(
@@ -6591,6 +6800,7 @@ export const mobileDataService = {
           payment_received: "PAYMENT_SUBMITTED",
           water_calculated: "ATTENDANCE_UPDATED",
           group_invite: "INVITATION_RECEIVED",
+          announcement: "SYSTEM_BROADCAST",
         };
         setDoc(
           doc(db, "notifications", perUserDocId),

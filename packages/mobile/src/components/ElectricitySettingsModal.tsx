@@ -181,7 +181,7 @@ export const ElectricitySettingsModal: React.FC<
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(10, insets.bottom + 20) },
+          { paddingBottom: Math.max(2, insets.bottom + 2) },
         ]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}
@@ -454,7 +454,6 @@ export const ElectricitySettingsModal: React.FC<
 const styles = StyleSheet.create({
   scrollBody: {
     paddingTop: 6,
-    paddingBottom: 18,
   },
   readingsRow: {
     flexDirection: "row",

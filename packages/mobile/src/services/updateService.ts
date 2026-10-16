@@ -22,13 +22,15 @@ function getUpdatesModule(): SafeUpdatesModule | null {
 
 class UpdateService {
   private hasChecked = false;
+  private isFetching = false;
 
   /**
    * Initializes silent background update check on app launch.
    * Runs non-blockingly without delaying splash screen or UI interaction.
+   * Includes concurrency guard and timeout to avoid hanging or corrupted downloads.
    */
   public async initBackgroundUpdateCheck(): Promise<void> {
-    if (this.hasChecked) return;
+    if (this.hasChecked || this.isFetching) return;
     this.hasChecked = true;
 
     // Updates are only active in published standalone/preview/production builds
@@ -41,20 +43,36 @@ class UpdateService {
       return;
     }
 
-    // Defer check by 6 seconds so initial splash, audio chime, and native boot settle cleanly
+    // Defer check by 8 seconds so initial splash, audio chime, and native boot settle cleanly
     setTimeout(async () => {
+      if (this.isFetching) return;
+      this.isFetching = true;
+
       try {
         const check = await updates.checkForUpdateAsync();
         if (check.isAvailable) {
-          // Silently download the new JavaScript bundle and assets in the background
-          await updates.fetchUpdateAsync();
-          // The downloaded bundle will automatically be mounted on the user's next app start.
+          // Wrap fetch in a timeout so poor connections don't hang indefinitely or corrupt bundles
+          const fetchPromise = updates.fetchUpdateAsync();
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Update fetch timeout (25s)")),
+              25000,
+            ),
+          );
+
+          await Promise.race([fetchPromise, timeoutPromise]);
+          // The downloaded bundle will cleanly mount on the user's next app start.
         }
-      } catch (err) {
-        // Network failure, concurrent check, or offline mode: silently ignore so user experience is uninterrupted
-        console.warn("[UpdateService] Background check notice:", err);
+      } catch (err: any) {
+        // Network timeout, offline mode, or concurrent fetch: silently ignore so user experience is uninterrupted
+        console.warn(
+          "[UpdateService] Background update check notice:",
+          err?.message || err,
+        );
+      } finally {
+        this.isFetching = false;
       }
-    }, 6000);
+    }, 8000);
   }
 
   /**
@@ -63,6 +81,7 @@ class UpdateService {
   public async checkForUpdateManually(): Promise<{
     available: boolean;
     manifest?: any;
+    error?: string;
   }> {
     if (__DEV__) {
       return { available: false };
@@ -70,18 +89,41 @@ class UpdateService {
 
     const updates = getUpdatesModule();
     if (!updates || !updates.isEnabled) {
-      return { available: false };
+      return {
+        available: false,
+        error: "Updates not enabled in current environment",
+      };
     }
 
+    if (this.isFetching) {
+      return {
+        available: false,
+        error: "An update is currently being downloaded",
+      };
+    }
+
+    this.isFetching = true;
     try {
       const check = await updates.checkForUpdateAsync();
       if (check.isAvailable) {
-        await updates.fetchUpdateAsync();
+        const fetchPromise = updates.fetchUpdateAsync();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Download timed out (30s)")),
+            30000,
+          ),
+        );
+        await Promise.race([fetchPromise, timeoutPromise]);
         return { available: true, manifest: check.manifest };
       }
       return { available: false };
-    } catch {
-      return { available: false };
+    } catch (err: any) {
+      return {
+        available: false,
+        error: err?.message || "Failed to download update",
+      };
+    } finally {
+      this.isFetching = false;
     }
   }
 
@@ -91,7 +133,11 @@ class UpdateService {
   public async applyUpdateNow(): Promise<void> {
     const updates = getUpdatesModule();
     if (updates && updates.isEnabled) {
-      await updates.reloadAsync();
+      try {
+        await updates.reloadAsync();
+      } catch (e) {
+        console.warn("[UpdateService] Reload warning:", e);
+      }
     }
   }
 }

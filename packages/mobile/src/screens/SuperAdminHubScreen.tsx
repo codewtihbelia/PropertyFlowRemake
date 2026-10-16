@@ -1984,7 +1984,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             viewStyles.subTabBtn,
             subTab === "SETTINGS" && [
               viewStyles.subTabBtnActive,
-              { borderBottomColor: "#E11D48" },
+              { borderBottomColor: "#2563EB" },
             ],
           ]}
           onPress={() => setSubTab("SETTINGS")}
@@ -1993,7 +1993,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             name="sliders"
             size={13}
             color={
-              subTab === "SETTINGS" ? "#E11D48" : isDark ? "#94A3B8" : "#64748B"
+              subTab === "SETTINGS" ? "#2563EB" : isDark ? "#94A3B8" : "#64748B"
             }
           />
           <Text
@@ -2020,7 +2020,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             viewStyles.subTabBtn,
             subTab === "AUDIT_LOGS" && [
               viewStyles.subTabBtnActive,
-              { borderBottomColor: "#E11D48" },
+              { borderBottomColor: "#2563EB" },
             ],
           ]}
           onPress={() => setSubTab("AUDIT_LOGS")}
@@ -2030,7 +2030,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             size={13}
             color={
               subTab === "AUDIT_LOGS"
-                ? "#E11D48"
+                ? "#2563EB"
                 : isDark
                   ? "#94A3B8"
                   : "#64748B"
@@ -2060,7 +2060,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             viewStyles.subTabBtn,
             subTab === "TICKETS" && [
               viewStyles.subTabBtnActive,
-              { borderBottomColor: "#E11D48" },
+              { borderBottomColor: "#2563EB" },
             ],
           ]}
           onPress={() => setSubTab("TICKETS")}
@@ -2069,7 +2069,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
             name="help-circle"
             size={13}
             color={
-              subTab === "TICKETS" ? "#E11D48" : isDark ? "#94A3B8" : "#64748B"
+              subTab === "TICKETS" ? "#2563EB" : isDark ? "#94A3B8" : "#64748B"
             }
           />
           <Text
@@ -2356,7 +2356,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
 
           {/* Save Button */}
           <TouchableOpacity
-            style={[viewStyles.saveBtn, { backgroundColor: "#E11D48" }]}
+            style={[viewStyles.saveBtn, { backgroundColor: "#2563EB" }]}
             onPress={handleSavePlatformSettings}
             disabled={savingSettings}
             activeOpacity={0.8}
@@ -2421,7 +2421,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
           >
             {loadingLogs ? (
               <View style={viewStyles.emptyCard}>
-                <ActivityIndicator size="small" color="#E11D48" />
+                <ActivityIndicator size="small" color="#2563EB" />
                 <Text
                   style={[
                     viewStyles.emptySubtitle,
@@ -2794,7 +2794,7 @@ export const SuperAdminHubScreen: React.FC<SuperAdminHubScreenProps> = ({
           <View>
             <View style={styles.headerBadgeRow}>
               <View style={styles.superBadge}>
-                <Ionicons name="shield-checkmark" size={11} color="#E11D48" />
+                <Ionicons name="shield-checkmark" size={11} color="#2563EB" />
                 <Text style={styles.superBadgeText}>SUPER ADMIN</Text>
               </View>
               <Text
@@ -2858,7 +2858,7 @@ export const SuperAdminHubScreen: React.FC<SuperAdminHubScreenProps> = ({
                 backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
                 borderColor:
                   activeTab === "host_reviews"
-                    ? "#E11D48"
+                    ? "#2563EB"
                     : isDark
                       ? "#334155"
                       : "#E2E8F0",
@@ -3198,7 +3198,7 @@ export const SuperAdminHubScreen: React.FC<SuperAdminHubScreenProps> = ({
       <View style={styles.contentBody}>
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#E11D48" />
+            <ActivityIndicator size="large" color="#2563EB" />
             <Text
               style={[
                 styles.loadingText,
@@ -3270,7 +3270,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
-    backgroundColor: "rgba(225, 29, 72, 0.12)",
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
     paddingHorizontal: 6,
     paddingVertical: 1.5,
     borderRadius: 6,
@@ -3278,7 +3278,7 @@ const styles = StyleSheet.create({
   superBadgeText: {
     fontSize: 9,
     fontWeight: "800",
-    color: "#E11D48",
+    color: "#2563EB",
     letterSpacing: 0.5,
   },
   headerSubtitle: {

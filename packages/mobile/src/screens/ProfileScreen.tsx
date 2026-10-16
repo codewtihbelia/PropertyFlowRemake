@@ -663,7 +663,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(120, insets.bottom + 95) },
+          { paddingBottom: Math.max(40, insets.bottom + 45) },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

@@ -134,7 +134,6 @@ function getCategoryMetaVisuals(
         ),
       };
     case "group_invite":
-    default:
       return {
         bgColor: isDark ? "rgba(147, 51, 234, 0.2)" : "#F3E8FF",
         accentColor: isDark ? "#C084FC" : "#9333EA",
@@ -149,6 +148,25 @@ function getCategoryMetaVisuals(
             name="people-outline"
             size={28}
             color={isDark ? "#C084FC" : "#9333EA"}
+          />
+        ),
+      };
+    case "announcement":
+    default:
+      return {
+        bgColor: isDark ? "rgba(37, 99, 235, 0.22)" : "#DBEAFE",
+        accentColor: isDark ? "#60A5FA" : "#2563EB",
+        badgeBg: isDark ? "rgba(37, 99, 235, 0.15)" : "#EFF6FF",
+        badgeBorder: isDark ? "rgba(37, 99, 235, 0.3)" : "#BFDBFE",
+        badgeText: isDark ? "#60A5FA" : "#1D4ED8",
+        label: "Super Admin Broadcast",
+        actionLabel: "View Announcement",
+        actionIcon: "volume-2" as const,
+        icon: (
+          <Ionicons
+            name="megaphone-outline"
+            size={28}
+            color={isDark ? "#60A5FA" : "#2563EB"}
           />
         ),
       };
@@ -1467,6 +1485,130 @@ export const NotificationDetailsScreen: React.FC<
           </View>
         )}
 
+        {/* Contextual Details for Global Broadcast Announcement */}
+        {(notification.category === "announcement" ||
+          notification.actionTarget === "announcement") && (
+          <View
+            style={[
+              styles.sectionCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.sectionHeaderRow}>
+              <Text
+                style={[styles.sectionTitle, isDark && { color: colors.text }]}
+              >
+                Broadcast Information
+              </Text>
+              <View
+                style={[
+                  styles.statusTag,
+                  styles.statusTagInfo,
+                  isDark && {
+                    backgroundColor: "rgba(37, 99, 235, 0.16)",
+                    borderColor: "rgba(37, 99, 235, 0.35)",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusTagText,
+                    styles.statusTagTextInfo,
+                    isDark && { color: "#60A5FA" },
+                  ]}
+                >
+                  OFFICIAL NOTICE
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.infoRow,
+                isDark && { borderBottomColor: colors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.infoLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Source
+              </Text>
+              <Text
+                style={[styles.infoValue, isDark && { color: colors.text }]}
+              >
+                Splitzy Platform Administration
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.infoRow,
+                isDark && { borderBottomColor: colors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.infoLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Audience
+              </Text>
+              <Text
+                style={[styles.infoValue, isDark && { color: colors.text }]}
+              >
+                All Residents & Household Members
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.infoRow,
+                isDark && { borderBottomColor: colors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.infoLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Delivery Mode
+              </Text>
+              <Text
+                style={[styles.infoValue, isDark && { color: colors.text }]}
+              >
+                HomeScreen Slide-Down & Notification Tray
+              </Text>
+            </View>
+
+            <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+              <Text
+                style={[
+                  styles.infoLabel,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                Broadcast Status
+              </Text>
+              <Text
+                style={[
+                  styles.infoValue,
+                  { color: isDark ? colors.success : "#10B981" },
+                ]}
+              >
+                Active & Archived
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Cloud Notification Record Metadata */}
         <View
           style={[
@@ -1493,10 +1635,14 @@ export const NotificationDetailsScreen: React.FC<
                 isDark && { color: colors.textSecondary },
               ]}
             >
-              Household
+              {notification.category === "announcement"
+                ? "Broadcast Scope"
+                : "Household"}
             </Text>
             <Text style={[styles.infoValue, isDark && { color: colors.text }]}>
-              {groupName}
+              {notification.category === "announcement"
+                ? "Global (All Households)"
+                : groupName}
             </Text>
           </View>
 

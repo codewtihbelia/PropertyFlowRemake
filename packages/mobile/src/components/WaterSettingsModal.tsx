@@ -170,7 +170,7 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(10, insets.bottom + 20) },
+          { paddingBottom: Math.max(2, insets.bottom + 2) },
         ]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}
