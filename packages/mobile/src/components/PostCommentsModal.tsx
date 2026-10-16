@@ -208,9 +208,10 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
             styles.container,
             {
               backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              height: keyboardHeight > 0 ? "52%" : "82%",
               marginBottom:
                 Platform.OS === "android" && keyboardHeight > 0
-                  ? keyboardHeight
+                  ? Math.max(keyboardHeight, 320) + Math.max(insets.bottom, 28)
                   : 0,
             },
           ]}
@@ -466,7 +467,7 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
                 borderTopColor: isDark ? "#334155" : "#E2E8F0",
                 backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
                 paddingBottom:
-                  keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 14),
+                  keyboardHeight > 0 ? 12 : Math.max(insets.bottom, 14),
               },
             ]}
           >

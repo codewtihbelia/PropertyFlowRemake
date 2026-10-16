@@ -49,6 +49,7 @@ import { StoryViewerModal } from "../components/StoryViewerModal";
 import { EditStoryModal } from "../components/EditStoryModal";
 import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
 import * as Clipboard from "expo-clipboard";
 
 const AVATAR_PALETTES = [
@@ -82,10 +83,11 @@ function getAvatarPalette(str: string, isDark: boolean) {
 export { FB_6_REACTIONS };
 
 export interface CommunityInitialTarget {
-  type?: "post" | "story" | "comment" | "reaction" | string;
+  type?: "post" | "story" | "comment" | "reaction" | "friend_request" | string;
   postId?: string;
   storyId?: string;
   commentId?: string;
+  senderId?: string;
 }
 
 interface CommunityScreenProps {
@@ -169,6 +171,20 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
   // Friendships & Discovery states
   const [friendships, setFriendships] = useState<CommunityFriendship[]>([]);
+  const [allAcceptedFriendships, setAllAcceptedFriendships] = useState<
+    CommunityFriendship[]
+  >([]);
+  const [imageViewerConfig, setImageViewerConfig] = useState<{
+    visible: boolean;
+    images: string[];
+    initialIndex: number;
+    authorName?: string;
+    caption?: string;
+  }>({
+    visible: false,
+    images: [],
+    initialIndex: 0,
+  });
   const [networkSubTab, setNetworkSubTab] = useState<
     "discover" | "requests" | "friends"
   >("discover");
@@ -231,6 +247,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     });
     return () => unsub();
   }, [currentUid]);
+
+  // Subscribe to all accepted friendships to compute real deduplicated mutual friends
+  useEffect(() => {
+    const unsub = communityService.subscribeAllAcceptedFriendships((list) => {
+      setAllAcceptedFriendships(list);
+    });
+    return () => unsub();
+  }, []);
 
   // Load members for People You May Know & Discovery
   const loadMembers = useCallback(async () => {
@@ -347,6 +371,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         }
         if (onClearInitialTarget) onClearInitialTarget();
       }
+    } else if (
+      initialTarget.type === "friend_request" ||
+      (initialTarget as any).senderId
+    ) {
+      handledInitialTargetRef.current = targetKey;
+      setActiveMainTab("network");
+      setFriendsFilter("all");
+      if (onClearInitialTarget) onClearInitialTarget();
     }
   }, [initialTarget, displayStories, posts, onClearInitialTarget]);
 
@@ -615,13 +647,121 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     }
   };
 
-  // Send friend request
+  // Dynamically compute real mutual friend count between current user and target user
+  const computeMutualFriendsCount = useCallback(
+    (targetUid?: string) => {
+      if (!currentUid || !targetUid) return 0;
+      const cleanTarget = String(targetUid).replace(/^mem_/, "").trim();
+      const cleanCur = String(currentUid).replace(/^mem_/, "").trim();
+      if (!cleanTarget || !cleanCur || cleanTarget === cleanCur) return 0;
+
+      // Unique friends of current user
+      const myFriends = new Set<string>();
+      const addIfFriend = (
+        set: Set<string>,
+        user: string,
+        f: CommunityFriendship,
+      ) => {
+        const s = String(f.senderId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        const r = String(f.receiverId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        if (s === user && r && r !== user) set.add(r);
+        if (r === user && s && s !== user) set.add(s);
+      };
+
+      allAcceptedFriendships.forEach((f) =>
+        addIfFriend(myFriends, cleanCur, f),
+      );
+      acceptedFriends.forEach((f) => addIfFriend(myFriends, cleanCur, f));
+
+      // Unique friends of target user
+      const targetFriends = new Set<string>();
+      allAcceptedFriendships.forEach((f) =>
+        addIfFriend(targetFriends, cleanTarget, f),
+      );
+
+      let count = 0;
+      myFriends.forEach((fid) => {
+        if (targetFriends.has(fid)) count++;
+      });
+      return count;
+    },
+    [currentUid, allAcceptedFriendships, acceptedFriends],
+  );
+
+  const formatFriendSubtitle = useCallback(
+    (targetUid: string, householdName?: string) => {
+      const mutualCount = computeMutualFriendsCount(targetUid);
+      if (mutualCount > 0) {
+        return `Splitzy Friend • ${mutualCount} mutual friend${mutualCount === 1 ? "" : "s"}`;
+      }
+      if (householdName) {
+        return `Splitzy Friend • ${householdName}`;
+      }
+      return "Splitzy Friend • Roommate in Splitzy";
+    },
+    [computeMutualFriendsCount],
+  );
+
+  const formatPymkSubtitle = useCallback(
+    (targetUid: string, householdName?: string) => {
+      const mutualCount = computeMutualFriendsCount(targetUid);
+      if (mutualCount > 0) {
+        return `${mutualCount} mutual friend${mutualCount === 1 ? "" : "s"} • Splitzy Resident`;
+      }
+      return householdName
+        ? `${householdName} • Splitzy Resident`
+        : "Suggested for you • Splitzy Resident";
+    },
+    [computeMutualFriendsCount],
+  );
+
+  // Send friend request with instant optimistic UI update on first tap
   const handleSendFriendRequest = async (member: CommunityMember) => {
+    const rawSenderId = auth.currentUser?.uid || currentUid;
+    const cleanSender = String(rawSenderId).replace(/^mem_/, "").trim();
+    const cleanReceiver = String(member.uid).replace(/^mem_/, "").trim();
+    if (!cleanSender || !cleanReceiver || cleanSender === cleanReceiver) return;
+
+    const pairKey = [cleanSender, cleanReceiver].sort().join("_");
+    const friendshipDocId = `friendship_${pairKey}`;
+
+    // 1. Instant optimistic state update on the first tap: disables button and shows "Requested"
+    setDiscoveredMembers((prev) =>
+      prev.map((m) => {
+        const mClean = String(m.uid).replace(/^mem_/, "").trim();
+        if (mClean === cleanReceiver) {
+          return {
+            ...m,
+            friendshipStatus: "pending_sent",
+            friendshipId: friendshipDocId,
+          };
+        }
+        return m;
+      }),
+    );
+
+    setSelectedProfileUser((prev) => {
+      if (!prev) return null;
+      const pClean = String(prev.uid).replace(/^mem_/, "").trim();
+      if (pClean === cleanReceiver) {
+        return {
+          ...prev,
+          friendshipStatus: "pending_sent",
+          friendshipId: friendshipDocId,
+        };
+      }
+      return prev;
+    });
+
     try {
       setProcessingActionId(member.uid);
       await communityService.sendFriendRequest(
         {
-          uid: member.uid,
+          uid: cleanReceiver,
           name: member.name,
           avatar: member.avatar,
           email: member.email,
@@ -632,8 +772,22 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           email: currentUser.email || auth.currentUser?.email,
         },
       );
-      await loadMembers();
     } catch (err: any) {
+      console.warn("Failed to send friend request:", err);
+      // Revert optimistic update on network failure
+      setDiscoveredMembers((prev) =>
+        prev.map((m) => {
+          const mClean = String(m.uid).replace(/^mem_/, "").trim();
+          if (mClean === cleanReceiver) {
+            return {
+              ...m,
+              friendshipStatus: "none",
+              friendshipId: undefined,
+            };
+          }
+          return m;
+        }),
+      );
       Alert.alert("Error", err?.message || "Could not send friend request.");
     } finally {
       setProcessingActionId(null);
@@ -987,24 +1141,51 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           </Text>
         ) : null}
 
-        {/* Full-width Media Grid (Facebook style) */}
+        {/* Full-width Media Grid (Facebook style with Lightbox Viewer) */}
         {post.images && post.images.length > 0 && (
           <View style={styles.fbImagesContainer}>
             {post.images.length === 1 ? (
-              <Image
-                source={{ uri: post.images[0] }}
-                style={styles.fbSingleImage}
-                resizeMode="cover"
-              />
+              <TouchableOpacity
+                activeOpacity={0.92}
+                onPress={() =>
+                  setImageViewerConfig({
+                    visible: true,
+                    images: post.images,
+                    initialIndex: 0,
+                    authorName: resolvePostAuthorName(post),
+                    caption: post.content,
+                  })
+                }
+              >
+                <Image
+                  source={{ uri: post.images[0] }}
+                  style={styles.fbSingleImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
             ) : (
               <View style={styles.fbMultiImageGrid}>
                 {post.images.map((imgUri, idx) => (
-                  <Image
+                  <TouchableOpacity
                     key={idx}
-                    source={{ uri: imgUri }}
-                    style={styles.fbGridImage}
-                    resizeMode="cover"
-                  />
+                    activeOpacity={0.92}
+                    style={{ flex: 1 }}
+                    onPress={() =>
+                      setImageViewerConfig({
+                        visible: true,
+                        images: post.images,
+                        initialIndex: idx,
+                        authorName: resolvePostAuthorName(post),
+                        caption: post.content,
+                      })
+                    }
+                  >
+                    <Image
+                      source={{ uri: imgUri }}
+                      style={styles.fbGridImage}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
@@ -1593,6 +1774,19 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           currentUser={currentUser}
           posts={posts}
           onSendFriendRequest={async (user) => {
+            // Immediate optimistic UI update on first tap
+            setSelectedProfileUser((prev) =>
+              prev ? { ...prev, friendshipStatus: "pending_sent" } : null,
+            );
+            setDiscoveredMembers((prev) =>
+              prev.map((m) => {
+                const cleanM = String(m.uid).replace(/^mem_/, "").trim();
+                const cleanU = String(user.uid).replace(/^mem_/, "").trim();
+                return cleanM === cleanU
+                  ? { ...m, friendshipStatus: "pending_sent" }
+                  : m;
+              }),
+            );
             await communityService.sendFriendRequest(
               {
                 uid: user.uid,
@@ -1605,16 +1799,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 avatar: currentAvatar,
                 email: currentUser.email || auth.currentUser?.email,
               },
-            );
-            setSelectedProfileUser((prev) =>
-              prev ? { ...prev, friendshipStatus: "pending_sent" } : null,
-            );
-            setDiscoveredMembers((prev) =>
-              prev.map((m) =>
-                m.uid === user.uid
-                  ? { ...m, friendshipStatus: "pending_sent" }
-                  : m,
-              ),
             );
           }}
           onAcceptFriendRequest={async (friendshipId) => {
@@ -2703,7 +2887,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               { color: isDark ? "#94A3B8" : "#64748B" },
                             ]}
                           >
-                            Splitzy Friend • 4 mutual friends
+                            {formatFriendSubtitle(friendUid)}
                           </Text>
 
                           <View style={styles.fbFriendRowActions}>
@@ -2743,7 +2927,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                   `Connection with ${friendCleanName}`,
                                   [
                                     {
-                                      text: "Unfriend",
+                                      text: "Remove Friend",
                                       style: "destructive",
                                       onPress: () => handleDeclineRequest(f.id),
                                     },
@@ -3195,9 +3379,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               ]}
                               numberOfLines={1}
                             >
-                              {member.householdName
-                                ? `${member.householdName} • 6 mutual friends`
-                                : "6 mutual friends • Splitzy Resident"}
+                              {formatPymkSubtitle(
+                                member.uid,
+                                member.householdName,
+                              )}
                             </Text>
 
                             {/* Two Action Buttons: Add Friend & Remove */}
@@ -4100,6 +4285,18 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Fullscreen Image Lightbox Modal for all feed post media */}
+      <FullScreenImageViewerModal
+        visible={imageViewerConfig.visible}
+        images={imageViewerConfig.images}
+        initialIndex={imageViewerConfig.initialIndex}
+        authorName={imageViewerConfig.authorName}
+        caption={imageViewerConfig.caption}
+        onClose={() =>
+          setImageViewerConfig((prev) => ({ ...prev, visible: false }))
+        }
+      />
     </SafeAreaView>
   );
 };

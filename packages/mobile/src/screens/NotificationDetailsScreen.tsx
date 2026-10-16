@@ -38,7 +38,28 @@ export interface NotificationDetailsScreenProps {
 function getCategoryMetaVisuals(
   category: NotificationCategory,
   isDark = false,
+  actionTarget?: string,
 ) {
+  if (actionTarget === "community") {
+    return {
+      bgColor: isDark ? "rgba(147, 51, 234, 0.2)" : "#F3E8FF",
+      accentColor: isDark ? "#C084FC" : "#9333EA",
+      badgeBg: isDark ? "rgba(147, 51, 234, 0.15)" : "#FAF5FF",
+      badgeBorder: isDark ? "rgba(147, 51, 234, 0.3)" : "#E9D5FF",
+      badgeText: isDark ? "#C084FC" : "#7E22CE",
+      label: "Community",
+      actionLabel: "View in Community",
+      actionIcon: "users" as const,
+      icon: (
+        <Ionicons
+          name="people-outline"
+          size={28}
+          color={isDark ? "#C084FC" : "#9333EA"}
+        />
+      ),
+    };
+  }
+
   switch (category) {
     case "reminder":
       return {
@@ -176,7 +197,11 @@ export const NotificationDetailsScreen: React.FC<
 }) => {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const visuals = getCategoryMetaVisuals(notification.category, isDark);
+  const visuals = getCategoryMetaVisuals(
+    notification.category,
+    isDark,
+    notification.actionTarget,
+  );
 
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,

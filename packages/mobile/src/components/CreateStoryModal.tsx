@@ -181,7 +181,7 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
               backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
               marginBottom:
                 Platform.OS === "android" && keyboardHeight > 0
-                  ? keyboardHeight
+                  ? Math.max(keyboardHeight, 320) + Math.max(insets.bottom, 28)
                   : 0,
             },
           ]}

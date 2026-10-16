@@ -14,7 +14,10 @@ import {
   limit,
 } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
-import { pushDispatchService } from "./pushDispatchService";
+import {
+  pushDispatchService,
+  PushDispatchService,
+} from "./pushDispatchService";
 
 export type CommunityCategory =
   | "all"
@@ -429,10 +432,12 @@ class CommunityService {
           authorName: cleanAuthorName,
           caption: params.caption,
         })
-        .catch((e) =>
+        .catch((e: unknown) =>
           console.warn("[CommunityService] push error on story:", e),
         );
-    } catch {}
+    } catch (e: unknown) {
+      console.warn("[CommunityService] push dispatch exception on story:", e);
+    }
 
     return newDocRef.id;
   }
@@ -632,10 +637,12 @@ class CommunityService {
           content: params.content.trim(),
           category: params.category,
         })
-        .catch((e) =>
+        .catch((e: unknown) =>
           console.warn("[CommunityService] push error on post:", e),
         );
-    } catch {}
+    } catch (e: unknown) {
+      console.warn("[CommunityService] push dispatch exception on post:", e);
+    }
 
     return newDocRef.id;
   }
@@ -709,7 +716,7 @@ class CommunityService {
                   reactionType: reaction,
                   postSnippet: postData?.content,
                 })
-                .catch((e) =>
+                .catch((e: unknown) =>
                   console.warn("[CommunityService] push error on reaction:", e),
                 );
             }
@@ -825,7 +832,7 @@ class CommunityService {
                 commentText: commentData.content,
                 postSnippet: postData?.content,
               })
-              .catch((e) =>
+              .catch((e: unknown) =>
                 console.warn("[CommunityService] push error on comment:", e),
               );
           }
@@ -899,14 +906,39 @@ class CommunityService {
     let receivedList: CommunityFriendship[] = [];
 
     const notify = () => {
-      const map = new Map<string, CommunityFriendship>();
-      sentList.forEach((f) => map.set(f.id, f));
-      receivedList.forEach((f) => map.set(f.id, f));
-      callback(Array.from(map.values()));
+      // Deduplicate by normalized pairKey: [sender, receiver].sort().join("_")
+      const pairMap = new Map<string, CommunityFriendship>();
+      // Order descending by updatedAt/createdAt so latest state takes precedence
+      const all = [...sentList, ...receivedList].sort((a, b) =>
+        (b.updatedAt || b.createdAt || "").localeCompare(
+          a.updatedAt || a.createdAt || "",
+        ),
+      );
+      for (const f of all) {
+        const cleanSender = String(f.senderId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        const cleanReceiver = String(f.receiverId || "")
+          .replace(/^mem_/, "")
+          .trim();
+        const pairKey = [cleanSender, cleanReceiver].sort().join("_");
+        if (pairKey && !pairMap.has(pairKey)) {
+          pairMap.set(pairKey, {
+            ...f,
+            senderId: cleanSender,
+            receiverId: cleanReceiver,
+          });
+        }
+      }
+      callback(Array.from(pairMap.values()));
     };
 
+    const cleanUserId = String(userId || "")
+      .replace(/^mem_/, "")
+      .trim();
+
     const unsubSent = onSnapshot(
-      qSent,
+      query(friendshipsRef, where("senderId", "==", cleanUserId)),
       (snapshot) => {
         sentList = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -918,7 +950,7 @@ class CommunityService {
     );
 
     const unsubReceived = onSnapshot(
-      qReceived,
+      query(friendshipsRef, where("receiverId", "==", cleanUserId)),
       (snapshot) => {
         receivedList = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -936,28 +968,32 @@ class CommunityService {
   }
 
   /**
-   * Send a friend request to another Splitzy user.
+   * Send a friend request to another Splitzy user with deterministic document ID and push dispatch.
    */
   async sendFriendRequest(
     receiver: { uid: string; name: string; avatar?: string; email?: string },
     sender: { name: string; avatar?: string; email?: string },
   ): Promise<string> {
-    const currentUid = auth.currentUser?.uid;
-    if (!currentUid)
+    const rawSenderId = auth.currentUser?.uid;
+    if (!rawSenderId)
       throw new Error("Must be logged in to send friend request.");
-    if (currentUid === receiver.uid)
+    const cleanSenderId = String(rawSenderId).replace(/^mem_/, "").trim();
+    const cleanReceiverId = String(receiver.uid).replace(/^mem_/, "").trim();
+    if (cleanSenderId === cleanReceiverId)
       throw new Error("Cannot add yourself as a friend.");
 
-    const friendshipRef = doc(collection(db, "communityFriendships"));
+    const pairKey = [cleanSenderId, cleanReceiverId].sort().join("_");
+    const friendshipDocId = `friendship_${pairKey}`;
+    const friendshipRef = doc(db, "communityFriendships", friendshipDocId);
     const now = new Date().toISOString();
 
     const friendshipData: CommunityFriendship = {
-      id: friendshipRef.id,
-      senderId: currentUid,
+      id: friendshipDocId,
+      senderId: cleanSenderId,
       senderName: sender.name || auth.currentUser?.displayName || "Resident",
       senderAvatar: sender.avatar || auth.currentUser?.photoURL || "",
       senderEmail: sender.email || auth.currentUser?.email || "",
-      receiverId: receiver.uid,
+      receiverId: cleanReceiverId,
       receiverName: receiver.name || "Splitzer",
       receiverAvatar: receiver.avatar || "",
       receiverEmail: receiver.email || "",
@@ -966,8 +1002,25 @@ class CommunityService {
       updatedAt: now,
     };
 
-    await setDoc(friendshipRef, friendshipData);
-    return friendshipRef.id;
+    await setDoc(friendshipRef, friendshipData, { merge: true });
+
+    // Asynchronously dispatch friend request push notification and log to notifications collection
+    try {
+      pushDispatchService
+        .sendFriendRequestPush({
+          senderId: cleanSenderId,
+          senderName: friendshipData.senderName,
+          senderAvatar: friendshipData.senderAvatar,
+          receiverId: cleanReceiverId,
+        })
+        .catch((e: unknown) =>
+          console.warn("[CommunityService] push error on friend request:", e),
+        );
+    } catch (e: unknown) {
+      console.warn("[CommunityService] push error on friend request:", e);
+    }
+
+    return friendshipDocId;
   }
 
   /**
@@ -1061,15 +1114,16 @@ class CommunityService {
       return () => {};
     }
 
+    const cleanUserId = String(userId).replace(/^mem_/, "").trim();
     const friendshipsRef = collection(db, "communityFriendships");
     const qSent = query(
       friendshipsRef,
-      where("senderId", "==", userId),
+      where("senderId", "==", cleanUserId),
       where("status", "==", "accepted"),
     );
     const qReceived = query(
       friendshipsRef,
-      where("receiverId", "==", userId),
+      where("receiverId", "==", cleanUserId),
       where("status", "==", "accepted"),
     );
 
@@ -1079,7 +1133,12 @@ class CommunityService {
     const notify = () => {
       const mergedMap = new Map<string, CommunityMember>();
       for (const f of [...sentFriends, ...receivedFriends]) {
-        mergedMap.set(f.uid, f);
+        const cleanUid = String(f.uid || "")
+          .replace(/^mem_/, "")
+          .trim();
+        if (cleanUid && cleanUid !== cleanUserId && !mergedMap.has(cleanUid)) {
+          mergedMap.set(cleanUid, { ...f, uid: cleanUid });
+        }
       }
       callback(Array.from(mergedMap.values()));
     };
@@ -1089,8 +1148,11 @@ class CommunityService {
       (snapshot) => {
         sentFriends = snapshot.docs.map((docSnap) => {
           const d = docSnap.data() as CommunityFriendship;
+          const targetUid = String(d.receiverId || "")
+            .replace(/^mem_/, "")
+            .trim();
           return {
-            uid: d.receiverId,
+            uid: targetUid,
             name: d.receiverName || "Splitzer",
             avatar: d.receiverAvatar || "",
             email: d.receiverEmail || "",
@@ -1108,8 +1170,11 @@ class CommunityService {
       (snapshot) => {
         receivedFriends = snapshot.docs.map((docSnap) => {
           const d = docSnap.data() as CommunityFriendship;
+          const targetUid = String(d.senderId || "")
+            .replace(/^mem_/, "")
+            .trim();
           return {
-            uid: d.senderId,
+            uid: targetUid,
             name: d.senderName || "Resident",
             avatar: d.senderAvatar || "",
             email: d.senderEmail || "",
@@ -1130,6 +1195,50 @@ class CommunityService {
   }
 
   /**
+   * Listen to all accepted friendships across the community to compute accurate real mutual friends.
+   */
+  subscribeAllAcceptedFriendships(
+    callback: (friendships: CommunityFriendship[]) => void,
+  ): () => void {
+    const friendshipsRef = collection(db, "communityFriendships");
+    const q = query(
+      friendshipsRef,
+      where("status", "==", "accepted"),
+      limit(500),
+    );
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const pairMap = new Map<string, CommunityFriendship>();
+        snapshot.docs.forEach((docSnap) => {
+          const d = docSnap.data() as CommunityFriendship;
+          const cleanSender = String(d.senderId || "")
+            .replace(/^mem_/, "")
+            .trim();
+          const cleanReceiver = String(d.receiverId || "")
+            .replace(/^mem_/, "")
+            .trim();
+          const pairKey = [cleanSender, cleanReceiver].sort().join("_");
+          if (pairKey && !pairMap.has(pairKey)) {
+            pairMap.set(pairKey, {
+              ...d,
+              id: docSnap.id,
+              senderId: cleanSender,
+              receiverId: cleanReceiver,
+            });
+          }
+        });
+        callback(Array.from(pairMap.values()));
+      },
+      (err) =>
+        console.warn(
+          "[CommunityService] subscribeAllAcceptedFriendships error:",
+          err,
+        ),
+    );
+  }
+
+  /**
    * Discover and search users across the app from Firestore.
    * Only returns real registered users from Firestore without mock data.
    */
@@ -1147,7 +1256,11 @@ class CommunityService {
 
       snap.forEach((docSnap) => {
         const uid = docSnap.id;
-        if (uid === currentUserId) return; // skip self
+        const cleanCurrentUid = String(currentUserId)
+          .replace(/^mem_/, "")
+          .trim();
+        const cleanUid = String(uid).replace(/^mem_/, "").trim();
+        if (cleanUid === cleanCurrentUid) return; // skip self
 
         const data = docSnap.data();
         const name =
@@ -1166,19 +1279,29 @@ class CommunityService {
         let friendshipStatus: CommunityMember["friendshipStatus"] = "none";
         let friendshipId: string | undefined = undefined;
 
-        const rel = friendships.find(
-          (f) =>
-            (f.senderId === currentUserId && f.receiverId === uid) ||
-            (f.receiverId === currentUserId && f.senderId === uid),
-        );
+        const rel = friendships.find((f) => {
+          const s = String(f.senderId || "")
+            .replace(/^mem_/, "")
+            .trim();
+          const r = String(f.receiverId || "")
+            .replace(/^mem_/, "")
+            .trim();
+          return (
+            (s === cleanCurrentUid && r === cleanUid) ||
+            (r === cleanCurrentUid && s === cleanUid)
+          );
+        });
 
         if (rel) {
           friendshipId = rel.id;
           if (rel.status === "accepted") {
             friendshipStatus = "friends";
           } else if (rel.status === "pending") {
+            const cleanSender = String(rel.senderId || "")
+              .replace(/^mem_/, "")
+              .trim();
             friendshipStatus =
-              rel.senderId === currentUserId
+              cleanSender === cleanCurrentUid
                 ? "pending_sent"
                 : "pending_received";
           }

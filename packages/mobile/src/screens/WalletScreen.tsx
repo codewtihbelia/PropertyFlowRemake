@@ -7487,7 +7487,7 @@ export function WalletScreen({
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 24 }}
+              contentContainerStyle={{ paddingBottom: 4 }}
             >
               <Text
                 style={[
@@ -7698,7 +7698,8 @@ export function WalletScreen({
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "space-between",
+                justifyContent: "flex-start",
+                gap: 4,
               }}
             >
               <View>
@@ -7716,7 +7717,7 @@ export function WalletScreen({
                     { color: isDark ? colors.textMuted : "#64748B" },
                   ]}
                 >
-                  Philippine National QR Standard for Instant Settlement
+                  Philippine National QR Standard
                 </Text>
               </View>
               <View
@@ -7766,6 +7767,8 @@ export function WalletScreen({
                   fontSize: 12,
                   fontWeight: "600",
                   marginTop: 8,
+                  paddingHorizontal: 20,
+                  textAlign: "center",
                 }}
               >
                 {isQrScanned
@@ -10215,6 +10218,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderTopWidth: 1,
+    marginBottom: 30,
   },
   walkthroughNavBackBtn: {
     flexDirection: "row",

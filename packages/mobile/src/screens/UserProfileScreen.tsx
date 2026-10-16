@@ -25,6 +25,7 @@ import {
   communityService,
 } from "../services/communityService";
 import { auth } from "../firebase/config";
+import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
 
 export interface UserProfileInfo {
   uid: string;
@@ -104,11 +105,27 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   const [loadingFriends, setLoadingFriends] = useState(true);
 
   const currentUid = currentUser?.uid || auth.currentUser?.uid || "";
-  const isSelf = currentUid === user.uid;
+  const cleanCurUid = String(currentUid).replace(/^mem_/, "").trim();
+  const cleanTargetUid = String(user.uid || "")
+    .replace(/^mem_/, "")
+    .trim();
+  const isSelf = cleanCurUid === cleanTargetUid;
   const cleanName = formatAuthorDisplayName(user.name, user.email);
   const coverUrl =
     user.coverImage ||
     "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80";
+
+  const [imageViewerConfig, setImageViewerConfig] = useState<{
+    visible: boolean;
+    images: string[];
+    initialIndex: number;
+    authorName?: string;
+    caption?: string;
+  }>({
+    visible: false,
+    images: [],
+    initialIndex: 0,
+  });
 
   // Subscribe to real cloud posts authored by this specific user
   useEffect(() => {
@@ -148,12 +165,30 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
     return () => unsubMyFriends();
   }, [currentUid]);
 
-  // Compute 100% real mutual friends between viewer and target user
+  // Compute 100% real mutual friends between viewer and target user with clean normalized UIDs & deduplication
   const mutualFriends = useMemo(() => {
     if (isSelf || !userFriends.length || !myFriends.length) return [];
-    const myFriendUids = new Set(myFriends.map((f) => f.uid));
-    return userFriends.filter((f) => myFriendUids.has(f.uid));
-  }, [isSelf, userFriends, myFriends]);
+    const myFriendUids = new Set(
+      myFriends.map((f) =>
+        String(f.uid || "")
+          .replace(/^mem_/, "")
+          .trim(),
+      ),
+    );
+    const seen = new Set<string>();
+    const result: CommunityMember[] = [];
+    for (const f of userFriends) {
+      const cleanUid = String(f.uid || "")
+        .replace(/^mem_/, "")
+        .trim();
+      if (!cleanUid || cleanUid === cleanCurUid || seen.has(cleanUid)) continue;
+      seen.add(cleanUid);
+      if (myFriendUids.has(cleanUid)) {
+        result.push(f);
+      }
+    }
+    return result;
+  }, [isSelf, userFriends, myFriends, cleanCurUid]);
 
   // Combine real subscribed posts with feed posts authored by this user
   const userPosts = useMemo(() => {
@@ -403,13 +438,26 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           {post.content}
         </Text>
 
-        {/* Post Images */}
+        {/* Post Images (tap to view full screen) */}
         {post.images && post.images.length > 0 && (
-          <Image
-            source={{ uri: post.images[0] }}
-            style={styles.fbPostImage}
-            resizeMode="cover"
-          />
+          <TouchableOpacity
+            activeOpacity={0.92}
+            onPress={() =>
+              setImageViewerConfig({
+                visible: true,
+                images: post.images,
+                initialIndex: 0,
+                authorName: cleanName,
+                caption: post.content,
+              })
+            }
+          >
+            <Image
+              source={{ uri: post.images[0] }}
+              style={styles.fbPostImage}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
         )}
 
         {/* Social Stats */}
@@ -1507,6 +1555,18 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           </View>
         )}
       </ScrollView>
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <FullScreenImageViewerModal
+        visible={imageViewerConfig.visible}
+        images={imageViewerConfig.images}
+        initialIndex={imageViewerConfig.initialIndex}
+        authorName={imageViewerConfig.authorName}
+        caption={imageViewerConfig.caption}
+        onClose={() =>
+          setImageViewerConfig((prev) => ({ ...prev, visible: false }))
+        }
+      />
     </View>
   );
 };

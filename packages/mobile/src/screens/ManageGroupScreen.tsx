@@ -15,7 +15,7 @@ import {
   KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons, Feather } from "@expo/vector-icons";
+import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { auth } from "../firebase/config";
 import {
   mobileDataService,
@@ -2474,9 +2474,17 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                               isDark && { color: colors.accent },
                             ]}
                           >
-                            {p.role === "NON_PAYOR"
-                              ? "Make Payor"
-                              : "Make Non-Payor"}
+                            {p.role === "NON_PAYOR" ? (
+                              <MaterialCommunityIcons
+                                name="rotate-3d-variant"
+                                size={18}
+                              />
+                            ) : (
+                              <MaterialCommunityIcons
+                                name="rotate-3d-variant"
+                                size={18}
+                              />
+                            )}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -6322,7 +6330,7 @@ const styles = StyleSheet.create({
   },
   expenseItemRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
@@ -6717,8 +6725,7 @@ const styles = StyleSheet.create({
     color: "#DC2626",
   },
   editModeToggleRoleBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    padding: 8,
     borderRadius: 8,
     backgroundColor: "#F1F5F9",
   },

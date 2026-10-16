@@ -19,6 +19,7 @@ import {
   NotificationCategory,
   NotificationTextSpan,
   MobileNotificationItem,
+  NotificationActionTarget,
   buildRealNotificationsList,
   isNotificationItemUnread,
 } from "../services/firebaseDataService";
@@ -26,7 +27,11 @@ import { UniversalSkeleton } from "../components/UniversalLoader";
 import { NotificationDetailsScreen } from "./NotificationDetailsScreen";
 import { useTheme } from "../context/ThemeContext";
 
-export type { NotificationCategory, NotificationTextSpan };
+export type {
+  NotificationCategory,
+  NotificationTextSpan,
+  NotificationActionTarget,
+};
 export type NotificationItem = MobileNotificationItem;
 
 export interface NotificationsScreenProps {
@@ -428,7 +433,15 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   };
 
   const handleActionNavigation = (item: MobileNotificationItem) => {
-    switch (item.actionTarget) {
+    const actionTarget = item.actionTarget as
+      | NotificationActionTarget
+      | string
+      | undefined;
+    switch (actionTarget) {
+      case "community":
+        if (onSelectNotification) onSelectNotification(item);
+        if (onNavigate) (onNavigate as any)("community");
+        break;
       case "settle_dues":
         if (onOpenSettleDues) onOpenSettleDues();
         else if (onNavigate) onNavigate("bills");
@@ -456,10 +469,16 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   };
 
   const handlePressNotification = async (item: MobileNotificationItem) => {
-    setSelectedNotification(item);
     if (onSelectNotification) {
       onSelectNotification(item);
     }
+    const itemTarget = item.actionTarget as string | undefined;
+    const itemData = (item as { data?: any })?.data;
+    if (itemTarget === "community" || itemData?.screen === "community") {
+      await mobileDataService.markNotificationsRead(firebaseUser?.uid, [item]);
+      return;
+    }
+    setSelectedNotification(item);
     await mobileDataService.markNotificationsRead(firebaseUser?.uid, [item]);
   };
 

@@ -181,7 +181,7 @@ export const ElectricitySettingsModal: React.FC<
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(80, insets.bottom + 60) },
+          { paddingBottom: Math.max(10, insets.bottom + 20) },
         ]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}

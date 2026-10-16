@@ -6,6 +6,7 @@ import {
   getDocs,
   query,
   where,
+  setDoc,
 } from "firebase/firestore";
 
 export interface PushNotificationPayload {
@@ -32,7 +33,14 @@ export function isValidExpoPushToken(token: any): boolean {
   );
 }
 
-class PushDispatchService {
+export interface FriendRequestPushParams {
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  receiverId: string;
+}
+
+export class PushDispatchService {
   /**
    * Fetches all registered active push tokens for a given list of user IDs.
    * Checks both direct user document fields and the devices subcollection.
@@ -620,8 +628,112 @@ class PushDispatchService {
   }
 
   /**
+   * Logs a persistent notification entry in Firestore's `notifications` collection
+   * so it appears in the user's in-app Notifications screen list.
+   */
+  public async logNotificationToFirestore(params: {
+    recipientId: string;
+    type: string;
+    title: string;
+    message: string;
+    category?: string;
+    relatedItemId?: string;
+    data?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      const cleanRecipientId = String(params.recipientId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      if (!cleanRecipientId) return;
+
+      const notifRef = doc(collection(db, "notifications"));
+      const now = new Date().toISOString();
+
+      await setDoc(notifRef, {
+        id: notifRef.id,
+        notificationId: notifRef.id,
+        recipientId: cleanRecipientId,
+        type: params.type,
+        title: params.title,
+        message: params.message,
+        category: params.category || "reminder",
+        relatedItemId: params.relatedItemId || notifRef.id,
+        createdTimestamp: now,
+        createdAt: now,
+        readStatus: false,
+        data: params.data || {},
+      });
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Failed to log notification to Firestore:",
+        err,
+      );
+    }
+  }
+
+  /**
+   * Dispatches high-priority push notifications and logs a persistent notification
+   * when a user receives a new friend request.
+   */
+  public async sendFriendRequestPush(params: {
+    senderId: string;
+    senderName: string;
+    senderAvatar?: string;
+    receiverId: string;
+  }): Promise<void> {
+    try {
+      const cleanSenderId = String(params.senderId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanReceiverId = String(params.receiverId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      if (!cleanReceiverId || cleanReceiverId === cleanSenderId) return;
+
+      const title = "New Friend Request";
+      const message = `${params.senderName} sent you a friend request on Splitzy.`;
+
+      // 1. Log to Firestore `notifications` collection
+      await this.logNotificationToFirestore({
+        recipientId: cleanReceiverId,
+        type: "FRIEND_REQUEST",
+        title,
+        message,
+        category: "group_invite",
+        relatedItemId: `friend_req_${cleanSenderId}`,
+        data: {
+          screen: "community",
+          type: "friend_request",
+          senderId: cleanSenderId,
+          senderName: params.senderName,
+          senderAvatar: params.senderAvatar || "",
+        },
+      });
+
+      // 2. Dispatch push notification to recipient's registered device tokens
+      const tokens = await this.getPushTokensForUsers([cleanReceiverId]);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title: "Friend Request • Splitzy",
+          body: `${params.senderName} sent you a friend request. Tap to respond!`,
+          data: {
+            screen: "community",
+            type: "friend_request",
+            senderId: cleanSenderId,
+            senderName: params.senderName,
+          },
+          channelId: "high_priority",
+          sound: "default",
+        });
+      }
+    } catch (err) {
+      console.warn("[PushDispatch] Error sending friend request push:", err);
+    }
+  }
+
+  /**
    * Dispatches high-priority push notifications to friends & household roommates
-   * when a user creates a new community post.
+   * when a user creates a new community post, and logs to Notifications screen.
    */
   public async sendCommunityPostPush(params: {
     postId: string;
@@ -638,28 +750,52 @@ class PushDispatchService {
       );
       if (recipientUserIds.length === 0) return;
 
-      const tokens = await this.getPushTokensForUsers(recipientUserIds);
-      if (tokens.length === 0) return;
-
       const cleanSnippet =
         params.content.length > 90
           ? `${params.content.substring(0, 87)}...`
           : params.content;
 
-      await this.sendPushToTokens(tokens, {
-        title: `Splitzy Community • ${params.authorName}`,
-        body: cleanSnippet
-          ? `${params.authorName} posted: "${cleanSnippet}"`
-          : `${params.authorName} shared a new post!`,
-        data: {
-          screen: "community",
-          type: "post",
-          postId: params.postId,
-          authorId: params.authorId,
-        },
-        channelId: "high_priority",
-        sound: "default",
-      });
+      const title = `Splitzy Community • ${params.authorName}`;
+      const body = cleanSnippet
+        ? `${params.authorName} posted: "${cleanSnippet}"`
+        : `${params.authorName} shared a new post!`;
+
+      // Log notification in Firestore for every recipient
+      await Promise.all(
+        recipientUserIds.map((recId) =>
+          this.logNotificationToFirestore({
+            recipientId: recId,
+            type: "COMMUNITY_POST",
+            title,
+            message: body,
+            category: "reminder",
+            relatedItemId: params.postId,
+            data: {
+              screen: "community",
+              type: "post",
+              postId: params.postId,
+              authorId: params.authorId,
+            },
+          }),
+        ),
+      );
+
+      // Dispatch native push
+      const tokens = await this.getPushTokensForUsers(recipientUserIds);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title,
+          body,
+          data: {
+            screen: "community",
+            type: "post",
+            postId: params.postId,
+            authorId: params.authorId,
+          },
+          channelId: "high_priority",
+          sound: "default",
+        });
+      }
     } catch (err) {
       console.warn("[PushDispatch] Error sending community post push:", err);
     }
@@ -667,7 +803,7 @@ class PushDispatchService {
 
   /**
    * Dispatches high-priority push notifications to friends & household roommates
-   * when a user creates a new 24h story.
+   * when a user creates a new 24h story, and logs to Notifications screen.
    */
   public async sendCommunityStoryPush(params: {
     storyId: string;
@@ -683,26 +819,50 @@ class PushDispatchService {
       );
       if (recipientUserIds.length === 0) return;
 
-      const tokens = await this.getPushTokensForUsers(recipientUserIds);
-      if (tokens.length === 0) return;
-
       const captionSnippet =
         params.caption && params.caption.trim().length > 0
           ? ` "${params.caption.length > 60 ? `${params.caption.substring(0, 57)}...` : params.caption}"`
           : "";
 
-      await this.sendPushToTokens(tokens, {
-        title: `New Story • ${params.authorName}`,
-        body: `${params.authorName} shared a new story${captionSnippet}. Tap to view before it expires!`,
-        data: {
-          screen: "community",
-          type: "story",
-          storyId: params.storyId,
-          authorId: params.authorId,
-        },
-        channelId: "high_priority",
-        sound: "default",
-      });
+      const title = `New Story • ${params.authorName}`;
+      const body = `${params.authorName} shared a new story${captionSnippet}. Tap to view before it expires!`;
+
+      // Log notification in Firestore for every recipient
+      await Promise.all(
+        recipientUserIds.map((recId) =>
+          this.logNotificationToFirestore({
+            recipientId: recId,
+            type: "COMMUNITY_STORY",
+            title,
+            message: body,
+            category: "reminder",
+            relatedItemId: params.storyId,
+            data: {
+              screen: "community",
+              type: "story",
+              storyId: params.storyId,
+              authorId: params.authorId,
+            },
+          }),
+        ),
+      );
+
+      // Dispatch native push
+      const tokens = await this.getPushTokensForUsers(recipientUserIds);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title,
+          body,
+          data: {
+            screen: "community",
+            type: "story",
+            storyId: params.storyId,
+            authorId: params.authorId,
+          },
+          channelId: "high_priority",
+          sound: "default",
+        });
+      }
     } catch (err) {
       console.warn("[PushDispatch] Error sending community story push:", err);
     }
@@ -710,7 +870,7 @@ class PushDispatchService {
 
   /**
    * Dispatches push notification when someone comments on a community post.
-   * Alerts the post author directly.
+   * Alerts the post author directly and logs to Notifications screen.
    */
   public async sendCommunityCommentPush(params: {
     postId: string;
@@ -732,17 +892,22 @@ class PushDispatchService {
       // Do not notify self
       if (!cleanAuthorId || cleanAuthorId === cleanCommenterId) return;
 
-      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
-      if (tokens.length === 0) return;
-
       const cleanComment =
         params.commentText.length > 90
           ? `${params.commentText.substring(0, 87)}...`
           : params.commentText;
 
-      await this.sendPushToTokens(tokens, {
-        title: "Splitzy Community",
-        body: `${params.commenterName} commented on your post: "${cleanComment}"`,
+      const title = "New Comment on Your Post";
+      const message = `${params.commenterName} commented: "${cleanComment}"`;
+
+      // 1. Log to Firestore `notifications` collection
+      await this.logNotificationToFirestore({
+        recipientId: cleanAuthorId,
+        type: "COMMUNITY_COMMENT",
+        title,
+        message,
+        category: "reminder",
+        relatedItemId: params.postId,
         data: {
           screen: "community",
           type: "comment",
@@ -750,16 +915,33 @@ class PushDispatchService {
           commentId: params.commentId,
           commenterId: cleanCommenterId,
         },
-        channelId: "high_priority",
-        sound: "default",
       });
+
+      // 2. Dispatch native push
+      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title: "Splitzy Community",
+          body: `${params.commenterName} commented on your post: "${cleanComment}"`,
+          data: {
+            screen: "community",
+            type: "comment",
+            postId: params.postId,
+            commentId: params.commentId,
+            commenterId: cleanCommenterId,
+          },
+          channelId: "high_priority",
+          sound: "default",
+        });
+      }
     } catch (err) {
       console.warn("[PushDispatch] Error sending community comment push:", err);
     }
   }
 
   /**
-   * Dispatches push notification when someone reacts to a community post.
+   * Dispatches push notification when someone reacts to a community post,
+   * and logs to Notifications screen.
    */
   public async sendCommunityReactionPush(params: {
     postId: string;
@@ -780,9 +962,6 @@ class PushDispatchService {
       // Do not notify self
       if (!cleanAuthorId || cleanAuthorId === cleanReactorId) return;
 
-      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
-      if (tokens.length === 0) return;
-
       const emojiMap: Record<string, string> = {
         like: "👍",
         love: "❤️",
@@ -798,9 +977,17 @@ class PushDispatchService {
         ? `: "${params.postSnippet.length > 50 ? `${params.postSnippet.substring(0, 47)}...` : params.postSnippet}"`
         : ".";
 
-      await this.sendPushToTokens(tokens, {
-        title: "Splitzy Community",
-        body: `${params.reactorName} reacted ${reactionEmoji} to your post${snippet}`,
+      const title = "New Reaction on Your Post";
+      const message = `${params.reactorName} reacted ${reactionEmoji} to your post${snippet}`;
+
+      // 1. Log to Firestore `notifications` collection
+      await this.logNotificationToFirestore({
+        recipientId: cleanAuthorId,
+        type: "COMMUNITY_REACTION",
+        title,
+        message,
+        category: "reminder",
+        relatedItemId: params.postId,
         data: {
           screen: "community",
           type: "reaction",
@@ -808,9 +995,25 @@ class PushDispatchService {
           reactionType: params.reactionType,
           reactorId: cleanReactorId,
         },
-        channelId: "high_priority",
-        sound: "default",
       });
+
+      // 2. Dispatch native push
+      const tokens = await this.getPushTokensForUsers([cleanAuthorId]);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title: "Splitzy Community",
+          body: `${params.reactorName} reacted ${reactionEmoji} to your post${snippet}`,
+          data: {
+            screen: "community",
+            type: "reaction",
+            postId: params.postId,
+            reactionType: params.reactionType,
+            reactorId: cleanReactorId,
+          },
+          channelId: "high_priority",
+          sound: "default",
+        });
+      }
     } catch (err) {
       console.warn(
         "[PushDispatch] Error sending community reaction push:",

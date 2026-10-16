@@ -285,6 +285,16 @@ export interface Adjustment {
   createdDate: string;
 }
 
+export type NotificationActionTarget =
+  | "settle_dues"
+  | "bills"
+  | "payments"
+  | "attendance"
+  | "groups"
+  | "community"
+  | "messages"
+  | (string & {});
+
 export interface NotificationItem {
   notificationId: string;
   recipientId: string; // userId or 'ALL'
@@ -308,6 +318,23 @@ export interface NotificationItem {
   entityType?: string;
   readStatus: boolean;
   createdTimestamp: string;
+}
+
+export interface MobileNotificationItem {
+  id: string;
+  cloudDocId: string;
+  category: any;
+  title: string;
+  message: string;
+  spans?: any[];
+  timeLabel: string;
+  timestampMs: number;
+  createdTimestamp: string;
+  section: "recent" | "earlier";
+  defaultUnread: boolean;
+  relatedEntityId?: string;
+  actionTarget?: NotificationActionTarget;
+  data?: any;
 }
 
 export interface Conversation {

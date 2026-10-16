@@ -1187,6 +1187,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         onBack={() => setOverlayScreen("none")}
         householdId={householdId}
         onNavigate={(tab: any) => {
+          if (tab === "community") {
+            setOverlayScreen("community");
+            return;
+          }
           setOverlayScreen("none");
           if (tab === "payments") {
             setBillsInitialSubView("pay");
@@ -1196,6 +1200,26 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             setCurrentTab("bills");
           } else {
             setCurrentTab(tab);
+          }
+        }}
+        onSelectNotification={(item) => {
+          const itemTarget = item.actionTarget as string | undefined;
+          const itemData = (item as { data?: any })?.data;
+          if (
+            itemTarget === "community" ||
+            itemData?.screen === "community" ||
+            (item.category === "group_invite" &&
+              item.id?.startsWith("friend_req_"))
+          ) {
+            setCommunityInitialTarget({
+              type:
+                itemData?.type ||
+                (item.category === "group_invite" ? "friend_request" : "post"),
+              postId: itemData?.postId,
+              storyId: itemData?.storyId,
+              commentId: itemData?.commentId,
+            });
+            setOverlayScreen("community");
           }
         }}
         onOpenSettleDues={() => setOverlayScreen("settle_dues")}

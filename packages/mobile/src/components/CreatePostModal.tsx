@@ -218,9 +218,10 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
             styles.container,
             {
               backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              height: keyboardHeight > 0 ? "55%" : "88%",
               marginBottom:
                 Platform.OS === "android" && keyboardHeight > 0
-                  ? keyboardHeight
+                  ? Math.max(keyboardHeight, 320) + Math.max(insets.bottom, 28)
                   : 0,
             },
           ]}

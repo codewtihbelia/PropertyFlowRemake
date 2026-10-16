@@ -170,7 +170,7 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(80, insets.bottom + 60) },
+          { paddingBottom: Math.max(10, insets.bottom + 20) },
         ]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}
@@ -766,7 +766,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 18,
     paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: "#F1F5F9",

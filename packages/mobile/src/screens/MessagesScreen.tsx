@@ -418,7 +418,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   const defaultBottomPadding = Math.max(
     bottomInset,
-    Platform.OS === "android" ? 20 : 12,
+    Platform.OS === "android" ? 24 : 14,
   );
 
   const chatInputBottomPadding = useMemo(() => {
@@ -427,15 +427,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     if (Platform.OS === "android") {
-      // In Android translucent status bar mode, the window does not automatically resize.
-      // Elevate input container above the soft keyboard with a clean 12px cushion.
-      const effectiveHeight =
-        keyboardHeight > 0
-          ? keyboardHeight
-          : contextKeyboardHeight > 0
-            ? contextKeyboardHeight
-            : 290;
-      return effectiveHeight + 12;
+      // In Android translucent status bar mode, the soft keyboard sits above the system navigation bar (insets.bottom).
+      // We must elevate the input container by the keyboard height PLUS the navigation bar clearance PLUS a clean 12px cushion.
+      const navBarClearance = Math.max(insets.bottom, bottomInset, 34);
+      const effectiveHeight = Math.max(
+        keyboardHeight,
+        contextKeyboardHeight || 0,
+        320, // Baseline for modern Android keyboards with suggestion & number rows (e.g., Gboard)
+      );
+      return effectiveHeight + navBarClearance + 12;
     }
 
     if (Platform.OS === "ios") {
@@ -451,6 +451,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     keyboardHeight,
     contextKeyboardHeight,
     defaultBottomPadding,
+    insets.bottom,
+    bottomInset,
   ]);
 
   const handleToggleMessage = (msgId: string) => {
@@ -4099,11 +4101,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     paddingBottom:
                       Platform.OS === "android"
                         ? keyboardActive
-                          ? (keyboardHeight > 0
-                              ? keyboardHeight
-                              : contextKeyboardHeight > 0
-                                ? contextKeyboardHeight
-                                : 290) + 12
+                          ? Math.max(
+                              keyboardHeight,
+                              contextKeyboardHeight || 0,
+                              320,
+                            ) +
+                            Math.max(insets.bottom, bottomInset, 34) +
+                            12
                           : Math.max(bottomInset + 10, insets.bottom + 16)
                         : keyboardActive
                           ? 12
