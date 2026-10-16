@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,10 +13,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Vibration,
+  Animated,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Clipboard from "expo-clipboard";
+import * as ImagePicker from "expo-image-picker";
+import jsQR from "jsqr";
+import { SplitzyQrCode, downloadQrCodePng } from "../components/SplitzyQrCode";
+import { mobileDataService } from "../services/firebaseDataService";
 import { useTheme } from "../context/ThemeContext";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import {
@@ -541,7 +548,630 @@ export function WalletScreen({
   const [splitNumPeople, setSplitNumPeople] = useState<number>(4);
 
   const [showScanQrModal, setShowScanQrModal] = useState<boolean>(false);
-  const [isQrScanned, setIsQrScanned] = useState<boolean>(false);
+  const [qrModalTab, setQrModalTab] = useState<"scan" | "receive">("scan");
+  const [qrScanStep, setQrScanStep] = useState<
+    "viewfinder" | "confirm" | "receipt"
+  >("viewfinder");
+  const [presetAmount, setPresetAmount] = useState<string>("");
+  const [presetNote, setPresetNote] = useState<string>("");
+  const [showPresetEditor, setShowPresetEditor] = useState<boolean>(false);
+  const [copiedPayLink, setCopiedPayLink] = useState<boolean>(false);
+  const [manualCodeInput, setManualCodeInput] = useState<string>("");
+  const [showManualInput, setShowManualInput] = useState<boolean>(false);
+  const [scannedRecipient, setScannedRecipient] = useState<{
+    uid: string;
+    name: string;
+    email?: string;
+    avatar?: string;
+    role?: string;
+  } | null>(null);
+  const [qrTransferAmount, setQrTransferAmount] = useState<string>("");
+  const [qrTransferNote, setQrTransferNote] = useState<string>("");
+  const [qrFundingSource, setQrFundingSource] = useState<"wallet" | string>(
+    "wallet",
+  );
+  const [isProcessingQrTransfer, setIsProcessingQrTransfer] =
+    useState<boolean>(false);
+  const [qrReceipt, setQrReceipt] = useState<{
+    refNumber: string;
+    amount: number;
+    recipientName: string;
+    sourceName: string;
+    timestamp: string;
+    note?: string;
+  } | null>(null);
+  const [householdMembers, setHouseholdMembers] = useState<any[]>([]);
+
+  // Real Camera & Scanner State
+  const videoRef = useRef<any>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const scanIntervalRef = useRef<any>(null);
+  const [hasCameraPermission, setHasCameraPermission] = useState<
+    boolean | null
+  >(null);
+  const [cameraFacingMode, setCameraFacingMode] = useState<
+    "environment" | "user"
+  >("environment");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isDownloadingQrPng, setIsDownloadingQrPng] = useState<boolean>(false);
+  const [isDecodingImage, setIsDecodingImage] = useState<boolean>(false);
+
+  const qrScanLaserAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (
+      showScanQrModal &&
+      qrModalTab === "scan" &&
+      qrScanStep === "viewfinder"
+    ) {
+      const animLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(qrScanLaserAnim, {
+            toValue: 1,
+            duration: 1600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(qrScanLaserAnim, {
+            toValue: 0,
+            duration: 1600,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      animLoop.start();
+      return () => animLoop.stop();
+    }
+  }, [showScanQrModal, qrModalTab, qrScanStep, qrScanLaserAnim]);
+
+  useEffect(() => {
+    const cachedProfile = mobileDataService.getCachedProfile(currentUid);
+    const householdId = cachedProfile?.householdId || "";
+    if (!householdId) return;
+
+    const unsub = mobileDataService.listenToHouseholdMembers(
+      householdId,
+      (data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setHouseholdMembers(data);
+        }
+      },
+    );
+    return unsub;
+  }, [currentUid]);
+
+  const availableRoommates = useMemo(() => {
+    const filtered = householdMembers.filter(
+      (m) => (m.userId || m.uid || m.id) !== currentUid,
+    );
+    if (filtered.length > 0) {
+      return filtered.map((m) => ({
+        uid: m.userId || m.uid || m.id,
+        name: m.name || m.displayName || "Roommate",
+        email: m.email || "",
+        avatar: m.profilePicture || m.avatar || "",
+        role: m.role || "MEMBER",
+      }));
+    }
+    return [
+      {
+        uid: "user_alex_rivera",
+        name: "Alex Rivera",
+        email: "alex.rivera@splitzy.ph",
+        avatar: "",
+        role: "MEMBER",
+      },
+      {
+        uid: "user_maria_santos",
+        name: "Maria Santos",
+        email: "maria.santos@splitzy.ph",
+        avatar: "",
+        role: "HOST",
+      },
+      {
+        uid: "user_josh_chen",
+        name: "Josh Chen",
+        email: "josh.chen@splitzy.ph",
+        avatar: "",
+        role: "MEMBER",
+      },
+      {
+        uid: "user_bea_ramos",
+        name: "Bea Ramos",
+        email: "bea.ramos@splitzy.ph",
+        avatar: "",
+        role: "MEMBER",
+      },
+    ];
+  }, [householdMembers, currentUid]);
+
+  const myDisplayName =
+    currentUser?.name || auth.currentUser?.displayName || "Splitzy Resident";
+  const myEmail = currentUser?.email || auth.currentUser?.email || "";
+  const myAvatar =
+    currentUser?.photoURL ||
+    currentUser?.avatar ||
+    auth.currentUser?.photoURL ||
+    "";
+
+  const myQrPayload = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set("uid", currentUid);
+    params.set("name", myDisplayName);
+    if (myEmail) params.set("email", myEmail);
+    if (presetAmount && Number(presetAmount) > 0) {
+      params.set("amt", presetAmount.trim());
+    }
+    if (presetNote && presetNote.trim()) {
+      params.set("note", presetNote.trim());
+    }
+    return `splitzy://pay?${params.toString()}`;
+  }, [currentUid, myDisplayName, myEmail, presetAmount, presetNote]);
+
+  const parseQrPayload = (payload: string) => {
+    try {
+      const trimmed = payload.trim();
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        const parsed = JSON.parse(trimmed);
+        return {
+          uid: parsed.uid || parsed.userId || "user_roommate",
+          name: parsed.name || parsed.displayName || "Splitzy Resident",
+          email: parsed.email || "",
+          amount: parsed.amount
+            ? String(parsed.amount)
+            : parsed.amt
+              ? String(parsed.amt)
+              : "",
+          note: parsed.note || "",
+        };
+      }
+
+      if (trimmed.includes("uid=")) {
+        const queryPart = trimmed.includes("?")
+          ? trimmed.split("?")[1]
+          : trimmed;
+        const searchParams = new URLSearchParams(queryPart);
+        const uid = searchParams.get("uid") || "user_roommate";
+        const name = searchParams.get("name") || "Splitzy Resident";
+        const email = searchParams.get("email") || "";
+        const amt = searchParams.get("amt") || searchParams.get("amount") || "";
+        const note = searchParams.get("note") || "";
+        return { uid, name, email, amount: amt, note };
+      }
+
+      const matched = availableRoommates.find(
+        (r) =>
+          r.uid.toLowerCase() === trimmed.toLowerCase() ||
+          r.name.toLowerCase() === trimmed.toLowerCase() ||
+          r.email.toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (matched) {
+        return {
+          uid: matched.uid,
+          name: matched.name,
+          email: matched.email,
+          amount: "",
+          note: "",
+        };
+      }
+
+      return {
+        uid: trimmed || "user_splitzy_resident",
+        name: trimmed.includes("@")
+          ? trimmed.split("@")[0]
+          : "Splitzy Resident",
+        email: trimmed.includes("@") ? trimmed : "",
+        amount: "",
+        note: "",
+      };
+    } catch (e) {
+      return {
+        uid: "user_roommate",
+        name: "Splitzy Resident",
+        email: "",
+        amount: "",
+        note: "",
+      };
+    }
+  };
+
+  const stopLiveCamera = () => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+    if (cameraStreamRef.current) {
+      try {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch (e) {
+        console.warn("[WalletScreen] Error stopping camera stream:", e);
+      }
+      cameraStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const startLiveCamera = async () => {
+    try {
+      setCameraError(null);
+      stopLiveCamera();
+
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
+        setCameraError("Camera is not supported on this platform.");
+        setHasCameraPermission(false);
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: cameraFacingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      cameraStreamRef.current = stream;
+      setHasCameraPermission(true);
+      setIsCameraActive(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current
+          .play()
+          .catch((e: any) =>
+            console.warn("[WalletScreen] Video play error:", e),
+          );
+      }
+
+      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = setInterval(() => {
+        captureAndScanFrame();
+      }, 120);
+    } catch (err: any) {
+      console.warn("[WalletScreen] Camera start error:", err);
+      setHasCameraPermission(false);
+      setCameraError(
+        err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError"
+          ? "Camera permission was denied. Please allow camera access in your browser or device settings."
+          : err?.message || "Could not access device camera.",
+      );
+    }
+  };
+
+  const captureAndScanFrame = async () => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) return;
+
+    // 1. Native BarcodeDetector (hardware accelerated)
+    if (typeof (window as any).BarcodeDetector !== "undefined") {
+      try {
+        const detector = new (window as any).BarcodeDetector({
+          formats: ["qr_code"],
+        });
+        const detected = await detector.detect(video);
+        if (detected && detected.length > 0 && detected[0].rawValue) {
+          handleOnQrCodeScanned(detected[0].rawValue);
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback pure jsQR frame analysis
+    try {
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, 640 / Math.max(width, height));
+      canvas.width = Math.floor(width * scale);
+      canvas.height = Math.floor(height * scale);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const qrCode = jsQR(imgData.data, canvas.width, canvas.height, {
+          inversionAttempts: "dontInvert",
+        });
+        if (qrCode && qrCode.data) {
+          handleOnQrCodeScanned(qrCode.data);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const handleOnQrCodeScanned = (rawCode: string) => {
+    if (!rawCode || !rawCode.trim()) return;
+
+    // 1. Stop camera stream immediately
+    stopLiveCamera();
+
+    // 2. Tactile vibration feedback
+    try {
+      Vibration.vibrate([0, 50, 40, 50]);
+    } catch (_) {}
+
+    // 3. Parse QR payload
+    const parsed = parseQrPayload(rawCode);
+
+    // 4. Resolve real recipient information
+    const matchedRoommate = availableRoommates.find(
+      (m) =>
+        (parsed.uid && m.uid.toLowerCase() === parsed.uid.toLowerCase()) ||
+        (parsed.email &&
+          m.email &&
+          m.email.toLowerCase() === parsed.email.toLowerCase()) ||
+        (parsed.name && m.name.toLowerCase() === parsed.name.toLowerCase()),
+    );
+
+    const recipientData = matchedRoommate || {
+      uid: parsed.uid || `user_${Date.now()}`,
+      name: parsed.name || "Splitzy Resident",
+      email: parsed.email || "",
+      avatar: "",
+      role: "MEMBER",
+    };
+
+    setScannedRecipient(recipientData);
+    setQrTransferAmount(parsed.amount || "");
+    setQrTransferNote(parsed.note || "Splitzy QR Payment");
+    setQrFundingSource("wallet");
+    setQrScanStep("confirm");
+  };
+
+  useEffect(() => {
+    if (
+      showScanQrModal &&
+      qrModalTab === "scan" &&
+      qrScanStep === "viewfinder"
+    ) {
+      startLiveCamera();
+    } else {
+      stopLiveCamera();
+    }
+    return () => {
+      stopLiveCamera();
+    };
+  }, [showScanQrModal, qrModalTab, qrScanStep, cameraFacingMode]);
+
+  const toggleCameraFacingMode = () => {
+    setCameraFacingMode((prev) =>
+      prev === "environment" ? "user" : "environment",
+    );
+  };
+
+  const handleOpenScanQrModal = (initialTab: "scan" | "receive" = "scan") => {
+    setQrModalTab(initialTab);
+    setQrScanStep("viewfinder");
+    setScannedRecipient(null);
+    setQrTransferAmount("");
+    setQrTransferNote("");
+    setQrFundingSource("wallet");
+    setQrReceipt(null);
+    setShowPresetEditor(false);
+    setCopiedPayLink(false);
+    setShowManualInput(false);
+    setManualCodeInput("");
+    setShowScanQrModal(true);
+  };
+
+  const handleSelectRoommateToTransfer = (
+    roommate: {
+      uid: string;
+      name: string;
+      email?: string;
+      avatar?: string;
+      role?: string;
+    },
+    defaultPresetAmt?: string,
+    defaultNote?: string,
+  ) => {
+    try {
+      Vibration.vibrate(40);
+    } catch (_) {}
+    setScannedRecipient(roommate);
+    setQrTransferAmount(defaultPresetAmt || "");
+    setQrTransferNote(defaultNote || "Splitzy QR Payment");
+    setQrFundingSource("wallet");
+    setQrScanStep("confirm");
+  };
+
+  const handlePickQrImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1.0,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setIsDecodingImage(true);
+
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = asset.uri;
+
+        img.onload = () => {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            if (!ctx) {
+              setIsDecodingImage(false);
+              Alert.alert(
+                "Scan Error",
+                "Could not initialize image processor.",
+              );
+              return;
+            }
+            ctx.drawImage(img, 0, 0);
+            const imgData = ctx.getImageData(0, 0, img.width, img.height);
+            const qrCode = jsQR(imgData.data, img.width, img.height);
+
+            setIsDecodingImage(false);
+            if (qrCode && qrCode.data) {
+              handleOnQrCodeScanned(qrCode.data);
+            } else {
+              Alert.alert(
+                "No QR Code Detected",
+                "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit, or use the camera to scan directly.",
+              );
+            }
+          } catch (e: any) {
+            console.warn("[WalletScreen] Image decode error:", e);
+            setIsDecodingImage(false);
+            Alert.alert(
+              "Decoding Failed",
+              "Could not read QR code from this image. Please try another photo.",
+            );
+          }
+        };
+
+        img.onerror = () => {
+          setIsDecodingImage(false);
+          Alert.alert(
+            "Image Error",
+            "Could not load the selected image for QR scanning.",
+          );
+        };
+      }
+    } catch (err) {
+      console.warn("[WalletScreen] Image picker QR error:", err);
+      setIsDecodingImage(false);
+      Alert.alert(
+        "Photo Gallery Error",
+        "Could not open photo library to read QR code.",
+      );
+    }
+  };
+
+  const handleDownloadQrPng = async () => {
+    try {
+      setIsDownloadingQrPng(true);
+      const res = await downloadQrCodePng({
+        value: myQrPayload,
+        name: myDisplayName,
+        email: myEmail,
+        amount: presetAmount,
+        note: presetNote,
+        initials: myDisplayName,
+      });
+      if (res.success) {
+        Alert.alert(
+          "QR Code Downloaded",
+          "Your Splitzy payment QR code has been saved as a high-resolution PNG image.",
+        );
+      } else {
+        Alert.alert("Notice", res.message || "Could not save QR code.");
+      }
+    } catch (err: any) {
+      Alert.alert(
+        "Download Error",
+        err?.message || "Failed to download QR code.",
+      );
+    } finally {
+      setIsDownloadingQrPng(false);
+    }
+  };
+
+  const handleCopyMyPayLink = async () => {
+    try {
+      await Clipboard.setStringAsync(myQrPayload);
+      try {
+        Vibration.vibrate(30);
+      } catch (_) {}
+      setCopiedPayLink(true);
+      setTimeout(() => setCopiedPayLink(false), 2200);
+    } catch (err) {
+      console.warn("Failed to copy pay link:", err);
+    }
+  };
+
+  const handleExecuteQrTransfer = async () => {
+    if (!scannedRecipient) return;
+    const numAmount = parseFloat(qrTransferAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      Alert.alert(
+        "Invalid Amount",
+        "Please enter a valid transfer amount greater than ₱0.00.",
+      );
+      return;
+    }
+
+    let sourceLabel = "Available Balance";
+    let sourceBal = wallet?.balance || 0;
+    if (qrFundingSource !== "wallet") {
+      const card = wallet?.cards.find((c) => c.id === qrFundingSource);
+      if (!card) {
+        Alert.alert(
+          "Funding Source Error",
+          "Selected payment card was not found.",
+        );
+        return;
+      }
+      sourceBal = card.balance || 0;
+      sourceLabel = card.name;
+    }
+
+    if (sourceBal < numAmount) {
+      Alert.alert(
+        "Insufficient Balance",
+        `You need ₱${numAmount.toFixed(2)} but ${sourceLabel} only has ₱${sourceBal.toFixed(2)} available.`,
+      );
+      return;
+    }
+
+    setIsProcessingQrTransfer(true);
+    try {
+      const res = await walletService.transferViaQr({
+        senderUid: currentUid,
+        senderName: myDisplayName,
+        recipientUid: scannedRecipient.uid,
+        recipientName: scannedRecipient.name,
+        amount: numAmount,
+        fundingSourceId: qrFundingSource,
+        note: qrTransferNote,
+      });
+
+      if (!res.success) {
+        Alert.alert("Transfer Failed", res.message);
+        setIsProcessingQrTransfer(false);
+        return;
+      }
+
+      try {
+        Vibration.vibrate([0, 50, 40, 50]);
+      } catch (_) {}
+
+      setQrReceipt({
+        refNumber: res.referenceNumber,
+        amount: numAmount,
+        recipientName: scannedRecipient.name,
+        sourceName: sourceLabel,
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+        note: qrTransferNote.trim(),
+      });
+      setQrScanStep("receipt");
+    } catch (err: any) {
+      console.warn("[WalletScreen] QR Transfer error:", err);
+      Alert.alert(
+        "Transfer Error",
+        err?.message || "An error occurred while transferring funds.",
+      );
+    } finally {
+      setIsProcessingQrTransfer(false);
+    }
+  };
 
   const [showAnalyticsModal, setShowAnalyticsModal] = useState<boolean>(false);
 
@@ -1713,10 +2343,7 @@ export function WalletScreen({
 
             <TouchableOpacity
               style={styles.quickCircleItem}
-              onPress={() => {
-                setIsQrScanned(false);
-                setShowScanQrModal(true);
-              }}
+              onPress={() => handleOpenScanQrModal("scan")}
               activeOpacity={0.7}
             >
               <View
@@ -7663,19 +8290,25 @@ export function WalletScreen({
         </View>
       </Modal>
 
-      {/* QUICK CIRCLE MODAL 3: Scan QR Ph Code */}
+      {/* QUICK CIRCLE MODAL 3: Splitzy Cross-User QR Transfer & Receive Engine */}
       <Modal
         visible={showScanQrModal}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowScanQrModal(false)}
+        onRequestClose={() => {
+          stopLiveCamera();
+          setShowScanQrModal(false);
+        }}
         statusBarTranslucent={true}
       >
         <View style={dynamicModalOverlayStyle}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            onPress={() => setShowScanQrModal(false)}
+            onPress={() => {
+              stopLiveCamera();
+              setShowScanQrModal(false);
+            }}
           />
           <View
             style={[
@@ -7694,189 +8327,2084 @@ export function WalletScreen({
                 isDark && { backgroundColor: colors.textMuted },
               ]}
             />
+
+            {/* Modal Header */}
             <View
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "flex-start",
-                gap: 4,
+                justifyContent: "space-between",
+                marginBottom: 12,
               }}
             >
-              <View>
-                <Text
-                  style={[
-                    styles.modalTitle,
-                    { color: isDark ? colors.text : "#0F172A" },
-                  ]}
+              <View style={{ flex: 1 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
                 >
-                  Scan QR Ph Code
-                </Text>
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      { color: isDark ? colors.text : "#0F172A" },
+                    ]}
+                  >
+                    Splitzy QR Transfer
+                  </Text>
+                  <View
+                    style={{
+                      backgroundColor: "#2563EB",
+                      paddingHorizontal: 7,
+                      paddingVertical: 2,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#FFFFFF",
+                        fontSize: 10,
+                        fontWeight: "800",
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      P2P
+                    </Text>
+                  </View>
+                </View>
                 <Text
                   style={[
                     styles.modalSubtitle,
-                    { color: isDark ? colors.textMuted : "#64748B" },
+                    {
+                      color: isDark ? colors.textMuted : "#64748B",
+                      marginBottom: 0,
+                    },
                   ]}
                 >
-                  Philippine National QR Standard
+                  Send or receive money instantly with Splitzy users
                 </Text>
               </View>
-              <View
+
+              <TouchableOpacity
+                onPress={() => {
+                  stopLiveCamera();
+                  setShowScanQrModal(false);
+                }}
                 style={{
-                  backgroundColor: "#2563EB",
-                  paddingHorizontal: 8,
-                  paddingVertical: 4,
-                  borderRadius: 6,
+                  padding: 6,
+                  borderRadius: 18,
+                  backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
                 }}
               >
-                <Text
-                  style={{
-                    color: "#FFFFFF",
-                    fontSize: 10,
-                    fontWeight: "800",
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  QR Ph
-                </Text>
-              </View>
+                <Ionicons
+                  name="close"
+                  size={20}
+                  color={isDark ? colors.text : "#475569"}
+                />
+              </TouchableOpacity>
             </View>
 
-            {/* Interactive Viewfinder Box */}
-            <View
-              style={{
-                height: 200,
-                backgroundColor: isDark ? "#0F172A" : "#020617",
-                borderRadius: 18,
-                marginVertical: 14,
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-                overflow: "hidden",
-                borderWidth: 2,
-                borderColor: isQrScanned ? "#10B981" : "#3B82F6",
-              }}
+            {/* Dual Tabs Selector: Scan QR vs My QR Code */}
+            {qrScanStep !== "receipt" && (
+              <View style={styles.qrModalTabsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.qrModalTabBtn,
+                    qrModalTab === "scan" && styles.qrModalTabBtnActive,
+                  ]}
+                  onPress={() => {
+                    setQrModalTab("scan");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="scan"
+                    size={16}
+                    color={
+                      qrModalTab === "scan"
+                        ? "#FFFFFF"
+                        : isDark
+                          ? colors.textMuted
+                          : "#64748B"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.qrModalTabText,
+                      qrModalTab === "scan" && styles.qrModalTabTextActive,
+                    ]}
+                  >
+                    Scan QR
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.qrModalTabBtn,
+                    qrModalTab === "receive" && styles.qrModalTabBtnActive,
+                  ]}
+                  onPress={() => {
+                    setQrModalTab("receive");
+                    setQrScanStep("viewfinder");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="qr-code"
+                    size={16}
+                    color={
+                      qrModalTab === "receive"
+                        ? "#FFFFFF"
+                        : isDark
+                          ? colors.textMuted
+                          : "#64748B"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.qrModalTabText,
+                      qrModalTab === "receive" && styles.qrModalTabTextActive,
+                    ]}
+                  >
+                    Generate QR
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 16 }}
+              keyboardShouldPersistTaps="handled"
             >
-              <Ionicons
-                name={isQrScanned ? "checkmark-circle" : "scan-outline"}
-                size={70}
-                color={isQrScanned ? "#10B981" : "#60A5FA"}
-              />
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  fontSize: 12,
-                  fontWeight: "600",
-                  marginTop: 8,
-                  paddingHorizontal: 20,
-                  textAlign: "center",
-                }}
-              >
-                {isQrScanned
-                  ? "QR Ph Code Detected: Roommate WiFi Split"
-                  : "Point camera at any QR Ph merchant or roommate code"}
-              </Text>
-              {isQrScanned && (
-                <Text
-                  style={{
-                    color: "#34D399",
-                    fontSize: 16,
-                    fontWeight: "800",
-                    marginTop: 4,
-                  }}
-                >
-                  Amount: ₱650.00
-                </Text>
-              )}
-            </View>
+              {/* TAB 1: RECEIVE MONEY ("MY QR CODE") */}
+              {qrModalTab === "receive" && (
+                <View style={{ alignItems: "center", width: "100%" }}>
+                  {/* Pure SVG QR Code Matrix */}
+                  <View style={styles.qrCodeCard}>
+                    <SplitzyQrCode
+                      value={myQrPayload}
+                      size={210}
+                      logoInitials={myDisplayName}
+                    />
+                  </View>
 
-            {(() => {
-              const defaultCard =
-                wallet?.cards.find((c) => c.isDefault) || wallet?.cards[0];
-              const isQrInsufficient =
-                isQrScanned && (defaultCard?.balance || 0) < 650;
-
-              return (
-                <View style={{ width: "100%" }}>
-                  {isQrInsufficient && defaultCard && (
+                  {/* Preset Amount Callout Badge if active */}
+                  {presetAmount && Number(presetAmount) > 0 ? (
                     <View
-                      style={[
-                        styles.simPreviewCallout,
-                        {
-                          backgroundColor: isDark ? "#450A0A30" : "#FEF2F2",
-                          borderColor: "#EF4444",
-                          marginBottom: 10,
-                        },
-                      ]}
+                      style={{
+                        backgroundColor: isDark ? "#064E3B40" : "#ECFDF5",
+                        borderColor: "#10B981",
+                        borderWidth: 1,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 10,
+                        marginTop: 4,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
                     >
-                      <Ionicons name="alert-circle" size={18} color="#EF4444" />
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[styles.simPreviewText, { color: "#EF4444" }]}
-                        >
-                          Insufficient balance on {defaultCard?.name || "card"}{" "}
-                          (₱
-                          {(defaultCard?.balance || 0).toLocaleString()}{" "}
-                          available). Top up or rebalance funds to pay ₱650.00.
-                        </Text>
-                      </View>
+                      <Ionicons name="pricetag" size={14} color="#10B981" />
+                      <Text
+                        style={{
+                          color: "#10B981",
+                          fontSize: 12,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Requesting ₱{parseFloat(presetAmount).toFixed(2)}
+                        {presetNote ? ` · ${presetNote}` : ""}
+                      </Text>
                     </View>
-                  )}
+                  ) : null}
 
+                  {/* User Identity Pill */}
+                  <View
+                    style={[
+                      styles.qrIdentityRow,
+                      {
+                        backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <View style={styles.qrIdentityAvatar}>
+                      <Text style={styles.qrIdentityAvatarText}>
+                        {myDisplayName.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.qrIdentityName,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {myDisplayName}
+                        </Text>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={15}
+                          color="#10B981"
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.qrIdentitySub,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {myEmail ||
+                          `@${myDisplayName.toLowerCase().replace(/\s+/g, "_")}`}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        backgroundColor: isDark ? "#1E293B" : "#E2E8F0",
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isDark ? "#93C5FD" : "#2563EB",
+                          fontSize: 10,
+                          fontWeight: "700",
+                        }}
+                      >
+                        Verified
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Preset Amount & Note Controls */}
                   <TouchableOpacity
                     style={[
-                      styles.modalPrimaryBtn,
-                      isQrInsufficient && { backgroundColor: "#94A3B8" },
+                      styles.qrPresetToggleBtn,
+                      {
+                        backgroundColor: showPresetEditor
+                          ? isDark
+                            ? "#1E293B"
+                            : "#E2E8F0"
+                          : "transparent",
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                      },
                     ]}
-                    disabled={isQrInsufficient}
-                    onPress={() => {
-                      if (!isQrScanned) {
-                        setIsQrScanned(true);
-                      } else {
-                        setShowScanQrModal(false);
-                        Alert.alert(
-                          "QR Ph Payment Completed",
-                          `₱650.00 transferred successfully to Roommate WiFi Split via ${defaultCard?.name || "your card"}!`,
-                        );
-                      }
-                    }}
+                    onPress={() => setShowPresetEditor(!showPresetEditor)}
                     activeOpacity={0.8}
                   >
                     <Ionicons
-                      name={
-                        isQrInsufficient
-                          ? "alert-circle"
-                          : isQrScanned
-                            ? "checkmark"
-                            : "camera"
-                      }
-                      size={18}
-                      color="#FFFFFF"
+                      name={showPresetEditor ? "chevron-up" : "options-outline"}
+                      size={15}
+                      color={isDark ? colors.text : "#334155"}
                     />
-                    <Text style={styles.modalPrimaryBtnText}>
-                      {isQrInsufficient
-                        ? "Insufficient Balance"
-                        : isQrScanned
-                          ? "Confirm & Pay ₱650.00"
-                          : "Simulate QR Ph Scan"}
+                    <Text
+                      style={[
+                        styles.qrPresetToggleText,
+                        { color: isDark ? colors.text : "#334155" },
+                      ]}
+                    >
+                      {showPresetEditor
+                        ? "Hide Preset Options"
+                        : presetAmount
+                          ? "Edit Preset Amount & Note"
+                          : "Set Preset Amount & Note (Optional)"}
                     </Text>
                   </TouchableOpacity>
-                </View>
-              );
-            })()}
 
-            <TouchableOpacity
-              style={styles.modalCancelBtn}
-              onPress={() => setShowScanQrModal(false)}
-            >
-              <Text
-                style={[
-                  styles.modalCancelBtnText,
-                  { color: isDark ? colors.textMuted : "#64748B" },
-                ]}
-              >
-                Close
-              </Text>
-            </TouchableOpacity>
+                  {showPresetEditor && (
+                    <View
+                      style={[
+                        styles.qrPresetBox,
+                        {
+                          backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                          borderColor: isDark ? colors.border : "#E2E8F0",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.text : "#0F172A",
+                        }}
+                      >
+                        Preset Requested Amount (₱)
+                      </Text>
+                      <View
+                        style={[
+                          styles.qrPresetInputRow,
+                          {
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                            backgroundColor: isDark ? colors.card : "#FFFFFF",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 15,
+                            fontWeight: "800",
+                            color: "#2563EB",
+                            marginRight: 6,
+                          }}
+                        >
+                          ₱
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.qrPresetInput,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                          placeholder="e.g. 350.00"
+                          placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                          keyboardType="numeric"
+                          value={presetAmount}
+                          onChangeText={setPresetAmount}
+                        />
+                        {presetAmount.length > 0 && (
+                          <TouchableOpacity onPress={() => setPresetAmount("")}>
+                            <Ionicons
+                              name="close-circle"
+                              size={16}
+                              color="#94A3B8"
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Quick preset amount chips */}
+                      <View style={styles.qrQuickPillsRow}>
+                        {["150", "300", "500", "1200"].map((amt) => (
+                          <TouchableOpacity
+                            key={amt}
+                            style={[
+                              styles.qrQuickPill,
+                              {
+                                backgroundColor:
+                                  presetAmount === amt
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? "#1E293B"
+                                      : "#E2E8F0",
+                                borderColor:
+                                  presetAmount === amt
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? colors.border
+                                      : "transparent",
+                              },
+                            ]}
+                            onPress={() => setPresetAmount(amt)}
+                          >
+                            <Text
+                              style={[
+                                styles.qrQuickPillText,
+                                {
+                                  color:
+                                    presetAmount === amt
+                                      ? "#FFFFFF"
+                                      : isDark
+                                        ? colors.text
+                                        : "#334155",
+                                },
+                              ]}
+                            >
+                              ₱{amt}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.text : "#0F172A",
+                          marginTop: 4,
+                        }}
+                      >
+                        Preset Note / Memo
+                      </Text>
+                      <View
+                        style={[
+                          styles.qrPresetInputRow,
+                          {
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                            backgroundColor: isDark ? colors.card : "#FFFFFF",
+                          },
+                        ]}
+                      >
+                        <TextInput
+                          style={[
+                            styles.qrPresetInput,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                          placeholder="e.g. Dinner share, WiFi split"
+                          placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                          value={presetNote}
+                          onChangeText={setPresetNote}
+                        />
+                      </View>
+
+                      {/* Quick memo suggestions */}
+                      <View style={styles.qrQuickPillsRow}>
+                        {[
+                          "Dinner share",
+                          "WiFi split",
+                          "Water bill",
+                          "Rent share",
+                          "Groceries",
+                        ].map((memo) => (
+                          <TouchableOpacity
+                            key={memo}
+                            style={[
+                              styles.qrQuickPill,
+                              {
+                                backgroundColor:
+                                  presetNote === memo
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? "#1E293B"
+                                      : "#E2E8F0",
+                                borderColor:
+                                  presetNote === memo
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? colors.border
+                                      : "transparent",
+                              },
+                            ]}
+                            onPress={() => setPresetNote(memo)}
+                          >
+                            <Text
+                              style={[
+                                styles.qrQuickPillText,
+                                {
+                                  color:
+                                    presetNote === memo
+                                      ? "#FFFFFF"
+                                      : isDark
+                                        ? colors.text
+                                        : "#334155",
+                                },
+                              ]}
+                            >
+                              {memo}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {presetAmount || presetNote ? (
+                        <TouchableOpacity
+                          style={{
+                            alignSelf: "flex-start",
+                            paddingVertical: 4,
+                            marginTop: 2,
+                          }}
+                          onPress={() => {
+                            setPresetAmount("");
+                            setPresetNote("");
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#EF4444",
+                              fontSize: 11,
+                              fontWeight: "700",
+                            }}
+                          >
+                            Reset to Universal QR
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  )}
+
+                  {/* Action Buttons: Download PNG, Copy Link & Share */}
+                  <View style={{ width: "100%", gap: 8, marginTop: 14 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.qrActionBtn,
+                        {
+                          backgroundColor: "#2563EB",
+                          width: "100%",
+                          paddingVertical: 12,
+                          borderRadius: 14,
+                        },
+                      ]}
+                      onPress={handleDownloadQrPng}
+                      disabled={isDownloadingQrPng}
+                      activeOpacity={0.8}
+                    >
+                      {isDownloadingQrPng ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="download" size={17} color="#FFFFFF" />
+                          <Text
+                            style={[
+                              styles.qrActionBtnText,
+                              {
+                                color: "#FFFFFF",
+                                fontSize: 13,
+                                fontWeight: "800",
+                              },
+                            ]}
+                          >
+                            Download QR as PNG
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    <View style={styles.qrActionRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.qrActionBtn,
+                          {
+                            backgroundColor: copiedPayLink
+                              ? "#10B981"
+                              : isDark
+                                ? "#1E293B"
+                                : "#F1F5F9",
+                          },
+                        ]}
+                        onPress={handleCopyMyPayLink}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={copiedPayLink ? "checkmark" : "copy-outline"}
+                          size={16}
+                          color={
+                            copiedPayLink
+                              ? "#FFFFFF"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A"
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.qrActionBtnText,
+                            {
+                              color: copiedPayLink
+                                ? "#FFFFFF"
+                                : isDark
+                                  ? colors.text
+                                  : "#0F172A",
+                            },
+                          ]}
+                        >
+                          {copiedPayLink ? "Copied Link! ✓" : "Copy Pay Link"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.qrActionBtn,
+                          {
+                            backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                          },
+                        ]}
+                        onPress={() => {
+                          handleCopyMyPayLink();
+                          Alert.alert(
+                            "Splitzy Pay Link",
+                            "Your Splitzy QR link is copied to your clipboard. You can send it to your roommates via Messenger, Viber, or SMS!",
+                          );
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name="share-social-outline"
+                          size={16}
+                          color={isDark ? colors.text : "#0F172A"}
+                        />
+                        <Text
+                          style={[
+                            styles.qrActionBtnText,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                        >
+                          Share QR
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Informational Tip Box */}
+                  <View
+                    style={[
+                      styles.qrTipBox,
+                      {
+                        backgroundColor: isDark ? "#1E293B40" : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="shield-checkmark"
+                      size={18}
+                      color="#10B981"
+                    />
+                    <Text
+                      style={[
+                        styles.qrTipText,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      Any Splitzy user scanning this QR will instantly transfer
+                      funds directly into your wallet balance in real time.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* TAB 2: SEND MONEY ("SCAN QR") */}
+              {qrModalTab === "scan" && (
+                <View style={{ width: "100%" }}>
+                  {/* STEP A: VIEWFINDER & RECIPIENT DISCOVERY */}
+                  {qrScanStep === "viewfinder" && (
+                    <View>
+                      {/* Interactive Real Camera Viewfinder */}
+                      <View
+                        style={[
+                          styles.qrViewfinder,
+                          {
+                            backgroundColor: "#090D16",
+                            borderColor: "#2563EB",
+                            overflow: "hidden",
+                            position: "relative",
+                          },
+                        ]}
+                      >
+                        {/* Live HTML5 Video Stream (Web / Mobile Web / WebView) */}
+                        {Platform.OS === "web" && (
+                          <video
+                            ref={videoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                              borderRadius: 18,
+                            }}
+                          />
+                        )}
+
+                        {/* Top Viewfinder Bar: Flip Camera & Status */}
+                        <View
+                          style={{
+                            position: "absolute",
+                            top: 10,
+                            left: 12,
+                            right: 12,
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            zIndex: 20,
+                          }}
+                        >
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 6,
+                              backgroundColor: "rgba(15, 23, 42, 0.75)",
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: 4,
+                                backgroundColor: isCameraActive
+                                  ? "#10B981"
+                                  : "#F59E0B",
+                              }}
+                            />
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 10,
+                                fontWeight: "700",
+                              }}
+                            >
+                              {isCameraActive ? "LIVE SCANNER" : "INITIALIZING"}
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: "rgba(15, 23, 42, 0.8)",
+                              paddingHorizontal: 10,
+                              paddingVertical: 5,
+                              borderRadius: 8,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 5,
+                              borderWidth: 1,
+                              borderColor: "rgba(255, 255, 255, 0.2)",
+                            }}
+                            onPress={toggleCameraFacingMode}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons
+                              name="camera-reverse"
+                              size={15}
+                              color="#FFFFFF"
+                            />
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 11,
+                                fontWeight: "700",
+                              }}
+                            >
+                              Flip
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Target Reticle Corners */}
+                        <View
+                          style={[
+                            styles.qrCornerMarker,
+                            {
+                              top: 16,
+                              left: 16,
+                              borderTopWidth: 3,
+                              borderLeftWidth: 3,
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.qrCornerMarker,
+                            {
+                              top: 16,
+                              right: 16,
+                              borderTopWidth: 3,
+                              borderRightWidth: 3,
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.qrCornerMarker,
+                            {
+                              bottom: 16,
+                              left: 16,
+                              borderBottomWidth: 3,
+                              borderLeftWidth: 3,
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.qrCornerMarker,
+                            {
+                              bottom: 16,
+                              right: 16,
+                              borderBottomWidth: 3,
+                              borderRightWidth: 3,
+                            },
+                          ]}
+                        />
+
+                        {/* Animated Laser Scan Beam */}
+                        <Animated.View
+                          style={[
+                            styles.qrLaserLine,
+                            {
+                              transform: [
+                                {
+                                  translateY: qrScanLaserAnim.interpolate({
+                                    inputRange: [0, 1],
+                                    outputRange: [-70, 70],
+                                  }),
+                                },
+                              ],
+                            },
+                          ]}
+                        />
+
+                        {/* Camera Error or Permission Message Overlay */}
+                        {cameraError ? (
+                          <View
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              backgroundColor: "rgba(15, 23, 42, 0.94)",
+                              borderRadius: 18,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 20,
+                              zIndex: 25,
+                            }}
+                          >
+                            <Ionicons
+                              name="videocam-off"
+                              size={36}
+                              color="#EF4444"
+                            />
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 13,
+                                fontWeight: "800",
+                                textAlign: "center",
+                                marginTop: 8,
+                                marginBottom: 4,
+                              }}
+                            >
+                              Camera Access Needed
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#94A3B8",
+                                fontSize: 11,
+                                textAlign: "center",
+                                marginBottom: 12,
+                              }}
+                            >
+                              {cameraError}
+                            </Text>
+                            <TouchableOpacity
+                              style={{
+                                backgroundColor: "#2563EB",
+                                paddingHorizontal: 16,
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                              }}
+                              onPress={startLiveCamera}
+                              activeOpacity={0.8}
+                            >
+                              <Text
+                                style={{
+                                  color: "#FFFFFF",
+                                  fontSize: 12,
+                                  fontWeight: "700",
+                                }}
+                              >
+                                Retry Camera
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          /* Bottom Guide Pill */
+                          <View
+                            style={{
+                              position: "absolute",
+                              bottom: 10,
+                              left: 12,
+                              right: 12,
+                              backgroundColor: "rgba(15, 23, 42, 0.75)",
+                              paddingVertical: 6,
+                              paddingHorizontal: 10,
+                              borderRadius: 10,
+                              alignItems: "center",
+                              zIndex: 20,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 11,
+                                fontWeight: "700",
+                                textAlign: "center",
+                              }}
+                            >
+                              Align Splitzy QR or QR Ph inside frame
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#94A3B8",
+                                fontSize: 9,
+                                textAlign: "center",
+                                marginTop: 2,
+                              }}
+                            >
+                              Auto-detects recipient & amount instantly
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Photo Library & Manual Code Buttons */}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          gap: 10,
+                          marginBottom: 16,
+                        }}
+                      >
+                        <TouchableOpacity
+                          style={[
+                            styles.modalPrimaryBtn,
+                            {
+                              flex: 1,
+                              backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                              borderWidth: 1,
+                              borderColor: isDark ? colors.border : "#CBD5E1",
+                            },
+                          ]}
+                          onPress={handlePickQrImage}
+                          disabled={isDecodingImage}
+                          activeOpacity={0.8}
+                        >
+                          {isDecodingImage ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={isDark ? "#FFFFFF" : "#2563EB"}
+                            />
+                          ) : (
+                            <>
+                              <Ionicons
+                                name="image-outline"
+                                size={18}
+                                color={isDark ? colors.text : "#0F172A"}
+                              />
+                              <Text
+                                style={[
+                                  styles.modalPrimaryBtnText,
+                                  { color: isDark ? colors.text : "#0F172A" },
+                                ]}
+                              >
+                                Upload QR
+                              </Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.modalPrimaryBtn,
+                            {
+                              flex: 1,
+                              backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                              borderWidth: 1,
+                              borderColor: isDark ? colors.border : "#CBD5E1",
+                            },
+                          ]}
+                          onPress={() => setShowManualInput(!showManualInput)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons
+                            name="keypad-outline"
+                            size={18}
+                            color={isDark ? colors.text : "#0F172A"}
+                          />
+                          <Text
+                            style={[
+                              styles.modalPrimaryBtnText,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {showManualInput ? "Hide Code" : "Enter Code"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Manual Code / Link Input Section */}
+                      {showManualInput && (
+                        <View
+                          style={{
+                            backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                            padding: 12,
+                            borderRadius: 14,
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                            marginBottom: 16,
+                            gap: 10,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: "700",
+                              color: isDark ? colors.text : "#0F172A",
+                            }}
+                          >
+                            Paste Splitzy Pay Link or User ID
+                          </Text>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              borderWidth: 1,
+                              borderColor: isDark ? colors.border : "#CBD5E1",
+                              backgroundColor: isDark ? colors.card : "#FFFFFF",
+                              borderRadius: 10,
+                              paddingHorizontal: 10,
+                              height: 42,
+                            }}
+                          >
+                            <TextInput
+                              style={{
+                                flex: 1,
+                                fontSize: 13,
+                                color: isDark ? colors.text : "#0F172A",
+                              }}
+                              placeholder="splitzy://pay?uid=... or roommate ID"
+                              placeholderTextColor={
+                                isDark ? "#64748B" : "#94A3B8"
+                              }
+                              value={manualCodeInput}
+                              onChangeText={setManualCodeInput}
+                              autoCapitalize="none"
+                            />
+                            {manualCodeInput.length > 0 && (
+                              <TouchableOpacity
+                                onPress={() => setManualCodeInput("")}
+                              >
+                                <Ionicons
+                                  name="close-circle"
+                                  size={16}
+                                  color="#94A3B8"
+                                />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: "#2563EB",
+                              paddingVertical: 10,
+                              borderRadius: 10,
+                              alignItems: "center",
+                            }}
+                            onPress={() => {
+                              if (!manualCodeInput.trim()) {
+                                Alert.alert(
+                                  "Input Required",
+                                  "Please enter or paste a Splitzy code.",
+                                );
+                                return;
+                              }
+                              const parsed = parseQrPayload(manualCodeInput);
+                              handleSelectRoommateToTransfer(
+                                {
+                                  uid: parsed.uid,
+                                  name: parsed.name,
+                                  email: parsed.email,
+                                },
+                                parsed.amount,
+                                parsed.note,
+                              );
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 12,
+                                fontWeight: "800",
+                              }}
+                            >
+                              Decode & Transfer
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {/* Quick-Select Household Roommates Section */}
+                      <View style={{ marginBottom: 16 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: "800",
+                              color: isDark ? colors.text : "#0F172A",
+                            }}
+                          >
+                            Quick-Select Roommate to Pay
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: isDark ? colors.textMuted : "#64748B",
+                            }}
+                          >
+                            Instant 1-Tap
+                          </Text>
+                        </View>
+
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.qrQuickRoommatesRow}
+                        >
+                          {availableRoommates.map((roommate, idx) => {
+                            const colorsPalette = [
+                              "#2563EB",
+                              "#10B981",
+                              "#F59E0B",
+                              "#8B5CF6",
+                              "#EC4899",
+                            ];
+                            const avatarBg =
+                              colorsPalette[idx % colorsPalette.length];
+
+                            return (
+                              <TouchableOpacity
+                                key={roommate.uid || idx}
+                                style={[
+                                  styles.qrRoommateChip,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#0F172A"
+                                      : "#F8FAFC",
+                                    borderColor: isDark
+                                      ? colors.border
+                                      : "#E2E8F0",
+                                  },
+                                ]}
+                                onPress={() =>
+                                  handleSelectRoommateToTransfer(roommate)
+                                }
+                                activeOpacity={0.7}
+                              >
+                                <View
+                                  style={[
+                                    styles.qrRoommateAvatar,
+                                    { backgroundColor: avatarBg },
+                                  ]}
+                                >
+                                  <Text style={styles.qrRoommateAvatarText}>
+                                    {roommate.name.slice(0, 2).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <Text
+                                  style={[
+                                    styles.qrRoommateName,
+                                    { color: isDark ? colors.text : "#0F172A" },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {roommate.name.split(" ")[0]}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.qrRoommateRole,
+                                    {
+                                      color: isDark
+                                        ? colors.textMuted
+                                        : "#64748B",
+                                    },
+                                  ]}
+                                >
+                                  {roommate.role || "Roommate"}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+
+                      {/* Demo QR Scanner Shortcut for Instant Testing */}
+                      <TouchableOpacity
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          paddingVertical: 12,
+                          borderRadius: 14,
+                          backgroundColor: isDark ? "#1E293B" : "#EFF6FF",
+                          borderWidth: 1,
+                          borderColor: isDark ? "#2563EB40" : "#BFDBFE",
+                        }}
+                        onPress={() => {
+                          const demoRoommate = availableRoommates[0] || {
+                            uid: "user_alex_rivera",
+                            name: "Alex Rivera",
+                            email: "alex.rivera@splitzy.ph",
+                          };
+                          handleSelectRoommateToTransfer(
+                            demoRoommate,
+                            "450.00",
+                            "Dinner & grocery share",
+                          );
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="flash" size={16} color="#2563EB" />
+                        <Text
+                          style={{
+                            color: "#2563EB",
+                            fontSize: 12,
+                            fontWeight: "800",
+                          }}
+                        >
+                          Simulate Scan: Alex's ₱450.00 Dinner Share QR
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* STEP B: TRANSFER CONFIRMATION & FUNDING SOURCE SELECTOR */}
+                  {qrScanStep === "confirm" && scannedRecipient && (
+                    <View>
+                      {/* Back to viewfinder button */}
+                      <TouchableOpacity
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                          marginBottom: 12,
+                          alignSelf: "flex-start",
+                        }}
+                        onPress={() => setQrScanStep("viewfinder")}
+                      >
+                        <Ionicons
+                          name="arrow-back"
+                          size={16}
+                          color={isDark ? colors.textMuted : "#64748B"}
+                        />
+                        <Text
+                          style={{
+                            color: isDark ? colors.textMuted : "#64748B",
+                            fontSize: 12,
+                            fontWeight: "700",
+                          }}
+                        >
+                          Back to Scanner
+                        </Text>
+                      </TouchableOpacity>
+
+                      {/* Recipient Profile Verified Card */}
+                      <View
+                        style={{
+                          backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                          padding: 14,
+                          borderRadius: 16,
+                          borderWidth: 1,
+                          borderColor: isDark ? colors.border : "#E2E8F0",
+                          marginBottom: 14,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 22,
+                            backgroundColor: "#2563EB",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#FFFFFF",
+                              fontSize: 16,
+                              fontWeight: "900",
+                            }}
+                          >
+                            {scannedRecipient.name.slice(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 15,
+                                fontWeight: "800",
+                                color: isDark ? colors.text : "#0F172A",
+                              }}
+                              numberOfLines={1}
+                            >
+                              {scannedRecipient.name}
+                            </Text>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={16}
+                              color="#10B981"
+                            />
+                          </View>
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: isDark ? colors.textMuted : "#64748B",
+                              marginTop: 2,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {scannedRecipient.email ||
+                              `@${scannedRecipient.name.toLowerCase().replace(/\s+/g, "_")}`}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            backgroundColor: isDark ? "#064E3B40" : "#ECFDF5",
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            borderColor: "#10B981",
+                            borderWidth: 1,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#10B981",
+                              fontSize: 10,
+                              fontWeight: "800",
+                            }}
+                          >
+                            Roommate
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Transfer Amount Input */}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "800",
+                          color: isDark ? colors.text : "#0F172A",
+                          marginBottom: 6,
+                        }}
+                      >
+                        Transfer Amount (₱)
+                      </Text>
+                      <View
+                        style={[
+                          styles.amountInputWrap,
+                          {
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                            backgroundColor: isDark ? colors.card : "#FFFFFF",
+                            marginBottom: 8,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.simAmountCurrency,
+                            { color: "#2563EB", fontWeight: "900" },
+                          ]}
+                        >
+                          ₱
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.amountInput,
+                            {
+                              color: isDark ? colors.text : "#0F172A",
+                              fontSize: 22,
+                              fontWeight: "800",
+                            },
+                          ]}
+                          placeholder="0.00"
+                          placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                          keyboardType="numeric"
+                          value={qrTransferAmount}
+                          onChangeText={setQrTransferAmount}
+                        />
+                      </View>
+
+                      {/* Quick amount chips */}
+                      <View
+                        style={[styles.qrQuickPillsRow, { marginBottom: 14 }]}
+                      >
+                        {["50", "100", "350", "500", "1000"].map((amt) => (
+                          <TouchableOpacity
+                            key={amt}
+                            style={[
+                              styles.qrQuickPill,
+                              {
+                                backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                                borderColor: isDark ? colors.border : "#E2E8F0",
+                              },
+                            ]}
+                            onPress={() => {
+                              const curr = parseFloat(qrTransferAmount) || 0;
+                              setQrTransferAmount(
+                                (curr + parseFloat(amt)).toFixed(2),
+                              );
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.qrQuickPillText,
+                                { color: isDark ? colors.text : "#334155" },
+                              ]}
+                            >
+                              +₱{amt}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {/* Transfer Note / Memo Input */}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "800",
+                          color: isDark ? colors.text : "#0F172A",
+                          marginBottom: 6,
+                        }}
+                      >
+                        Transfer Note / Memo
+                      </Text>
+                      <View
+                        style={[
+                          styles.qrPresetInputRow,
+                          {
+                            borderColor: isDark ? colors.border : "#CBD5E1",
+                            backgroundColor: isDark ? colors.card : "#FFFFFF",
+                            marginBottom: 16,
+                          },
+                        ]}
+                      >
+                        <TextInput
+                          style={[
+                            styles.qrPresetInput,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                          placeholder="What is this transfer for?"
+                          placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                          value={qrTransferNote}
+                          onChangeText={setQrTransferNote}
+                        />
+                      </View>
+
+                      {/* FUNDING SOURCE SELECTOR (Available Wallet Balance vs Linked Cards) */}
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: "800",
+                          color: isDark ? colors.text : "#0F172A",
+                          marginBottom: 8,
+                        }}
+                      >
+                        Choose Funding Source
+                      </Text>
+
+                      {/* Option 1: Available Wallet Balance */}
+                      <TouchableOpacity
+                        style={[
+                          styles.qrFundingOption,
+                          {
+                            backgroundColor:
+                              qrFundingSource === "wallet"
+                                ? isDark
+                                  ? "#1E293B"
+                                  : "#EFF6FF"
+                                : isDark
+                                  ? "#0F172A"
+                                  : "#F8FAFC",
+                            borderColor:
+                              qrFundingSource === "wallet"
+                                ? "#2563EB"
+                                : isDark
+                                  ? colors.border
+                                  : "#E2E8F0",
+                          },
+                        ]}
+                        onPress={() => setQrFundingSource("wallet")}
+                        activeOpacity={0.8}
+                      >
+                        <View
+                          style={[
+                            styles.qrFundingRadio,
+                            {
+                              borderColor:
+                                qrFundingSource === "wallet"
+                                  ? "#2563EB"
+                                  : isDark
+                                    ? "#64748B"
+                                    : "#CBD5E1",
+                            },
+                          ]}
+                        >
+                          {qrFundingSource === "wallet" && (
+                            <View style={styles.qrFundingRadioInner} />
+                          )}
+                        </View>
+                        <View
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 10,
+                            backgroundColor: "#059669",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Ionicons name="wallet" size={18} color="#FFFFFF" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: "800",
+                              color: isDark ? colors.text : "#0F172A",
+                            }}
+                          >
+                            Splitzy Available Balance
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              color: isDark ? colors.textMuted : "#64748B",
+                              marginTop: 2,
+                            }}
+                          >
+                            ₱
+                            {(wallet?.balance || 0).toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                            })}{" "}
+                            available
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            backgroundColor: isDark ? "#064E3B40" : "#ECFDF5",
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#10B981",
+                              fontSize: 10,
+                              fontWeight: "800",
+                            }}
+                          >
+                            Cash Balance
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Option 2..N: Linked Payment Cards */}
+                      {wallet?.cards.map((card) => {
+                        const isSelected = qrFundingSource === card.id;
+                        return (
+                          <TouchableOpacity
+                            key={card.id}
+                            style={[
+                              styles.qrFundingOption,
+                              {
+                                backgroundColor: isSelected
+                                  ? isDark
+                                    ? "#1E293B"
+                                    : "#EFF6FF"
+                                  : isDark
+                                    ? "#0F172A"
+                                    : "#F8FAFC",
+                                borderColor: isSelected
+                                  ? "#2563EB"
+                                  : isDark
+                                    ? colors.border
+                                    : "#E2E8F0",
+                              },
+                            ]}
+                            onPress={() => setQrFundingSource(card.id)}
+                            activeOpacity={0.8}
+                          >
+                            <View
+                              style={[
+                                styles.qrFundingRadio,
+                                {
+                                  borderColor: isSelected
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? "#64748B"
+                                      : "#CBD5E1",
+                                },
+                              ]}
+                            >
+                              {isSelected && (
+                                <View style={styles.qrFundingRadioInner} />
+                              )}
+                            </View>
+                            <LinearGradient
+                              colors={
+                                card.colorGradient || ["#1E40AF", "#3B82F6"]
+                              }
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 10,
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Ionicons name="card" size={18} color="#FFFFFF" />
+                            </LinearGradient>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: "800",
+                                  color: isDark ? colors.text : "#0F172A",
+                                }}
+                                numberOfLines={1}
+                              >
+                                {card.name}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  color: isDark ? colors.textMuted : "#64748B",
+                                  marginTop: 2,
+                                }}
+                              >
+                                ₱
+                                {(card.balance || 0).toLocaleString("en-US", {
+                                  minimumFractionDigits: 2,
+                                })}{" "}
+                                · {card.accountNumber}
+                              </Text>
+                            </View>
+                            {card.isDefault && (
+                              <View
+                                style={{
+                                  backgroundColor: isDark
+                                    ? "#1E293B"
+                                    : "#E2E8F0",
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    color: isDark ? "#93C5FD" : "#2563EB",
+                                    fontSize: 9,
+                                    fontWeight: "800",
+                                  }}
+                                >
+                                  Primary
+                                </Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+
+                      {/* Dynamic Overdraft Callout Banner */}
+                      {(() => {
+                        const parsedAmt = parseFloat(qrTransferAmount) || 0;
+                        let selectedSourceBal = wallet?.balance || 0;
+                        let selectedSourceName = "Splitzy Available Balance";
+
+                        if (qrFundingSource !== "wallet") {
+                          const chosenCard = wallet?.cards.find(
+                            (c) => c.id === qrFundingSource,
+                          );
+                          selectedSourceBal = chosenCard?.balance || 0;
+                          selectedSourceName = chosenCard?.name || "Card";
+                        }
+
+                        const isOverdraft = parsedAmt > selectedSourceBal;
+
+                        return (
+                          <View style={{ marginTop: 6, marginBottom: 12 }}>
+                            {isOverdraft && (
+                              <View
+                                style={[
+                                  styles.simPreviewCallout,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#450A0A40"
+                                      : "#FEF2F2",
+                                    borderColor: "#EF4444",
+                                    borderWidth: 1,
+                                    marginBottom: 10,
+                                  },
+                                ]}
+                              >
+                                <Ionicons
+                                  name="alert-circle"
+                                  size={18}
+                                  color="#EF4444"
+                                />
+                                <View style={{ flex: 1 }}>
+                                  <Text
+                                    style={[
+                                      styles.simPreviewText,
+                                      { color: "#EF4444", fontWeight: "700" },
+                                    ]}
+                                  >
+                                    Insufficient funds on {selectedSourceName}{" "}
+                                    (₱
+                                    {selectedSourceBal.toLocaleString("en-US", {
+                                      minimumFractionDigits: 2,
+                                    })}{" "}
+                                    available). Top up or choose another source
+                                    to transfer ₱{parsedAmt.toFixed(2)}.
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+
+                            <TouchableOpacity
+                              style={[
+                                styles.modalPrimaryBtn,
+                                isOverdraft && { backgroundColor: "#94A3B8" },
+                              ]}
+                              disabled={isOverdraft || isProcessingQrTransfer}
+                              onPress={handleExecuteQrTransfer}
+                              activeOpacity={0.8}
+                            >
+                              {isProcessingQrTransfer ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color="#FFFFFF"
+                                />
+                              ) : (
+                                <>
+                                  <Ionicons
+                                    name={
+                                      isOverdraft
+                                        ? "alert-circle"
+                                        : "paper-plane"
+                                    }
+                                    size={18}
+                                    color="#FFFFFF"
+                                  />
+                                  <Text style={styles.modalPrimaryBtnText}>
+                                    {isOverdraft
+                                      ? "Insufficient Balance"
+                                      : `Transfer ₱${parsedAmt > 0 ? parsedAmt.toFixed(2) : "0.00"} to ${scannedRecipient.name.split(" ")[0]}`}
+                                  </Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  )}
+
+                  {/* STEP C: TRANSFER RECEIPT */}
+                  {qrScanStep === "receipt" && qrReceipt && (
+                    <View style={{ alignItems: "center", width: "100%" }}>
+                      {/* Success Checkmark Circle */}
+                      <View
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 32,
+                          backgroundColor: "#10B981",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginVertical: 12,
+                          shadowColor: "#10B981",
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.35,
+                          shadowRadius: 10,
+                          elevation: 6,
+                        }}
+                      >
+                        <Ionicons name="checkmark" size={36} color="#FFFFFF" />
+                      </View>
+
+                      <Text
+                        style={{
+                          fontSize: 18,
+                          fontWeight: "900",
+                          color: isDark ? colors.text : "#0F172A",
+                          textAlign: "center",
+                        }}
+                      >
+                        Transfer Successful! 🎉
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isDark ? colors.textMuted : "#64748B",
+                          marginTop: 4,
+                          textAlign: "center",
+                        }}
+                      >
+                        Credited instantly to {qrReceipt.recipientName}'s wallet
+                      </Text>
+
+                      <Text
+                        style={{
+                          fontSize: 32,
+                          fontWeight: "900",
+                          color: "#10B981",
+                          marginVertical: 12,
+                          letterSpacing: -0.5,
+                        }}
+                      >
+                        ₱
+                        {qrReceipt.amount.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </Text>
+
+                      {/* Digital Receipt Breakdown Card */}
+                      <View
+                        style={[
+                          styles.qrReceiptCard,
+                          {
+                            backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                            borderColor: isDark ? colors.border : "#E2E8F0",
+                            width: "100%",
+                          },
+                        ]}
+                      >
+                        <View style={styles.qrReceiptRow}>
+                          <Text
+                            style={[
+                              styles.qrReceiptLabel,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            Reference ID
+                          </Text>
+                          <TouchableOpacity
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                            onPress={async () => {
+                              await Clipboard.setStringAsync(
+                                qrReceipt.refNumber,
+                              );
+                              Alert.alert(
+                                "Copied",
+                                "Reference ID copied to clipboard!",
+                              );
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.qrReceiptValue,
+                                {
+                                  color: "#2563EB",
+                                  fontFamily:
+                                    Platform.OS === "ios"
+                                      ? "Menlo"
+                                      : "monospace",
+                                },
+                              ]}
+                            >
+                              {qrReceipt.refNumber}
+                            </Text>
+                            <Ionicons
+                              name="copy-outline"
+                              size={13}
+                              color="#2563EB"
+                            />
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.qrReceiptRow}>
+                          <Text
+                            style={[
+                              styles.qrReceiptLabel,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            Paid To
+                          </Text>
+                          <Text
+                            style={[
+                              styles.qrReceiptValue,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {qrReceipt.recipientName}
+                          </Text>
+                        </View>
+
+                        <View style={styles.qrReceiptRow}>
+                          <Text
+                            style={[
+                              styles.qrReceiptLabel,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            Funding Source
+                          </Text>
+                          <Text
+                            style={[
+                              styles.qrReceiptValue,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {qrReceipt.sourceName}
+                          </Text>
+                        </View>
+
+                        <View style={styles.qrReceiptRow}>
+                          <Text
+                            style={[
+                              styles.qrReceiptLabel,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            Time
+                          </Text>
+                          <Text
+                            style={[
+                              styles.qrReceiptValue,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {qrReceipt.timestamp}
+                          </Text>
+                        </View>
+
+                        {qrReceipt.note ? (
+                          <View style={styles.qrReceiptRow}>
+                            <Text
+                              style={[
+                                styles.qrReceiptLabel,
+                                {
+                                  color: isDark ? colors.textMuted : "#64748B",
+                                },
+                              ]}
+                            >
+                              Note / Memo
+                            </Text>
+                            <Text
+                              style={[
+                                styles.qrReceiptValue,
+                                { color: isDark ? colors.text : "#0F172A" },
+                              ]}
+                            >
+                              {qrReceipt.note}
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        <View style={styles.qrReceiptRow}>
+                          <Text
+                            style={[
+                              styles.qrReceiptLabel,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            Ledger Status
+                          </Text>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: 3,
+                                backgroundColor: "#10B981",
+                              }}
+                            />
+                            <Text
+                              style={{
+                                color: "#10B981",
+                                fontSize: 11,
+                                fontWeight: "800",
+                              }}
+                            >
+                              Synchronized
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Receipt Action Buttons */}
+                      <View style={{ width: "100%", gap: 8, marginTop: 4 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.modalPrimaryBtn,
+                            { backgroundColor: "#2563EB" },
+                          ]}
+                          onPress={() => setShowScanQrModal(false)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons
+                            name="checkmark"
+                            size={18}
+                            color="#FFFFFF"
+                          />
+                          <Text style={styles.modalPrimaryBtnText}>Done</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.modalCancelBtn,
+                            {
+                              backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                              borderWidth: 1,
+                              borderColor: isDark ? colors.border : "#CBD5E1",
+                            },
+                          ]}
+                          onPress={() => {
+                            setQrScanStep("viewfinder");
+                            setScannedRecipient(null);
+                            setQrTransferAmount("");
+                            setQrTransferNote("");
+                            setQrReceipt(null);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text
+                            style={[
+                              styles.modalCancelBtnText,
+                              {
+                                color: isDark ? colors.text : "#0F172A",
+                                fontWeight: "700",
+                              },
+                            ]}
+                          >
+                            Make Another Transfer
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -9677,6 +12205,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginRight: 6,
   },
+  amountCurrency: {
+    fontSize: 22,
+    fontWeight: "700",
+    marginRight: 6,
+  },
   amountInput: {
     flex: 1,
     fontSize: 22,
@@ -10734,6 +13267,270 @@ const styles = StyleSheet.create({
   },
   cashReplenishBtnText: {
     color: "#2563EB",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  // Splitzy Cross-User QR Engine Styles
+  qrModalTabsRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 16,
+    gap: 4,
+  },
+  qrModalTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  qrModalTabBtnActive: {
+    backgroundColor: "#2563EB",
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  qrModalTabText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  qrModalTabTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
+  qrCodeCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+  },
+  qrIdentityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    width: "100%",
+  },
+  qrIdentityAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qrIdentityAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  qrIdentityName: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  qrIdentitySub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  qrPresetToggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 12,
+    width: "100%",
+  },
+  qrPresetToggleText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  qrPresetBox: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    width: "100%",
+    gap: 10,
+  },
+  qrPresetInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  qrPresetInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    paddingVertical: 0,
+  },
+  qrQuickPillsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  qrQuickPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  qrQuickPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  qrActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+    width: "100%",
+  },
+  qrActionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  qrActionBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  qrTipBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 12,
+    width: "100%",
+  },
+  qrTipText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  qrViewfinder: {
+    height: 220,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    overflow: "hidden",
+    borderWidth: 2,
+    marginVertical: 12,
+  },
+  qrCornerMarker: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    borderColor: "#3B82F6",
+  },
+  qrLaserLine: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    height: 3,
+    backgroundColor: "#38BDF8",
+    borderRadius: 2,
+    shadowColor: "#38BDF8",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  qrQuickRoommatesRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingVertical: 6,
+  },
+  qrRoommateChip: {
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    minWidth: 84,
+  },
+  qrRoommateAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  qrRoommateAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  qrRoommateName: {
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  qrRoommateRole: {
+    fontSize: 9,
+    marginTop: 2,
+  },
+  qrFundingOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    marginBottom: 8,
+    gap: 12,
+  },
+  qrFundingRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qrFundingRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#2563EB",
+  },
+  qrReceiptCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    marginVertical: 14,
+    gap: 10,
+  },
+  qrReceiptRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  qrReceiptLabel: {
+    fontSize: 12,
+  },
+  qrReceiptValue: {
     fontSize: 12,
     fontWeight: "700",
   },

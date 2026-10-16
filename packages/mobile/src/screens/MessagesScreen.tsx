@@ -418,42 +418,19 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   const defaultBottomPadding = Math.max(
     bottomInset,
-    Platform.OS === "android" ? 24 : 14,
+    Platform.OS === "android" ? 16 : 14,
   );
 
   const chatInputBottomPadding = useMemo(() => {
     if (!keyboardActive) {
       return defaultBottomPadding;
     }
-
-    if (Platform.OS === "android") {
-      // In Android translucent status bar mode, the soft keyboard sits above the system navigation bar (insets.bottom).
-      // We must elevate the input container by the keyboard height PLUS the navigation bar clearance PLUS a clean 12px cushion.
-      const navBarClearance = Math.max(insets.bottom, bottomInset, 34);
-      const effectiveHeight = Math.max(
-        keyboardHeight,
-        contextKeyboardHeight || 0,
-        320, // Baseline for modern Android keyboards with suggestion & number rows (e.g., Gboard)
-      );
-      return effectiveHeight + navBarClearance + 12;
-    }
-
-    if (Platform.OS === "ios") {
-      // On iOS, KeyboardAvoidingView (behavior="padding") lifts the container by keyboardHeight.
-      // Provide a clean 12px cushion inside the elevated container.
-      return 12;
-    }
-
-    // Web / other platforms
-    return 12;
-  }, [
-    keyboardActive,
-    keyboardHeight,
-    contextKeyboardHeight,
-    defaultBottomPadding,
-    insets.bottom,
-    bottomInset,
-  ]);
+    // When keyboard is active, Android (via softwareKeyboardLayoutMode: resize) and iOS
+    // (via KeyboardAvoidingView padding) automatically elevate the container above the soft keyboard.
+    // Setting a compact 8px padding keeps the capsule input bar sitting snugly and flush
+    // against the top of the keyboard without an empty void.
+    return 8;
+  }, [keyboardActive, defaultBottomPadding]);
 
   const handleToggleMessage = (msgId: string) => {
     setToggledMessageIds((prev) => ({
@@ -4098,20 +4075,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 style={[
                   styles.noteViewerBottomContainer,
                   {
-                    paddingBottom:
-                      Platform.OS === "android"
-                        ? keyboardActive
-                          ? Math.max(
-                              keyboardHeight,
-                              contextKeyboardHeight || 0,
-                              320,
-                            ) +
-                            Math.max(insets.bottom, bottomInset, 34) +
-                            12
-                          : Math.max(bottomInset + 10, insets.bottom + 16)
-                        : keyboardActive
-                          ? 12
-                          : Math.max(bottomInset + 10, insets.bottom + 16),
+                    paddingBottom: keyboardActive
+                      ? 8
+                      : Math.max(bottomInset + 6, insets.bottom + 12),
                   },
                 ]}
               >

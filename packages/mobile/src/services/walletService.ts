@@ -206,7 +206,9 @@ export type WalletTransactionType =
   | "savings_withdrawal"
   | "expense_simulation"
   | "card_transfer"
-  | "cash_expense";
+  | "cash_expense"
+  | "qr_transfer_sent"
+  | "qr_transfer_received";
 
 export interface CashAutomationRule {
   id: string;
@@ -1893,6 +1895,272 @@ class WalletService {
       amount,
       "ATM Cash Withdrawal / Replenish Cash on Hand",
     );
+  }
+
+  /**
+   * Transfers money peer-to-peer to another Splitzy user via QR code.
+   * Debits sender (wallet balance or card), credits recipient, and records dual-entry ledgers.
+   */
+  async transferViaQr(params: {
+    senderUid: string;
+    senderName: string;
+    recipientUid: string;
+    recipientName: string;
+    amount: number;
+    fundingSourceId: "wallet" | string;
+    note?: string;
+  }): Promise<{
+    success: boolean;
+    updatedState: WalletState;
+    message: string;
+    referenceNumber: string;
+  }> {
+    const {
+      senderUid,
+      senderName,
+      recipientUid,
+      recipientName,
+      amount,
+      fundingSourceId,
+      note,
+    } = params;
+    const current = await this.getWallet(senderUid);
+    const refNumber =
+      "SPL-QR-" +
+      Date.now().toString(36).toUpperCase() +
+      "-" +
+      Math.random().toString(36).substring(2, 6).toUpperCase();
+    const nowIso = new Date().toISOString();
+
+    if (amount <= 0) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Transfer amount must be greater than ₱0.00.",
+        referenceNumber: refNumber,
+      };
+    }
+
+    if (senderUid === recipientUid) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "You cannot transfer funds to your own Splitzy account.",
+        referenceNumber: refNumber,
+      };
+    }
+
+    let sourceLabel = "Available Balance";
+    const updatedCards = [...current.cards];
+
+    // Check balance and deduct from chosen source
+    if (fundingSourceId === "wallet") {
+      const availableFunds = current.balance;
+
+      if (availableFunds < amount) {
+        return {
+          success: false,
+          updatedState: current,
+          message: `Insufficient wallet balance (₱${availableFunds.toLocaleString("en-US", { minimumFractionDigits: 2 })} available). Please top up or choose a card.`,
+          referenceNumber: refNumber,
+        };
+      }
+
+      if (updatedCards.length > 0) {
+        const cashIndex = updatedCards.findIndex(
+          (c) => c.type === "cash" || c.name.toLowerCase().includes("cash"),
+        );
+        if (
+          cashIndex !== -1 &&
+          (updatedCards[cashIndex].balance || 0) >= amount
+        ) {
+          updatedCards[cashIndex] = {
+            ...updatedCards[cashIndex],
+            balance: Math.max(
+              0,
+              (updatedCards[cashIndex].balance || 0) - amount,
+            ),
+          };
+          sourceLabel = updatedCards[cashIndex].name;
+        } else {
+          // Cascade deduction across available cards
+          const cascaded = this.deductFromCards(updatedCards, amount);
+          updatedCards.splice(0, updatedCards.length, ...cascaded);
+          sourceLabel = "Wallet Balance";
+        }
+      }
+    } else {
+      // Deduct from specific card
+      const cardIndex = updatedCards.findIndex((c) => c.id === fundingSourceId);
+      if (cardIndex === -1) {
+        return {
+          success: false,
+          updatedState: current,
+          message: "Selected payment card could not be found.",
+          referenceNumber: refNumber,
+        };
+      }
+      const card = updatedCards[cardIndex];
+      const cardBal = card.balance || 0;
+      if (cardBal < amount) {
+        return {
+          success: false,
+          updatedState: current,
+          message: `Insufficient balance on ${card.name} (₱${cardBal.toLocaleString("en-US", { minimumFractionDigits: 2 })} available).`,
+          referenceNumber: refNumber,
+        };
+      }
+
+      updatedCards[cardIndex] = {
+        ...card,
+        balance: Math.max(0, cardBal - amount),
+      };
+      sourceLabel = card.name;
+    }
+
+    const newSenderTotal =
+      updatedCards.length > 0
+        ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
+        : Math.max(0, current.balance - amount);
+
+    // Record sender transaction
+    const senderTx: WalletTransaction = {
+      id:
+        "tx_qr_sent_" +
+        Date.now() +
+        "_" +
+        Math.random().toString(36).substring(2, 6),
+      type: "qr_transfer_sent",
+      amount,
+      title: `Sent to ${recipientName || "Roommate"}`,
+      description: note?.trim()
+        ? `QR Transfer: ${note.trim()}`
+        : `Splitzy QR Transfer to ${recipientName || "Roommate"}`,
+      note: note?.trim() || "Splitzy QR Payment",
+      paymentMethodUsed: sourceLabel,
+      referenceId: refNumber,
+      timestamp: nowIso,
+      status: "completed",
+      category: "transfer",
+    };
+
+    const updatedSenderWallet: WalletState = {
+      ...current,
+      balance: newSenderTotal,
+      cards: updatedCards,
+      transactions: [senderTx, ...current.transactions],
+      updatedAt: nowIso,
+    };
+
+    // 1. Persist sender wallet
+    await this.persist(senderUid, updatedSenderWallet);
+
+    // 2. Credit recipient wallet in background/cloud
+    try {
+      const recipientWallet = await this.getWallet(recipientUid);
+      const recipientCards = [...(recipientWallet.cards || [])];
+      let recipientTargetIndex = recipientCards.findIndex((c) => c.isDefault);
+      if (recipientTargetIndex === -1) {
+        recipientTargetIndex = recipientCards.findIndex(
+          (c) => c.type === "cash" || c.name.toLowerCase().includes("cash"),
+        );
+      }
+      if (recipientTargetIndex === -1 && recipientCards.length > 0) {
+        recipientTargetIndex = 0;
+      }
+
+      if (recipientTargetIndex !== -1) {
+        recipientCards[recipientTargetIndex] = {
+          ...recipientCards[recipientTargetIndex],
+          balance: (recipientCards[recipientTargetIndex].balance || 0) + amount,
+        };
+      } else {
+        // Create initial Cash on Hand card if recipient has zero cards
+        recipientCards.push({
+          id: "card_cash_" + Date.now(),
+          type: "cash",
+          name: "Cash on Hand",
+          accountNumber: "•••• 0001",
+          cardholderName: recipientName || "Roommate",
+          colorGradient: ["#064E3B", "#059669"],
+          balance: amount,
+          isDefault: true,
+          createdAt: nowIso,
+        });
+      }
+
+      const newRecipientTotal =
+        recipientCards.length > 0
+          ? recipientCards.reduce((acc, c) => acc + (c.balance || 0), 0)
+          : (recipientWallet.balance || 0) + amount;
+
+      const recipientTx: WalletTransaction = {
+        id:
+          "tx_qr_recv_" +
+          Date.now() +
+          "_" +
+          Math.random().toString(36).substring(2, 6),
+        type: "qr_transfer_received",
+        amount,
+        title: `Received from ${senderName || "Roommate"}`,
+        description: note?.trim()
+          ? `QR Received: ${note.trim()}`
+          : `Splitzy QR transfer from ${senderName || "Roommate"}`,
+        note: note?.trim() || "Splitzy QR Payment",
+        paymentMethodUsed: "Splitzy QR",
+        referenceId: refNumber,
+        timestamp: nowIso,
+        status: "completed",
+        category: "income",
+      };
+
+      const updatedRecipientWallet: WalletState = {
+        ...recipientWallet,
+        balance: newRecipientTotal,
+        cards: recipientCards,
+        transactions: [recipientTx, ...(recipientWallet.transactions || [])],
+        updatedAt: nowIso,
+      };
+
+      await this.persist(recipientUid, updatedRecipientWallet);
+
+      // 3. Dispatch cloud notification to recipient
+      const notifDocId = `notif_${recipientUid}_qr_${Date.now()}`;
+      await setDoc(
+        doc(db, "notifications", notifDocId),
+        {
+          notificationId: notifDocId,
+          recipientId: recipientUid,
+          type: "PAYMENT_RECEIVED",
+          category: "payment_received",
+          title: `₱${amount.toFixed(2)} Received via QR! 🎉`,
+          message: `${senderName || "A roommate"} sent you ₱${amount.toFixed(2)} via Splitzy QR${note?.trim() ? ` ("${note.trim()}")` : ""}.`,
+          spans: [
+            { text: `${senderName || "A roommate"} transferred ` },
+            { text: `₱${amount.toFixed(2)}`, bold: true, color: "#10B981" },
+            { text: ` to your wallet via Splitzy QR.` },
+          ],
+          relatedItemId: refNumber,
+          relatedEntityId: refNumber,
+          actionTarget: "wallet",
+          readStatus: false,
+          createdTimestamp: nowIso,
+        },
+        { merge: true },
+      );
+    } catch (recvErr) {
+      console.warn(
+        "[WalletService] Recipient credit or notification notice:",
+        recvErr,
+      );
+    }
+
+    return {
+      success: true,
+      updatedState: updatedSenderWallet,
+      message: `₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })} transferred successfully to ${recipientName || "recipient"} via ${sourceLabel}!`,
+      referenceNumber: refNumber,
+    };
   }
 
   private async persist(userId: string, state: WalletState) {
