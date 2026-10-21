@@ -903,7 +903,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
           try {
             const ViewShot = require("react-native-view-shot");
             const captureFn =
-              ViewShot.captureRef || ViewShot.default?.captureRef;
+              ViewShot?.captureRef || ViewShot?.default?.captureRef;
             if (captureFn) {
               await new Promise((res) => setTimeout(res, 50));
               base64Png = await captureFn(receiptCaptureRef, {

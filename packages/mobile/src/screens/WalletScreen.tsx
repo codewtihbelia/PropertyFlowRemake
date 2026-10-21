@@ -21,7 +21,6 @@ import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
-import jsQR from "jsqr";
 import { SplitzyQrCode, downloadQrCodePng } from "../components/SplitzyQrCode";
 import { mobileDataService } from "../services/firebaseDataService";
 import { useTheme } from "../context/ThemeContext";
@@ -41,11 +40,32 @@ import { auth } from "../firebase/config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// Safe Pure-JS Scanner Loader (Resilient against EAS OTA updates across all native APKs)
+// Safe Pure-JS Scanner Loaders (Resilient against EAS OTA updates across all native APKs)
 let jpegDecoder: any = null;
 try {
   jpegDecoder = require("jpeg-js");
 } catch (_) {}
+
+function safeDecodeQrMatrix(
+  data: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  options?: any,
+) {
+  try {
+    let jsQRMod: any = null;
+    try {
+      jsQRMod = require("jsqr");
+    } catch (_) {}
+    const fn = jsQRMod?.default || jsQRMod;
+    if (typeof fn === "function") {
+      return fn(data, width, height, options);
+    }
+  } catch (err) {
+    console.warn("[WalletScreen] safeDecodeQrMatrix error:", err);
+  }
+  return null;
+}
 
 function base64ToUint8Array(b64: string): Uint8Array {
   const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
@@ -935,9 +955,14 @@ export function WalletScreen({
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const qrCode = jsQR(imgData.data, canvas.width, canvas.height, {
-            inversionAttempts: "dontInvert",
-          });
+          const qrCode = safeDecodeQrMatrix(
+            imgData.data,
+            canvas.width,
+            canvas.height,
+            {
+              inversionAttempts: "dontInvert",
+            },
+          );
           if (qrCode && qrCode.data) {
             handleOnQrCodeScanned(qrCode.data);
           }
@@ -1067,7 +1092,7 @@ export function WalletScreen({
             if (rawBytes && rawBytes.length > 0) {
               const decoded = decodePixelsFromBytes(rawBytes);
               if (decoded && decoded.width && decoded.height) {
-                const qrCode = jsQR(
+                const qrCode = safeDecodeQrMatrix(
                   decoded.data,
                   decoded.width,
                   decoded.height,
@@ -1127,7 +1152,11 @@ export function WalletScreen({
                 }
                 ctx.drawImage(img, 0, 0);
                 const imgData = ctx.getImageData(0, 0, img.width, img.height);
-                const qrCode = jsQR(imgData.data, img.width, img.height);
+                const qrCode = safeDecodeQrMatrix(
+                  imgData.data,
+                  img.width,
+                  img.height,
+                );
 
                 setIsDecodingImage(false);
                 if (qrCode && qrCode.data) {
