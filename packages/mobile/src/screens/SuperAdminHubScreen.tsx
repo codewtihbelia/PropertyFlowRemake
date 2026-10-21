@@ -19,6 +19,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { mobileDataService } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
+import { getCurrentAppVersion, compareSemVer } from "../utils/versionUtils";
 
 export type AdminModuleTab =
   | "host_reviews"
@@ -1868,8 +1869,11 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [announcementBanner, setAnnouncementBanner] = useState("");
   const [minSupportedVersion, setMinSupportedVersion] = useState("1.0.0");
-  const [latestVersion, setLatestVersion] = useState("1.2.0");
+  const [latestVersion, setLatestVersion] = useState("1.3.2");
   const [forceUpdate, setForceUpdate] = useState(false);
+  const [releaseTitle, setReleaseTitle] = useState("");
+  const [releaseNotes, setReleaseNotes] = useState("");
+  const [apkDownloadUrl, setApkDownloadUrl] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
 
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -1886,8 +1890,11 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
         setMaintenanceMessage(s.maintenanceMessage || "");
         setAnnouncementBanner(s.announcementBanner || "");
         setMinSupportedVersion(s.minSupportedVersion || "1.0.0");
-        setLatestVersion(s.latestVersion || "1.2.0");
+        setLatestVersion(s.latestVersion || "1.3.2");
         setForceUpdate(Boolean(s.forceUpdate));
+        setReleaseTitle(s.releaseTitle || "");
+        setReleaseNotes(s.releaseNotes || "");
+        setApkDownloadUrl(s.apkDownloadUrl || "");
       }
     });
 
@@ -1912,6 +1919,9 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
         minSupportedVersion: minSupportedVersion.trim(),
         latestVersion: latestVersion.trim(),
         forceUpdate,
+        releaseTitle: releaseTitle.trim(),
+        releaseNotes: releaseNotes.trim(),
+        apkDownloadUrl: apkDownloadUrl.trim(),
       });
 
       Alert.alert(
@@ -2265,7 +2275,7 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
                   ]}
                   value={latestVersion}
                   onChangeText={setLatestVersion}
-                  placeholder="1.2.0"
+                  placeholder="1.3.2"
                   placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
                 />
               </View>
@@ -2296,6 +2306,127 @@ const SuperAdminMaintenanceView: React.FC<MaintenanceViewProps> = ({
                 trackColor={{ false: "#CBD5E1", true: "#3B82F6" }}
                 thumbColor="#FFFFFF"
               />
+            </View>
+
+            <View style={viewStyles.inputGroup}>
+              <Text
+                style={[
+                  viewStyles.fieldLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Release Title / Heading:
+              </Text>
+              <TextInput
+                style={[
+                  viewStyles.textInput,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    color: isDark ? "#F8FAFC" : "#0F172A",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                  },
+                ]}
+                placeholder="e.g. Splitzy v1.3.2 Social & Stability Upgrade"
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                value={releaseTitle}
+                onChangeText={setReleaseTitle}
+              />
+            </View>
+
+            <View style={viewStyles.inputGroup}>
+              <Text
+                style={[
+                  viewStyles.fieldLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Release Notes & Changelog Highlights:
+              </Text>
+              <TextInput
+                style={[
+                  viewStyles.textInput,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    color: isDark ? "#F8FAFC" : "#0F172A",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                    minHeight: 70,
+                    textAlignVertical: "top",
+                  },
+                ]}
+                placeholder="Enter release highlights (one item per line)&#10;• Automatic balance reconciliation&#10;• Faster splash startup sync"
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                value={releaseNotes}
+                onChangeText={setReleaseNotes}
+                multiline
+              />
+            </View>
+
+            <View style={viewStyles.inputGroup}>
+              <Text
+                style={[
+                  viewStyles.fieldLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                APK Direct Download URL:
+              </Text>
+              <TextInput
+                style={[
+                  viewStyles.textInput,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    color: isDark ? "#F8FAFC" : "#0F172A",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                  },
+                ]}
+                placeholder="https://github.com/splitzy-app/releases/latest"
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                value={apkDownloadUrl}
+                onChangeText={setApkDownloadUrl}
+                autoCapitalize="none"
+              />
+            </View>
+
+            {/* Device Version Status Info */}
+            <View
+              style={{
+                marginTop: 6,
+                padding: 10,
+                borderRadius: 10,
+                backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: isDark ? "#94A3B8" : "#64748B",
+                  fontWeight: "600",
+                }}
+              >
+                Current Admin Device: v{getCurrentAppVersion()}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: "800",
+                  color:
+                    compareSemVer(getCurrentAppVersion(), minSupportedVersion) <
+                    0
+                      ? "#E11D48"
+                      : compareSemVer(getCurrentAppVersion(), latestVersion) < 0
+                        ? "#F59E0B"
+                        : "#10B981",
+                }}
+              >
+                {compareSemVer(getCurrentAppVersion(), minSupportedVersion) < 0
+                  ? "GATE BLOCKED"
+                  : compareSemVer(getCurrentAppVersion(), latestVersion) < 0
+                    ? "UPDATE AVAILABLE"
+                    : "UP TO DATE"}
+              </Text>
             </View>
           </View>
 

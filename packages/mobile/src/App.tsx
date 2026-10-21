@@ -63,6 +63,7 @@ import { initAudioUnlock, playMessengerPopChime } from "./utils/soundEffects";
 import { notificationService } from "./services/notificationService";
 import { NotificationBanner } from "./components/NotificationBanner";
 import { updateService } from "./services/updateService";
+import { GlobalAppVersionGate } from "./components/GlobalAppVersionGate";
 
 // Initialize global alert interceptor to upgrade all Alert.alert dialogs to app-matching UI
 alertService.initAlertPatch();
@@ -1696,6 +1697,7 @@ export default function App() {
         <SafeAreaProvider style={{ flex: 1, backgroundColor: "#111215" }}>
           <NavVisibilityProvider>
             <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
+            <GlobalAppVersionGate isSplashActive={rootFlow === "splash"} />
             <CustomAlertModal />
           </NavVisibilityProvider>
         </SafeAreaProvider>

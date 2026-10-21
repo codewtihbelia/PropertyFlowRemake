@@ -4,6 +4,9 @@ import { AppVersion } from "@propertyflow/shared";
 import { Smartphone, Save, Shield, AlertCircle } from "lucide-react";
 import { UniversalLoader } from "../../components/common/UniversalLoader";
 
+import { db } from "../../firebase/config";
+import { doc, setDoc } from "firebase/firestore";
+
 export const SuperAdminVersions: React.FC<{ loading?: boolean }> = ({
   loading = false,
 }) => {
@@ -26,7 +29,7 @@ export const SuperAdminVersions: React.FC<{ loading?: boolean }> = ({
     setNotes(v.releaseNotes);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     adminService.updateAppVersion({
       ...selectedVer,
@@ -35,6 +38,36 @@ export const SuperAdminVersions: React.FC<{ loading?: boolean }> = ({
       mandatoryUpdate: mandatory,
       releaseNotes: notes,
     });
+
+    if (selectedVer.platform === "ANDROID") {
+      try {
+        await setDoc(
+          doc(db, "platform_settings", "global"),
+          {
+            minSupportedVersion: minVer.trim(),
+            latestVersion: latestVer.trim(),
+            forceUpdate: mandatory,
+            releaseNotes: notes.trim(),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+        await setDoc(
+          doc(db, "systemSettings", "platform"),
+          {
+            minSupportedVersion: minVer.trim(),
+            latestVersion: latestVer.trim(),
+            forceUpdate: mandatory,
+            releaseNotes: notes.trim(),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+      } catch (err) {
+        console.warn("[SuperAdminVersions] Firestore sync notice:", err);
+      }
+    }
+
     alert(
       `Version configuration for ${selectedVer.platform} updated successfully.`,
     );
