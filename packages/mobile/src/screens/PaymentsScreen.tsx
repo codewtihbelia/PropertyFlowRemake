@@ -2612,7 +2612,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
             ]}
           >
             <View style={styles.hostPaymentInfoHeader}>
-              <View
+              {/* <View
                 style={[
                   styles.verifiedHostBadge,
                   isDark && {
@@ -2634,7 +2634,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                 >
                   Host Verified Payment
                 </Text>
-              </View>
+              </View> */}
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
               >
@@ -2723,7 +2723,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                           : "#2563EB"
                     }
                   />
-                  <Text
+                  {/* <Text
                     style={[
                       styles.copyAccountBtnText,
                       copiedSuccess && { color: "#FFFFFF" },
@@ -2734,7 +2734,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
                     ]}
                   >
                     {copiedSuccess ? "Copied!" : "Copy"}
-                  </Text>
+                  </Text> */}
                 </TouchableOpacity>
               </View>
             ) : null}

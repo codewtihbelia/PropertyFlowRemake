@@ -41,23 +41,7 @@ import { auth } from "../firebase/config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// Safe Expo Camera & Native Scanner Loader (Resilient against EAS OTA updates across different native binaries)
-let NativeCameraView: any = null;
-let NativeCamera: any = null;
-let nativeScanFromURLAsync: any = null;
-let nativeRequestCameraPermissionsAsync: any = null;
-
-try {
-  const expCam = require("expo-camera");
-  NativeCameraView = expCam.CameraView || expCam.Camera;
-  NativeCamera = expCam.Camera;
-  nativeScanFromURLAsync =
-    expCam.scanFromURLAsync || expCam.Camera?.scanFromURLAsync;
-  nativeRequestCameraPermissionsAsync =
-    expCam.requestCameraPermissionsAsync ||
-    expCam.Camera?.requestCameraPermissionsAsync;
-} catch (_) {}
-
+// Safe Pure-JS Scanner Loader (Resilient against EAS OTA updates across all native APKs)
 let jpegDecoder: any = null;
 try {
   jpegDecoder = require("jpeg-js");
@@ -900,46 +884,9 @@ export function WalletScreen({
           captureAndScanFrame();
         }, 120);
       } else {
-        // Native mobile platform (Android / iOS)
-        try {
-          if (typeof nativeRequestCameraPermissionsAsync === "function") {
-            const res = await nativeRequestCameraPermissionsAsync();
-            if (res && res.status === "granted") {
-              setHasCameraPermission(true);
-              setIsCameraActive(true);
-            } else {
-              setHasCameraPermission(false);
-              setCameraError(
-                "Camera permission was denied. Please allow camera access in your device settings to scan QR codes.",
-              );
-            }
-          } else if (
-            NativeCamera &&
-            typeof NativeCamera.requestCameraPermissionsAsync === "function"
-          ) {
-            const res = await NativeCamera.requestCameraPermissionsAsync();
-            if (res && res.status === "granted") {
-              setHasCameraPermission(true);
-              setIsCameraActive(true);
-            } else {
-              setHasCameraPermission(false);
-              setCameraError(
-                "Camera permission was denied. Please allow camera access in your device settings to scan QR codes.",
-              );
-            }
-          } else {
-            // Default to active for native camera runtime
-            setHasCameraPermission(true);
-            setIsCameraActive(true);
-          }
-        } catch (permErr: any) {
-          console.warn(
-            "[WalletScreen] Native camera permission request error:",
-            permErr,
-          );
-          setHasCameraPermission(true);
-          setIsCameraActive(true);
-        }
+        // Native mobile platform (EAS OTA update compatible - zero missing native module crashes)
+        setHasCameraPermission(true);
+        setIsCameraActive(true);
       }
     } catch (err: any) {
       console.warn("[WalletScreen] Camera start error:", err);
@@ -1111,19 +1058,7 @@ export function WalletScreen({
         // Native Mobile Path (iOS & Android): No DOM dependencies, 100% resilient
         if (Platform.OS !== "web") {
           try {
-            // A. Attempt native hardware/OS barcode URL scan if available
-            if (typeof nativeScanFromURLAsync === "function") {
-              try {
-                const scanned = await nativeScanFromURLAsync(asset.uri, ["qr"]);
-                if (scanned && scanned.length > 0 && scanned[0].data) {
-                  setIsDecodingImage(false);
-                  handleOnQrCodeScanned(scanned[0].data);
-                  return;
-                }
-              } catch (_) {}
-            }
-
-            // B. Pure TypeScript image decode via raw base64 bytes + jsQR
+            // Pure TypeScript image decode via raw base64 bytes + jsQR
             let rawBytes: Uint8Array | null = null;
             if (asset.base64) {
               rawBytes = base64ToUint8Array(asset.base64);
@@ -1148,7 +1083,7 @@ export function WalletScreen({
             setIsDecodingImage(false);
             Alert.alert(
               "No QR Code Detected",
-              "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit, or use the camera to scan directly.",
+              "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit.",
             );
           } catch (nativeErr: any) {
             console.warn(
@@ -1158,7 +1093,7 @@ export function WalletScreen({
             setIsDecodingImage(false);
             Alert.alert(
               "Decoding Failed",
-              "Could not read QR code from this image. Please try another photo or scan directly with the camera.",
+              "Could not read QR code from this image. Please try another photo or enter code manually.",
             );
           }
           return;
@@ -9200,30 +9135,48 @@ export function WalletScreen({
                             },
                           })}
 
-                        {/* Live Native Camera (Android / iOS EAS Native Runtime) */}
-                        {Platform.OS !== "web" &&
-                          NativeCameraView &&
-                          hasCameraPermission &&
-                          isCameraActive && (
-                            <NativeCameraView
-                              style={StyleSheet.absoluteFill}
-                              facing={
-                                cameraFacingMode === "user" ? "front" : "back"
-                              }
-                              barcodeScannerSettings={{
-                                barcodeTypes: ["qr"],
-                              }}
-                              onBarcodeScanned={({
-                                data,
-                              }: {
-                                data: string;
-                              }) => {
-                                if (data && isCameraActive) {
-                                  handleOnQrCodeScanned(data);
-                                }
-                              }}
+                        {/* Native Viewfinder UI Display */}
+                        {Platform.OS !== "web" && (
+                          <View
+                            style={[
+                              StyleSheet.absoluteFill,
+                              {
+                                alignItems: "center",
+                                justifyContent: "center",
+                                padding: 20,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              name="scan-circle"
+                              size={60}
+                              color="#3B82F6"
+                              style={{ opacity: 0.9, marginBottom: 8 }}
                             />
-                          )}
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 13,
+                                fontWeight: "800",
+                                textAlign: "center",
+                                marginBottom: 4,
+                              }}
+                            >
+                              Splitzy Scanner Active
+                            </Text>
+                            <Text
+                              style={{
+                                color: "#94A3B8",
+                                fontSize: 11,
+                                textAlign: "center",
+                                maxWidth: 220,
+                              }}
+                            >
+                              Select a QR screenshot from photos below, or tap
+                              manual code to enter payload
+                            </Text>
+                          </View>
+                        )}
 
                         {/* Top Viewfinder Bar: Flip Camera & Status */}
                         <View

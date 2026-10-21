@@ -26,6 +26,19 @@ if (fs.existsSync(path.join(monorepoRoot, "packages", "shared"))) {
   ];
 }
 
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (
+    moduleName === "@propertyflow/shared" ||
+    moduleName === "@splitzy/shared"
+  ) {
+    return {
+      filePath: path.resolve(resolvedSharedPath, "index.ts"),
+      type: "sourceFile",
+    };
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 config.resolver.extraNodeModules = {
   ...(config.resolver.extraNodeModules || {}),
   "@propertyflow/shared": resolvedSharedPath,
