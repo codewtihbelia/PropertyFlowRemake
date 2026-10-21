@@ -446,102 +446,134 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   }, []);
 
   useEffect(() => {
-    // Reset seen message tracking whenever the active household changes
+    // Reset seen message tracking whenever active account changes
     seenMessageIds.current = new Set();
     isInitialLoad.current = true;
 
-    if (!householdId) {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) {
       setUnreadMessagesCount(0);
       setLatestUnreadMessage(null);
       return;
     }
-    const currentUid = auth.currentUser?.uid;
-    // Heartbeat update
-    mobileDataService.updateUserHeartbeat(householdId, currentUid);
-    const heartbeatInterval = setInterval(() => {
+
+    let heartbeatInterval: any = null;
+    if (householdId) {
       mobileDataService.updateUserHeartbeat(householdId, currentUid);
-    }, 120000);
+      heartbeatInterval = setInterval(() => {
+        mobileDataService.updateUserHeartbeat(householdId, currentUid);
+      }, 120000);
+    }
 
-    const unsub = mobileDataService.listenToHouseholdMessages(
-      householdId,
-      (msgs) => {
-        if (!currentUid) {
-          setUnreadMessagesCount(0);
-          setLatestUnreadMessage(null);
-          return;
-        }
-        const unread = (msgs || []).filter((m: any) => {
-          if (!m || m.senderId === currentUid) return false;
-          if ((m.readBy || []).includes(currentUid)) return false;
+    let householdMsgsList: any[] = [];
+    let directMsgsList: any[] = [];
 
-          // 1. Group broadcast messages (visible to all household members)
-          const isGroupMsg =
-            m.conversationId === "household_group" ||
+    const computeAndProcessUnread = () => {
+      const allMsgsMap = new Map<string, any>();
+      householdMsgsList.forEach((m) => {
+        if (m?.id) allMsgsMap.set(m.id, m);
+      });
+      directMsgsList.forEach((m) => {
+        if (m?.id) allMsgsMap.set(m.id, m);
+      });
+      const allMsgs = Array.from(allMsgsMap.values());
+
+      const unread = allMsgs.filter((m: any) => {
+        if (!m || m.senderId === currentUid) return false;
+        if ((m.readBy || []).includes(currentUid)) return false;
+
+        // 1. Group broadcast messages (visible to all household members)
+        const isGroupMsg =
+          householdId &&
+          (m.conversationId === "household_group" ||
             m.recipientId === "ALL" ||
-            (!m.conversationId && !m.recipientId);
+            (!m.conversationId && !m.recipientId));
 
-          // 2. Direct 1-on-1 messages (strictly private between sender and recipient)
-          const isDirectToMe =
-            m.recipientId === currentUid ||
-            (m.conversationId &&
-              m.conversationId.startsWith("dm_") &&
-              m.conversationId.includes(currentUid) &&
-              (m.recipientId === currentUid || !m.recipientId));
+        // 2. Direct 1-on-1 messages (strictly private between sender and recipient)
+        const isDirectToMe =
+          m.recipientId === currentUid ||
+          (m.conversationId &&
+            m.conversationId.startsWith("dm_") &&
+            m.conversationId.includes(currentUid) &&
+            (m.recipientId === currentUid || !m.recipientId));
 
-          return isGroupMsg || isDirectToMe;
-        });
+        return Boolean(isGroupMsg || isDirectToMe);
+      });
 
-        // Detect newly arrived messages for currentUid after initial data sync
-        if (!isInitialLoad.current && msgs && msgs.length > 0) {
-          const brandNewMsgs = unread.filter(
-            (m: any) => !seenMessageIds.current.has(m.id),
-          );
-          if (brandNewMsgs.length > 0) {
-            playMessengerPopChime();
-            const latest = brandNewMsgs[brandNewMsgs.length - 1];
-            const isGroup =
-              latest.conversationId === "household_group" ||
-              latest.recipientId === "ALL" ||
-              (!latest.conversationId && !latest.recipientId);
-            const sender = (latest.senderName || "Roommate").split(" ")[0];
+      // Detect newly arrived messages for currentUid after initial data sync
+      if (!isInitialLoad.current && allMsgs.length > 0) {
+        const brandNewMsgs = unread.filter(
+          (m: any) => !seenMessageIds.current.has(m.id),
+        );
+        if (brandNewMsgs.length > 0) {
+          playMessengerPopChime();
+          const latest = brandNewMsgs[brandNewMsgs.length - 1];
+          const isGroup =
+            latest.conversationId === "household_group" ||
+            latest.recipientId === "ALL" ||
+            (!latest.conversationId && !latest.recipientId);
+          const sender = (latest.senderName || "Friend").split(" ")[0];
 
-            // If app is hidden / in background on mobile or web, fire system push notification!
-            if (typeof document !== "undefined" && document.hidden) {
-              notificationService.showNotification({
-                title: isGroup
-                  ? `${sender} in Bills Group`
-                  : `${sender} (Direct Message)`,
-                body: latest.text || "Sent a message",
-                tag: latest.id,
-                data: {
-                  conversationId: latest.conversationId,
-                  messageId: latest.id,
-                },
-              });
-            }
+          if (typeof document !== "undefined" && document.hidden) {
+            notificationService.showNotification({
+              title: isGroup
+                ? `${sender} in Bills Group`
+                : `${sender} (Direct Message)`,
+              body: latest.text || "Sent a message",
+              tag: latest.id,
+              data: {
+                conversationId: latest.conversationId,
+                messageId: latest.id,
+              },
+            });
           }
         }
+      }
 
-        // Store known message IDs
-        seenMessageIds.current = new Set((msgs || []).map((m: any) => m.id));
-        isInitialLoad.current = false;
+      seenMessageIds.current = new Set(allMsgs.map((m: any) => m.id));
+      isInitialLoad.current = false;
 
-        setUnreadMessagesCount(unread.length);
-        if (unread.length > 0) {
-          const lastMsg = unread[unread.length - 1];
-          setLatestUnreadMessage({
-            id: lastMsg.id,
-            senderName: (lastMsg.senderName || "Roommate").split(" ")[0],
-            text: lastMsg.text || "Sent a message",
-          });
-        } else {
-          setLatestUnreadMessage(null);
-        }
+      setUnreadMessagesCount(unread.length);
+      if (unread.length > 0) {
+        const lastMsg = unread[unread.length - 1];
+        setLatestUnreadMessage({
+          id: lastMsg.id,
+          senderName: (lastMsg.senderName || "Friend").split(" ")[0],
+          text: lastMsg.text || "Sent a message",
+        });
+      } else {
+        setLatestUnreadMessage(null);
+      }
+    };
+
+    // 1. Always listen to Direct Messages for logged-in user
+    const unsubDirect = mobileDataService.listenToDirectMessages(
+      currentUid,
+      (msgs) => {
+        directMsgsList = msgs || [];
+        computeAndProcessUnread();
       },
     );
+
+    // 2. If in a household, also listen to household group messages
+    let unsubHousehold: (() => void) | null = null;
+    if (householdId) {
+      unsubHousehold = mobileDataService.listenToHouseholdMessages(
+        householdId,
+        (msgs) => {
+          householdMsgsList = msgs || [];
+          computeAndProcessUnread();
+        },
+      );
+    } else {
+      householdMsgsList = [];
+      computeAndProcessUnread();
+    }
+
     return () => {
-      unsub();
-      clearInterval(heartbeatInterval);
+      unsubDirect();
+      if (unsubHousehold) unsubHousehold();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
     };
   }, [householdId, rootFlow]);
 
@@ -1189,6 +1221,16 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           onOpenAddExpense={
             isHostUser ? () => setOverlayScreen("add_expense") : undefined
           }
+          onExploreCommunity={() => {
+            setActiveDirectChatUserId(null);
+            setOverlayScreen("community");
+          }}
+          onCreateGroup={() => {
+            setActiveDirectChatUserId(null);
+            setOverlayScreen("none");
+            setManageGroupInitialView("create");
+            setCurrentTab("groups");
+          }}
         />
       </View>
     );
@@ -1459,10 +1501,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         />
       )}
 
-      {/* Floating draggable messages widget, floating and draggable across the screen */}
+      {/* Floating draggable messages widget, floating and draggable across the screen for all logged-in users */}
       {currentTab !== "messages" &&
         overlayScreen === "none" &&
-        Boolean(householdId) &&
+        Boolean(auth.currentUser?.uid) &&
         userProfile?.joinRequestStatus !== "REJECTED" && (
           <FloatingMessagesBubble
             unreadCount={unreadMessagesCount}

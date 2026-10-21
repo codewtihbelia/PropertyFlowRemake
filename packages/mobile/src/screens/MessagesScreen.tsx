@@ -19,6 +19,8 @@ import {
   LayoutAnimation,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+let cachedAndroidKeyboardHeight = 290;
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useNavVisibility } from "../context/NavVisibilityContext";
@@ -42,6 +44,8 @@ export interface MessagesScreenProps {
   onOpenSettleDues?: () => void;
   onOpenAddExpense?: () => void;
   loading?: boolean;
+  onExploreCommunity?: () => void;
+  onCreateGroup?: () => void;
 }
 
 export interface ChatMessage {
@@ -241,6 +245,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   initialTargetUserId,
   onOpenSettleDues,
   onOpenAddExpense,
+  onExploreCommunity,
+  onCreateGroup,
 }) => {
   const {
     onScroll,
@@ -384,6 +390,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       }
       const h = e?.endCoordinates?.height || 0;
       if (h > 0) {
+        cachedAndroidKeyboardHeight = h;
         setLocalKeyboardHeight(h);
       }
       setIsKeyboardOpen(true);
@@ -425,12 +432,21 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     if (!keyboardActive) {
       return defaultBottomPadding;
     }
-    // When keyboard is active, Android (via softwareKeyboardLayoutMode: resize) and iOS
-    // (via KeyboardAvoidingView padding) automatically elevate the container above the soft keyboard.
-    // Setting a compact 8px padding keeps the capsule input bar sitting snugly and flush
-    // against the top of the keyboard without an empty void.
+    // On Android, edge-to-edge / translucent system bars prevent the OS WindowManager
+    // from automatically resizing the window via adjustResize.
+    // Explicitly applying the active software keyboard height elevates the capsule input bar
+    // directly flush above the keyboard.
+    if (Platform.OS === "android") {
+      const activeHeight =
+        keyboardHeight > 0
+          ? keyboardHeight
+          : cachedAndroidKeyboardHeight || 290;
+      return activeHeight + 8;
+    }
+    // On iOS, KeyboardAvoidingView (with behavior="padding") automatically offsets the entire
+    // container, so 8px padding keeps it flush right above the keyboard.
     return 8;
-  }, [keyboardActive, defaultBottomPadding]);
+  }, [keyboardActive, keyboardHeight, defaultBottomPadding]);
 
   const handleToggleMessage = (msgId: string) => {
     setToggledMessageIds((prev) => ({
@@ -952,7 +968,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   }, [conversations]);
 
-  // Auto-focus thread if initialTargetUserId is supplied
+  // Auto-focus thread if initialTargetUserId is supplied (or initialize new direct thread if first time messaging)
   useEffect(() => {
     if (initialTargetUserId && !activeThread) {
       const match = conversations.find(
@@ -960,9 +976,55 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       );
       if (match) {
         setActiveThread(match);
+      } else {
+        let isCancelled = false;
+        mobileDataService
+          .getUserProfile(initialTargetUserId)
+          .then((prof) => {
+            if (isCancelled || !prof) return;
+            const memberName =
+              prof.displayName ||
+              prof.name ||
+              prof.fullName ||
+              prof.email?.split("@")[0] ||
+              "User";
+            const palette =
+              AVATAR_PALETTES[
+                Math.abs(hashString(initialTargetUserId)) %
+                  AVATAR_PALETTES.length
+              ];
+            const convId =
+              "dm_" + [currentUid, initialTargetUserId].sort().join("_");
+            const newThread: ConversationItem = {
+              id: convId,
+              targetUserId: initialTargetUserId,
+              type: "direct",
+              name: memberName,
+              initials: getInitials(memberName),
+              avatarBg: palette.bg,
+              avatarColor: palette.text,
+              photoURL: prof.profilePicture || prof.photoURL,
+              isOnline: false,
+              onlineStatusLabel: "Community Member",
+              timestamp: "New",
+              lastMessageTimestampMs: Date.now(),
+              unreadCount: 0,
+              pinned: false,
+              roleLabel: prof.role === "HOST" ? "Host" : "Member",
+              lastMessage: "Tap to start conversation",
+              messages: [],
+            };
+            setActiveThread(newThread);
+          })
+          .catch((err) => {
+            console.warn("Could not load initial target user for DM:", err);
+          });
+        return () => {
+          isCancelled = true;
+        };
       }
     }
-  }, [initialTargetUserId, conversations, activeThread]);
+  }, [initialTargetUserId, conversations, activeThread, currentUid]);
 
   // Mark messages in active thread as read
   useEffect(() => {
@@ -1153,6 +1215,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           type: "text",
         });
       }
+      setTimeout(() => {
+        messageScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
     } catch (err: any) {
       console.warn("Error sending message:", err);
       Alert.alert("Failed to send", "Please check your network connection.");
@@ -1473,267 +1538,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             <TouchableOpacity
               style={{
                 backgroundColor: "#E11D48",
-                paddingHorizontal: 24,
-                paddingVertical: 12,
-                borderRadius: 12,
-              }}
-              onPress={onBack}
-            >
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  fontFamily: "Inter-SemiBold",
-                  fontSize: 14,
-                }}
-              >
-                Return to Home
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  // Guard 2: Group membership or friends required to chat
-  if (!householdId && allDirectMembers.length === 0) {
-    return (
-      <View
-        style={[
-          styles.container,
-          {
-            backgroundColor: isDark ? "#111215" : "#FFFFFF",
-            paddingTop: topInset,
-            paddingBottom: bottomInset,
-          },
-        ]}
-      >
-        <StatusBar
-          barStyle={isDark ? "light-content" : "dark-content"}
-          translucent
-          backgroundColor="transparent"
-        />
-        <View style={styles.header}>
-          <View style={styles.headerLeftRow}>
-            {onBack && (
-              <TouchableOpacity
-                style={[
-                  styles.backButton,
-                  {
-                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
-                    borderColor: isDark
-                      ? "rgba(255, 255, 255, 0.1)"
-                      : "#E2E8F0",
-                  },
-                ]}
-                onPress={onBack}
-                accessibilityLabel="Back"
-              >
-                <Feather
-                  name="chevron-left"
-                  size={22}
-                  color={isDark ? "#FFFFFF" : "#0F172A"}
-                />
-              </TouchableOpacity>
-            )}
-            <Text
-              style={[
-                styles.screenTitle,
-                { color: isDark ? "#FFFFFF" : "#0F172A" },
-              ]}
-            >
-              Messages
-            </Text>
-          </View>
-        </View>
-
-        <View
-          style={{
-            flex: 1,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 24,
-          }}
-        >
-          <View
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 36,
-              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 16,
-            }}
-          >
-            <Feather
-              name="message-square"
-              size={32}
-              color={isDark ? "#94A3B8" : "#64748B"}
-            />
-          </View>
-          <Text
-            style={{
-              fontSize: 18,
-              fontFamily: "Inter-Bold",
-              color: isDark ? "#FFFFFF" : "#0F172A",
-              textAlign: "center",
-              marginBottom: 8,
-            }}
-          >
-            No Active Conversations
-          </Text>
-          <Text
-            style={{
-              fontSize: 14,
-              fontFamily: "Inter-Regular",
-              color: isDark ? "#94A3B8" : "#64748B",
-              textAlign: "center",
-              lineHeight: 20,
-              marginBottom: 20,
-              maxWidth: 300,
-            }}
-          >
-            Join a household group or connect with friends in Splitzy Community
-            to start chatting and splitting expenses.
-          </Text>
-          {onBack && (
-            <TouchableOpacity
-              style={{
-                backgroundColor: "#2563EB",
-                paddingHorizontal: 24,
-                paddingVertical: 12,
-                borderRadius: 12,
-              }}
-              onPress={onBack}
-            >
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  fontFamily: "Inter-SemiBold",
-                  fontSize: 14,
-                }}
-              >
-                Return to Home
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  // Guard 3: Non-member restricted access
-  if (
-    !loading &&
-    householdMembers.length > 0 &&
-    !isCurrentMemberActive &&
-    !isHost
-  ) {
-    return (
-      <View
-        style={[
-          styles.container,
-          {
-            backgroundColor: isDark ? "#111215" : "#FFFFFF",
-            paddingTop: topInset,
-            paddingBottom: bottomInset,
-          },
-        ]}
-      >
-        <StatusBar
-          barStyle={isDark ? "light-content" : "dark-content"}
-          translucent
-          backgroundColor="transparent"
-        />
-        <View style={styles.header}>
-          <View style={styles.headerLeftRow}>
-            {onBack && (
-              <TouchableOpacity
-                style={[
-                  styles.backButton,
-                  {
-                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
-                    borderColor: isDark
-                      ? "rgba(255, 255, 255, 0.1)"
-                      : "#E2E8F0",
-                  },
-                ]}
-                onPress={onBack}
-                accessibilityLabel="Back"
-              >
-                <Feather
-                  name="chevron-left"
-                  size={22}
-                  color={isDark ? "#FFFFFF" : "#0F172A"}
-                />
-              </TouchableOpacity>
-            )}
-            <Text
-              style={[
-                styles.screenTitle,
-                { color: isDark ? "#FFFFFF" : "#0F172A" },
-              ]}
-            >
-              Messages
-            </Text>
-          </View>
-        </View>
-
-        <View
-          style={{
-            flex: 1,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 24,
-          }}
-        >
-          <View
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 36,
-              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 16,
-            }}
-          >
-            <Feather
-              name="lock"
-              size={32}
-              color={isDark ? "#94A3B8" : "#64748B"}
-            />
-          </View>
-          <Text
-            style={{
-              fontSize: 18,
-              fontFamily: "Inter-Bold",
-              color: isDark ? "#FFFFFF" : "#0F172A",
-              textAlign: "center",
-              marginBottom: 8,
-            }}
-          >
-            Access Restricted
-          </Text>
-          <Text
-            style={{
-              fontSize: 14,
-              fontFamily: "Inter-Regular",
-              color: isDark ? "#94A3B8" : "#64748B",
-              textAlign: "center",
-              lineHeight: 20,
-              marginBottom: 20,
-              maxWidth: 300,
-            }}
-          >
-            Only active members of this household group can view and send
-            messages.
-          </Text>
-          {onBack && (
-            <TouchableOpacity
-              style={{
-                backgroundColor: "#2563EB",
                 paddingHorizontal: 24,
                 paddingVertical: 12,
                 borderRadius: 12,
@@ -2352,13 +2156,27 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 onChangeText={setChatInputText}
                 onSubmitEditing={handleSendMessage}
                 onFocus={() => {
+                  if (Platform.OS === "android") {
+                    try {
+                      LayoutAnimation.configureNext(
+                        LayoutAnimation.Presets.easeInEaseOut,
+                      );
+                    } catch {}
+                  }
                   setIsInputFocused(true);
                   setIsKeyboardOpen(true);
                   setTimeout(() => {
                     messageScrollRef.current?.scrollToEnd({ animated: true });
-                  }, 100);
+                  }, 120);
                 }}
                 onBlur={() => {
+                  if (Platform.OS === "android") {
+                    try {
+                      LayoutAnimation.configureNext(
+                        LayoutAnimation.Presets.easeInEaseOut,
+                      );
+                    } catch {}
+                  }
                   setIsInputFocused(false);
                 }}
                 returnKeyType="send"
@@ -2982,8 +2800,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   { color: isDark ? "#64748B" : "#94A3B8" },
                 ]}
               >
-                No other roommates yet. Invite roommates from the Groups tab to
-                chat!
+                {householdId
+                  ? "No other roommates yet. Invite roommates from the Groups tab to chat!"
+                  : acceptedCommunityFriends.length > 0
+                    ? "Tap any friend below or explore Community to chat!"
+                    : "Connect with friends in Community to start chatting!"}
               </Text>
             </View>
           )}
@@ -3027,65 +2848,69 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </Text>
           </TouchableOpacity>
 
-          {/* "Bills Group" Filter Pill */}
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              activeFilter === "apartment"
-                ? styles.filterPillActive
-                : [
-                    styles.filterPillInactive,
-                    {
-                      backgroundColor: isDark ? "#181A20" : "#F1F5F9",
-                      borderColor: isDark
-                        ? "rgba(255,255,255,0.06)"
-                        : "#E2E8F0",
-                    },
-                  ],
-            ]}
-            onPress={() => setActiveFilter("apartment")}
-          >
-            <Text
+          {/* "Bills Group" Filter Pill (only if user has a household) */}
+          {Boolean(householdId) && (
+            <TouchableOpacity
               style={[
-                styles.filterPillText,
+                styles.filterPill,
                 activeFilter === "apartment"
-                  ? styles.filterPillTextActive
-                  : { color: isDark ? "#CBD5E1" : "#475569" },
+                  ? styles.filterPillActive
+                  : [
+                      styles.filterPillInactive,
+                      {
+                        backgroundColor: isDark ? "#181A20" : "#F1F5F9",
+                        borderColor: isDark
+                          ? "rgba(255,255,255,0.06)"
+                          : "#E2E8F0",
+                      },
+                    ],
               ]}
+              onPress={() => setActiveFilter("apartment")}
             >
-              Bills Group
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "apartment"
+                    ? styles.filterPillTextActive
+                    : { color: isDark ? "#CBD5E1" : "#475569" },
+                ]}
+              >
+                Bills Group
+              </Text>
+            </TouchableOpacity>
+          )}
 
-          {/* "Pending Dues" Filter Pill */}
-          <TouchableOpacity
-            style={[
-              styles.filterPill,
-              activeFilter === "pending"
-                ? styles.filterPillActive
-                : [
-                    styles.filterPillInactive,
-                    {
-                      backgroundColor: isDark ? "#181A20" : "#F1F5F9",
-                      borderColor: isDark
-                        ? "rgba(255,255,255,0.06)"
-                        : "#E2E8F0",
-                    },
-                  ],
-            ]}
-            onPress={() => setActiveFilter("pending")}
-          >
-            <Text
+          {/* "Pending Dues" Filter Pill (only if user has a household) */}
+          {Boolean(householdId) && (
+            <TouchableOpacity
               style={[
-                styles.filterPillText,
+                styles.filterPill,
                 activeFilter === "pending"
-                  ? styles.filterPillTextActive
-                  : { color: isDark ? "#CBD5E1" : "#475569" },
+                  ? styles.filterPillActive
+                  : [
+                      styles.filterPillInactive,
+                      {
+                        backgroundColor: isDark ? "#181A20" : "#F1F5F9",
+                        borderColor: isDark
+                          ? "rgba(255,255,255,0.06)"
+                          : "#E2E8F0",
+                      },
+                    ],
               ]}
+              onPress={() => setActiveFilter("pending")}
             >
-              Pending Dues
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "pending"
+                    ? styles.filterPillTextActive
+                    : { color: isDark ? "#CBD5E1" : "#475569" },
+                ]}
+              >
+                Pending Dues
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* "Direct Chats" Filter Pill */}
           <TouchableOpacity
@@ -3311,21 +3136,33 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           );
         })}
 
-        {/* Empty state when no conversations match search */}
+        {/* Empty state when no conversations match search or no chats yet */}
         {filteredConversations.length === 0 && !loading && (
           <View style={styles.emptyWrap}>
-            <Feather
-              name="message-circle"
-              size={42}
-              color={isDark ? "#64748B" : "#94A3B8"}
-            />
+            <View
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: isDark ? "rgba(37, 99, 235, 0.15)" : "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 16,
+              }}
+            >
+              <Ionicons
+                name="chatbubbles"
+                size={34}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+            </View>
             <Text
               style={[
                 styles.emptyTitle,
                 { color: isDark ? "#FFFFFF" : "#0F172A" },
               ]}
             >
-              No conversations found
+              {searchQuery ? "No conversations found" : "Direct Messages"}
             </Text>
             <Text
               style={[
@@ -3334,27 +3171,212 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               ]}
             >
               {searchQuery
-                ? "Try searching for a different roommate, group, or keyword."
-                : "No messages yet. Send a message to get the conversation started!"}
+                ? "Try searching for a different friend, keyword, or name."
+                : "Connect 1-on-1 with community friends, roommates, and neighbors. You don't need a group to send direct messages!"}
             </Text>
+
+            {/* Quick Action Buttons: Explore Community & Create Group */}
+            {!searchQuery && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  marginTop: 20,
+                  flexWrap: "wrap",
+                }}
+              >
+                {onExploreCommunity && (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      backgroundColor: "#2563EB",
+                      paddingHorizontal: 18,
+                      paddingVertical: 12,
+                      borderRadius: 14,
+                      shadowColor: "#2563EB",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.25,
+                      shadowRadius: 8,
+                      elevation: 4,
+                    }}
+                    onPress={onExploreCommunity}
+                    activeOpacity={0.85}
+                  >
+                    <Feather name="compass" size={17} color="#FFFFFF" />
+                    <Text
+                      style={{
+                        color: "#FFFFFF",
+                        fontSize: 14,
+                        fontWeight: "700",
+                      }}
+                    >
+                      Explore Community
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {onCreateGroup && !householdId && (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+                      paddingHorizontal: 18,
+                      paddingVertical: 12,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: isDark
+                        ? "rgba(255, 255, 255, 0.1)"
+                        : "#E2E8F0",
+                    }}
+                    onPress={onCreateGroup}
+                    activeOpacity={0.85}
+                  >
+                    <Feather
+                      name="plus-circle"
+                      size={17}
+                      color={isDark ? "#FFFFFF" : "#0F172A"}
+                    />
+                    <Text
+                      style={{
+                        color: isDark ? "#FFFFFF" : "#0F172A",
+                        fontSize: 14,
+                        fontWeight: "700",
+                      }}
+                    >
+                      Create Group
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* If user has accepted community friends, offer 1-tap quick start cards */}
+            {!searchQuery && acceptedCommunityFriends.length > 0 && (
+              <View
+                style={{ marginTop: 28, width: "100%", alignItems: "center" }}
+              >
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "700",
+                    letterSpacing: 0.5,
+                    textTransform: "uppercase",
+                    color: isDark ? "#94A3B8" : "#64748B",
+                    marginBottom: 12,
+                  }}
+                >
+                  Your Friends · Tap to Message
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{
+                    gap: 12,
+                    paddingHorizontal: 16,
+                  }}
+                >
+                  {acceptedCommunityFriends.map((friend) => (
+                    <TouchableOpacity
+                      key={friend.userId || friend.id}
+                      style={{
+                        alignItems: "center",
+                        width: 72,
+                      }}
+                      onPress={() => handleOpenDirectChatWithMember(friend)}
+                      activeOpacity={0.8}
+                    >
+                      <View
+                        style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 24,
+                          backgroundColor: "#2563EB",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginBottom: 6,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {friend.photoURL || friend.profilePicture ? (
+                          <Image
+                            source={{
+                              uri: friend.photoURL || friend.profilePicture,
+                            }}
+                            style={{ width: 48, height: 48 }}
+                          />
+                        ) : (
+                          <Text
+                            style={{
+                              color: "#FFFFFF",
+                              fontWeight: "700",
+                              fontSize: 16,
+                            }}
+                          >
+                            {getInitials(
+                              friend.displayName || friend.name || "Friend",
+                            )}
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "600",
+                          color: isDark ? "#FFFFFF" : "#0F172A",
+                          textAlign: "center",
+                        }}
+                        numberOfLines={1}
+                      >
+                        {
+                          (friend.displayName || friend.name || "Friend").split(
+                            " ",
+                          )[0]
+                        }
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           </View>
         )}
 
         <View style={{ height: 110 }} />
       </ScrollView>
 
-      {/* Floating "+ Request Split" Action Button */}
+      {/* Floating Action Button */}
       <View style={styles.fabWrapper} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.requestSplitFab}
           activeOpacity={0.88}
           onPress={() => {
-            setSplitTargetId("ALL");
-            setShowRequestSplitModal(true);
+            if (householdId) {
+              setSplitTargetId("ALL");
+              setShowRequestSplitModal(true);
+            } else if (onExploreCommunity) {
+              onExploreCommunity();
+            } else if (onCreateGroup) {
+              onCreateGroup();
+            }
           }}
         >
-          <Feather name="plus" size={18} color="#FFFFFF" />
-          <Text style={styles.requestSplitFabText}>Request Split</Text>
+          {householdId ? (
+            <>
+              <Feather name="plus" size={18} color="#FFFFFF" />
+              <Text style={styles.requestSplitFabText}>Request Split</Text>
+            </>
+          ) : (
+            <>
+              <Feather name="compass" size={18} color="#FFFFFF" />
+              <Text style={styles.requestSplitFabText}>Explore Community</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
