@@ -2724,20 +2724,45 @@ export const mobileDataService = {
             return;
           }
 
-          if (!seen.has(uid)) {
-            seen.add(uid);
+          const canonicalUid =
+            (data.userId || "").replace(/^mem_/, "").trim() ||
+            d.id.replace(/^mem_/, "").trim();
+          const emailKey = (data.email || "").trim().toLowerCase();
+          const dedupeKey = canonicalUid || emailKey || d.id;
+
+          if (!seen.has(dedupeKey)) {
+            seen.add(dedupeKey);
+            if (canonicalUid) seen.add(canonicalUid);
+            if (emailKey) seen.add(emailKey);
             rawItems.push({
               ...data,
               id: d.id,
               docId: d.id,
+              userId: canonicalUid || data.userId || d.id,
             });
-            if (
-              !data.profilePicture &&
-              !data.photoURL &&
-              uid &&
-              !uid.startsWith("mem_")
-            ) {
-              missingPhotoUids.push(uid);
+            if (!data.profilePicture && !data.photoURL && canonicalUid) {
+              missingPhotoUids.push(canonicalUid);
+            }
+          } else {
+            // Already seen: if existing entry is missing profile picture or name, merge from this duplicate
+            const existingIdx = rawItems.findIndex(
+              (m) =>
+                (m.userId && m.userId.replace(/^mem_/, "") === canonicalUid) ||
+                (emailKey && m.email && m.email.toLowerCase() === emailKey),
+            );
+            if (existingIdx !== -1) {
+              const current = rawItems[existingIdx];
+              rawItems[existingIdx] = {
+                ...data,
+                ...current,
+                profilePicture:
+                  current.profilePicture ||
+                  data.profilePicture ||
+                  data.photoURL,
+                photoURL:
+                  current.photoURL || data.photoURL || data.profilePicture,
+                displayName: current.displayName || data.displayName,
+              };
             }
           }
         });
@@ -4063,13 +4088,95 @@ export const mobileDataService = {
     }
   },
 
+  async cleanupDuplicateMembers(
+    householdId: string,
+  ): Promise<{ cleaned: number }> {
+    if (!householdId) return { cleaned: 0 };
+    try {
+      const snap = await getDocs(
+        collection(db, `households/${householdId}/members`),
+      );
+      if (snap.empty) return { cleaned: 0 };
+
+      const userGroups = new Map<
+        string,
+        Array<{ id: string; ref: any; data: any }>
+      >();
+
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        const canonicalKey =
+          (data.userId || "").replace(/^mem_/, "").trim() ||
+          d.id.replace(/^mem_/, "").trim() ||
+          (data.email || "").trim().toLowerCase();
+
+        if (!canonicalKey) return;
+        const list = userGroups.get(canonicalKey) || [];
+        list.push({ id: d.id, ref: d.ref, data });
+        userGroups.set(canonicalKey, list);
+      });
+
+      let cleaned = 0;
+      for (const [key, docsList] of userGroups.entries()) {
+        if (docsList.length > 1) {
+          // Identify canonical doc: prefer doc where id === key (pure uid without mem_) or doc with most fields
+          docsList.sort((a, b) => {
+            const aIsCleanUid = a.id === key ? 1 : 0;
+            const bIsCleanUid = b.id === key ? 1 : 0;
+            if (aIsCleanUid !== bIsCleanUid) return bIsCleanUid - aIsCleanUid;
+            const aFieldCount = Object.keys(a.data).length;
+            const bFieldCount = Object.keys(b.data).length;
+            return bFieldCount - aFieldCount;
+          });
+
+          const canonical = docsList[0];
+          const duplicates = docsList.slice(1);
+
+          // Merge fields from duplicates onto canonical
+          const mergedData: any = {};
+          duplicates.forEach((dup) => {
+            if (dup.data.profilePicture && !canonical.data.profilePicture) {
+              mergedData.profilePicture = dup.data.profilePicture;
+            }
+            if (dup.data.photoURL && !canonical.data.photoURL) {
+              mergedData.photoURL = dup.data.photoURL;
+            }
+            if (dup.data.role && !canonical.data.role) {
+              mergedData.role = dup.data.role;
+            }
+            if (dup.data.displayName && !canonical.data.displayName) {
+              mergedData.displayName = dup.data.displayName;
+            }
+          });
+
+          if (Object.keys(mergedData).length > 0) {
+            await setDoc(canonical.ref, mergedData, { merge: true }).catch(
+              () => {},
+            );
+          }
+
+          // Delete all duplicate documents from Firestore
+          for (const dup of duplicates) {
+            await deleteDoc(dup.ref).catch(() => {});
+            cleaned++;
+          }
+        }
+      }
+      return { cleaned };
+    } catch (e) {
+      console.warn("[cleanupDuplicateMembers] Notice:", e);
+      return { cleaned: 0 };
+    }
+  },
+
   async updateUserProfilePicture(
     uid: string,
     photoUrl: string,
     householdId?: string,
   ): Promise<boolean> {
     try {
-      const userRef = doc(db, "users", uid);
+      const cleanUid = String(uid).replace(/^mem_/, "").trim();
+      const userRef = doc(db, "users", cleanUid);
       await setDoc(
         userRef,
         {
@@ -4079,38 +4186,68 @@ export const mobileDataService = {
         },
         { merge: true },
       );
-      if (_cachedUserProfile && _cachedUserProfile.uid === uid) {
+      if (
+        _cachedUserProfile &&
+        (_cachedUserProfile.uid === cleanUid || _cachedUserProfile.uid === uid)
+      ) {
         _cachedUserProfile.profilePicture = photoUrl;
         _cachedUserProfile.photoURL = photoUrl;
       }
-      if (auth.currentUser && auth.currentUser.uid === uid) {
+      if (
+        auth.currentUser &&
+        (auth.currentUser.uid === cleanUid || auth.currentUser.uid === uid)
+      ) {
         await updateAuthProfile(auth.currentUser, { photoURL: photoUrl }).catch(
           () => {},
         );
       }
       if (householdId) {
-        const memRef1 = doc(db, `households/${householdId}/members`, uid);
-        await setDoc(
-          memRef1,
-          {
-            profilePicture: photoUrl,
-            photoURL: photoUrl,
-          },
-          { merge: true },
-        ).catch(() => {});
-        const memRef2 = doc(
-          db,
-          `households/${householdId}/members`,
-          `mem_${uid}`,
-        );
-        await setDoc(
-          memRef2,
-          {
-            profilePicture: photoUrl,
-            photoURL: photoUrl,
-          },
-          { merge: true },
-        ).catch(() => {});
+        // Find existing member documents in this household to update in-place without duplicating
+        const snap = await getDocs(
+          collection(db, `households/${householdId}/members`),
+        ).catch(() => null);
+
+        let updatedExisting = false;
+        if (snap && !snap.empty) {
+          const userEmail = (auth.currentUser?.email || "")
+            .trim()
+            .toLowerCase();
+          for (const d of snap.docs) {
+            const data = d.data();
+            const docCanonical = (data.userId || d.id || "")
+              .replace(/^mem_/, "")
+              .trim();
+            const docEmail = (data.email || "").trim().toLowerCase();
+
+            if (
+              docCanonical === cleanUid ||
+              (docEmail && userEmail && docEmail === userEmail)
+            ) {
+              updatedExisting = true;
+              await updateDoc(d.ref, {
+                profilePicture: photoUrl,
+                photoURL: photoUrl,
+              }).catch(() => {});
+            }
+          }
+        }
+
+        // Only create if completely absent
+        if (!updatedExisting) {
+          const memRef = doc(db, `households/${householdId}/members`, cleanUid);
+          await setDoc(
+            memRef,
+            {
+              userId: cleanUid,
+              profilePicture: photoUrl,
+              photoURL: photoUrl,
+            },
+            { merge: true },
+          ).catch(() => {});
+        }
+
+        // Clean up any existing duplicate member documents
+        this.cleanupDuplicateMembers(householdId).catch(() => {});
       }
       return true;
     } catch (err) {
@@ -6527,6 +6664,18 @@ export const mobileDataService = {
           "[Firestore Mobile] listenToHouseholdCycleAttendance:",
           err,
         ),
+    );
+  },
+
+  listenToAttendanceRecords(
+    householdId: string,
+    cycleId: string,
+    callback: (records: any[]) => void,
+  ) {
+    return this.listenToHouseholdCycleAttendance(
+      householdId,
+      cycleId,
+      callback,
     );
   },
 

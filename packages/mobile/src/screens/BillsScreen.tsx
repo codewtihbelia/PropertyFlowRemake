@@ -559,6 +559,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
       <PaymentsScreen
         householdId={resolvedHouseholdId}
         billingCycleId={activeCycle?.billingCycleId}
+        initialAmountCentavos={myShareCents}
         onBack={() => setSubView("overview")}
       />
     );

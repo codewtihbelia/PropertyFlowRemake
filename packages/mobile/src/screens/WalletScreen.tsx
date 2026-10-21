@@ -41,6 +41,70 @@ import { auth } from "../firebase/config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
+// Safe Expo Camera & Native Scanner Loader (Resilient against EAS OTA updates across different native binaries)
+let NativeCameraView: any = null;
+let NativeCamera: any = null;
+let nativeScanFromURLAsync: any = null;
+let nativeRequestCameraPermissionsAsync: any = null;
+
+try {
+  const expCam = require("expo-camera");
+  NativeCameraView = expCam.CameraView || expCam.Camera;
+  NativeCamera = expCam.Camera;
+  nativeScanFromURLAsync =
+    expCam.scanFromURLAsync || expCam.Camera?.scanFromURLAsync;
+  nativeRequestCameraPermissionsAsync =
+    expCam.requestCameraPermissionsAsync ||
+    expCam.Camera?.requestCameraPermissionsAsync;
+} catch (_) {}
+
+let jpegDecoder: any = null;
+try {
+  jpegDecoder = require("jpeg-js");
+} catch (_) {}
+
+function base64ToUint8Array(b64: string): Uint8Array {
+  const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const len = clean.length;
+  const byteLength = (len * 3) >> 2;
+  const bytes = new Uint8Array(byteLength);
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let p = 0;
+  for (let i = 0; i < len; i += 4) {
+    const enc1 = chars.indexOf(clean.charAt(i));
+    const enc2 = chars.indexOf(clean.charAt(i + 1));
+    const enc3 = chars.indexOf(clean.charAt(i + 2));
+    const enc4 = chars.indexOf(clean.charAt(i + 3));
+    bytes[p++] = (enc1 << 2) | (enc2 >> 4);
+    if (enc3 !== -1 && p < byteLength)
+      bytes[p++] = ((enc2 & 15) << 4) | (enc3 >> 2);
+    if (enc4 !== -1 && p < byteLength) bytes[p++] = ((enc3 & 3) << 6) | enc4;
+  }
+  return bytes;
+}
+
+function decodePixelsFromBytes(rawBytes: Uint8Array): {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+} | null {
+  // Try JPEG format (SOI 0xFF, 0xD8)
+  if (jpegDecoder && jpegDecoder.decode) {
+    try {
+      const decoded = jpegDecoder.decode(rawBytes, { useTArray: true });
+      if (decoded && decoded.width && decoded.height && decoded.data) {
+        return {
+          width: decoded.width,
+          height: decoded.height,
+          data: new Uint8ClampedArray(decoded.data),
+        };
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 export interface QuickExpensePreset {
   id: string;
   title: string;
@@ -584,7 +648,7 @@ export function WalletScreen({
 
   // Real Camera & Scanner State
   const videoRef = useRef<any>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<any>(null);
   const scanIntervalRef = useRef<any>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<
     boolean | null
@@ -782,7 +846,9 @@ export function WalletScreen({
     }
     if (cameraStreamRef.current) {
       try {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current
+          .getTracks()
+          .forEach((track: any) => track.stop());
       } catch (e) {
         console.warn("[WalletScreen] Error stopping camera stream:", e);
       }
@@ -796,42 +862,85 @@ export function WalletScreen({
       setCameraError(null);
       stopLiveCamera();
 
-      if (
-        typeof navigator === "undefined" ||
-        !navigator.mediaDevices?.getUserMedia
-      ) {
-        setCameraError("Camera is not supported on this platform.");
-        setHasCameraPermission(false);
-        return;
-      }
+      if (Platform.OS === "web") {
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.mediaDevices?.getUserMedia
+        ) {
+          setCameraError("Camera is not supported on this platform.");
+          setHasCameraPermission(false);
+          return;
+        }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: cameraFacingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: cameraFacingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
 
-      cameraStreamRef.current = stream;
-      setHasCameraPermission(true);
-      setIsCameraActive(true);
+        cameraStreamRef.current = stream;
+        setHasCameraPermission(true);
+        setIsCameraActive(true);
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", "true");
-        videoRef.current
-          .play()
-          .catch((e: any) =>
-            console.warn("[WalletScreen] Video play error:", e),
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute("playsinline", "true");
+          videoRef.current
+            .play()
+            .catch((e: any) =>
+              console.warn("[WalletScreen] Video play error:", e),
+            );
+        }
+
+        if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+        scanIntervalRef.current = setInterval(() => {
+          captureAndScanFrame();
+        }, 120);
+      } else {
+        // Native mobile platform (Android / iOS)
+        try {
+          if (typeof nativeRequestCameraPermissionsAsync === "function") {
+            const res = await nativeRequestCameraPermissionsAsync();
+            if (res && res.status === "granted") {
+              setHasCameraPermission(true);
+              setIsCameraActive(true);
+            } else {
+              setHasCameraPermission(false);
+              setCameraError(
+                "Camera permission was denied. Please allow camera access in your device settings to scan QR codes.",
+              );
+            }
+          } else if (
+            NativeCamera &&
+            typeof NativeCamera.requestCameraPermissionsAsync === "function"
+          ) {
+            const res = await NativeCamera.requestCameraPermissionsAsync();
+            if (res && res.status === "granted") {
+              setHasCameraPermission(true);
+              setIsCameraActive(true);
+            } else {
+              setHasCameraPermission(false);
+              setCameraError(
+                "Camera permission was denied. Please allow camera access in your device settings to scan QR codes.",
+              );
+            }
+          } else {
+            // Default to active for native camera runtime
+            setHasCameraPermission(true);
+            setIsCameraActive(true);
+          }
+        } catch (permErr: any) {
+          console.warn(
+            "[WalletScreen] Native camera permission request error:",
+            permErr,
           );
+          setHasCameraPermission(true);
+          setIsCameraActive(true);
+        }
       }
-
-      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = setInterval(() => {
-        captureAndScanFrame();
-      }, 120);
     } catch (err: any) {
       console.warn("[WalletScreen] Camera start error:", err);
       setHasCameraPermission(false);
@@ -844,14 +953,18 @@ export function WalletScreen({
   };
 
   const captureAndScanFrame = async () => {
+    if (Platform.OS !== "web") return;
     const video = videoRef.current;
     if (!video || video.readyState < 2) return;
     const width = video.videoWidth;
     const height = video.videoHeight;
     if (!width || !height) return;
 
-    // 1. Native BarcodeDetector (hardware accelerated)
-    if (typeof (window as any).BarcodeDetector !== "undefined") {
+    // 1. Native BarcodeDetector (hardware accelerated on supported browsers)
+    if (
+      typeof window !== "undefined" &&
+      typeof (window as any).BarcodeDetector !== "undefined"
+    ) {
       try {
         const detector = new (window as any).BarcodeDetector({
           formats: ["qr_code"],
@@ -864,21 +977,23 @@ export function WalletScreen({
       } catch (_) {}
     }
 
-    // 2. Fallback pure jsQR frame analysis
+    // 2. Fallback pure jsQR frame analysis (browser DOM canvas)
     try {
-      const canvas = document.createElement("canvas");
-      const scale = Math.min(1, 640 / Math.max(width, height));
-      canvas.width = Math.floor(width * scale);
-      canvas.height = Math.floor(height * scale);
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const qrCode = jsQR(imgData.data, canvas.width, canvas.height, {
-          inversionAttempts: "dontInvert",
-        });
-        if (qrCode && qrCode.data) {
-          handleOnQrCodeScanned(qrCode.data);
+      if (typeof document !== "undefined") {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 640 / Math.max(width, height));
+        canvas.width = Math.floor(width * scale);
+        canvas.height = Math.floor(height * scale);
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const qrCode = jsQR(imgData.data, canvas.width, canvas.height, {
+            inversionAttempts: "dontInvert",
+          });
+          if (qrCode && qrCode.data) {
+            handleOnQrCodeScanned(qrCode.data);
+          }
         }
       }
     } catch (_) {}
@@ -986,60 +1101,133 @@ export function WalletScreen({
         mediaTypes: ["images"],
         allowsEditing: false,
         quality: 1.0,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         setIsDecodingImage(true);
 
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = asset.uri;
-
-        img.onload = () => {
+        // Native Mobile Path (iOS & Android): No DOM dependencies, 100% resilient
+        if (Platform.OS !== "web") {
           try {
-            const canvas = document.createElement("canvas");
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
-            if (!ctx) {
-              setIsDecodingImage(false);
-              Alert.alert(
-                "Scan Error",
-                "Could not initialize image processor.",
-              );
-              return;
+            // A. Attempt native hardware/OS barcode URL scan if available
+            if (typeof nativeScanFromURLAsync === "function") {
+              try {
+                const scanned = await nativeScanFromURLAsync(asset.uri, ["qr"]);
+                if (scanned && scanned.length > 0 && scanned[0].data) {
+                  setIsDecodingImage(false);
+                  handleOnQrCodeScanned(scanned[0].data);
+                  return;
+                }
+              } catch (_) {}
             }
-            ctx.drawImage(img, 0, 0);
-            const imgData = ctx.getImageData(0, 0, img.width, img.height);
-            const qrCode = jsQR(imgData.data, img.width, img.height);
+
+            // B. Pure TypeScript image decode via raw base64 bytes + jsQR
+            let rawBytes: Uint8Array | null = null;
+            if (asset.base64) {
+              rawBytes = base64ToUint8Array(asset.base64);
+            }
+
+            if (rawBytes && rawBytes.length > 0) {
+              const decoded = decodePixelsFromBytes(rawBytes);
+              if (decoded && decoded.width && decoded.height) {
+                const qrCode = jsQR(
+                  decoded.data,
+                  decoded.width,
+                  decoded.height,
+                );
+                if (qrCode && qrCode.data) {
+                  setIsDecodingImage(false);
+                  handleOnQrCodeScanned(qrCode.data);
+                  return;
+                }
+              }
+            }
 
             setIsDecodingImage(false);
-            if (qrCode && qrCode.data) {
-              handleOnQrCodeScanned(qrCode.data);
-            } else {
-              Alert.alert(
-                "No QR Code Detected",
-                "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit, or use the camera to scan directly.",
-              );
-            }
-          } catch (e: any) {
-            console.warn("[WalletScreen] Image decode error:", e);
+            Alert.alert(
+              "No QR Code Detected",
+              "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit, or use the camera to scan directly.",
+            );
+          } catch (nativeErr: any) {
+            console.warn(
+              "[WalletScreen] Native image decode error:",
+              nativeErr,
+            );
             setIsDecodingImage(false);
             Alert.alert(
               "Decoding Failed",
-              "Could not read QR code from this image. Please try another photo.",
+              "Could not read QR code from this image. Please try another photo or scan directly with the camera.",
             );
           }
-        };
+          return;
+        }
 
-        img.onerror = () => {
+        // Web Path: DOM Image and Canvas
+        if (
+          typeof window !== "undefined" &&
+          typeof (window as any).Image !== "undefined"
+        ) {
+          const img = new (window as any).Image();
+          img.crossOrigin = "anonymous";
+          img.src = asset.uri;
+
+          img.onload = () => {
+            try {
+              if (typeof document !== "undefined") {
+                const canvas = document.createElement("canvas");
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext("2d", {
+                  willReadFrequently: true,
+                });
+                if (!ctx) {
+                  setIsDecodingImage(false);
+                  Alert.alert(
+                    "Scan Error",
+                    "Could not initialize image processor.",
+                  );
+                  return;
+                }
+                ctx.drawImage(img, 0, 0);
+                const imgData = ctx.getImageData(0, 0, img.width, img.height);
+                const qrCode = jsQR(imgData.data, img.width, img.height);
+
+                setIsDecodingImage(false);
+                if (qrCode && qrCode.data) {
+                  handleOnQrCodeScanned(qrCode.data);
+                } else {
+                  Alert.alert(
+                    "No QR Code Detected",
+                    "No valid QR code was detected in the selected image. Please make sure the QR code is clearly visible and well-lit, or use the camera to scan directly.",
+                  );
+                }
+              }
+            } catch (e: any) {
+              console.warn("[WalletScreen] Image decode error:", e);
+              setIsDecodingImage(false);
+              Alert.alert(
+                "Decoding Failed",
+                "Could not read QR code from this image. Please try another photo.",
+              );
+            }
+          };
+
+          img.onerror = () => {
+            setIsDecodingImage(false);
+            Alert.alert(
+              "Image Error",
+              "Could not load the selected image for QR scanning.",
+            );
+          };
+        } else {
           setIsDecodingImage(false);
           Alert.alert(
-            "Image Error",
-            "Could not load the selected image for QR scanning.",
+            "Notice",
+            "Image scanning is not supported in this environment.",
           );
-        };
+        }
       }
     } catch (err) {
       console.warn("[WalletScreen] Image picker QR error:", err);
@@ -8994,14 +9182,14 @@ export function WalletScreen({
                           },
                         ]}
                       >
-                        {/* Live HTML5 Video Stream (Web / Mobile Web / WebView) */}
-                        {Platform.OS === "web" && (
-                          <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            style={{
+                        {/* Live HTML5 Video Stream (Web only - avoided raw <video> JSX to prevent React Native view config invariant errors) */}
+                        {Platform.OS === "web" &&
+                          React.createElement("video", {
+                            ref: videoRef,
+                            autoPlay: true,
+                            playsInline: true,
+                            muted: true,
+                            style: {
                               position: "absolute",
                               top: 0,
                               left: 0,
@@ -9009,9 +9197,33 @@ export function WalletScreen({
                               height: "100%",
                               objectFit: "cover",
                               borderRadius: 18,
-                            }}
-                          />
-                        )}
+                            },
+                          })}
+
+                        {/* Live Native Camera (Android / iOS EAS Native Runtime) */}
+                        {Platform.OS !== "web" &&
+                          NativeCameraView &&
+                          hasCameraPermission &&
+                          isCameraActive && (
+                            <NativeCameraView
+                              style={StyleSheet.absoluteFill}
+                              facing={
+                                cameraFacingMode === "user" ? "front" : "back"
+                              }
+                              barcodeScannerSettings={{
+                                barcodeTypes: ["qr"],
+                              }}
+                              onBarcodeScanned={({
+                                data,
+                              }: {
+                                data: string;
+                              }) => {
+                                if (data && isCameraActive) {
+                                  handleOnQrCodeScanned(data);
+                                }
+                              }}
+                            />
+                          )}
 
                         {/* Top Viewfinder Bar: Flip Camera & Status */}
                         <View

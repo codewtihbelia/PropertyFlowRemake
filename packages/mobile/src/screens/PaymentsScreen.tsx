@@ -36,6 +36,8 @@ import {
   isCyclePaymentsLocked,
   HostPaymentMethod,
   DEFAULT_HOST_PAYMENT_METHODS,
+  computeCycleWaterBreakdown,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
@@ -46,6 +48,8 @@ import { useTheme } from "../context/ThemeContext";
 export interface PaymentsScreenProps {
   householdId?: string;
   billingCycleId?: string;
+  initialAmountCentavos?: number;
+  initialAmount?: string;
   onBack?: () => void;
 }
 
@@ -72,6 +76,8 @@ interface CompletedPaymentReceipt {
 export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   householdId,
   billingCycleId,
+  initialAmountCentavos,
+  initialAmount,
   onBack,
 }) => {
   const { isDark, colors } = useTheme();
@@ -103,7 +109,16 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const hasScrolledSuccessTopRef = useRef<boolean>(false);
   const receiptCaptureRef = useRef<View | null>(null);
   const svgReceiptRef = useRef<any>(null);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(() => {
+    if (initialAmount) return initialAmount;
+    if (
+      typeof initialAmountCentavos === "number" &&
+      initialAmountCentavos > 0
+    ) {
+      return (initialAmountCentavos / 100).toFixed(2);
+    }
+    return "";
+  });
   const [refNum, setRefNum] = useState("");
   const [notes, setNotes] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -119,6 +134,11 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   const [memberBills, setMemberBills] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
+  const [waterConfig, setWaterConfig] = useState<any | null>(null);
+  const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
+  const [attendanceSubmissions, setAttendanceSubmissions] = useState<
+    Record<string, any>
+  >({});
   const [payments, setPayments] = useState<any[]>([]);
   const currentUser = auth.currentUser;
 
@@ -230,12 +250,28 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     isCyclePaymentsLocked(activeCycle, household) && !isHostUser;
 
   const activePayors = useMemo(() => {
-    const list = members.filter(
+    const seen = new Set<string>();
+    const deduplicated: any[] = [];
+    members.forEach((m) => {
+      const canonical =
+        (m.userId || "").replace(/^mem_/, "").trim() ||
+        (m.memberId || "").replace(/^mem_/, "").trim() ||
+        (m.id || "").replace(/^mem_/, "").trim();
+      const email = (m.email || "").trim().toLowerCase();
+      const key = canonical || email || m.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        if (canonical) seen.add(canonical);
+        if (email) seen.add(email);
+        deduplicated.push(m);
+      }
+    });
+    const list = deduplicated.filter(
       (m) => m.status === "ACTIVE" && isPayorMember(m),
     );
     return list.length > 0
       ? list
-      : members.filter((m) => m.status === "ACTIVE");
+      : deduplicated.filter((m) => m.status === "ACTIVE");
   }, [members]);
 
   const currentCycleExpenses = useMemo(() => {
@@ -254,6 +290,34 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       (e) => e.status !== "PAID" && !e.isPaid,
     );
     const liveShare = unpaidExpenses.reduce((sum, e) => {
+      const isWater = (e.category || "").toLowerCase().includes("water");
+      if (isWater) {
+        const isPersonDayMode =
+          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+          !waterConfig?.pricingModel;
+        if (isPersonDayMode) {
+          const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+          const { getPayorShareCentavos } = computeCycleWaterBreakdown(
+            members,
+            cycleAttendance,
+            attendanceSubmissions,
+            rate,
+            e.splitDetails,
+          );
+          return sum + getPayorShareCentavos(currentUser?.uid);
+        }
+        if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+          return sum + Number(waterConfig?.fixedPerPersonAmountCentavos || 0);
+        }
+        const mySplit = e.splitDetails?.find((s: any) =>
+          matchesMemberUid(s, currentUser?.uid),
+        );
+        if (mySplit && typeof mySplit.shareCentavos === "number") {
+          return sum + mySplit.shareCentavos;
+        }
+        return sum + Math.round((e.amountCents || 0) / payorCount);
+      }
+
       const splitPayors = e.splitDetails
         ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
         : [];
@@ -263,11 +327,12 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
         !isSplitStale &&
         e.splitDetails &&
         currentUser?.uid &&
-        typeof e.splitDetails.find((s: any) => s.userId === currentUser.uid)
-          ?.shareCentavos === "number"
+        typeof e.splitDetails.find((s: any) =>
+          matchesMemberUid(s, currentUser.uid),
+        )?.shareCentavos === "number"
       ) {
-        const mySplit = e.splitDetails.find(
-          (s: any) => s.userId === currentUser.uid,
+        const mySplit = e.splitDetails.find((s: any) =>
+          matchesMemberUid(s, currentUser.uid),
         );
         if (mySplit?.isPaid) return sum;
         return sum + (mySplit?.shareCentavos || 0);
@@ -288,16 +353,25 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   }, [
     currentCycleExpenses,
     activePayors,
+    members,
+    cycleAttendance,
+    attendanceSubmissions,
+    waterConfig,
     currentUser?.uid,
     payments,
     resolvedBillingCycleId,
   ]);
 
   useEffect(() => {
-    if (liveOutstandingCentavos > 0 && !amount) {
+    if (
+      typeof initialAmountCentavos === "number" &&
+      initialAmountCentavos > 0
+    ) {
+      setAmount((initialAmountCentavos / 100).toFixed(2));
+    } else if (liveOutstandingCentavos > 0 && !amount) {
       setAmount((liveOutstandingCentavos / 100).toFixed(2));
     }
-  }, [liveOutstandingCentavos]);
+  }, [liveOutstandingCentavos, initialAmountCentavos]);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -326,6 +400,11 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
       (data: any) => setMembers(data),
+    );
+
+    const unsubWater = mobileDataService.listenToWaterConfig(
+      resolvedHouseholdId,
+      setWaterConfig,
     );
 
     const unsubPayments = mobileDataService.listenToPayments(
@@ -358,10 +437,29 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       unsubExpenses();
       unsubCycles();
       unsubMembers();
+      unsubWater();
       unsubPayments();
       unsubHousehold();
     };
   }, [resolvedHouseholdId]);
+
+  useEffect(() => {
+    if (!resolvedHouseholdId || !resolvedBillingCycleId) return;
+    const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setCycleAttendance,
+    );
+    const unsubSubs = mobileDataService.listenToAttendanceSubmissions(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setAttendanceSubmissions,
+    );
+    return () => {
+      unsubAtt();
+      unsubSubs();
+    };
+  }, [resolvedHouseholdId, resolvedBillingCycleId]);
 
   const handlePickReceipt = async () => {
     try {

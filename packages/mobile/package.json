@@ -1,7 +1,7 @@
 {
   "name": "@propertyflow/mobile",
   "version": "1.0.0",
-  "main": "expo/AppEntry.js",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -16,6 +16,7 @@
     "expo-audio": "~57.0.5",
     "expo-auth-session": "~57.0.16",
     "expo-blur": "~57.0.3",
+    "expo-camera": "~57.0.6",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.20",
     "expo-crypto": "~57.0.4",
@@ -28,7 +29,9 @@
     "expo-updates": "~57.0.26",
     "expo-web-browser": "~57.0.3",
     "firebase": "^11.0.2",
+    "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",

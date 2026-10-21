@@ -805,12 +805,35 @@ export async function downloadQrCodePng(
       };
     }
 
-    // 2. React Native Native Environment: MediaLibrary + Native Share Sheet
+    // 2. React Native Native Environment: Write file to cache then save to MediaLibrary / Share
+    let fileUri = "";
+    try {
+      let FileSystem: any = null;
+      try {
+        FileSystem = require("expo-file-system");
+      } catch (_) {}
+
+      if (FileSystem && FileSystem.cacheDirectory) {
+        const rawBase64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+        fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(fileUri, rawBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+    } catch (fsErr) {
+      console.warn(
+        "[SplitzyQrCode] Native file system cache write error:",
+        fsErr,
+      );
+    }
+
+    // Attempt direct save to photo gallery with MediaLibrary
     try {
       const MediaLibrary = require("expo-media-library");
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status === "granted") {
-        await MediaLibrary.saveToLibraryAsync(dataUrl);
+        const targetUri = fileUri || dataUrl;
+        await MediaLibrary.saveToLibraryAsync(targetUri);
         return {
           success: true,
           message: "Saved QR code PNG directly to your device photo gallery!",
@@ -826,7 +849,7 @@ export async function downloadQrCodePng(
         await Share.share({
           title: `${options.name || "Splitzy"} QR Code`,
           message: `Splitzy QR Code for ${options.name || "Splitzy Resident"}: ${options.value}`,
-          url: dataUrl,
+          url: fileUri || dataUrl,
         });
         return {
           success: true,

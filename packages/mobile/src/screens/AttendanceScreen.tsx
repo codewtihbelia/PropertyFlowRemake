@@ -690,11 +690,33 @@ export const AttendanceScreen: React.FC<{
       resolvedHouseholdId,
       setWaterConfig,
     );
+    // Automatically clean up any orphaned or duplicate member records in the household
+    mobileDataService
+      .cleanupDuplicateMembers(resolvedHouseholdId)
+      .catch(() => {});
+
     const unsubMembers = mobileDataService.listenToHouseholdMembers(
       resolvedHouseholdId,
       (data) => {
         const activeOnly = (data || []).filter(isActiveGroupMember);
-        setMembers(activeOnly);
+        // Robust in-memory deduplication by canonical user ID & email
+        const seenUids = new Set<string>();
+        const deduplicated: any[] = [];
+        activeOnly.forEach((m) => {
+          const canonical =
+            (m.userId || "").replace(/^mem_/, "").trim() ||
+            (m.memberId || "").replace(/^mem_/, "").trim() ||
+            (m.id || "").replace(/^mem_/, "").trim();
+          const email = (m.email || "").trim().toLowerCase();
+          const key = canonical || email || m.id;
+          if (!seenUids.has(key)) {
+            seenUids.add(key);
+            if (canonical) seenUids.add(canonical);
+            if (email) seenUids.add(email);
+            deduplicated.push(m);
+          }
+        });
+        setMembers(deduplicated);
         attReady.members = true;
         checkReady();
       },
