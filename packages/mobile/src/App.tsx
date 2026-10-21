@@ -31,7 +31,6 @@ import { AttendanceScreen } from "./screens/AttendanceScreen";
 import { MessagesScreen } from "./screens/MessagesScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
 import { AddExpenseScreen } from "./screens/AddExpenseScreen";
-import { SettleDuesScreen } from "./screens/SettleDuesScreen";
 import { ExpenseHistoryScreen } from "./screens/ExpenseHistoryScreen";
 import { ExpenseDetailsScreen } from "./screens/ExpenseDetailsScreen";
 import { ReportScreen } from "./screens/ReportScreen";
@@ -96,7 +95,6 @@ type OverlayScreen =
   | "notifications"
   | "messages"
   | "add_expense"
-  | "settle_dues"
   | "expense_history"
   | "expense_details"
   | "reports"
@@ -273,6 +271,12 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const [billsInitialSubView, setBillsInitialSubView] = useState<
     "overview" | "pay"
   >("overview");
+
+  const handleOpenSettleDues = () => {
+    setOverlayScreen("none");
+    setBillsInitialSubView("pay");
+    setCurrentTab("bills");
+  };
   const [manageGroupInitialView, setManageGroupInitialView] = useState<
     "details" | "create" | "join"
   >("details");
@@ -965,19 +969,6 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     );
   }
 
-  if (overlayScreen === "settle_dues") {
-    return (
-      <SettleDuesScreen
-        onBack={() => setOverlayScreen("none")}
-        onPayPress={() => {
-          setOverlayScreen("none");
-          setBillsInitialSubView("pay");
-          setCurrentTab("bills");
-        }}
-      />
-    );
-  }
-
   if (overlayScreen === "expense_history") {
     return (
       <ExpenseHistoryScreen
@@ -1006,7 +997,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return (
       <ReportScreen
         onBack={() => setOverlayScreen("none")}
-        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenSettleDues={handleOpenSettleDues}
       />
     );
   }
@@ -1015,7 +1006,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return (
       <ViewGroupScreen
         onBack={() => setOverlayScreen("none")}
-        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenSettleDues={handleOpenSettleDues}
         onOpenHostApplication={() => setOverlayScreen("host_application")}
         currentUser={currentUser}
       />
@@ -1030,7 +1021,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             setOverlayScreen("none");
             setManageGroupInitialView("details");
           }}
-          onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+          onOpenSettleDues={handleOpenSettleDues}
           onOpenHostApplication={() => {
             setOverlayScreen("host_application");
             setManageGroupInitialView("details");
@@ -1049,7 +1040,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           setOverlayScreen("add_expense");
           setManageGroupInitialView("details");
         }}
-        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenSettleDues={handleOpenSettleDues}
         onOpenHostApplication={() => {
           setOverlayScreen("host_application");
           setManageGroupInitialView("details");
@@ -1193,9 +1184,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               auth.currentUser?.photoURL ||
               undefined,
           }}
-          onOpenSettleDues={() => {
-            setOverlayScreen("settle_dues");
-          }}
+          onOpenSettleDues={handleOpenSettleDues}
           onOpenAddExpense={
             isHostUser ? () => setOverlayScreen("add_expense") : undefined
           }
@@ -1245,7 +1234,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             setOverlayScreen("community");
           }
         }}
-        onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+        onOpenSettleDues={handleOpenSettleDues}
         onOpenExpenseHistory={() => setOverlayScreen("expense_history")}
         onOpenViewGroup={() => setOverlayScreen("view_group")}
         onOpenManageGroup={(mode) => {
@@ -1270,7 +1259,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
                 setCurrentTab("home");
                 setManageGroupInitialView("details");
               }}
-              onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+              onOpenSettleDues={handleOpenSettleDues}
               onOpenHostApplication={() => setOverlayScreen("host_application")}
               currentUser={currentUser}
             />
@@ -1283,7 +1272,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setManageGroupInitialView("details");
             }}
             onOpenAddExpense={() => setOverlayScreen("add_expense")}
-            onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+            onOpenSettleDues={handleOpenSettleDues}
             onOpenHostApplication={() => setOverlayScreen("host_application")}
             currentUser={currentUser}
             initialView={manageGroupInitialView}
@@ -1298,7 +1287,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setBillsInitialSubView("pay");
               setCurrentTab("bills");
             }}
-            onNavigateToSettle={() => setOverlayScreen("settle_dues")}
+            onNavigateToSettle={handleOpenSettleDues}
           />
         );
       case "bills":
@@ -1337,9 +1326,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
                 auth.currentUser?.photoURL ||
                 undefined,
             }}
-            onOpenSettleDues={() => {
-              setOverlayScreen("settle_dues");
-            }}
+            onOpenSettleDues={handleOpenSettleDues}
             onOpenAddExpense={
               isHostUser ? () => setOverlayScreen("add_expense") : undefined
             }
@@ -1403,7 +1390,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               }
             }}
             onOpenAddExpense={() => setOverlayScreen("add_expense")}
-            onOpenSettleDues={() => setOverlayScreen("settle_dues")}
+            onOpenSettleDues={handleOpenSettleDues}
             onOpenExpenseHistory={() => setOverlayScreen("expense_history")}
             onOpenViewGroup={() => setOverlayScreen("view_group")}
             onOpenManageGroup={(mode) => {

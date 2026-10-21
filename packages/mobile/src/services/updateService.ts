@@ -1,11 +1,14 @@
 /**
- * Service to manage silent background Over-The-Air (OTA) updates using EAS Update.
- * Safely resolves expo-updates dynamically to prevent compilation errors if the module
- * has not yet been installed locally, while functioning seamlessly in compiled builds.
+ * Service to manage Over-The-Air (OTA) updates using EAS Update.
+ * Supports:
+ * 1. Startup check with strict 5-second deadline during SplashScreen (download + reloadAsync).
+ * 2. Background check for active sessions (deferred by 25s so it never collides with startup).
+ * 3. Manual check from settings/maintenance views with one-tap reload.
  */
 
 interface SafeUpdatesModule {
   isEnabled: boolean;
+  isEmbeddedLaunch?: boolean;
   checkForUpdateAsync: () => Promise<{ isAvailable: boolean; manifest?: any }>;
   fetchUpdateAsync: () => Promise<any>;
   reloadAsync: () => Promise<void>;
@@ -13,27 +16,114 @@ interface SafeUpdatesModule {
 
 function getUpdatesModule(): SafeUpdatesModule | null {
   try {
-    // Dynamic require so missing local dependencies or type definitions don't block development
     return require("expo-updates");
   } catch {
     return null;
   }
 }
 
+export type UpdateSyncStatus =
+  | "idle"
+  | "checking"
+  | "downloading"
+  | "reloading";
+
 class UpdateService {
-  private hasChecked = false;
+  private hasCheckedStartup = false;
   private isFetching = false;
+  private statusListeners: Set<(status: UpdateSyncStatus) => void> = new Set();
+
+  public subscribeStatus(
+    listener: (status: UpdateSyncStatus) => void,
+  ): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  private notifyStatus(status: UpdateSyncStatus) {
+    this.statusListeners.forEach((fn) => {
+      try {
+        fn(status);
+      } catch (_) {}
+    });
+  }
 
   /**
-   * Initializes silent background update check on app launch.
-   * Runs non-blockingly without delaying splash screen or UI interaction.
-   * Includes concurrency guard and timeout to avoid hanging or corrupted downloads.
+   * Checks for and immediately applies any newly published EAS update during the startup splash window.
+   * Strictly respects the 5-second deadline so users are never blocked or stuck on splash.
+   * If an update is fetched, immediately reloads into the fresh bundle.
    */
-  public async initBackgroundUpdateCheck(): Promise<void> {
-    if (this.hasChecked || this.isFetching) return;
-    this.hasChecked = true;
+  public async checkAndApplyStartupUpdate(
+    timeoutMs = 5000,
+  ): Promise<{ updated: boolean }> {
+    if (this.hasCheckedStartup || this.isFetching) {
+      return { updated: false };
+    }
+    this.hasCheckedStartup = true;
 
     // Updates are only active in published standalone/preview/production builds
+    if (__DEV__) {
+      return { updated: false };
+    }
+
+    const updates = getUpdatesModule();
+    if (!updates || !updates.isEnabled) {
+      return { updated: false };
+    }
+
+    this.isFetching = true;
+    const startTime = Date.now();
+
+    try {
+      this.notifyStatus("checking");
+
+      // Check for update raced against deadline
+      const checkPromise = updates.checkForUpdateAsync();
+      const checkTimeout = new Promise<{ isAvailable: boolean }>((resolve) =>
+        setTimeout(() => resolve({ isAvailable: false }), timeoutMs),
+      );
+
+      const checkResult = await Promise.race([checkPromise, checkTimeout]);
+
+      if (checkResult && checkResult.isAvailable) {
+        this.notifyStatus("downloading");
+
+        const elapsed = Date.now() - startTime;
+        const remainingTime = Math.max(1000, timeoutMs - elapsed);
+
+        const fetchPromise = updates.fetchUpdateAsync();
+        const fetchTimeout = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), remainingTime),
+        );
+
+        const fetchResult = await Promise.race([fetchPromise, fetchTimeout]);
+
+        if (fetchResult !== null) {
+          this.notifyStatus("reloading");
+          // Short delay to display reload indicator smoothly
+          await new Promise((r) => setTimeout(r, 250));
+          await updates.reloadAsync();
+          return { updated: true };
+        }
+      }
+    } catch (err: any) {
+      console.warn(
+        "[UpdateService] Startup check warning:",
+        err?.message || err,
+      );
+    } finally {
+      this.isFetching = false;
+      this.notifyStatus("idle");
+    }
+
+    return { updated: false };
+  }
+
+  /**
+   * Initializes silent background update check on app launch for prolonged sessions.
+   * Defers by 25 seconds so startup and splash settle cleanly.
+   */
+  public async initBackgroundUpdateCheck(): Promise<void> {
     if (__DEV__) {
       return;
     }
@@ -43,7 +133,7 @@ class UpdateService {
       return;
     }
 
-    // Defer check by 8 seconds so initial splash, audio chime, and native boot settle cleanly
+    // Defer check by 25 seconds to avoid colliding with startup flow
     setTimeout(async () => {
       if (this.isFetching) return;
       this.isFetching = true;
@@ -51,7 +141,6 @@ class UpdateService {
       try {
         const check = await updates.checkForUpdateAsync();
         if (check.isAvailable) {
-          // Wrap fetch in a timeout so poor connections don't hang indefinitely or corrupt bundles
           const fetchPromise = updates.fetchUpdateAsync();
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(
@@ -61,10 +150,9 @@ class UpdateService {
           );
 
           await Promise.race([fetchPromise, timeoutPromise]);
-          // The downloaded bundle will cleanly mount on the user's next app start.
+          // The downloaded bundle will cleanly mount on next launch
         }
       } catch (err: any) {
-        // Network timeout, offline mode, or concurrent fetch: silently ignore so user experience is uninterrupted
         console.warn(
           "[UpdateService] Background update check notice:",
           err?.message || err,
@@ -72,7 +160,7 @@ class UpdateService {
       } finally {
         this.isFetching = false;
       }
-    }, 8000);
+    }, 25000);
   }
 
   /**
@@ -98,7 +186,7 @@ class UpdateService {
     if (this.isFetching) {
       return {
         available: false,
-        error: "An update is currently being downloaded",
+        error: "An update is currently being processed",
       };
     }
 

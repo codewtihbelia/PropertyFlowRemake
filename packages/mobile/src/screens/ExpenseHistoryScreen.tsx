@@ -855,14 +855,14 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
             <Text style={[styles.navTitle, isDark && { color: colors.text }]}>
               Paid Bill History
             </Text>
-            <Text
+            {/* <Text
               style={[
                 styles.navSubtitle,
                 isDark && { color: colors.textSecondary },
               ]}
             >
               Settled household bills & payor breakdowns
-            </Text>
+            </Text> */}
           </View>
 
           <View style={styles.headerRight}>

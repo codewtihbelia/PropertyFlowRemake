@@ -109,6 +109,22 @@ function decodePixelsFromBytes(rawBytes: Uint8Array): {
   return null;
 }
 
+// Resilient currency & number formatters that never throw on undefined, null, or NaN
+export function safeFormatPesos(val: any, decimals = 2): string {
+  const n = typeof val === "number" ? val : parseFloat(String(val ?? "0"));
+  if (isNaN(n) || !isFinite(n)) return (0).toFixed(decimals);
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+export function safeFormatNumber(val: any): string {
+  const n = typeof val === "number" ? val : parseFloat(String(val ?? "0"));
+  if (isNaN(n) || !isFinite(n)) return "0";
+  return n.toLocaleString("en-US");
+}
+
 export interface QuickExpensePreset {
   id: string;
   title: string;
@@ -1492,7 +1508,7 @@ export function WalletScreen({
       const sourceSuffix = cleanSource ? ` from ${cleanSource}` : "";
       Alert.alert(
         "Top-up Successful",
-        `₱${num.toLocaleString()} has been added${sourceSuffix} to ${cardTitle}. Total Available Digital Balance updated!`,
+        `₱${safeFormatNumber(num)} has been added${sourceSuffix} to ${cardTitle}. Total Available Digital Balance updated!`,
       );
     } catch (e: any) {
       Alert.alert("Top-up Failed", e?.message || "Could not complete top up.");
@@ -1666,7 +1682,7 @@ export function WalletScreen({
       setSendNote("");
       Alert.alert(
         "Transfer Complete",
-        `Sent ₱${num.toLocaleString()} to ${sendRecipient.trim() || "Roommate Alex"} via ${card.name}!`,
+        `Sent ₱${safeFormatNumber(num)} to ${sendRecipient.trim() || "Roommate Alex"} via ${card.name}!`,
       );
     } else {
       Alert.alert("Transfer Failed", res.message);
@@ -1683,7 +1699,7 @@ export function WalletScreen({
     setShowRequestSplitModal(false);
     Alert.alert(
       "Split Request Created",
-      `Created request for "${splitTitle || "Household Split"}" (₱${num.toLocaleString()}). Each of the ${splitNumPeople} roommates requested for ₱${perPerson}.`,
+      `Created request for "${splitTitle || "Household Split"}" (₱${safeFormatNumber(num)}). Each of the ${splitNumPeople} roommates requested for ₱${perPerson}.`,
     );
   };
 
@@ -1728,7 +1744,7 @@ export function WalletScreen({
       setNewCardBalance("5000");
       Alert.alert(
         "Card Added",
-        `Linked ${newCardName.trim() || preset.name} with ₱${parsedBalance.toLocaleString()} balance. Total Available Digital Balance updated!`,
+        `Linked ${newCardName.trim() || preset.name} with ₱${safeFormatNumber(parsedBalance)} balance. Total Available Digital Balance updated!`,
       );
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not add payment card.");
@@ -4175,8 +4191,7 @@ export function WalletScreen({
                 activeOpacity={0.8}
               >
                 <Text style={styles.modalPrimaryBtnText}>
-                  Confirm Top-up of ₱
-                  {parseFloat(cashInAmount || "0").toLocaleString()}
+                  Confirm Top-up of ₱{safeFormatNumber(cashInAmount)}
                 </Text>
               </TouchableOpacity>
 
@@ -5328,8 +5343,8 @@ export function WalletScreen({
                             ]}
                           >
                             {isInsufficient
-                              ? `Insufficient funds on ${currentCard.name} (Available: ₱${cardBal.toLocaleString()})`
-                              : `Balance after deduction: ₱${balanceAfter.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              ? `Insufficient funds on ${currentCard.name} (Available: ₱${safeFormatNumber(cardBal)})`
+                              : `Balance after deduction: ₱${safeFormatPesos(balanceAfter)}`}
                           </Text>
                         </View>
                       </View>
@@ -5436,13 +5451,7 @@ export function WalletScreen({
                             ? `Insufficient Balance on ${currentCard?.name || "Card"}`
                             : expenseAmt <= 0
                               ? "Enter Expense Amount"
-                              : `Simulate & Deduct ₱${expenseAmt.toLocaleString(
-                                  "en-US",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  },
-                                )}`}
+                              : `Simulate & Deduct ₱${safeFormatPesos(expenseAmt)}`}
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -5917,8 +5926,8 @@ export function WalletScreen({
                           {isSameCard
                             ? "Source and destination cards must be different accounts."
                             : isInsufficient
-                              ? `Insufficient balance on ${sourceCard.name} (Available: ₱${sourceBal.toLocaleString()})`
-                              : `${sourceCard.name}: ₱${Math.max(0, sourceBal - transferAmt).toLocaleString()}  ➔  ${destCard.name}: ₱${(destBal + transferAmt).toLocaleString()}`}
+                              ? `Insufficient balance on ${sourceCard.name} (Available: ₱${safeFormatNumber(sourceBal)})`
+                              : `${sourceCard.name}: ₱${safeFormatNumber(Math.max(0, (sourceBal ?? 0) - (transferAmt ?? 0)))}  ➔  ${destCard.name}: ₱${safeFormatNumber((destBal ?? 0) + (transferAmt ?? 0))}`}
                         </Text>
                       </View>
                     </View>
@@ -5952,13 +5961,7 @@ export function WalletScreen({
                             ? `Insufficient Balance on ${sourceCard?.name || "Card"}`
                             : transferAmt <= 0
                               ? "Enter Transfer Amount"
-                              : `Confirm Transfer ₱${transferAmt.toLocaleString(
-                                  "en-US",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  },
-                                )}`}
+                              : `Confirm Transfer ₱${safeFormatPesos(transferAmt)}`}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -6277,8 +6280,8 @@ export function WalletScreen({
                       ]}
                     >
                       {isInsufficient
-                        ? `Insufficient cash on hand (₱${(cashBal ?? 0).toLocaleString()} available)`
-                        : `Cash on hand after expense: ₱${Math.max(0, (cashBal ?? 0) - expenseAmt).toLocaleString()}`}
+                        ? `Insufficient cash on hand (₱${safeFormatNumber(cashBal)} available)`
+                        : `Cash on hand after expense: ₱${safeFormatNumber(Math.max(0, (cashBal ?? 0) - (expenseAmt ?? 0)))}`}
                     </Text>
                   </View>
 
@@ -6303,7 +6306,7 @@ export function WalletScreen({
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <Text style={styles.modalPrimaryBtnText}>
-                        Log ₱{(expenseAmt ?? 0).toLocaleString()} Cash Spent
+                        Log ₱{safeFormatNumber(expenseAmt)} Cash Spent
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -7140,9 +7143,9 @@ export function WalletScreen({
                     >
                       {pocketActionType === "deposit"
                         ? isInsufficient
-                          ? `Insufficient balance on ${activeCard.name} (₱${cardBal.toLocaleString()} available)`
-                          : `After saving: ${activeCard.name} balance will be ₱${Math.max(0, cardBal - num).toLocaleString()}`
-                        : `After withdrawal: ${activeCard.name} balance will be ₱${(cardBal + num).toLocaleString()}`}
+                          ? `Insufficient balance on ${activeCard?.name || "Card"} (₱${safeFormatNumber(cardBal)} available)`
+                          : `After saving: ${activeCard?.name || "Card"} balance will be ₱${safeFormatNumber(Math.max(0, (cardBal ?? 0) - (num ?? 0)))}`
+                        : `After withdrawal: ${activeCard?.name || "Card"} balance will be ₱${safeFormatNumber((cardBal ?? 0) + (num ?? 0))}`}
                     </Text>
                   </View>
                 );
@@ -7181,13 +7184,7 @@ export function WalletScreen({
                         ? `Insufficient Balance on ${pocketActionType === "deposit" ? activeCard?.name || "Card" : selectedPocket?.name || "Pocket"}`
                         : num <= 0
                           ? "Enter Amount"
-                          : `Confirm ${pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱${num.toLocaleString(
-                              "en-US",
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              },
-                            )}`}
+                          : `Confirm ${pocketActionType === "deposit" ? "Deposit" : "Withdrawal"} of ₱${safeFormatPesos(num)}`}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -8204,10 +8201,7 @@ export function WalletScreen({
                           ? `Insufficient Balance on ${fundingCard?.name || "Card"}`
                           : sendVal <= 0
                             ? "Enter Amount"
-                            : `Send ₱${sendVal.toLocaleString("en-US", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })} Now`}
+                            : `Send ₱${safeFormatPesos(sendVal)} Now`}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -9726,7 +9720,7 @@ export function WalletScreen({
                       </View>
 
                       {/* Demo QR Scanner Shortcut for Instant Testing */}
-                      <TouchableOpacity
+                      {/* <TouchableOpacity
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -9762,7 +9756,7 @@ export function WalletScreen({
                         >
                           Simulate Scan: Alex's ₱450.00 Dinner Share QR
                         </Text>
-                      </TouchableOpacity>
+                      </TouchableOpacity> */}
                     </View>
                   )}
 
@@ -10261,12 +10255,9 @@ export function WalletScreen({
                                     ]}
                                   >
                                     Insufficient funds on {selectedSourceName}{" "}
-                                    (₱
-                                    {selectedSourceBal.toLocaleString("en-US", {
-                                      minimumFractionDigits: 2,
-                                    })}{" "}
+                                    (₱{safeFormatPesos(selectedSourceBal)}{" "}
                                     available). Top up or choose another source
-                                    to transfer ₱{parsedAmt.toFixed(2)}.
+                                    to transfer ₱{safeFormatPesos(parsedAmt)}.
                                   </Text>
                                 </View>
                               </View>
@@ -10364,10 +10355,7 @@ export function WalletScreen({
                           letterSpacing: -0.5,
                         }}
                       >
-                        ₱
-                        {qrReceipt.amount.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                        })}
+                        ₱{safeFormatPesos(qrReceipt?.amount)}
                       </Text>
 
                       {/* Digital Receipt Breakdown Card */}
@@ -10912,7 +10900,7 @@ export function WalletScreen({
                   setShowLimitsModal(false);
                   Alert.alert(
                     "Security Settings Saved",
-                    `Daily limit set to ₱${parseFloat(dailyOnlineLimit || "0").toLocaleString()}. Security status active.`,
+                    `Daily limit set to ₱${safeFormatNumber(dailyOnlineLimit)}. Security status active.`,
                   );
                 }}
                 activeOpacity={0.8}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -7,9 +7,11 @@ import {
   Animated,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { updateService, UpdateSyncStatus } from "../services/updateService";
 
 const { width } = Dimensions.get("window");
 const SPLASH_CHIME_ASSET = require("../../assets/splash-chime.wav");
@@ -21,14 +23,28 @@ export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
   const scaleAnim = useRef(new Animated.Value(0.92)).current;
   const textFadeAnim = useRef(new Animated.Value(0)).current;
   const cleanupAudioRef = useRef<(() => void) | null>(null);
+  const [syncStatus, setSyncStatus] = useState<UpdateSyncStatus>("idle");
 
   useEffect(() => {
     let isMounted = true;
+    let hasFinished = false;
+
+    // Subscribe to real-time update sync state
+    const unsubscribeStatus = updateService.subscribeStatus((status) => {
+      if (isMounted) {
+        setSyncStatus(status);
+      }
+    });
+
+    const finishSafely = () => {
+      if (!hasFinished && isMounted) {
+        hasFinished = true;
+        onFinish();
+      }
+    };
 
     const playSplashSound = async () => {
       try {
-        // Lazy-require expo-audio inside try/catch so top-level bundle evaluation never fails
-        // and any missing native module error on older dev clients is safely caught.
         const ExpoAudio = require("expo-audio") as typeof import("expo-audio");
 
         if (typeof ExpoAudio.setAudioModeAsync === "function") {
@@ -83,13 +99,36 @@ export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
       }),
     ]).start();
 
-    const timer = setTimeout(() => {
-      onFinish();
-    }, 2200);
+    // Check for OTA update on launch with a strict 5-second deadline
+    const minSplashPromise = new Promise((resolve) =>
+      setTimeout(resolve, 2000),
+    );
+    const startupUpdatePromise = updateService.checkAndApplyStartupUpdate(5000);
+
+    Promise.allSettled([minSplashPromise, startupUpdatePromise]).then(
+      (results) => {
+        const updateResult = results[1];
+        if (
+          updateResult.status === "fulfilled" &&
+          updateResult.value &&
+          updateResult.value.updated
+        ) {
+          // App is reloading into fresh OTA bundle; don't trigger finish
+          return;
+        }
+        finishSafely();
+      },
+    );
+
+    // Hard fallback timer ensures splash screen NEVER blocks under any network condition
+    const hardFallbackTimer = setTimeout(() => {
+      finishSafely();
+    }, 5200);
 
     return () => {
       isMounted = false;
-      clearTimeout(timer);
+      unsubscribeStatus();
+      clearTimeout(hardFallbackTimer);
       if (cleanupAudioRef.current) {
         cleanupAudioRef.current();
         cleanupAudioRef.current = null;
@@ -135,6 +174,23 @@ export const SplashScreen: React.FC<{ onFinish: () => void }> = ({
         {/* Clean footer wordmark matching the proposed typography */}
         <Animated.View style={[styles.footer, { opacity: textFadeAnim }]}>
           <Text style={styles.appName}>Splitzy</Text>
+
+          {/* Discreet sync status indicator if an update is actively downloading/reloading */}
+          {(syncStatus === "downloading" || syncStatus === "reloading") && (
+            <View style={styles.syncRow}>
+              <ActivityIndicator
+                size="small"
+                color="#FFFFFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.syncText}>
+                {syncStatus === "downloading"
+                  ? "Downloading update..."
+                  : "Applying update..."}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.homeIndicator} />
         </Animated.View>
       </SafeAreaView>
@@ -182,12 +238,29 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#FFFFFF",
     letterSpacing: 0.8,
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  syncRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+  },
+  syncText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.2,
   },
   homeIndicator: {
     width: 134,
     height: 5,
     borderRadius: 3,
     backgroundColor: "rgba(255, 255, 255, 0.4)",
+    marginTop: 12,
   },
 });
