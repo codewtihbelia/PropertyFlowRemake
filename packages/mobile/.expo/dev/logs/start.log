@@ -31581,3 +31581,7 @@
 {"_e":"devserver:start","_t":1792586491403,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":false}
 {"_e":"metro:config","_t":1792586494198,"serverRoot":"../..\\..\\..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":true,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
 {"_e":"expo:dev-tools-plugin:load","_t":1792586494611,"plugins":[]}
+{"_e":"metro:instantiate","_t":1792586503006,"atlas":false,"workers":3,"host":"::","port":8081}
+{"_e":"metro:bundling:started","_t":1792586509652,"id":"2","platform":"android","environment":null,"entry":"packages\\mobile\\index.js"}
+{"_e":"metro:bundling:progress","_t":1792586509653,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1792586526954,"id":"2","total":1,"ms":17302.0307}
