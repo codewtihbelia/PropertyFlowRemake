@@ -10,6 +10,7 @@ import {
   Text,
   View,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   Image,
@@ -35,12 +36,17 @@ import {
   CommunityFriendship,
   CommunityMember,
   CommunityStory,
+  CommunityReel,
+  CommunityReelComment,
+  ReelCategory,
   ReactionType,
   CATEGORY_LABELS,
   formatAuthorDisplayName,
   FB_6_REACTIONS,
   isStoryActive,
   calculateStoryTimeRemaining,
+  resolveUserAvatarUrl,
+  getReelVideoType,
 } from "../services/communityService";
 import { CreatePostModal } from "../components/CreatePostModal";
 import { PostCommentsModal } from "../components/PostCommentsModal";
@@ -50,6 +56,10 @@ import { EditStoryModal } from "../components/EditStoryModal";
 import { UserProfileScreen, UserProfileInfo } from "./UserProfileScreen";
 import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { CreateReelModal } from "../components/CreateReelModal";
+import { ReelCommentsModal } from "../components/ReelCommentsModal";
+import { SplitzyReelItem } from "../components/SplitzyReelItem";
+import { InAppVideoPlayerModal } from "../components/InAppVideoPlayerModal";
 
 const safeCopyTextAsync = async (text: string): Promise<boolean> => {
   try {
@@ -120,6 +130,7 @@ interface CommunityScreenProps {
   onNavigateToSplitzyProfile?: () => void;
   initialTarget?: CommunityInitialTarget | null;
   onClearInitialTarget?: () => void;
+  onProfileUpdated?: (updated: UserProfileInfo) => void;
 }
 
 const CATEGORIES: CommunityCategory[] = [
@@ -139,13 +150,29 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   onNavigateToSplitzyProfile,
   initialTarget,
   onClearInitialTarget,
+  onProfileUpdated,
 }) => {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
 
-  // Active top tab: "feed" or "network"
-  const [activeMainTab, setActiveMainTab] = useState<"feed" | "network">(
-    "feed",
+  // Active top tab: "feed", "reels", or "network"
+  const [activeMainTab, setActiveMainTab] = useState<
+    "feed" | "reels" | "network"
+  >("feed");
+
+  // Reels states
+  const [reels, setReels] = useState<CommunityReel[]>([]);
+  const [loadingReels, setLoadingReels] = useState(true);
+  const [activeReelIndex, setActiveReelIndex] = useState(0);
+  const [isReelsMuted, setIsReelsMuted] = useState(true);
+  const [selectedReelCategory, setSelectedReelCategory] =
+    useState<ReelCategory>("all");
+  const [createReelVisible, setCreateReelVisible] = useState(false);
+  const [activeReelForComments, setActiveReelForComments] =
+    useState<CommunityReel | null>(null);
+  const [reelsViewportHeight, setReelsViewportHeight] = useState(650);
+  const [inAppVideoReel, setInAppVideoReel] = useState<CommunityReel | null>(
+    null,
   );
 
   // Feed states
@@ -229,6 +256,18 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const currentAvatar =
     currentUser.photoURL || currentUser.profilePicture || "";
 
+  const handleOpenMyProfile = () => {
+    setSelectedProfileUser({
+      uid: currentUid,
+      name: currentDisplayName,
+      email: currentUser.email || auth.currentUser?.email || "",
+      avatar: currentAvatar,
+      role: currentUser.role || "Resident Member",
+      householdName: currentUser.householdName || undefined,
+      friendshipStatus: "none",
+    });
+  };
+
   // Subscribe to real-time posts
   useEffect(() => {
     setLoadingPosts(true);
@@ -248,6 +287,77 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     });
     return () => unsub();
   }, []);
+
+  // Subscribe to real-time reels
+  useEffect(() => {
+    setLoadingReels(true);
+    const unsub = communityService.subscribeReels((list) => {
+      setReels(list);
+      setLoadingReels(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Filter reels based on selected category (including YouTube Shorts and Facebook Reels)
+  const filteredReels = useMemo(() => {
+    if (selectedReelCategory === "all") return reels;
+    if (selectedReelCategory === "youtube_shorts") {
+      return reels.filter((r) => getReelVideoType(r.videoUrl) === "youtube");
+    }
+    if (selectedReelCategory === "facebook_reels") {
+      return reels.filter((r) => getReelVideoType(r.videoUrl) === "facebook");
+    }
+    return reels.filter((r) => r.category === selectedReelCategory);
+  }, [reels, selectedReelCategory]);
+
+  const handleToggleReelLike = async (reelId: string) => {
+    if (!currentUid) {
+      Alert.alert("Sign In Required", "Please sign in to like reels.");
+      return;
+    }
+    setReels((prev) =>
+      prev.map((r) => {
+        if (r.id !== reelId) return r;
+        const currentLikes = r.likes || [];
+        const isLiked = currentLikes.includes(currentUid);
+        const newLikes = isLiked
+          ? currentLikes.filter((uid) => uid !== currentUid)
+          : [...currentLikes, currentUid];
+        return {
+          ...r,
+          likes: newLikes,
+          likesCount: newLikes.length,
+        };
+      }),
+    );
+    try {
+      await communityService.toggleReelLike(reelId, currentUid);
+    } catch (err) {
+      console.warn("Failed to toggle reel like:", err);
+    }
+  };
+
+  const handleDeleteReel = (reelId: string) => {
+    Alert.alert(
+      "Delete Reel",
+      "Are you sure you want to delete this reel? This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setReels((prev) => prev.filter((r) => r.id !== reelId));
+              await communityService.deleteReel(reelId, currentUid);
+            } catch (err: any) {
+              Alert.alert("Error", err.message || "Failed to delete reel.");
+            }
+          },
+        },
+      ],
+    );
+  };
 
   // Subscribe to friendships
   useEffect(() => {
@@ -314,21 +424,41 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
   const resolveMemberAvatar = useCallback(
     (uid?: string, fallbackAvatar?: string) => {
-      if (!uid) return fallbackAvatar || "";
+      if (!uid) return resolveUserAvatarUrl(fallbackAvatar);
       const cleanUid = String(uid).replace(/^mem_/, "").trim();
-      return (
+      const livePic =
         userLiveAvatarMap.get(cleanUid) ||
-        userLiveAvatarMap.get(`mem_${cleanUid}`) ||
-        (fallbackAvatar || "").trim()
-      );
+        userLiveAvatarMap.get(`mem_${cleanUid}`);
+      return resolveUserAvatarUrl(livePic || fallbackAvatar);
     },
     [userLiveAvatarMap],
   );
 
-  // 100% Real cloud-synced stories (Active within 24 hours only)
+  // Accepted friends count & IDs
+  const acceptedFriends = useMemo(() => {
+    return friendships.filter((f) => f.status === "accepted");
+  }, [friendships]);
+
+  const acceptedFriendUids = useMemo(() => {
+    return acceptedFriends.map((f) =>
+      f.senderId === currentUid ? f.receiverId : f.senderId,
+    );
+  }, [acceptedFriends, currentUid]);
+
+  // 100% Real cloud-synced stories (Active within 24 hours only, with Friends-Only privacy)
   const displayStories = useMemo(() => {
-    return cloudStories.filter((s) => isStoryActive(s));
-  }, [cloudStories]);
+    const friendUidSet = new Set(
+      acceptedFriendUids.map((id) => String(id).replace(/^mem_/, "").trim()),
+    );
+    const cleanCurUid = String(currentUid).replace(/^mem_/, "").trim();
+    return cloudStories.filter((s) => {
+      if (!isStoryActive(s)) return false;
+      const cleanAuthorId = String(s.authorId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      return cleanAuthorId === cleanCurUid || friendUidSet.has(cleanAuthorId);
+    });
+  }, [cloudStories, acceptedFriendUids, currentUid]);
 
   // Current user's archived stories (expired after 24h or manually archived)
   const myArchivedStories = useMemo(() => {
@@ -422,17 +552,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
   // Pending incoming requests count
   const incomingRequests = allIncomingRequests;
-
-  // Accepted friends count & IDs
-  const acceptedFriends = useMemo(() => {
-    return friendships.filter((f) => f.status === "accepted");
-  }, [friendships]);
-
-  const acceptedFriendUids = useMemo(() => {
-    return acceptedFriends.map((f) =>
-      f.senderId === currentUid ? f.receiverId : f.senderId,
-    );
-  }, [acceptedFriends, currentUid]);
 
   // Suggestions for "People You May Know"
   const peopleYouMayKnow = useMemo(() => {
@@ -1783,6 +1902,23 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           onBack={() => setSelectedProfileUser(null)}
           currentUser={currentUser}
           posts={posts}
+          onProfileUpdated={(updated) => {
+            setPosts((prevPosts) =>
+              prevPosts.map((p) => {
+                const cleanP = String(p.authorId).replace(/^mem_/, "").trim();
+                const cleanU = String(updated.uid).replace(/^mem_/, "").trim();
+                if (cleanP === cleanU) {
+                  return {
+                    ...p,
+                    authorName: updated.name,
+                    authorAvatar: updated.avatar || p.authorAvatar,
+                  };
+                }
+                return p;
+              }),
+            );
+            onProfileUpdated?.(updated);
+          }}
           onSendFriendRequest={async (user) => {
             // Immediate optimistic UI update on first tap
             setSelectedProfileUser((prev) =>
@@ -1857,152 +1993,437 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     );
   }
 
+  // ─── FACEBOOK-STYLE REELS & SHORT VIDEOS SHELF (FEED EMBED) ───────────────
+  const renderFacebookReelsShelf = () => {
+    if (!reels || reels.length === 0) return null;
+    return (
+      <View
+        style={[
+          styles.reelsShelfCard,
+          {
+            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            borderColor: isDark ? "#334155" : "#E2E8F0",
+          },
+        ]}
+      >
+        {/* Header */}
+        <View style={styles.reelsShelfHeader}>
+          <View style={styles.reelsShelfTitleRow}>
+            <View style={styles.reelsShelfIconWrap}>
+              <Ionicons name="film" size={16} color="#FFFFFF" />
+            </View>
+            <View>
+              <Text
+                style={[
+                  styles.reelsShelfTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A" },
+                ]}
+              >
+                Reels and short videos
+              </Text>
+              <Text
+                style={[
+                  styles.reelsShelfSub,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Trending YouTube Shorts & Facebook Reels
+              </Text>
+            </View>
+          </View>
+          {/* <TouchableOpacity
+            onPress={() => {
+              setSelectedReelCategory("all");
+              setActiveMainTab("reels");
+              setActiveReelIndex(0);
+            }}
+            style={styles.reelsShelfSeeAllBtn}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.reelsShelfSeeAllText}>Watch Reels</Text>
+            <Ionicons name="chevron-forward" size={14} color="#2563EB" />
+          </TouchableOpacity> */}
+        </View>
+
+        {/* Horizontal scroll cards */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.reelsShelfScroll}
+        >
+          {/* Create Reel Shortcut Card */}
+          <TouchableOpacity
+            onPress={() => setCreateReelVisible(true)}
+            style={[
+              styles.shelfReelItemCard,
+              styles.shelfCreateReelCard,
+              {
+                backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                borderColor: isDark ? "#334155" : "#E2E8F0",
+              },
+            ]}
+            activeOpacity={0.88}
+          >
+            <View style={styles.shelfCreateReelIconCircle}>
+              <Ionicons name="videocam" size={24} color="#FFFFFF" />
+            </View>
+            <Text
+              style={[
+                styles.shelfCreateReelText,
+                { color: isDark ? "#F8FAFC" : "#0F172A" },
+              ]}
+            >
+              Create Reel
+            </Text>
+            <Text
+              style={[
+                styles.shelfCreateReelSub,
+                { color: isDark ? "#94A3B8" : "#64748B" },
+              ]}
+            >
+              Shorts or video
+            </Text>
+          </TouchableOpacity>
+
+          {/* Reel preview cards */}
+          {reels.slice(0, 10).map((r) => {
+            const vType = getReelVideoType(r.videoUrl);
+            const isYT = vType === "youtube";
+            const isFB = vType === "facebook";
+
+            return (
+              <TouchableOpacity
+                key={r.id}
+                onPress={() => {
+                  const targetIdx = reels.findIndex((item) => item.id === r.id);
+                  setSelectedReelCategory("all");
+                  setActiveReelIndex(targetIdx >= 0 ? targetIdx : 0);
+                  setActiveMainTab("reels");
+                }}
+                style={[
+                  styles.shelfReelItemCard,
+                  { borderColor: isDark ? "#334155" : "#E2E8F0" },
+                ]}
+                activeOpacity={0.9}
+              >
+                {r.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: r.thumbnailUrl }}
+                    style={styles.shelfReelThumb}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.shelfReelFallbackBg}>
+                    <Ionicons name="play" size={28} color="#94A3B8" />
+                  </View>
+                )}
+
+                {/* Top Badge: YouTube Shorts or Facebook Reel */}
+                <View style={styles.shelfReelBadgeWrap}>
+                  {isYT ? (
+                    <View
+                      style={[
+                        styles.shelfPlatformBadge,
+                        { backgroundColor: "rgba(220, 38, 38, 0.95)" },
+                      ]}
+                    >
+                      <Ionicons name="logo-youtube" size={11} color="#FFFFFF" />
+                      <Text style={styles.shelfPlatformBadgeText}>Shorts</Text>
+                    </View>
+                  ) : isFB ? (
+                    <View
+                      style={[
+                        styles.shelfPlatformBadge,
+                        { backgroundColor: "rgba(24, 119, 242, 0.95)" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="logo-facebook"
+                        size={11}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.shelfPlatformBadgeText}>Reels</Text>
+                    </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.shelfPlatformBadge,
+                        { backgroundColor: "rgba(16, 185, 129, 0.95)" },
+                      ]}
+                    >
+                      <Ionicons name="film-outline" size={11} color="#FFFFFF" />
+                      <Text style={styles.shelfPlatformBadgeText}>Clip</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Center play icon */}
+                <View style={styles.shelfPlayIconCircle}>
+                  <Ionicons
+                    name="play"
+                    size={16}
+                    color="#FFFFFF"
+                    style={{ marginLeft: 2 }}
+                  />
+                </View>
+
+                {/* Dark gradient shadow */}
+                <View style={styles.shelfReelScrim} />
+
+                {/* Bottom author and caption */}
+                <View style={styles.shelfReelBottomInfo}>
+                  <Text style={styles.shelfReelCaption} numberOfLines={2}>
+                    {r.caption}
+                  </Text>
+                  <View style={styles.shelfReelAuthorRow}>
+                    {r.authorAvatar ? (
+                      <Image
+                        source={{ uri: r.authorAvatar }}
+                        style={styles.shelfReelAuthorAvatar}
+                      />
+                    ) : (
+                      <View style={styles.shelfReelAuthorPlaceholder}>
+                        <Text style={styles.shelfReelAuthorInitials}>
+                          {r.authorName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={styles.shelfReelAuthorName} numberOfLines={1}>
+                      {r.authorName.split(" ")[0]}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView
       style={[
         styles.safeArea,
-        { backgroundColor: isDark ? "#0B1120" : "#F8FAFC" },
+        {
+          backgroundColor:
+            activeMainTab === "reels"
+              ? "#000000"
+              : isDark
+                ? "#0B1120"
+                : "#F8FAFC",
+        },
       ]}
-      edges={["top"]}
+      edges={activeMainTab === "reels" ? [] : ["top"]}
     >
-      {/* Top Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
-            borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
-          },
-        ]}
-      >
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Feather
-            name="chevron-left"
-            size={22}
-            color={isDark ? "#F8FAFC" : "#0F172A"}
-          />
-        </TouchableOpacity>
+      <StatusBar
+        barStyle={
+          activeMainTab === "reels" || isDark ? "light-content" : "dark-content"
+        }
+        backgroundColor={activeMainTab === "reels" ? "#000000" : undefined}
+      />
 
-        <View style={styles.headerTitleWrap}>
-          <View style={styles.headerRow}>
-            <Ionicons name="sparkles" size={18} color="#2563EB" />
+      {/* Top Header - Hidden when viewing Reels tab for full-bleed immersive experience */}
+      {activeMainTab !== "reels" && (
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+            },
+          ]}
+        >
+          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+            <Feather
+              name="chevron-left"
+              size={22}
+              color={isDark ? "#F8FAFC" : "#0F172A"}
+            />
+          </TouchableOpacity>
+
+          <View style={styles.headerTitleWrap}>
+            <View style={styles.headerRow}>
+              <Ionicons name="sparkles" size={18} color="#2563EB" />
+              <Text
+                style={[
+                  styles.headerTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A" },
+                ]}
+              >
+                Splitzy Community
+              </Text>
+            </View>
             <Text
               style={[
-                styles.headerTitle,
-                { color: isDark ? "#F8FAFC" : "#0F172A" },
+                styles.headerSubtitle,
+                { color: isDark ? "#94A3B8" : "#64748B" },
               ]}
             >
-              Splitzy Community
+              Social feed & roommate network
             </Text>
           </View>
-          <Text
-            style={[
-              styles.headerSubtitle,
-              { color: isDark ? "#94A3B8" : "#64748B" },
-            ]}
-          >
-            Social feed & roommate network
-          </Text>
+
+          <View style={styles.headerRightActions}>
+            <TouchableOpacity
+              onPress={handleOpenMyProfile}
+              style={styles.headerAvatarBtn}
+              activeOpacity={0.8}
+              accessibilityLabel="View and edit profile"
+            >
+              {currentAvatar ? (
+                <Image
+                  source={{ uri: currentAvatar }}
+                  style={styles.headerAvatarImg}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.headerAvatarPlaceholder,
+                    { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.headerAvatarInitials,
+                      { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                    ]}
+                  >
+                    {currentDisplayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.headerAvatarOnlineDot} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setCreatePostVisible(true)}
+              style={styles.headerPostBtn}
+              accessibilityLabel="Create Post"
+            >
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         </View>
+      )}
 
-        <TouchableOpacity
-          onPress={() => setCreatePostVisible(true)}
-          style={styles.headerPostBtn}
-        >
-          <Ionicons name="add" size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Main Tab Toggle: Feed vs Friends & Network */}
-      <View
-        style={[
-          styles.mainTabsContainer,
-          {
-            backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
-            borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
-          },
-        ]}
-      >
-        <TouchableOpacity
-          onPress={() => setActiveMainTab("feed")}
+      {/* Main Tab Toggle: Feed vs Reels vs Friends & Network - Hidden in Reels tab */}
+      {activeMainTab !== "reels" && (
+        <View
           style={[
-            styles.mainTabBtn,
-            activeMainTab === "feed" && styles.mainTabBtnActive,
+            styles.mainTabsContainer,
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+            },
           ]}
         >
-          <Feather
-            name="file-text"
-            size={16}
-            color={
-              activeMainTab === "feed"
-                ? "#2563EB"
-                : isDark
-                  ? "#94A3B8"
-                  : "#64748B"
-            }
-          />
-          <Text
+          <TouchableOpacity
+            onPress={() => setActiveMainTab("feed")}
             style={[
-              styles.mainTabBtnText,
-              {
-                color:
-                  activeMainTab === "feed"
-                    ? "#2563EB"
-                    : isDark
-                      ? "#94A3B8"
-                      : "#64748B",
-                fontWeight: activeMainTab === "feed" ? "700" : "500",
-              },
+              styles.mainTabBtn,
+              activeMainTab === "feed" && styles.mainTabBtnActive,
             ]}
           >
-            Feed
-          </Text>
-        </TouchableOpacity>
+            <Feather
+              name="file-text"
+              size={16}
+              color={
+                activeMainTab === "feed"
+                  ? "#2563EB"
+                  : isDark
+                    ? "#94A3B8"
+                    : "#64748B"
+              }
+            />
+            <Text
+              style={[
+                styles.mainTabBtnText,
+                {
+                  color:
+                    activeMainTab === "feed"
+                      ? "#2563EB"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  fontWeight: activeMainTab === "feed" ? "700" : "500",
+                },
+              ]}
+            >
+              Feed
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => setActiveMainTab("network")}
-          style={[
-            styles.mainTabBtn,
-            activeMainTab === "network" && styles.mainTabBtnActive,
-          ]}
-        >
-          <Ionicons
-            name="people-outline"
-            size={17}
-            color={
-              activeMainTab === "network"
-                ? "#2563EB"
-                : isDark
-                  ? "#94A3B8"
-                  : "#64748B"
-            }
-          />
-          <Text
+          {/* REELS TAB (Facebook-Style Short Video Feed) */}
+          <TouchableOpacity
+            onPress={() => setActiveMainTab("reels")}
+            style={styles.mainTabBtn}
+          >
+            <Ionicons
+              name="film-outline"
+              size={17}
+              color={isDark ? "#94A3B8" : "#64748B"}
+            />
+            <Text
+              style={[
+                styles.mainTabBtnText,
+                {
+                  color: isDark ? "#94A3B8" : "#64748B",
+                  fontWeight: "500",
+                },
+              ]}
+            >
+              Reels
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setActiveMainTab("network")}
             style={[
-              styles.mainTabBtnText,
-              {
-                color:
-                  activeMainTab === "network"
-                    ? "#2563EB"
-                    : isDark
-                      ? "#94A3B8"
-                      : "#64748B",
-                fontWeight: activeMainTab === "network" ? "700" : "500",
-              },
+              styles.mainTabBtn,
+              activeMainTab === "network" && styles.mainTabBtnActive,
             ]}
           >
-            Friends & Network
-          </Text>
-          {incomingRequests.length > 0 && (
-            <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{incomingRequests.length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+            <Ionicons
+              name="people-outline"
+              size={17}
+              color={
+                activeMainTab === "network"
+                  ? "#2563EB"
+                  : isDark
+                    ? "#94A3B8"
+                    : "#64748B"
+              }
+            />
+            <Text
+              style={[
+                styles.mainTabBtnText,
+                {
+                  color:
+                    activeMainTab === "network"
+                      ? "#2563EB"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  fontWeight: activeMainTab === "network" ? "700" : "500",
+                },
+              ]}
+            >
+              People
+            </Text>
+            {incomingRequests.length > 0 && (
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>
+                  {incomingRequests.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* FEED TAB VIEW */}
-      {activeMainTab === "feed" ? (
+      {activeMainTab === "feed" && (
         <ScrollView
           style={styles.feedScrollView}
           contentContainerStyle={[
@@ -2035,28 +2456,34 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             ]}
           >
             <View style={styles.quickPostRow}>
-              {currentAvatar ? (
-                <Image
-                  source={{ uri: currentAvatar }}
-                  style={styles.quickPostAvatar}
-                />
-              ) : (
-                <View
-                  style={[
-                    styles.quickPostAvatarPlaceholder,
-                    { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
-                  ]}
-                >
-                  <Text
+              <TouchableOpacity
+                onPress={handleOpenMyProfile}
+                activeOpacity={0.8}
+                accessibilityLabel="View your profile"
+              >
+                {currentAvatar ? (
+                  <Image
+                    source={{ uri: currentAvatar }}
+                    style={styles.quickPostAvatar}
+                  />
+                ) : (
+                  <View
                     style={[
-                      styles.quickPostAvatarInitials,
-                      { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                      styles.quickPostAvatarPlaceholder,
+                      { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
                     ]}
                   >
-                    {currentDisplayName.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              )}
+                    <Text
+                      style={[
+                        styles.quickPostAvatarInitials,
+                        { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                      ]}
+                    >
+                      {currentDisplayName.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setCreatePostVisible(true)}
                 style={[
@@ -2360,6 +2787,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             </ScrollView>
           </View>
 
+          {/* Facebook Reels and Short Videos Shelf (Embedded in Feed) */}
+          {renderFacebookReelsShelf()}
+
           {/* Scope Filter Switch (All Posts | Friends Only | My Posts) */}
           <View style={styles.scopeRow}>
             {(["all", "friends", "my"] as const).map((sc) => {
@@ -2542,8 +2972,213 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             })
           )}
         </ScrollView>
-      ) : (
-        /* FACEBOOK-STYLE FRIENDS & NETWORK VIEW */
+      )}
+
+      {/* REELS TAB VIEW (100% Full-Bleed Immersive Experience) */}
+      {activeMainTab === "reels" && (
+        <View
+          style={styles.reelsTabContainer}
+          onLayout={(e) => {
+            const h = e.nativeEvent.layout.height;
+            if (h > 200) setReelsViewportHeight(h);
+          }}
+        >
+          {/* Floating Glassmorphic Top Bar for Reels (Back + Scrollable Categories + Create Reel) */}
+          <View
+            style={[
+              styles.floatingReelsTopBar,
+              {
+                top:
+                  Math.max(
+                    insets.top,
+                    Platform.OS === "android"
+                      ? (StatusBar.currentHeight ?? 24)
+                      : 16,
+                  ) + 6,
+              },
+            ]}
+          >
+            {/* Left: Floating Translucent Back Button */}
+            <TouchableOpacity
+              onPress={onBack}
+              style={styles.floatingReelsBackBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Back to previous screen"
+              activeOpacity={0.8}
+            >
+              <Feather name="chevron-left" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            {/* Center: Scrollable Reel Categories (Replacing Feed/Reels/People tabs) */}
+            <View style={styles.floatingCategoriesScrollWrapper}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.floatingReelsCategoryScroll}
+              >
+                {[
+                  { id: "all", label: "All Reels", icon: "sparkles" },
+                  {
+                    id: "youtube_shorts",
+                    label: "YouTube Shorts",
+                    icon: "logo-youtube",
+                    activeBg: "#DC2626",
+                  },
+                  {
+                    id: "roommate_tips",
+                    label: "Roommate Tips",
+                    icon: "bulb-outline",
+                  },
+                  {
+                    id: "cooking",
+                    label: "Cooking",
+                    icon: "restaurant-outline",
+                  },
+                  {
+                    id: "budgeting",
+                    label: "Budget Hacks",
+                    icon: "wallet-outline",
+                  },
+                  { id: "lifestyle", label: "Lifestyle", icon: "home-outline" },
+                  { id: "fun", label: "Fun", icon: "happy-outline" },
+                ].map((cat) => {
+                  const isSelected = selectedReelCategory === cat.id;
+                  const activeColor = cat.activeBg || "#2563EB";
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      onPress={() => setSelectedReelCategory(cat.id as any)}
+                      style={[
+                        styles.floatingReelCategoryChip,
+                        isSelected && {
+                          backgroundColor: activeColor,
+                          borderColor: activeColor,
+                        },
+                      ]}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons
+                        name={cat.icon as any}
+                        size={13}
+                        color="#FFFFFF"
+                        style={{ marginRight: 5 }}
+                      />
+                      <Text
+                        style={[
+                          styles.floatingReelCategoryChipText,
+                          { fontWeight: isSelected ? "800" : "500" },
+                        ]}
+                      >
+                        {cat.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Right: Floating Camera / Create Reel Button */}
+            <TouchableOpacity
+              onPress={() => setCreateReelVisible(true)}
+              style={styles.floatingReelsCreateBtn}
+              accessibilityLabel="Create Community Reel"
+              activeOpacity={0.8}
+            >
+              <Ionicons name="camera-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Reels Snapping Vertical List */}
+          {loadingReels ? (
+            <View style={styles.reelsLoadingBox}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.reelsLoadingText}>
+                Tuning into Community Reels...
+              </Text>
+            </View>
+          ) : filteredReels.length === 0 ? (
+            <View style={styles.reelsEmptyContainer}>
+              <Ionicons name="videocam-outline" size={54} color="#64748B" />
+              <Text style={styles.reelsEmptyTitle}>
+                No reels in this category yet
+              </Text>
+              <Text style={styles.reelsEmptySub}>
+                Be the first roommate to share a vertical clip or switch to "All
+                Reels"
+              </Text>
+              <TouchableOpacity
+                onPress={() => setCreateReelVisible(true)}
+                style={styles.reelsCreateBtn}
+              >
+                <Ionicons name="add-circle" size={18} color="#FFFFFF" />
+                <Text style={styles.reelsCreateBtnText}>Create a Reel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredReels}
+              keyExtractor={(item) => item.id}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              snapToInterval={reelsViewportHeight}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              onScroll={(e) => {
+                if (reelsViewportHeight > 0) {
+                  const idx = Math.max(
+                    0,
+                    Math.round(
+                      e.nativeEvent.contentOffset.y / reelsViewportHeight,
+                    ),
+                  );
+                  if (idx !== activeReelIndex && idx < filteredReels.length) {
+                    setActiveReelIndex(idx);
+                  }
+                }
+              }}
+              scrollEventThrottle={16}
+              onMomentumScrollEnd={(e) => {
+                if (reelsViewportHeight > 0) {
+                  const idx = Math.max(
+                    0,
+                    Math.round(
+                      e.nativeEvent.contentOffset.y / reelsViewportHeight,
+                    ),
+                  );
+                  if (idx < filteredReels.length) {
+                    setActiveReelIndex(idx);
+                  }
+                }
+              }}
+              renderItem={({ item, index }) => (
+                <SplitzyReelItem
+                  reel={item}
+                  isActive={activeReelIndex === index}
+                  isMuted={isReelsMuted}
+                  onToggleMute={() => setIsReelsMuted((prev) => !prev)}
+                  onToggleLike={handleToggleReelLike}
+                  onOpenComments={(targetReel) =>
+                    setActiveReelForComments(targetReel)
+                  }
+                  onOpenProfile={(uid, name, avatar) =>
+                    handleOpenUserProfile({ uid, name, avatar })
+                  }
+                  onDeleteReel={handleDeleteReel}
+                  onActivate={() => setActiveReelIndex(index)}
+                  onPlayInAppModal={(targetReel) =>
+                    setInAppVideoReel(targetReel)
+                  }
+                  currentUserId={currentUid}
+                  itemHeight={reelsViewportHeight}
+                />
+              )}
+            />
+          )}
+        </View>
+      )}
+
+      {/* FACEBOOK-STYLE FRIENDS & NETWORK VIEW */}
+      {activeMainTab === "network" && (
         <View style={styles.networkContainer}>
           {/* Facebook Friends Top Title & Search Button */}
           <View
@@ -3464,14 +4099,32 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         </View>
       )}
 
-      {/* Floating Action Button (FAB) for Creating Post */}
-      <TouchableOpacity
-        onPress={() => setCreatePostVisible(true)}
-        style={[styles.fab, { bottom: Math.max(24, insets.bottom + 84) }]}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="create-outline" size={24} color="#FFFFFF" />
-      </TouchableOpacity>
+      {/* Floating Action Button (FAB) for Creating Post / Reel */}
+      {activeMainTab === "feed" && (
+        <TouchableOpacity
+          onPress={() => setCreatePostVisible(true)}
+          style={[styles.fab, { bottom: Math.max(24, insets.bottom + 84) }]}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="create-outline" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
+
+      {/* {activeMainTab === "reels" && (
+        <TouchableOpacity
+          onPress={() => setCreateReelVisible(true)}
+          style={[
+            styles.fab,
+            {
+              bottom: Math.max(24, insets.bottom + 84),
+              backgroundColor: "#2563EB",
+            },
+          ]}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="videocam" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )} */}
 
       {/* Modals */}
       <CreatePostModal
@@ -3485,6 +4138,34 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         post={activePostForComments}
         onClose={() => setActivePostForComments(null)}
         currentUser={currentUser}
+      />
+
+      {/* Create Reel Modal */}
+      <CreateReelModal
+        visible={createReelVisible}
+        onClose={() => setCreateReelVisible(false)}
+        currentUser={currentUser}
+        onReelCreated={() => {
+          setActiveMainTab("reels");
+        }}
+      />
+
+      {/* Reel Comments Modal */}
+      <ReelCommentsModal
+        visible={!!activeReelForComments}
+        reel={activeReelForComments}
+        onClose={() => setActiveReelForComments(null)}
+        currentUser={currentUser}
+      />
+
+      {/* In-App Video Player Modal (100% In-App Playback Without External Redirects) */}
+      <InAppVideoPlayerModal
+        visible={!!inAppVideoReel}
+        reel={inAppVideoReel}
+        onClose={() => setInAppVideoReel(null)}
+        onOpenProfile={(uid, name, avatar) =>
+          handleOpenUserProfile({ uid, name, avatar })
+        }
       />
 
       {/* Post Options Bottom Sheet Modal */}
@@ -4341,6 +5022,44 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 12,
     marginTop: 1,
+  },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerAvatarBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    position: "relative",
+  },
+  headerAvatarImg: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  headerAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerAvatarInitials: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  headerAvatarOnlineDot: {
+    position: "absolute",
+    bottom: -1,
+    right: -1,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#10B981",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
   },
   headerPostBtn: {
     backgroundColor: "#2563EB",
@@ -5718,5 +6437,337 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
+  },
+  // Reels Tab Styles
+  reelsTabContainer: {
+    flex: 1,
+    backgroundColor: "#000000",
+    position: "relative",
+    overflow: "hidden",
+  },
+  floatingReelsTopBar: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    zIndex: 40,
+    gap: 8,
+  },
+  floatingReelsBackBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
+  floatingCategoriesScrollWrapper: {
+    flex: 1,
+    height: 38,
+    justifyContent: "center",
+  },
+  floatingReelsCategoryScroll: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 6,
+  },
+  floatingReelCategoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
+  floatingReelCategoryChipText: {
+    fontSize: 12,
+    color: "#FFFFFF",
+    fontWeight: "600",
+  },
+  floatingReelsCreateBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(37, 99, 235, 0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+  },
+  reelsCategoryBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    gap: 8,
+  },
+  reelsCategoryScroll: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  reelCategoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  reelCategoryChipText: {
+    fontSize: 12,
+  },
+  reelsBarUploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  reelsBarUploadText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  reelsLoadingBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#000000",
+  },
+  reelsLoadingText: {
+    fontSize: 14,
+  },
+  reelsEmptyContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    gap: 8,
+    backgroundColor: "#000000",
+  },
+  reelsEmptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 8,
+  },
+  reelsEmptySub: {
+    fontSize: 13,
+    textAlign: "center",
+  },
+  reelsCreateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  reelsCreateBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  // Feed-Embedded Facebook Reels Shelf
+  reelsShelfCard: {
+    marginHorizontal: 10,
+    marginVertical: 10,
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  reelsShelfHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  reelsShelfTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  reelsShelfIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reelsShelfTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  reelsShelfSub: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  reelsShelfSeeAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  reelsShelfSeeAllText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  reelsShelfScroll: {
+    paddingRight: 8,
+    gap: 10,
+  },
+  shelfReelItemCard: {
+    width: 140,
+    height: 220,
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+    borderWidth: 1,
+    backgroundColor: "#000000",
+  },
+  shelfCreateReelCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    borderStyle: "dashed",
+  },
+  shelfCreateReelIconCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  shelfCreateReelText: {
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  shelfCreateReelSub: {
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 2,
+  },
+  shelfReelThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  shelfReelFallbackBg: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#0F172A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shelfReelBadgeWrap: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    zIndex: 10,
+  },
+  shelfPlatformBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    gap: 4,
+  },
+  shelfPlatformBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  shelfPlayIconCircle: {
+    position: "absolute",
+    top: "38%",
+    left: "50%",
+    marginLeft: -17,
+    marginTop: -17,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 8,
+  },
+  shelfReelScrim: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 70,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  shelfReelBottomInfo: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    right: 8,
+    zIndex: 10,
+    gap: 4,
+  },
+  shelfReelCaption: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "600",
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  shelfReelAuthorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  shelfReelAuthorAvatar: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+  shelfReelAuthorPlaceholder: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shelfReelAuthorInitials: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  shelfReelAuthorName: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

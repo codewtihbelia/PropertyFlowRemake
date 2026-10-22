@@ -11,9 +11,12 @@ import {
   Share,
   Platform,
   StatusBar,
+  Modal,
+  TextInput,
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "../context/ThemeContext";
 import {
   CommunityPost,
@@ -23,6 +26,7 @@ import {
   formatAuthorDisplayName,
   FB_6_REACTIONS,
   communityService,
+  resolveUserAvatarUrl,
 } from "../services/communityService";
 import { auth } from "../firebase/config";
 import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
@@ -37,6 +41,8 @@ export interface UserProfileInfo {
   householdName?: string;
   bio?: string;
   location?: string;
+  occupation?: string;
+  school?: string;
   joinedDate?: string;
   mutualFriendsCount?: number;
   friendsCount?: number;
@@ -54,6 +60,8 @@ export interface UserProfileScreenProps {
     avatar?: string;
   };
   posts?: CommunityPost[];
+  initialEditMode?: boolean;
+  onProfileUpdated?: (updated: UserProfileInfo) => void;
   onSendFriendRequest?: (user: UserProfileInfo) => Promise<void>;
   onAcceptFriendRequest?: (friendshipId: string) => Promise<void>;
   onDeclineOrCancelRequest?: (friendshipId: string) => Promise<void>;
@@ -77,6 +85,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   onBack,
   currentUser,
   posts = [],
+  initialEditMode = false,
+  onProfileUpdated,
   onSendFriendRequest,
   onAcceptFriendRequest,
   onDeclineOrCancelRequest,
@@ -104,16 +114,242 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   const [myFriends, setMyFriends] = useState<CommunityMember[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(true);
 
+  // Synced local profile details supporting Facebook-style updates
+  const [profileDetails, setProfileDetails] = useState<UserProfileInfo>(user);
+
+  // Modal and editing states for Facebook-style profile editor
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState(user.name || "");
+  const [editBio, setEditBio] = useState(user.bio || "");
+  const [editLocation, setEditLocation] = useState(user.location || "");
+  const [editOccupation, setEditOccupation] = useState(user.occupation || "");
+  const [editSchool, setEditSchool] = useState(user.school || "");
+  const [editCover, setEditCover] = useState(user.coverImage || "");
+  const [editAvatar, setEditAvatar] = useState(user.avatar || "");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // Sync profile details when user prop changes or on initial load from Firestore
+  useEffect(() => {
+    setProfileDetails(user);
+    if (!user?.uid) return;
+    communityService.getUserProfile(user.uid).then((cloudData) => {
+      if (cloudData) {
+        setProfileDetails((prev) => ({
+          ...prev,
+          name: cloudData.displayName || prev.name,
+          bio: cloudData.bio !== undefined ? cloudData.bio : prev.bio,
+          location:
+            cloudData.location !== undefined
+              ? cloudData.location
+              : prev.location,
+          occupation:
+            cloudData.occupation !== undefined
+              ? cloudData.occupation
+              : prev.occupation,
+          school:
+            cloudData.school !== undefined ? cloudData.school : prev.school,
+          coverImage: cloudData.coverImage || prev.coverImage,
+          avatar:
+            cloudData.profilePicture ||
+            cloudData.photoURL ||
+            cloudData.avatar ||
+            prev.avatar,
+        }));
+      }
+    });
+  }, [user]);
+
   const currentUid = currentUser?.uid || auth.currentUser?.uid || "";
   const cleanCurUid = String(currentUid).replace(/^mem_/, "").trim();
-  const cleanTargetUid = String(user.uid || "")
+  const cleanTargetUid = String(profileDetails.uid || user.uid || "")
     .replace(/^mem_/, "")
     .trim();
   const isSelf = cleanCurUid === cleanTargetUid;
-  const cleanName = formatAuthorDisplayName(user.name, user.email);
+  const cleanName = formatAuthorDisplayName(
+    profileDetails.name,
+    profileDetails.email || user.email,
+  );
   const coverUrl =
-    user.coverImage ||
+    profileDetails.coverImage ||
     "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80";
+  const avatarUrl =
+    resolveUserAvatarUrl(profileDetails.avatar) ||
+    resolveUserAvatarUrl(user.avatar);
+
+  // Curated Facebook-style Cover and Avatar Presets
+  const COVER_PRESETS = [
+    {
+      id: "city",
+      name: "City Skyline",
+      url: "https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=1200&q=80",
+    },
+    {
+      id: "loft",
+      name: "Cozy Loft",
+      url: "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80",
+    },
+    {
+      id: "modern",
+      name: "Modern Living",
+      url: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80",
+    },
+    {
+      id: "sunset",
+      name: "Sunset Terrace",
+      url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
+    },
+    {
+      id: "minimal",
+      name: "Minimalist Beige",
+      url: "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=1200&q=80",
+    },
+    {
+      id: "emerald",
+      name: "Botanical Green",
+      url: "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=80",
+    },
+  ];
+
+  const AVATAR_PRESETS = [
+    {
+      id: "av1",
+      name: "Creative",
+      url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+    },
+    {
+      id: "av2",
+      name: "Developer",
+      url: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80",
+    },
+    {
+      id: "av3",
+      name: "Designer",
+      url: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80",
+    },
+    {
+      id: "av4",
+      name: "Architect",
+      url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80",
+    },
+    {
+      id: "av5",
+      name: "Artist",
+      url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80",
+    },
+    {
+      id: "av6",
+      name: "Student",
+      url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80",
+    },
+  ];
+
+  const openEditModal = () => {
+    setEditName(profileDetails.name || user.name || "");
+    setEditBio(profileDetails.bio || user.bio || "");
+    setEditLocation(profileDetails.location || user.location || "");
+    setEditOccupation(profileDetails.occupation || user.occupation || "");
+    setEditSchool(profileDetails.school || user.school || "");
+    setEditCover(profileDetails.coverImage || user.coverImage || "");
+    setEditAvatar(profileDetails.avatar || user.avatar || "");
+    setShowEditModal(true);
+  };
+
+  // Auto-open profile editor modal if redirected in edit mode
+  useEffect(() => {
+    if (initialEditMode && isSelf) {
+      openEditModal();
+    }
+  }, [initialEditMode, isSelf]);
+
+  const pickImageAsync = async (target: "cover" | "avatar") => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert(
+          "Permission Required",
+          "Photo library access is needed to select a custom picture from your device.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: target === "avatar" ? [1, 1] : [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const pickedUri = result.assets[0].uri;
+        if (target === "avatar") {
+          setEditAvatar(pickedUri);
+        } else {
+          setEditCover(pickedUri);
+        }
+      }
+    } catch (err: any) {
+      console.warn("pickImageAsync error:", err);
+      Alert.alert("Picker Error", err?.message || "Failed to pick image");
+    }
+  };
+
+  const handleEditCoverPress = async () => {
+    openEditModal();
+    await pickImageAsync("cover");
+  };
+
+  const handleEditAvatarPress = async () => {
+    openEditModal();
+    await pickImageAsync("avatar");
+  };
+
+  const handleSaveProfile = async () => {
+    if (!cleanCurUid) return;
+    setIsSavingProfile(true);
+    try {
+      await communityService.updateUserProfile(cleanCurUid, {
+        name: editName.trim(),
+        displayName: editName.trim(),
+        bio: editBio.trim(),
+        location: editLocation.trim(),
+        occupation: editOccupation.trim(),
+        school: editSchool.trim(),
+        coverImage: editCover.trim(),
+        avatar: editAvatar.trim(),
+        profilePicture: editAvatar.trim(),
+        photoURL: editAvatar.trim(),
+      });
+
+      const updatedProfile: UserProfileInfo = {
+        ...profileDetails,
+        name: editName.trim(),
+        bio: editBio.trim(),
+        location: editLocation.trim(),
+        occupation: editOccupation.trim(),
+        school: editSchool.trim(),
+        coverImage: editCover.trim(),
+        avatar: editAvatar.trim(),
+      };
+
+      setProfileDetails(updatedProfile);
+      onProfileUpdated?.(updatedProfile);
+
+      setShowEditModal(false);
+      Alert.alert(
+        "Profile Saved",
+        "Your profile picture, cover photo, and personal bio have been updated across Splitzy!",
+      );
+    } catch (err: any) {
+      console.warn("handleSaveProfile error:", err);
+      Alert.alert(
+        "Save Failed",
+        err?.message || "Could not save profile changes.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   const [imageViewerConfig, setImageViewerConfig] = useState<{
     visible: boolean;
@@ -698,11 +934,23 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             resizeMode="cover"
           />
 
+          {isSelf && (
+            <TouchableOpacity
+              style={styles.coverCameraBtn}
+              onPress={handleEditCoverPress}
+              activeOpacity={0.8}
+              accessibilityLabel="Edit Cover Photo"
+            >
+              <Feather name="camera" size={14} color="#FFFFFF" />
+              <Text style={styles.coverCameraText}>Edit Cover</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Profile Avatar overlapping cover photo */}
           <View style={styles.avatarWrap}>
-            {user.avatar ? (
+            {avatarUrl ? (
               <Image
-                source={{ uri: user.avatar }}
+                source={{ uri: avatarUrl }}
                 style={[
                   styles.avatarImage,
                   { borderColor: isDark ? "#1E293B" : "#FFFFFF" },
@@ -724,13 +972,27 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               </View>
             )}
 
-            {/* Online Green Indicator Dot */}
-            <View
-              style={[
-                styles.onlineDot,
-                { borderColor: isDark ? "#1E293B" : "#FFFFFF" },
-              ]}
-            />
+            {isSelf ? (
+              <TouchableOpacity
+                style={[
+                  styles.avatarCameraBtn,
+                  { borderColor: isDark ? "#1E293B" : "#FFFFFF" },
+                ]}
+                onPress={handleEditAvatarPress}
+                activeOpacity={0.8}
+                accessibilityLabel="Edit Profile Picture"
+              >
+                <Feather name="camera" size={14} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : (
+              /* Online Green Indicator Dot */
+              <View
+                style={[
+                  styles.onlineDot,
+                  { borderColor: isDark ? "#1E293B" : "#FFFFFF" },
+                ]}
+              />
+            )}
           </View>
         </View>
 
@@ -768,9 +1030,9 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               { color: isDark ? "#94A3B8" : "#64748B" },
             ]}
           >
-            {user.householdName
-              ? `Member of ${user.householdName}`
-              : user.role || "Splitzy Resident Member"}
+            {profileDetails.householdName || user.householdName
+              ? `Member of ${profileDetails.householdName || user.householdName}`
+              : profileDetails.role || user.role || "Splitzy Resident Member"}
           </Text>
 
           {/* Bio */}
@@ -780,7 +1042,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               { color: isDark ? "#CBD5E1" : "#334155" },
             ]}
           >
-            {user.bio ||
+            {profileDetails.bio ||
+              user.bio ||
               "Splitting bills, sharing space, and creating memories with great roommates! 🏡✨"}
           </Text>
 
@@ -861,31 +1124,54 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           {isSelf ? (
             <View style={styles.actionButtonsBar}>
               <TouchableOpacity
-                onPress={() => {
-                  if (onNavigateToSplitzyProfile) {
-                    onNavigateToSplitzyProfile();
-                  } else {
-                    Alert.alert(
-                      "Splitzy Settings",
-                      "Manage your household bills and profile in Splitzy Settings.",
-                    );
-                  }
-                }}
+                onPress={openEditModal}
                 style={[
                   styles.primaryActionBtn,
-                  { backgroundColor: "#2563EB", flex: 1 },
+                  { backgroundColor: "#1877F2", flex: 1 },
                 ]}
               >
                 <Ionicons
-                  name="settings-outline"
-                  size={17}
+                  name="create-outline"
+                  size={18}
                   color="#FFFFFF"
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.primaryActionText}>
-                  Splitzy Account & Household
-                </Text>
+                <Text style={styles.primaryActionText}>Edit Profile</Text>
               </TouchableOpacity>
+
+              {onNavigateToSplitzyProfile && (
+                <TouchableOpacity
+                  onPress={onNavigateToSplitzyProfile}
+                  style={[
+                    styles.secondaryActionBtn,
+                    {
+                      backgroundColor: isDark ? "#334155" : "#E4E6EB",
+                      paddingHorizontal: 16,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="settings-outline"
+                    size={17}
+                    color={isDark ? "#F8FAFC" : "#0F172A"}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text
+                    style={[
+                      styles.secondaryActionText,
+                      {
+                        color: isDark ? "#F8FAFC" : "#0F172A",
+                        fontWeight: "600",
+                      },
+                    ]}
+                  >
+                    Settings
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : user.friendshipStatus === "pending_received" ? (
             /* Incoming request: Confirm and Delete row with Message button below */
@@ -1275,7 +1561,9 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 >
                   Member of{" "}
                   <Text style={{ fontWeight: "700" }}>
-                    {user.householdName || "Splitzy Resident Living"}
+                    {profileDetails.householdName ||
+                      user.householdName ||
+                      "Splitzy Resident Living"}
                   </Text>
                 </Text>
               </View>
@@ -1293,12 +1581,56 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                     { color: isDark ? "#CBD5E1" : "#334155" },
                   ]}
                 >
-                  From{" "}
+                  Lives in{" "}
                   <Text style={{ fontWeight: "700" }}>
-                    {user.location || "Philippines"}
+                    {profileDetails.location || user.location || "Philippines"}
                   </Text>
                 </Text>
               </View>
+
+              {Boolean(profileDetails.occupation || user.occupation) && (
+                <View style={styles.detailItem}>
+                  <Ionicons
+                    name="briefcase"
+                    size={20}
+                    color={isDark ? "#94A3B8" : "#64748B"}
+                    style={styles.detailIcon}
+                  />
+                  <Text
+                    style={[
+                      styles.detailText,
+                      { color: isDark ? "#CBD5E1" : "#334155" },
+                    ]}
+                  >
+                    Works as{" "}
+                    <Text style={{ fontWeight: "700" }}>
+                      {profileDetails.occupation || user.occupation}
+                    </Text>
+                  </Text>
+                </View>
+              )}
+
+              {Boolean(profileDetails.school || user.school) && (
+                <View style={styles.detailItem}>
+                  <Ionicons
+                    name="school"
+                    size={20}
+                    color={isDark ? "#94A3B8" : "#64748B"}
+                    style={styles.detailIcon}
+                  />
+                  <Text
+                    style={[
+                      styles.detailText,
+                      { color: isDark ? "#CBD5E1" : "#334155" },
+                    ]}
+                  >
+                    Studied at{" "}
+                    <Text style={{ fontWeight: "700" }}>
+                      {profileDetails.school || user.school}
+                    </Text>
+                  </Text>
+                </View>
+              )}
 
               <View style={styles.detailItem}>
                 <Ionicons
@@ -1335,7 +1667,9 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 >
                   Joined Splitzy in{" "}
                   <Text style={{ fontWeight: "700" }}>
-                    {user.joinedDate || "October 2024"}
+                    {profileDetails.joinedDate ||
+                      user.joinedDate ||
+                      "October 2024"}
                   </Text>
                 </Text>
               </View>
@@ -1567,6 +1901,477 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           setImageViewerConfig((prev) => ({ ...prev, visible: false }))
         }
       />
+
+      {/* Facebook-Style Edit Profile Modal */}
+      <Modal
+        visible={showEditModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowEditModal(false)}
+      >
+        <View
+          style={[
+            styles.editModalContainer,
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              paddingTop: Math.max(
+                insets.top,
+                Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 12,
+              ),
+            },
+          ]}
+        >
+          {/* Header */}
+          <View
+            style={[
+              styles.editModalHeader,
+              {
+                borderBottomColor: isDark ? "#334155" : "#E2E8F0",
+                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() => setShowEditModal(false)}
+              style={styles.editModalCloseBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons
+                name="close"
+                size={24}
+                color={isDark ? "#F8FAFC" : "#0F172A"}
+              />
+            </TouchableOpacity>
+
+            <Text
+              style={[
+                styles.editModalTitle,
+                { color: isDark ? "#F8FAFC" : "#0F172A" },
+              ]}
+            >
+              Edit Profile
+            </Text>
+
+            <TouchableOpacity
+              onPress={handleSaveProfile}
+              disabled={isSavingProfile}
+              style={[
+                styles.editModalSaveBtn,
+                { opacity: isSavingProfile ? 0.7 : 1 },
+              ]}
+            >
+              {isSavingProfile ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.editModalSaveBtnText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.editModalScroll}
+            contentContainerStyle={[
+              styles.editModalScrollContent,
+              { paddingBottom: insets.bottom + 40 },
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* 1. Profile Picture Section */}
+            <View
+              style={[
+                styles.editSection,
+                { borderBottomColor: isDark ? "#334155" : "#F1F5F9" },
+              ]}
+            >
+              <View style={styles.editSectionHeader}>
+                <Text
+                  style={[
+                    styles.editSectionTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Profile Picture
+                </Text>
+                <TouchableOpacity
+                  onPress={() => pickImageAsync("avatar")}
+                  style={styles.editSectionActionBtn}
+                >
+                  <Text style={styles.editSectionActionText}>Choose Photo</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.editAvatarPreviewRow}>
+                {editAvatar ? (
+                  <Image
+                    source={{ uri: editAvatar }}
+                    style={styles.editAvatarPreview}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.editAvatarPlaceholder,
+                      { backgroundColor: isDark ? "#334155" : "#DBEAFE" },
+                    ]}
+                  >
+                    <Text style={styles.editAvatarPlaceholderText}>
+                      {(editName || "U").charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={[
+                    styles.chooseDevicePhotoBtn,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                    },
+                  ]}
+                  onPress={() => pickImageAsync("avatar")}
+                >
+                  <Feather
+                    name="image"
+                    size={16}
+                    color={isDark ? "#60A5FA" : "#2563EB"}
+                  />
+                  <Text
+                    style={[
+                      styles.chooseDevicePhotoText,
+                      { color: isDark ? "#60A5FA" : "#2563EB" },
+                    ]}
+                  >
+                    Upload from Library
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Avatar Presets */}
+              <Text
+                style={[
+                  styles.presetSectionLabel,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Or choose an avatar style:
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.presetsScroll}
+              >
+                {AVATAR_PRESETS.map((preset) => {
+                  const isSelected = editAvatar === preset.url;
+                  return (
+                    <TouchableOpacity
+                      key={preset.id}
+                      onPress={() => setEditAvatar(preset.url)}
+                      style={[
+                        styles.presetAvatarItem,
+                        isSelected && styles.presetItemActive,
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Image
+                        source={{ uri: preset.url }}
+                        style={styles.presetAvatarImage}
+                      />
+                      {isSelected && (
+                        <View style={styles.presetCheckmark}>
+                          <Ionicons
+                            name="checkmark"
+                            size={12}
+                            color="#FFFFFF"
+                          />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* 2. Cover Photo Section */}
+            <View
+              style={[
+                styles.editSection,
+                { borderBottomColor: isDark ? "#334155" : "#F1F5F9" },
+              ]}
+            >
+              <View style={styles.editSectionHeader}>
+                <Text
+                  style={[
+                    styles.editSectionTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Cover Photo
+                </Text>
+                <TouchableOpacity
+                  onPress={() => pickImageAsync("cover")}
+                  style={styles.editSectionActionBtn}
+                >
+                  <Text style={styles.editSectionActionText}>Choose Photo</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.editCoverPreviewWrap}>
+                <Image
+                  source={{
+                    uri:
+                      editCover ||
+                      "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80",
+                  }}
+                  style={styles.editCoverPreview}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  style={styles.editCoverOverlayBtn}
+                  onPress={() => pickImageAsync("cover")}
+                >
+                  <Feather name="camera" size={15} color="#FFFFFF" />
+                  <Text style={styles.editCoverOverlayText}>Upload Cover</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Cover Presets */}
+              <Text
+                style={[
+                  styles.presetSectionLabel,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Or choose a curated cover theme:
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.presetsScroll}
+              >
+                {COVER_PRESETS.map((preset) => {
+                  const isSelected = editCover === preset.url;
+                  return (
+                    <TouchableOpacity
+                      key={preset.id}
+                      onPress={() => setEditCover(preset.url)}
+                      style={[
+                        styles.presetCoverItem,
+                        isSelected && styles.presetItemActive,
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Image
+                        source={{ uri: preset.url }}
+                        style={styles.presetCoverImage}
+                      />
+                      <Text
+                        style={[
+                          styles.presetCoverLabel,
+                          { color: isDark ? "#CBD5E1" : "#475569" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {preset.name}
+                      </Text>
+                      {isSelected && (
+                        <View style={styles.presetCheckmarkCover}>
+                          <Ionicons
+                            name="checkmark"
+                            size={12}
+                            color="#FFFFFF"
+                          />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* 3. Bio / About Section */}
+            <View
+              style={[
+                styles.editSection,
+                { borderBottomColor: isDark ? "#334155" : "#F1F5F9" },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.editSectionTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A", marginBottom: 6 },
+                ]}
+              >
+                Bio
+              </Text>
+              <Text
+                style={[
+                  styles.editSectionDesc,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Describe yourself, your roommate habits, and what you enjoy!
+              </Text>
+              <TextInput
+                style={[
+                  styles.editBioInput,
+                  {
+                    backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    borderColor: isDark ? "#334155" : "#CBD5E1",
+                    color: isDark ? "#F8FAFC" : "#0F172A",
+                  },
+                ]}
+                placeholder="Write something about yourself..."
+                placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                multiline
+                numberOfLines={3}
+                value={editBio}
+                onChangeText={setEditBio}
+              />
+            </View>
+
+            {/* 4. Details / Personal Information */}
+            <View style={styles.editSection}>
+              <Text
+                style={[
+                  styles.editSectionTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A", marginBottom: 12 },
+                ]}
+              >
+                Customize Your Info
+              </Text>
+
+              {/* Display Name */}
+              <View style={styles.editFieldGroup}>
+                <Text
+                  style={[
+                    styles.editFieldLabel,
+                    { color: isDark ? "#CBD5E1" : "#475569" },
+                  ]}
+                >
+                  Full Name
+                </Text>
+                <TextInput
+                  style={[
+                    styles.editTextInput,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                      color: isDark ? "#F8FAFC" : "#0F172A",
+                    },
+                  ]}
+                  placeholder="Your Name"
+                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                  value={editName}
+                  onChangeText={setEditName}
+                />
+              </View>
+
+              {/* City / Location */}
+              <View style={styles.editFieldGroup}>
+                <Text
+                  style={[
+                    styles.editFieldLabel,
+                    { color: isDark ? "#CBD5E1" : "#475569" },
+                  ]}
+                >
+                  City / Location
+                </Text>
+                <TextInput
+                  style={[
+                    styles.editTextInput,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                      color: isDark ? "#F8FAFC" : "#0F172A",
+                    },
+                  ]}
+                  placeholder="e.g. Quezon City, Manila"
+                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                  value={editLocation}
+                  onChangeText={setEditLocation}
+                />
+              </View>
+
+              {/* Occupation */}
+              <View style={styles.editFieldGroup}>
+                <Text
+                  style={[
+                    styles.editFieldLabel,
+                    { color: isDark ? "#CBD5E1" : "#475569" },
+                  ]}
+                >
+                  Occupation / Work
+                </Text>
+                <TextInput
+                  style={[
+                    styles.editTextInput,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                      color: isDark ? "#F8FAFC" : "#0F172A",
+                    },
+                  ]}
+                  placeholder="e.g. Software Engineer, Student, Designer"
+                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                  value={editOccupation}
+                  onChangeText={setEditOccupation}
+                />
+              </View>
+
+              {/* School / Education */}
+              <View style={styles.editFieldGroup}>
+                <Text
+                  style={[
+                    styles.editFieldLabel,
+                    { color: isDark ? "#CBD5E1" : "#475569" },
+                  ]}
+                >
+                  School / Education
+                </Text>
+                <TextInput
+                  style={[
+                    styles.editTextInput,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                      color: isDark ? "#F8FAFC" : "#0F172A",
+                    },
+                  ]}
+                  placeholder="e.g. UP Diliman, DLSU, UST"
+                  placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+                  value={editSchool}
+                  onChangeText={setEditSchool}
+                />
+              </View>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                onPress={handleSaveProfile}
+                disabled={isSavingProfile}
+                style={[
+                  styles.saveProfileFullBtn,
+                  { opacity: isSavingProfile ? 0.7 : 1 },
+                ]}
+              >
+                {isSavingProfile ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#FFFFFF"
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.saveProfileFullBtnText}>
+                      Save All Changes
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -2004,5 +2809,281 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     marginLeft: 5,
+  },
+  coverCameraBtn: {
+    position: "absolute",
+    bottom: 12,
+    right: 14,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  coverCameraText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  avatarCameraBtn: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#1877F2",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
+  editModalContainer: {
+    flex: 1,
+  },
+  editModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  editModalCloseBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editModalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  editModalSaveBtn: {
+    backgroundColor: "#1877F2",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 64,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editModalSaveBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  editModalScroll: {
+    flex: 1,
+  },
+  editModalScrollContent: {
+    padding: 16,
+    gap: 16,
+  },
+  editSection: {
+    paddingBottom: 20,
+    // borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  editSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  editSectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  editSectionDesc: {
+    fontSize: 13,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  editSectionActionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  editSectionActionText: {
+    color: "#1877F2",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  editAvatarPreviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 14,
+  },
+  editAvatarPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  editAvatarPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editAvatarPlaceholderText: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  chooseDevicePhotoBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  chooseDevicePhotoText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  presetSectionLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  presetsScroll: {
+    gap: 10,
+    paddingVertical: 4,
+  },
+  presetAvatarItem: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    padding: 2,
+    position: "relative",
+  },
+  presetItemActive: {
+    borderWidth: 2.5,
+    borderColor: "#1877F2",
+  },
+  presetAvatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 29,
+  },
+  presetCheckmark: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    backgroundColor: "#1877F2",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editCoverPreviewWrap: {
+    width: "100%",
+    height: 130,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+    marginBottom: 14,
+  },
+  editCoverPreview: {
+    width: "100%",
+    height: "100%",
+  },
+  editCoverOverlayBtn: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  editCoverOverlayText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  presetCoverItem: {
+    width: 100,
+    borderRadius: 8,
+    overflow: "hidden",
+    position: "relative",
+    borderWidth: 1,
+    borderColor: "rgba(150, 150, 150, 0.2)",
+  },
+  presetCoverImage: {
+    width: "100%",
+    height: 60,
+  },
+  presetCoverLabel: {
+    fontSize: 11,
+    padding: 4,
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  presetCheckmarkCover: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    backgroundColor: "#1877F2",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editBioInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: "top",
+    minHeight: 80,
+  },
+  editFieldGroup: {
+    marginBottom: 14,
+  },
+  editFieldLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  editTextInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  saveProfileFullBtn: {
+    backgroundColor: "#1877F2",
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+    shadowColor: "#1877F2",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  saveProfileFullBtnText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

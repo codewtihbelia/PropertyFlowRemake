@@ -40,6 +40,7 @@ interface ProfileScreenProps {
   onOpenTermsOfService?: () => void;
   onOpenPrivacyPolicy?: () => void;
   onOpenCommunity?: () => void;
+  onOpenEditProfile?: () => void;
   onSignOut?: () => void;
   currentUser?: { name: string; role: string; email: string };
 }
@@ -55,6 +56,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenTermsOfService,
   onOpenPrivacyPolicy,
   onOpenCommunity,
+  onOpenEditProfile,
   onSignOut,
   currentUser = {
     name: "Resident",
@@ -816,8 +818,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               ]}
               activeOpacity={0.75}
               onPress={() => {
-                setDisplayNameInput(displayName);
-                setShowEditProfileModal(true);
+                if (onOpenEditProfile) {
+                  onOpenEditProfile();
+                } else {
+                  setDisplayNameInput(displayName);
+                  setShowEditProfileModal(true);
+                }
               }}
             >
               <Feather
@@ -2474,7 +2480,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           style={{ flexShrink: 1 }}
           contentContainerStyle={{
             paddingTop: 4,
-            paddingBottom: Math.max(80, insets.bottom + 60),
+            paddingBottom: Math.max(30, insets.bottom + 30),
           }}
         >
           {/* Photo Avatar In Modal */}
@@ -2608,7 +2614,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </View>
 
           {/* Save Buttons */}
-          <View style={[styles.modalButtonsRow, { marginTop: 22 }]}>
+          <View style={styles.modalButtonsRow}>
             <TouchableOpacity
               style={[
                 styles.modalCancelBtn,
@@ -3485,7 +3491,7 @@ const styles = StyleSheet.create({
   modalButtonsRow: {
     flexDirection: "row",
     gap: 12,
-    marginTop: 18,
+    marginTop: 8,
   },
   modalCancelBtn: {
     flex: 1,

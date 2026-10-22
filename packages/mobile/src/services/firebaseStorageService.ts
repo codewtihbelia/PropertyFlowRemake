@@ -113,3 +113,34 @@ export async function uploadToFirebaseStorageMobile(
 
   return imageUri;
 }
+
+/**
+ * Uploads a video file (MP4/MOV) to Firebase Storage as a cloud-hosted video.
+ * Returns a permanent HTTPS download URL.
+ */
+export async function uploadVideoToFirebaseStorageMobile(
+  videoUri: string,
+  folder = "community_reels",
+): Promise<string> {
+  if (videoUri.startsWith("http://") || videoUri.startsWith("https://")) {
+    return videoUri;
+  }
+  const filename = videoUri.split("/").pop() || `reel_${Date.now()}.mp4`;
+  const storagePath = `${folder}/${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
+  if (storage) {
+    const storageRef = ref(storage, storagePath);
+    const response = await fetch(videoUri);
+    const blob = await response.blob();
+    await uploadBytes(storageRef, blob, {
+      contentType: "video/mp4",
+      customMetadata: {
+        uploadedFrom: "mobile_reels",
+        originalFilename: filename,
+      },
+    });
+    const downloadUrl = await getDownloadURL(storageRef);
+    if (downloadUrl) return downloadUrl;
+  }
+  throw new Error("Firebase storage is not configured.");
+}

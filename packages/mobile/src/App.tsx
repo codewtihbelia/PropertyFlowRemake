@@ -44,6 +44,10 @@ import { PrivacyPolicyScreen } from "./screens/PrivacyPolicyScreen";
 import { CommunityScreen } from "./screens/CommunityScreen";
 import { SuperAdminHubScreen } from "./screens/SuperAdminHubScreen";
 import {
+  UserProfileScreen,
+  UserProfileInfo,
+} from "./screens/UserProfileScreen";
+import {
   registerForPushNotificationsAsync,
   setupNotificationChannelsAsync,
   setupNotificationResponseListener,
@@ -106,7 +110,8 @@ type OverlayScreen =
   | "terms_of_service"
   | "privacy_policy"
   | "community"
-  | "super_admin_hub";
+  | "super_admin_hub"
+  | "user_profile";
 
 interface NavItemConfig {
   key: MainTab;
@@ -334,6 +339,49 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     } | null;
   } | null>(null);
 
+  const [userProfileOverlayConfig, setUserProfileOverlayConfig] = useState<{
+    user: UserProfileInfo;
+    initialEditMode?: boolean;
+    fromScreen?: "profile" | "community";
+  } | null>(null);
+
+  const handleProfileUpdated = (updated: UserProfileInfo) => {
+    setUserProfile((prev: any) => ({
+      ...(prev || {}),
+      displayName: updated.name,
+      name: updated.name,
+      bio: updated.bio,
+      location: updated.location,
+      occupation: updated.occupation,
+      school: updated.school,
+      coverImage: updated.coverImage,
+      avatar: updated.avatar,
+      profilePicture: updated.avatar,
+      photoURL: updated.avatar,
+    }));
+
+    setCurrentUser((prev) => ({
+      ...prev,
+      name: updated.name,
+      avatar: updated.name?.charAt(0).toUpperCase() || prev.avatar || "R",
+      photoURL: updated.avatar || prev.photoURL,
+    }));
+
+    if (auth.currentUser?.uid && updated.avatar) {
+      authPinService.cacheUserAvatar(auth.currentUser.uid, updated.avatar);
+      setSavedProfileUser((prev) => {
+        if (prev && prev.uid === auth.currentUser?.uid) {
+          return {
+            ...prev,
+            displayName: updated.name,
+            photoURL: updated.avatar,
+          };
+        }
+        return prev;
+      });
+    }
+  };
+
   const performCleanSignOut = async () => {
     try {
       await auth.signOut();
@@ -344,6 +392,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     mobileDataService.clearCache();
     setHouseholdId("");
     setUserProfile(null);
+    setUserProfileOverlayConfig(null);
     setCurrentUser({
       name: "Resident",
       role: "Member",
@@ -1170,6 +1219,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           setActiveDirectChatUserId(targetUserId);
           setOverlayScreen("messages");
         }}
+        onProfileUpdated={handleProfileUpdated}
         currentUser={{
           uid: auth.currentUser?.uid,
           name: resolvedCommunityName,
@@ -1189,6 +1239,58 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             auth.currentUser?.photoURL ||
             currentUser.avatar ||
             undefined,
+        }}
+      />
+    );
+  }
+
+  if (overlayScreen === "user_profile" && userProfileOverlayConfig) {
+    const activeUid =
+      auth.currentUser?.uid || userProfileOverlayConfig.user.uid || "";
+    const activeName =
+      userProfile?.displayName ||
+      userProfile?.name ||
+      userProfileOverlayConfig.user.name ||
+      currentUser.name;
+    const activeEmail =
+      auth.currentUser?.email ||
+      userProfile?.email ||
+      userProfileOverlayConfig.user.email ||
+      currentUser.email;
+    const activeAvatar =
+      userProfile?.profilePicture ||
+      userProfile?.photoURL ||
+      userProfileOverlayConfig.user.avatar ||
+      currentUser.avatar;
+
+    return (
+      <UserProfileScreen
+        user={userProfileOverlayConfig.user}
+        initialEditMode={userProfileOverlayConfig.initialEditMode}
+        onBack={() => {
+          if (userProfileOverlayConfig.fromScreen === "community") {
+            setOverlayScreen("community");
+          } else {
+            setOverlayScreen("none");
+          }
+          setUserProfileOverlayConfig(null);
+        }}
+        currentUser={{
+          uid: activeUid,
+          name: activeName,
+          email: activeEmail,
+          avatar: activeAvatar,
+        }}
+        onProfileUpdated={handleProfileUpdated}
+        onOpenDirectChat={(targetUserId) => {
+          setUserProfileOverlayConfig(null);
+          setActiveDirectChatUserId(targetUserId);
+          setOverlayScreen("messages");
+        }}
+        onNavigateToSplitzyProfile={() => {
+          setUserProfileOverlayConfig(null);
+          setOverlayScreen("none");
+          setCurrentTab("profile");
         }}
       />
     );
@@ -1395,6 +1497,42 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             onOpenTermsOfService={() => setOverlayScreen("terms_of_service")}
             onOpenPrivacyPolicy={() => setOverlayScreen("privacy_policy")}
             onOpenCommunity={() => setOverlayScreen("community")}
+            onOpenEditProfile={() => {
+              const activeUid = auth.currentUser?.uid || userProfile?.uid || "";
+              const activeName =
+                userProfile?.displayName ||
+                userProfile?.name ||
+                auth.currentUser?.displayName ||
+                currentUser.name;
+              const activeEmail =
+                auth.currentUser?.email ||
+                userProfile?.email ||
+                currentUser.email;
+              const activeAvatar =
+                userProfile?.profilePicture ||
+                userProfile?.photoURL ||
+                auth.currentUser?.photoURL ||
+                currentUser.avatar;
+
+              setUserProfileOverlayConfig({
+                user: {
+                  uid: activeUid,
+                  name: activeName,
+                  email: activeEmail,
+                  avatar: activeAvatar,
+                  role: userProfile?.role || currentUser.role,
+                  householdName: userProfile?.householdName,
+                  bio: userProfile?.bio,
+                  location: userProfile?.location,
+                  occupation: userProfile?.occupation,
+                  school: userProfile?.school,
+                  coverImage: userProfile?.coverImage,
+                },
+                initialEditMode: true,
+                fromScreen: "profile",
+              });
+              setOverlayScreen("user_profile");
+            }}
             onOpenSuperAdminHub={() => setOverlayScreen("super_admin_hub")}
             onSignOut={async () => {
               const savedUser = await authPinService.getLastPinUser();

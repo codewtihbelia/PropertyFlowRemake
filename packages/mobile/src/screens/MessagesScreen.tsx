@@ -94,6 +94,7 @@ export interface ConversationItem {
     label: string;
   };
   hasReceiptConfirmAction?: boolean;
+  isMessageRequest?: boolean;
   messages: ChatMessage[];
 }
 
@@ -339,8 +340,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Search and Filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<
-    "all" | "apartment" | "pending" | "direct"
+    "all" | "requests" | "apartment" | "pending" | "direct"
   >("all");
+  const [acceptedConvIds, setAcceptedConvIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [declinedConvIds, setDeclinedConvIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Selected thread for full-screen active chat
   const [activeThread, setActiveThread] = useState<ConversationItem | null>(
@@ -591,6 +598,43 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     return () => unsub();
   }, [currentUid]);
 
+  // 1d. Subscribe to accepted/declined direct message requests from non-friends
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsub = communityService.subscribeAcceptedConversations(
+      currentUid,
+      (acc, dec) => {
+        setAcceptedConvIds(acc);
+        setDeclinedConvIds(dec);
+      },
+    );
+    return () => unsub();
+  }, [currentUid]);
+
+  const handleAcceptMessageRequest = async (convId: string) => {
+    try {
+      await communityService.acceptDirectMessageRequest(convId, currentUid);
+      setAcceptedConvIds((prev) => new Set([...prev, convId]));
+      Alert.alert(
+        "Request Accepted",
+        "This conversation is now in your active chats.",
+      );
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not accept request.");
+    }
+  };
+
+  const handleDeclineMessageRequest = async (convId: string) => {
+    try {
+      await communityService.declineDirectMessageRequest(convId, currentUid);
+      setDeclinedConvIds((prev) => new Set([...prev, convId]));
+      setActiveThread(null);
+      Alert.alert("Request Deleted", "The message request has been removed.");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not decline request.");
+    }
+  };
+
   // Merge household messages and direct messages deduplicated by id
   const combinedMessages = useMemo(() => {
     const map = new Map<string, any>();
@@ -618,7 +662,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     });
   }, [householdMembers, currentUid]);
 
-  // Combine household members with accepted friends from outside the household group
+  // Combine household members with accepted friends and incoming message request contacts
   const allDirectMembers = useMemo(() => {
     const list: any[] = [...billsGroupMembers];
     const existingUids = new Set<string>();
@@ -649,8 +693,47 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       }
     });
 
+    // Also include any users who have sent or received direct messages with current user
+    directMessages.forEach((m) => {
+      const cleanSender = String(m.senderId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanRecip = String(m.recipientId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanMe = String(currentUid).replace(/^mem_/, "").trim();
+      const otherUid = cleanSender === cleanMe ? cleanRecip : cleanSender;
+      if (
+        otherUid &&
+        otherUid !== cleanMe &&
+        !existingUids.has(otherUid) &&
+        !existingUids.has(`mem_${otherUid}`)
+      ) {
+        list.push({
+          userId: otherUid,
+          memberId: otherUid,
+          id: otherUid,
+          displayName:
+            cleanSender === cleanMe
+              ? m.recipientName || "Splitzer"
+              : m.senderName || "Splitzer",
+          name:
+            cleanSender === cleanMe
+              ? m.recipientName || "Splitzer"
+              : m.senderName || "Splitzer",
+          photoURL:
+            cleanSender === cleanMe ? m.recipientAvatar : m.senderAvatar,
+          role: "Member",
+          isOutsideFriend: false,
+          isNonFriendRequest: true,
+        });
+        existingUids.add(otherUid);
+        existingUids.add(`mem_${otherUid}`);
+      }
+    });
+
     return list;
-  }, [billsGroupMembers, acceptedCommunityFriends, currentUid]);
+  }, [billsGroupMembers, acceptedCommunityFriends, directMessages, currentUid]);
 
   const isHost =
     userProfile?.role === "HOST" ||
@@ -864,6 +947,26 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           (m.senderId === currentUid && m.recipientId === memberUid),
       );
 
+      const cleanMemberUid = String(memberUid).replace(/^mem_/, "").trim();
+      const isRoommate = billsGroupMembers.some((bm) => {
+        const u = String(bm.userId || bm.memberId || bm.id || "")
+          .replace(/^mem_/, "")
+          .trim();
+        return u === cleanMemberUid;
+      });
+      const isAcceptedFriend = acceptedCommunityFriends.some((af) => {
+        const u = String(af.userId || af.memberId || af.id || "")
+          .replace(/^mem_/, "")
+          .trim();
+        return u === cleanMemberUid;
+      });
+      const isAcceptedConv = acceptedConvIds.has(convId);
+      const isDeclinedConv = declinedConvIds.has(convId);
+      if (isDeclinedConv) return;
+
+      const isMessageRequest =
+        !isRoommate && !isAcceptedFriend && !isAcceptedConv;
+
       const lastDirectMsg =
         directMsgs.length > 0 ? directMsgs[directMsgs.length - 1] : null;
       const unreadCount = directMsgs.filter(
@@ -878,7 +981,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         ? "Host"
         : member.isOutsideFriend
           ? "Friend"
-          : "Payor";
+          : isMessageRequest
+            ? "Request"
+            : "Payor";
 
       // Legitimate presence calculation
       const memberPresence = computePresence(
@@ -937,6 +1042,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           lastDirectMsg.senderId === memberUid &&
           lastDirectMsg.meta?.status !== "confirmed",
         ),
+        isMessageRequest,
         messages: directMsgs.map(formatChatMessage),
       });
     });
@@ -1058,21 +1164,33 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     );
   }, [conversations]);
 
+  // Message requests count
+  const messageRequestsCount = useMemo(() => {
+    return conversations.filter((c) => c.isMessageRequest).length;
+  }, [conversations]);
+
   // Filtered conversations
   const filteredConversations = useMemo(() => {
     let list = [...conversations];
 
-    if (activeFilter === "apartment") {
-      list = list.filter((c) => c.type === "group");
-    } else if (activeFilter === "pending") {
-      list = list.filter(
-        (c) =>
-          c.statusBadge?.type === "pending" ||
-          c.hasReceiptConfirmAction ||
-          c.categoryTag,
-      );
-    } else if (activeFilter === "direct") {
-      list = list.filter((c) => c.type === "direct");
+    if (activeFilter === "requests") {
+      list = list.filter((c) => c.isMessageRequest);
+    } else {
+      // In all standard filters, keep message requests cleanly separated
+      list = list.filter((c) => !c.isMessageRequest);
+
+      if (activeFilter === "apartment") {
+        list = list.filter((c) => c.type === "group");
+      } else if (activeFilter === "pending") {
+        list = list.filter(
+          (c) =>
+            c.statusBadge?.type === "pending" ||
+            c.hasReceiptConfirmAction ||
+            c.categoryTag,
+        );
+      } else if (activeFilter === "direct") {
+        list = list.filter((c) => c.type === "direct");
+      }
     }
 
     if (searchQuery.trim()) {
@@ -1699,6 +1817,81 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             />
           </TouchableOpacity>
         </View>
+
+        {/* Messenger-Style Message Request Banner */}
+        {activeThread.isMessageRequest &&
+          !acceptedConvIds.has(activeThread.id) && (
+            <View
+              style={[
+                styles.requestBannerBox,
+                {
+                  backgroundColor: isDark ? "#1E293B" : "#F0F7FF",
+                  borderColor: isDark ? "#334155" : "#BFDBFE",
+                },
+              ]}
+            >
+              <View style={styles.requestBannerHeader}>
+                <View
+                  style={[
+                    styles.requestBannerIconWrap,
+                    { backgroundColor: isDark ? "#0F172A" : "#DBEAFE" },
+                  ]}
+                >
+                  <Ionicons
+                    name="chatbubbles-outline"
+                    size={18}
+                    color="#2563EB"
+                  />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text
+                    style={[
+                      styles.requestBannerTitle,
+                      { color: isDark ? "#FFFFFF" : "#0F172A" },
+                    ]}
+                  >
+                    Message Request
+                  </Text>
+                  <Text
+                    style={[
+                      styles.requestBannerDesc,
+                      { color: isDark ? "#94A3B8" : "#475569" },
+                    ]}
+                  >
+                    {activeThread.name} is not in your friends list or bills
+                    group. If you accept, they'll be able to send messages
+                    directly to your inbox.
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.requestBannerButtonsRow}>
+                <TouchableOpacity
+                  style={styles.requestAcceptBtn}
+                  onPress={() => handleAcceptMessageRequest(activeThread.id)}
+                >
+                  <Text style={styles.requestAcceptBtnText}>Accept</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.requestDeclineBtn,
+                    {
+                      backgroundColor: isDark ? "#334155" : "#E2E8F0",
+                    },
+                  ]}
+                  onPress={() => handleDeclineMessageRequest(activeThread.id)}
+                >
+                  <Text
+                    style={[
+                      styles.requestDeclineBtnText,
+                      { color: isDark ? "#CBD5E1" : "#475569" },
+                    ]}
+                  >
+                    Delete
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
         {/* Message Feed */}
         <ScrollView
@@ -2845,6 +3038,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               ]}
             >
               All •
+            </Text>
+          </TouchableOpacity>
+
+          {/* "Requests" Filter Pill (Messenger Style) */}
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "requests"
+                ? styles.filterPillActive
+                : [
+                    styles.filterPillInactive,
+                    {
+                      backgroundColor: isDark ? "#181A20" : "#F1F5F9",
+                      borderColor: isDark
+                        ? "rgba(255,255,255,0.06)"
+                        : "#E2E8F0",
+                    },
+                  ],
+            ]}
+            onPress={() => setActiveFilter("requests")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "requests"
+                  ? styles.filterPillTextActive
+                  : { color: isDark ? "#CBD5E1" : "#475569" },
+              ]}
+            >
+              Requests
+              {messageRequestsCount > 0 ? ` (${messageRequestsCount})` : ""}
             </Text>
           </TouchableOpacity>
 
@@ -5519,5 +5743,63 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
     alignItems: "center",
     justifyContent: "center",
+  },
+  requestBannerBox: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 6,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  requestBannerHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  requestBannerIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  requestBannerTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  requestBannerDesc: {
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  requestBannerButtonsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+  },
+  requestAcceptBtn: {
+    flex: 1,
+    backgroundColor: "#1877F2",
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  requestAcceptBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  requestDeclineBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  requestDeclineBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

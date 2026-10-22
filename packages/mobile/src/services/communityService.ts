@@ -14,6 +14,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
+import type { User } from "firebase/auth";
 import {
   pushDispatchService,
   PushDispatchService,
@@ -175,6 +176,318 @@ export interface CommunityStory {
   viewerDetails?: StoryViewerInfo[];
   likes?: string[];
 }
+
+export type ReelCategory =
+  | "all"
+  | "youtube_shorts"
+  | "facebook_reels"
+  | "lifestyle"
+  | "roommate_tips"
+  | "cooking"
+  | "budgeting"
+  | "fun";
+
+export interface CommunityReel {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorEmail?: string;
+  authorAvatar?: string;
+  authorRole?: string;
+  videoUrl: string;
+  thumbnailUrl?: string;
+  caption: string;
+  category: ReelCategory;
+  soundTitle?: string;
+  likes: string[];
+  likesCount: number;
+  commentsCount: number;
+  sharesCount: number;
+  createdAt: string;
+  duration?: number;
+  isCurated?: boolean;
+}
+
+export interface CommunityReelComment {
+  id: string;
+  reelId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  content: string;
+  createdAt: string;
+}
+
+export function normalizeFacebookUrl(url: string): string {
+  if (!url) return "";
+  const clean = url.trim();
+  // Extract numeric id from /reel/123456789 or /videos/123456789 or ?v=123456789
+  const matchId = clean.match(/(?:reel|videos|watch\/?\?v=|\/v\/)(\d+)/i);
+  if (matchId && matchId[1]) {
+    return `https://www.facebook.com/watch/?v=${matchId[1]}`;
+  }
+  return clean;
+}
+
+export function getReelVideoType(url: string): "youtube" | "facebook" | "mp4" {
+  if (!url) return "mp4";
+  const clean = url.toLowerCase().trim();
+  if (
+    clean.includes("youtube.com") ||
+    clean.includes("youtu.be") ||
+    extractYouTubeId(url) !== null
+  ) {
+    return "youtube";
+  }
+  if (
+    clean.includes("facebook.com") ||
+    clean.includes("fb.watch") ||
+    clean.includes("fb.me")
+  ) {
+    return "facebook";
+  }
+  return "mp4";
+}
+
+export function extractYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const clean = url.trim();
+  // Direct 11-character video ID
+  if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) {
+    return clean;
+  }
+  // Standard YouTube Shorts / Watch / Share URL variations (handles query params, handles, channels)
+  const match =
+    clean.match(/shorts\/([a-zA-Z0-9_-]{11})/i) ||
+    clean.match(/[?&]v=([a-zA-Z0-9_-]{11})/i) ||
+    clean.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/i) ||
+    clean.match(/embed\/([a-zA-Z0-9_-]{11})/i) ||
+    clean.match(/live\/([a-zA-Z0-9_-]{11})/i) ||
+    clean.match(/shorts\/([a-zA-Z0-9_-]+)/i) ||
+    clean.match(/[?&]v=([a-zA-Z0-9_-]+)/i) ||
+    clean.match(/youtu\.be\/([a-zA-Z0-9_-]+)/i) ||
+    clean.match(/embed\/([a-zA-Z0-9_-]+)/i);
+  return match ? match[1] : null;
+}
+
+export const CURATED_REELS: CommunityReel[] = [
+  {
+    id: "curated_reel_1",
+    authorId: "splitzy_curator_1",
+    authorName: "Maya & Jordan",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Studio Resident",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/sea_turtle.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/sea_turtle.jpg",
+    caption:
+      "Tour of our peaceful city co-living space! 🌿 Designated zones and green corners keep roommates zen. #RoommateLife #StudioLiving #InAppReels",
+    category: "lifestyle",
+    soundTitle: "Peaceful Waves & Loft Vibes • Original",
+    likes: ["user_1", "user_2", "user_3", "user_4", "user_5"],
+    likesCount: 384,
+    commentsCount: 42,
+    sharesCount: 68,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_2",
+    authorId: "splitzy_curator_2",
+    authorName: "Camille Gomez",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Roommate Captain",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/dog.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/dog.jpg",
+    caption:
+      "When the apartment puppy greets all 4 flatmates after a long workday 🐶❤️ Roomie therapy at its best! #ApartmentPets #SplitzyVibes #CoLiving",
+    category: "fun",
+    soundTitle: "Puppy Joy Beats • Splitzy Original",
+    likes: ["user_1", "user_3", "user_8", "user_9"],
+    likesCount: 412,
+    commentsCount: 56,
+    sharesCount: 89,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_3",
+    authorId: "splitzy_curator_3",
+    authorName: "Sarah Lin",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Kitchen Lead",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/dog2.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/dog2.jpg",
+    caption:
+      "Kitchen patrol dog waiting patiently while the house pasta bakes! 🍝🐕 Shared meals are 10x better with furry sous-chefs. #RoommateCooking #PetFriendly",
+    category: "cooking",
+    soundTitle: "Chill Kitchen Lo-Fi • Acoustic",
+    likes: ["user_2", "user_4", "user_6"],
+    likesCount: 295,
+    commentsCount: 33,
+    sharesCount: 47,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 10).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_4",
+    authorId: "splitzy_curator_4",
+    authorName: "The BGC Loft Crew",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Co-Living Host",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/rafting.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/rafting.jpg",
+    caption:
+      "Weekend adventure with the apartment gang! Roommates that paddle together stay together. 🚣‍♂️💦 #RoommateBonding #WeekendVibes #Splitzy",
+    category: "roommate_tips",
+    soundTitle: "River Rush Upbeat • Travel Mix",
+    likes: ["user_1", "user_2", "user_5", "user_7"],
+    likesCount: 236,
+    commentsCount: 27,
+    sharesCount: 39,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 18).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_5",
+    authorId: "splitzy_curator_5",
+    authorName: "Apartment Life PH",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Cozy Space Designer",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/walking.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/walking.jpg",
+    caption:
+      "Evening stroll around our neighborhood with the roommates. Great coffee spots just 2 minutes away! 🌆👟 #ApartmentVlog #CityLiving",
+    category: "lifestyle",
+    soundTitle: "Golden Hour Glow • Acoustic Ambient",
+    likes: ["user_3", "user_5", "user_8"],
+    likesCount: 351,
+    commentsCount: 39,
+    sharesCount: 62,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 26).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_6",
+    authorId: "splitzy_curator_6",
+    authorName: "Metro Roommates PH",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Finance & Splitting",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/finish_line.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/finish_line.jpg",
+    caption:
+      "Crossing the finish line: all 5 utility bills settled in 30 seconds using Splitzy! Rent, water, WiFi, electricity done. 🏁💸 #FairShare #BudgetHacks",
+    category: "budgeting",
+    soundTitle: "Victory Lap House • Upbeat",
+    likes: ["user_2", "user_4", "user_7", "user_9"],
+    likesCount: 318,
+    commentsCount: 31,
+    sharesCount: 54,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 36).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_7",
+    authorId: "splitzy_curator_7",
+    authorName: "Chef Mark & Flatmates",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Meal Prep Specialist",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/elephants.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/elephants.jpg",
+    caption:
+      "Nature documentary Sunday with the roommates on the living room screen! 🐘📺 Nothing beats relaxing together. #ApartmentSunday #ChillVibes",
+    category: "cooking",
+    soundTitle: "Wild & Free • Gentle Cinematic",
+    likes: ["user_1", "user_3", "user_6"],
+    likesCount: 278,
+    commentsCount: 24,
+    sharesCount: 46,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 48).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_8",
+    authorId: "splitzy_curator_8",
+    authorName: "Alyssa Diaz",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Plant & Pet Parent",
+    videoUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/kitten_fighting.mp4",
+    thumbnailUrl:
+      "https://res.cloudinary.com/demo/video/upload/c_fill,ar_9:16,w_720/kitten_fighting.jpg",
+    caption:
+      "Playful roommate pets taking over the living room carpet! Never a dull moment in this apartment 🐱🐾 #Flatmates #FunnyMoments",
+    category: "fun",
+    soundTitle: "Playful Paws • Happy Acoustic",
+    likes: ["user_2", "user_5", "user_7"],
+    likesCount: 420,
+    commentsCount: 48,
+    sharesCount: 73,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 60).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_yt_1",
+    authorId: "splitzy_curator_yt1",
+    authorName: "Studio Living PH",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Interior Creator • Shorts",
+    videoUrl: "https://www.youtube.com/shorts/1e9F3Zf6T6E",
+    thumbnailUrl: "https://img.youtube.com/vi/1e9F3Zf6T6E/hqdefault.jpg",
+    caption:
+      "Smart layout ideas for shared apartments! How to maximize small spaces with roommates 📐🏙️ #YouTubeShorts #ApartmentDesign",
+    category: "roommate_tips",
+    soundTitle: "Acoustic Loft Mix • Shorts Audio",
+    likes: ["user_1", "user_4", "user_6"],
+    likesCount: 512,
+    commentsCount: 63,
+    sharesCount: 92,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 70).toISOString(),
+    isCurated: true,
+  },
+  {
+    id: "curated_reel_yt_2",
+    authorId: "splitzy_curator_yt2",
+    authorName: "Quick Meal Flatmates",
+    authorAvatar:
+      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80",
+    authorRole: "Budget Cook • Shorts",
+    videoUrl: "https://www.youtube.com/shorts/tA9B_Fq-f20",
+    thumbnailUrl: "https://img.youtube.com/vi/tA9B_Fq-f20/hqdefault.jpg",
+    caption:
+      "15-minute shared dinner hack that costs less than ₱100 each! 🍳🥘 Tag your roomies! #YouTubeShorts #MealPrep",
+    category: "cooking",
+    soundTitle: "Upbeat Kitchen Chill • Shorts Audio",
+    likes: ["user_2", "user_3", "user_8"],
+    likesCount: 389,
+    commentsCount: 45,
+    sharesCount: 77,
+    createdAt: new Date(Date.now() - 3600 * 1000 * 80).toISOString(),
+    isCurated: true,
+  },
+];
 
 /**
  * Check if a story is active (within 24 hours of creation and not archived).
@@ -1373,6 +1686,482 @@ class CommunityService {
       return [];
     }
   }
+
+  /**
+   * Update full user profile in Firestore `users` collection.
+   */
+  async updateUserProfile(
+    userId: string,
+    data: {
+      name?: string;
+      displayName?: string;
+      bio?: string;
+      location?: string;
+      occupation?: string;
+      school?: string;
+      avatar?: string;
+      profilePicture?: string;
+      photoURL?: string;
+      coverImage?: string;
+    },
+  ): Promise<void> {
+    const cleanUid = String(userId).replace(/^mem_/, "").trim();
+    if (!cleanUid) throw new Error("Invalid user ID for profile update.");
+
+    const userRef = doc(db, "users", cleanUid);
+    const payload: Record<string, any> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (data.name !== undefined) payload.displayName = data.name.trim();
+    if (data.displayName !== undefined)
+      payload.displayName = data.displayName.trim();
+    if (data.bio !== undefined) payload.bio = data.bio.trim();
+    if (data.location !== undefined) payload.location = data.location.trim();
+    if (data.occupation !== undefined)
+      payload.occupation = data.occupation.trim();
+    if (data.school !== undefined) payload.school = data.school.trim();
+    if (data.coverImage !== undefined)
+      payload.coverImage = data.coverImage.trim();
+
+    const pic = data.avatar || data.profilePicture || data.photoURL;
+    if (pic !== undefined) {
+      payload.profilePicture = pic.trim();
+      payload.photoURL = pic.trim();
+      payload.avatar = pic.trim();
+    }
+
+    await setDoc(userRef, payload, { merge: true });
+
+    // Sync auth user displayName & photoURL if current user
+    if (auth.currentUser && auth.currentUser.uid === cleanUid) {
+      try {
+        const { updateProfile } = await import("firebase/auth");
+        await updateProfile(auth.currentUser, {
+          displayName: payload.displayName || auth.currentUser.displayName,
+          photoURL: payload.photoURL || auth.currentUser.photoURL,
+        });
+      } catch (authErr) {
+        console.warn("[CommunityService] updateAuthProfile deferred:", authErr);
+      }
+    }
+  }
+
+  /**
+   * Fetch full user profile data from Firestore.
+   */
+  async getUserProfile(userId: string): Promise<Record<string, any> | null> {
+    const cleanUid = String(userId).replace(/^mem_/, "").trim();
+    if (!cleanUid) return null;
+    try {
+      const snap = await getDoc(doc(db, "users", cleanUid));
+      if (!snap.exists()) return null;
+      return snap.data();
+    } catch (e) {
+      console.warn("[CommunityService] getUserProfile error:", e);
+      return null;
+    }
+  }
+
+  /**
+   * Accept an incoming direct message request from a non-friend.
+   */
+  async acceptDirectMessageRequest(
+    conversationId: string,
+    currentUserId: string,
+  ): Promise<void> {
+    const cleanUid = String(currentUserId).replace(/^mem_/, "").trim();
+    const cleanConvId = conversationId.trim();
+    if (!cleanConvId || !cleanUid) return;
+
+    try {
+      const convRef = doc(db, "directConversations", cleanConvId);
+      await setDoc(
+        convRef,
+        {
+          conversationId: cleanConvId,
+          status: "accepted",
+          acceptedBy: cleanUid,
+          acceptedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn(
+        "[CommunityService] acceptDirectMessageRequest notice:",
+        err,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Decline/ignore a direct message request from a non-friend.
+   */
+  async declineDirectMessageRequest(
+    conversationId: string,
+    currentUserId: string,
+  ): Promise<void> {
+    const cleanUid = String(currentUserId).replace(/^mem_/, "").trim();
+    const cleanConvId = conversationId.trim();
+    if (!cleanConvId || !cleanUid) return;
+
+    try {
+      const convRef = doc(db, "directConversations", cleanConvId);
+      await setDoc(
+        convRef,
+        {
+          conversationId: cleanConvId,
+          status: "declined",
+          declinedBy: cleanUid,
+          declinedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn(
+        "[CommunityService] declineDirectMessageRequest notice:",
+        err,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Real-time listener for accepted direct message conversations.
+   * Resilient to auth restoration latency and handles offline/permission states gracefully.
+   */
+  subscribeAcceptedConversations(
+    currentUserId: string,
+    callback: (acceptedIds: Set<string>, declinedIds: Set<string>) => void,
+  ): () => void {
+    const cleanUid = String(currentUserId).replace(/^mem_/, "").trim();
+    if (!cleanUid) {
+      callback(new Set(), new Set());
+      return () => {};
+    }
+
+    let unsubSnapshot: (() => void) | null = null;
+    let isDisposed = false;
+
+    const attach = () => {
+      if (isDisposed || unsubSnapshot) return;
+      try {
+        const colRef = collection(db, "directConversations");
+        unsubSnapshot = onSnapshot(
+          colRef,
+          (snapshot) => {
+            if (isDisposed) return;
+            const accepted = new Set<string>();
+            const declined = new Set<string>();
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              const convId = docSnap.id;
+              if (data.status === "accepted") {
+                accepted.add(convId);
+              } else if (data.status === "declined") {
+                declined.add(convId);
+              }
+            });
+            callback(accepted, declined);
+          },
+          (err) => {
+            if (isDisposed) return;
+            // Graceful non-crashing fallback
+            callback(new Set(), new Set());
+          },
+        );
+      } catch {
+        if (!isDisposed) {
+          callback(new Set(), new Set());
+        }
+      }
+    };
+
+    if (auth.currentUser) {
+      attach();
+    }
+
+    const unsubAuth = auth.onAuthStateChanged((user: User | null) => {
+      if (isDisposed) return;
+      if (user) {
+        attach();
+      } else {
+        if (unsubSnapshot) {
+          unsubSnapshot();
+          unsubSnapshot = null;
+        }
+        callback(new Set(), new Set());
+      }
+    });
+
+    return () => {
+      isDisposed = true;
+      if (unsubAuth) unsubAuth();
+      if (unsubSnapshot) {
+        unsubSnapshot();
+        unsubSnapshot = null;
+      }
+    };
+  }
+
+  // ─── REELS METHODS ────────────────────────────────────────────────────────
+
+  subscribeReels(callback: (reels: CommunityReel[]) => void): () => void {
+    const q = query(
+      collection(db, "communityReels"),
+      orderBy("createdAt", "desc"),
+      limit(50),
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const firestoreReels: CommunityReel[] = snapshot.docs.map(
+          (docSnap) => ({
+            id: docSnap.id,
+            ...(docSnap.data() as any),
+          }),
+        );
+
+        // Merge firestore user reels with curated library (avoiding duplicate IDs)
+        const firestoreIds = new Set(firestoreReels.map((r) => r.id));
+        const combined = [
+          ...firestoreReels,
+          ...CURATED_REELS.filter((cr) => !firestoreIds.has(cr.id)),
+        ];
+        callback(combined);
+      },
+      (error) => {
+        console.warn("Failed to subscribe to communityReels:", error);
+        callback(CURATED_REELS);
+      },
+    );
+  }
+
+  async createReel(
+    reelData: Omit<
+      CommunityReel,
+      | "id"
+      | "likes"
+      | "likesCount"
+      | "commentsCount"
+      | "sharesCount"
+      | "createdAt"
+    >,
+  ): Promise<string> {
+    const reelRef = doc(collection(db, "communityReels"));
+
+    // Auto-resolve thumbnail if not provided
+    let safeThumbnail = (reelData.thumbnailUrl || "").trim();
+    if (!safeThumbnail && reelData.videoUrl) {
+      const ytId = extractYouTubeId(reelData.videoUrl);
+      if (ytId) {
+        safeThumbnail = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
+      } else if (reelData.videoUrl.toLowerCase().endsWith(".mp4")) {
+        safeThumbnail = reelData.videoUrl.replace(/\.mp4$/i, ".jpg");
+      }
+    }
+
+    const rawReel: Record<string, any> = {
+      id: reelRef.id,
+      authorId: reelData.authorId || "",
+      authorName: reelData.authorName || "Splitzer",
+      authorEmail: reelData.authorEmail || "",
+      authorAvatar: reelData.authorAvatar || "",
+      authorRole: reelData.authorRole || "Splitzy Resident",
+      videoUrl: reelData.videoUrl || "",
+      thumbnailUrl: safeThumbnail,
+      caption: reelData.caption || "",
+      category: reelData.category || "lifestyle",
+      soundTitle: reelData.soundTitle || "Original Audio",
+      likes: [],
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (typeof reelData.duration === "number" && !isNaN(reelData.duration)) {
+      rawReel.duration = reelData.duration;
+    }
+    if (typeof reelData.isCurated === "boolean") {
+      rawReel.isCurated = reelData.isCurated;
+    }
+
+    // Strip any potential undefined values so Firestore setDoc never rejects the document
+    const sanitizedDoc: Record<string, any> = {};
+    for (const [key, val] of Object.entries(rawReel)) {
+      if (val !== undefined) {
+        sanitizedDoc[key] = val;
+      }
+    }
+
+    await setDoc(reelRef, sanitizedDoc);
+    return reelRef.id;
+  }
+
+  async toggleReelLike(reelId: string, userId: string): Promise<void> {
+    if (!userId) return;
+    if (reelId.startsWith("curated_")) {
+      return;
+    }
+    const reelRef = doc(db, "communityReels", reelId);
+    const snap = await getDoc(reelRef);
+    if (!snap.exists()) return;
+
+    const currentLikes: string[] = snap.data().likes || [];
+    const isLiked = currentLikes.includes(userId);
+    const newLikes = isLiked
+      ? currentLikes.filter((uid) => uid !== userId)
+      : [...currentLikes, userId];
+
+    await updateDoc(reelRef, {
+      likes: newLikes,
+      likesCount: newLikes.length,
+    });
+  }
+
+  subscribeReelComments(
+    reelId: string,
+    callback: (comments: CommunityReelComment[]) => void,
+  ): () => void {
+    if (reelId.startsWith("curated_")) {
+      callback([
+        {
+          id: `comment_${reelId}_1`,
+          reelId,
+          authorId: "sample_commenter_1",
+          authorName: "Sarah Chen",
+          authorAvatar:
+            "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80",
+          content:
+            "Love this tip! We started doing this in our unit last week and it really works! 🙌",
+          createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
+        },
+        {
+          id: `comment_${reelId}_2`,
+          reelId,
+          authorId: "sample_commenter_2",
+          authorName: "David Kim",
+          authorAvatar:
+            "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=200&q=80",
+          content:
+            "Splitzy makes it so painless. Can't imagine living without it!",
+          createdAt: new Date(Date.now() - 3600 * 1000 * 1).toISOString(),
+        },
+      ]);
+      return () => {};
+    }
+
+    const q = query(
+      collection(db, "communityReels", reelId, "comments"),
+      orderBy("createdAt", "asc"),
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const comments: CommunityReelComment[] = snapshot.docs.map(
+          (docSnap) => ({
+            id: docSnap.id,
+            reelId,
+            ...(docSnap.data() as any),
+          }),
+        );
+        callback(comments);
+      },
+      (error) => {
+        console.warn("Failed to subscribe to reel comments:", error);
+        callback([]);
+      },
+    );
+  }
+
+  async addReelComment(
+    reelId: string,
+    content: string,
+    author: { uid: string; name: string; avatar?: string },
+  ): Promise<string> {
+    if (reelId.startsWith("curated_")) {
+      return `comment_curated_${Date.now()}`;
+    }
+    const commentRef = doc(
+      collection(db, "communityReels", reelId, "comments"),
+    );
+    const newComment: CommunityReelComment = {
+      id: commentRef.id,
+      reelId,
+      authorId: author.uid,
+      authorName: author.name,
+      authorAvatar: author.avatar || "",
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    await setDoc(commentRef, newComment);
+
+    try {
+      const reelRef = doc(db, "communityReels", reelId);
+      await updateDoc(reelRef, {
+        commentsCount: increment(1),
+      });
+    } catch {}
+
+    return commentRef.id;
+  }
+
+  async deleteReel(reelId: string, authorId: string): Promise<void> {
+    if (reelId.startsWith("curated_")) return;
+    const reelRef = doc(db, "communityReels", reelId);
+    const snap = await getDoc(reelRef);
+    if (!snap.exists()) return;
+    if (
+      snap.data().authorId !== authorId &&
+      auth.currentUser?.email !== "cebutitans07@gmail.com"
+    ) {
+      throw new Error("You are not authorized to delete this reel.");
+    }
+    await deleteDoc(reelRef);
+  }
+}
+
+/**
+ * Universal safe avatar resolver helper that normalizes all photo properties.
+ */
+export function resolveUserAvatarUrl(userData: any): string {
+  if (!userData) return "";
+  if (typeof userData === "string") {
+    const trimmed = userData.trim();
+    if (
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("data:image/")
+    ) {
+      return trimmed;
+    }
+    return "";
+  }
+  const candidate =
+    userData.profilePicture ||
+    userData.photoURL ||
+    userData.avatar ||
+    userData.avatarUrl ||
+    userData.profilePhoto ||
+    userData.photo ||
+    userData.image ||
+    "";
+  const str = String(candidate || "").trim();
+  if (
+    str.startsWith("http://") ||
+    str.startsWith("https://") ||
+    str.startsWith("data:image/")
+  ) {
+    return str;
+  }
+  return "";
 }
 
 export const communityService = new CommunityService();
