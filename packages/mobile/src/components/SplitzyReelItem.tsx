@@ -25,6 +25,13 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
+let NativeWebView: any = null;
+if (Platform.OS !== "web") {
+  try {
+    NativeWebView = require("react-native-webview").WebView;
+  } catch (_) {}
+}
+
 interface SplitzyReelItemProps {
   reel: CommunityReel;
   isActive: boolean;
@@ -193,12 +200,6 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
     } catch {}
   };
 
-  const handleOpenExternal = () => {
-    if (reel.videoUrl) {
-      Linking.openURL(reel.videoUrl).catch(() => {});
-    }
-  };
-
   const formatCount = (count: number) => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
     if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
@@ -206,12 +207,14 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
   };
 
   // Construct iframe embed source
+  // Construct iframe embed source
   const getEmbedSource = () => {
     if (videoType === "youtube" && youtubeId) {
-      return `https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&enablejsapi=1`;
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0`;
     }
     if (videoType === "facebook") {
-      return `https://www.facebook.com/plugins/video.php?height=100%25&href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=100%25&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`;
+      const cleanFb = normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl;
+      return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(cleanFb)}&show_text=false&width=380&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`;
     }
     return null;
   };
@@ -245,8 +248,8 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 }}
               >
                 <iframe
-                  key={`yt-${youtubeId}`}
-                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3&enablejsapi=1`}
+                  key={`yt-${youtubeId}-${isMuted ? "muted" : "unmuted"}-${isActive ? "active" : "inactive"}`}
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0`}
                   title={reel.caption || "YouTube Short"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
@@ -275,8 +278,8 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 }}
               >
                 <iframe
-                  key={`fb-${reel.id}`}
-                  src={`https://www.facebook.com/plugins/video.php?height=100%25&href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=100%25&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`}
+                  key={`fb-${reel.id}-${isMuted ? "muted" : "unmuted"}-${isActive ? "active" : "inactive"}`}
+                  src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=380&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`}
                   title={reel.caption || "Facebook Reel"}
                   style={{
                     width: "100%",
@@ -290,7 +293,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 />
               </div>
             ) : (
-              // Direct MP4 video stream with Native DOM trusted user gesture play control
+              // Direct MP4 video stream (self-recorded & uploaded reels)
               <div
                 style={{
                   position: "relative",
@@ -300,11 +303,10 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 }}
               >
                 <video
-                  ref={(el) => {
+                  ref={(el: HTMLVideoElement | null) => {
                     videoElemRef.current = el;
                     if (el) {
                       el.muted = isMuted;
-                      el.defaultMuted = true;
                     }
                   }}
                   poster={reel.thumbnailUrl}
@@ -317,22 +319,29 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                   crossOrigin="anonymous"
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
-                  onClick={(e) => {
+                  onClick={(e: React.MouseEvent<HTMLVideoElement>) => {
                     e.stopPropagation();
                     const el = e.currentTarget;
                     if (el.paused) {
                       el.muted = isMuted;
                       el.play()
-                        .then(() => setIsPlaying(true))
+                        .then(() => {
+                          setIsPlaying(true);
+                          showIndicator("play");
+                        })
                         .catch(() => {
                           el.muted = true;
                           el.play()
-                            .then(() => setIsPlaying(true))
+                            .then(() => {
+                              setIsPlaying(true);
+                              showIndicator("play");
+                            })
                             .catch(() => {});
                         });
                     } else {
                       el.pause();
                       setIsPlaying(false);
+                      showIndicator("pause");
                     }
                   }}
                   style={{
@@ -346,95 +355,41 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 >
                   <source src={reel.videoUrl} type="video/mp4" />
                 </video>
-
-                {/* Direct Native DOM Play Button (guarantees trusted browser user activation in iframe) */}
-                {!isPlaying && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      if (onActivate && !isActive) {
-                        onActivate();
-                      }
-                      const el = videoElemRef.current;
-                      if (el) {
-                        el.muted = isMuted;
-                        const p = el.play();
-                        if (p !== undefined) {
-                          p.then(() => {
-                            setIsPlaying(true);
-                            showIndicator("play");
-                          }).catch(() => {
-                            el.muted = true;
-                            el.play()
-                              .then(() => {
-                                setIsPlaying(true);
-                                showIndicator("play");
-                              })
-                              .catch(() => {});
-                          });
-                        }
-                      }
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: "50%",
-                      left: "50%",
-                      transform: "translate(-50%, -50%)",
-                      zIndex: 10,
-                      width: "82px",
-                      height: "82px",
-                      borderRadius: "41px",
-                      backgroundColor: "rgba(37, 99, 235, 0.92)",
-                      border: "3px solid #FFFFFF",
-                      color: "#FFFFFF",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                      boxShadow: "0 8px 30px rgba(0, 0, 0, 0.75)",
-                      outline: "none",
-                      padding: 0,
-                    }}
-                  >
-                    <svg
-                      width="40"
-                      height="40"
-                      viewBox="0 0 24 24"
-                      fill="#FFFFFF"
-                      style={{ marginLeft: "4px" }}
-                    >
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: "800",
-                        marginTop: "2px",
-                        letterSpacing: "0.5px",
-                      }}
-                    >
-                      PLAY
-                    </span>
-                  </button>
-                )}
               </div>
             )}
           </div>
-        ) : (
-          <TouchableOpacity
-            style={styles.nativeVideoPlaceholder}
-            activeOpacity={0.9}
-            onPress={() => {
-              if (videoType === "youtube" || videoType === "facebook") {
-                handleOpenExternal();
-              } else {
-                togglePlayPause();
+        ) : NativeWebView ? (
+          <View style={StyleSheet.absoluteFill}>
+            <NativeWebView
+              key={`native-reel-${reel.id}-${isMuted ? "muted" : "unmuted"}-${isActive ? "1" : "0"}`}
+              source={
+                videoType === "youtube" && youtubeId
+                  ? {
+                      html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/><meta name="referrer" content="strict-origin-when-cross-origin"/><style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:100%;height:100%;background:#000000;overflow:hidden;}iframe{width:100%;height:100%;border:none;display:block;}</style></head><body><iframe src="https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></body></html>`,
+                      baseUrl: "https://www.youtube.com",
+                    }
+                  : videoType === "facebook"
+                    ? {
+                        html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/><meta name="referrer" content="strict-origin-when-cross-origin"/><style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:100%;height:100%;background:#000000;overflow:hidden;display:flex;align-items:center;justify-content:center;}iframe{width:100%;height:100%;border:none;}</style></head><body><iframe src="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=380&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}" allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share" allowfullscreen scrolling="no"></iframe></body></html>`,
+                        baseUrl: "https://www.facebook.com",
+                      }
+                    : {
+                        html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/><style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:100%;height:100%;background:#000000;overflow:hidden;}video{width:100%;height:100%;object-fit:cover;display:block;}</style></head><body><video id="v" src="${reel.videoUrl}" poster="${reel.thumbnailUrl || ""}" playsinline webkit-playsinline loop autoplay ${isMuted ? "muted" : ""}></video><script>const v=document.getElementById('v');if(${isActive}){const p=v.play();if(p!==undefined){p.catch(function(){v.muted=true;v.play();});}}else{v.pause();}document.body.addEventListener('click',function(){if(v.paused){v.play();}else{v.pause();}});</script></body></html>`,
+                      }
               }
-            }}
-          >
+              style={styles.nativeWebView}
+              allowsInlineMediaPlayback={true}
+              mediaPlaybackRequiresUserAction={false}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              allowsFullscreenVideo={true}
+              scrollEnabled={false}
+              bounces={false}
+              originWhitelist={["*"]}
+            />
+          </View>
+        ) : (
+          <View style={styles.nativeVideoPlaceholder}>
             {reel.thumbnailUrl ? (
               <Image
                 source={{ uri: reel.thumbnailUrl }}
@@ -444,38 +399,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             ) : (
               <View style={styles.fallbackBlackCanvas} />
             )}
-
-            <View style={styles.nativePlayOverlay}>
-              <View style={styles.nativePlayCircle}>
-                <Ionicons
-                  name="play"
-                  size={32}
-                  color="#FFFFFF"
-                  style={{ marginLeft: 3 }}
-                />
-              </View>
-              <View style={styles.nativeWatchBadge}>
-                <Ionicons
-                  name={
-                    videoType === "youtube"
-                      ? "logo-youtube"
-                      : videoType === "facebook"
-                        ? "logo-facebook"
-                        : "play-circle"
-                  }
-                  size={14}
-                  color="#FFFFFF"
-                />
-                <Text style={styles.nativeWatchText}>
-                  {videoType === "youtube"
-                    ? "Play Short In-App"
-                    : videoType === "facebook"
-                      ? "Play Reel In-App"
-                      : "Play Video In-App"}
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
+          </View>
         )}
 
         {/* Gradient Scrims for contrast */}
@@ -538,7 +462,9 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
       >
         <View style={styles.sourceBadgeWrap}>
           {videoType === "youtube" ? (
-            <View
+            <TouchableOpacity
+              onPress={() => Linking.openURL(reel.videoUrl).catch(() => {})}
+              activeOpacity={0.8}
               style={[
                 styles.platformBadge,
                 { backgroundColor: "rgba(220, 38, 38, 0.85)" },
@@ -546,9 +472,21 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             >
               <Ionicons name="logo-youtube" size={13} color="#FFFFFF" />
               <Text style={styles.platformBadgeText}>YouTube Short</Text>
-            </View>
+              <Feather
+                name="external-link"
+                size={11}
+                color="#FFFFFF"
+                style={{ marginLeft: 3 }}
+              />
+            </TouchableOpacity>
           ) : videoType === "facebook" ? (
-            <View
+            <TouchableOpacity
+              onPress={() =>
+                Linking.openURL(
+                  normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl,
+                ).catch(() => {})
+              }
+              activeOpacity={0.8}
               style={[
                 styles.platformBadge,
                 { backgroundColor: "rgba(24, 119, 242, 0.85)" },
@@ -556,7 +494,13 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             >
               <Ionicons name="logo-facebook" size={13} color="#FFFFFF" />
               <Text style={styles.platformBadgeText}>Facebook Reel</Text>
-            </View>
+              <Feather
+                name="external-link"
+                size={11}
+                color="#FFFFFF"
+                style={{ marginLeft: 3 }}
+              />
+            </TouchableOpacity>
           ) : (
             <View style={styles.liveBadge}>
               <Text style={styles.liveBadgeDot}>•</Text>
@@ -673,6 +617,36 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
 
       {/* ─── BOTTOM OVERLAY: Author Details, Caption & Audio ───────────── */}
       <View style={styles.bottomOverlay}>
+        {/* Quick Launch Pill for Facebook Reels and YouTube Shorts */}
+        {videoType === "facebook" ? (
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL(
+                normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl,
+              ).catch(() => {})
+            }
+            style={styles.openExternalPill}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="logo-facebook" size={14} color="#FFFFFF" />
+            <Text style={styles.openExternalPillText}>Watch on Facebook</Text>
+            <Feather name="arrow-up-right" size={13} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : videoType === "youtube" ? (
+          <TouchableOpacity
+            onPress={() => Linking.openURL(reel.videoUrl).catch(() => {})}
+            style={[
+              styles.openExternalPill,
+              { backgroundColor: "rgba(220, 38, 38, 0.9)" },
+            ]}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="logo-youtube" size={14} color="#FFFFFF" />
+            <Text style={styles.openExternalPillText}>Watch on YouTube</Text>
+            <Feather name="arrow-up-right" size={13} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : null}
+
         {/* Author Name and Badge */}
         <TouchableOpacity
           onPress={() =>
@@ -726,6 +700,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     position: "relative",
     overflow: "hidden",
+  },
+  nativeWebView: {
+    flex: 1,
+    backgroundColor: "#000000",
   },
   nativeVideoPlaceholder: {
     width: "100%",
@@ -956,6 +934,28 @@ const styles = StyleSheet.create({
     bottom: 40,
     gap: 8,
     zIndex: 20,
+  },
+  openExternalPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    backgroundColor: "rgba(24, 119, 242, 0.92)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
+    marginBottom: 2,
+  },
+  openExternalPillText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
   bottomAuthorRow: {
     flexDirection: "row",

@@ -1,5 +1,9 @@
+import { Platform } from "react-native";
+
 /**
- * Cloudinary Upload Service for Mobile (Expo / React Native)
+ * Cloudinary Upload Service for Mobile & Web (Expo / React Native)
+ * Resolves "Unsupported FormDataPart implementation" in Expo winter fetch
+ * by utilizing FileSystem.uploadAsync on native devices and standard Blob on Web.
  */
 export interface CloudinaryMobileUploadOptions {
   uri: string;
@@ -7,77 +11,44 @@ export interface CloudinaryMobileUploadOptions {
   mimeType?: string;
 }
 
-async function resolveFilePayload(
-  opt: CloudinaryMobileUploadOptions,
+/**
+ * Upload an arbitrary file using native XMLHttpRequest in React Native,
+ * which talks directly to RCTNetworking without going through Expo's
+ * JavaScript convertFormDataAsync polyfill.
+ */
+function uploadViaNativeXHR(
+  endpoint: string,
+  uploadPreset: string,
+  filePayload: any,
 ): Promise<any> {
-  if (opt.base64) {
-    const mime = opt.mimeType || "image/jpeg";
-    return `data:${mime};base64,${opt.base64}`;
-  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", endpoint);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          resolve(json);
+        } catch (e: any) {
+          reject(new Error(`Failed to parse response: ${e.message}`));
+        }
+      } else {
+        reject(
+          new Error(
+            `Cloudinary upload failed with status ${xhr.status}: ${xhr.responseText}`,
+          ),
+        );
+      }
+    };
+    xhr.onerror = () =>
+      reject(new Error("Network error during Cloudinary upload"));
+    xhr.ontimeout = () => reject(new Error("Timeout during Cloudinary upload"));
 
-  if (
-    opt.uri.startsWith("data:") ||
-    opt.uri.startsWith("http://") ||
-    opt.uri.startsWith("https://")
-  ) {
-    return opt.uri;
-  }
-
-  // If on Web with a blob URL, return the blob directly so FormData streams it natively
-  if (typeof window !== "undefined" && opt.uri.startsWith("blob:")) {
-    try {
-      const res = await fetch(opt.uri);
-      const blob = await res.blob();
-      return blob;
-    } catch (e) {
-      console.warn("[Cloudinary Mobile] Could not fetch blob directly:", e);
-    }
-  }
-
-  // Attempt to read URI into a base64 Data URL for smaller images
-  const isVideo =
-    opt.mimeType?.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(opt.uri);
-  if (!isVideo) {
-    try {
-      const res = await fetch(opt.uri);
-      const blob = await res.blob();
-      return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === "string") {
-            resolve(reader.result);
-          } else {
-            reject(new Error("FileReader returned non-string result"));
-          }
-        };
-        reader.onerror = () =>
-          reject(new Error("FileReader failed to read blob"));
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      // Fallback to React Native part below
-    }
-  }
-
-  const filename =
-    opt.uri.split("/").pop() || (isVideo ? "video.mp4" : "photo.jpg");
-  const match = /\.(\w+)$/.exec(filename);
-  const ext = match ? match[1].toLowerCase() : isVideo ? "mp4" : "jpg";
-  const type =
-    opt.mimeType ||
-    (ext === "mp4"
-      ? "video/mp4"
-      : ext === "mov"
-        ? "video/quicktime"
-        : ext === "png"
-          ? "image/png"
-          : "image/jpeg");
-
-  return {
-    uri: opt.uri,
-    name: filename,
-    type,
-  };
+    const formData = new FormData();
+    formData.append("upload_preset", uploadPreset);
+    formData.append("file", filePayload);
+    xhr.send(formData);
+  });
 }
 
 export async function uploadImageToCloudinaryMobile(
@@ -85,6 +56,10 @@ export async function uploadImageToCloudinaryMobile(
 ): Promise<string> {
   const opt: CloudinaryMobileUploadOptions =
     typeof options === "string" ? { uri: options } : options;
+
+  if (opt.uri.startsWith("http://") || opt.uri.startsWith("https://")) {
+    return opt.uri;
+  }
 
   const cloudName = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || "ri4xxxwk";
   const uploadPreset =
@@ -97,30 +72,83 @@ export async function uploadImageToCloudinaryMobile(
   }
 
   const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-  const filePayload = await resolveFilePayload(opt);
+  const filename = opt.uri.split("/").pop() || `photo_${Date.now()}.jpg`;
+  const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
+  const mimeType = opt.mimeType || (ext === "png" ? "image/png" : "image/jpeg");
 
-  // If payload is a data URI or remote URL string, we can upload directly
-  const formData = new FormData();
-  formData.append("upload_preset", uploadPreset);
-  formData.append("file", filePayload as any);
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Cloudinary Mobile] Upload error:", errorText);
-    throw new Error(`Failed to upload to Cloudinary: ${response.statusText}`);
+  // 1. Direct Base64 upload if provided
+  if (opt.base64) {
+    const cleanBase64 = opt.base64.includes(",")
+      ? opt.base64
+      : `data:${mimeType};base64,${opt.base64}`;
+    const res = await uploadViaNativeXHR(endpoint, uploadPreset, cleanBase64);
+    if (res.secure_url) return res.secure_url;
   }
 
-  const data = await response.json();
-  if (!data.secure_url) {
+  // 2. Web browser: fetch blob and use standard FormData
+  if (Platform.OS === "web") {
+    const res = await fetch(opt.uri);
+    const blob = await res.blob();
+    const formData = new FormData();
+    formData.append("upload_preset", uploadPreset);
+    formData.append("file", blob, filename);
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(
+        `Cloudinary upload failed: ${response.statusText} - ${errText}`,
+      );
+    }
+    const data = await response.json();
+    if (data.secure_url) return data.secure_url;
     throw new Error("Cloudinary did not return a secure_url.");
   }
 
-  return data.secure_url;
+  // 3. React Native Mobile: Use FileSystem.uploadAsync (streaming from native disk)
+  try {
+    const FileSystem = require("expo-file-system");
+    if (
+      FileSystem &&
+      FileSystem.uploadAsync &&
+      FileSystem.FileSystemUploadType
+    ) {
+      const uploadResult = await FileSystem.uploadAsync(endpoint, opt.uri, {
+        httpMethod: "POST",
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: "file",
+        parameters: {
+          upload_preset: uploadPreset,
+        },
+      });
+      if (uploadResult.status >= 200 && uploadResult.status < 300) {
+        const parsed = JSON.parse(uploadResult.body);
+        if (parsed.secure_url) {
+          return parsed.secure_url;
+        }
+      }
+    }
+  } catch (fsErr) {
+    console.warn(
+      "[Cloudinary] FileSystem.uploadAsync failed, attempting XHR fallback:",
+      fsErr,
+    );
+  }
+
+  // 4. Native XHR fallback with React Native's native FormData file object
+  const xhrResult = await uploadViaNativeXHR(endpoint, uploadPreset, {
+    uri: opt.uri,
+    name: filename,
+    type: mimeType,
+  });
+  if (xhrResult.secure_url) {
+    return xhrResult.secure_url;
+  }
+
+  throw new Error("Could not upload image to Cloudinary.");
 }
 
 export async function uploadVideoToCloudinaryMobile(
@@ -128,6 +156,10 @@ export async function uploadVideoToCloudinaryMobile(
 ): Promise<string> {
   const opt: CloudinaryMobileUploadOptions =
     typeof options === "string" ? { uri: options } : options;
+
+  if (opt.uri.startsWith("http://") || opt.uri.startsWith("https://")) {
+    return opt.uri;
+  }
 
   const cloudName = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || "ri4xxxwk";
   const uploadPreset =
@@ -140,38 +172,85 @@ export async function uploadVideoToCloudinaryMobile(
   }
 
   const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`;
-  const filePayload = await resolveFilePayload({
-    ...opt,
-    mimeType: opt.mimeType || "video/mp4",
-  });
+  const filename = opt.uri.split("/").pop() || `reel_${Date.now()}.mp4`;
+  const ext = filename.split(".").pop()?.toLowerCase() || "mp4";
+  const mimeType =
+    opt.mimeType || (ext === "mov" ? "video/quicktime" : "video/mp4");
 
-  const formData = new FormData();
-  formData.append("upload_preset", uploadPreset);
-  if (typeof Blob !== "undefined" && filePayload instanceof Blob) {
-    formData.append("file", filePayload, "reel_video.mp4");
-  } else {
-    formData.append("file", filePayload as any);
+  // 1. Direct Base64 upload if provided
+  if (opt.base64) {
+    const cleanBase64 = opt.base64.includes(",")
+      ? opt.base64
+      : `data:${mimeType};base64,${opt.base64}`;
+    const res = await uploadViaNativeXHR(endpoint, uploadPreset, cleanBase64);
+    if (res.secure_url) return res.secure_url;
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    body: formData,
-  });
+  // 2. Web browser: fetch blob and use standard FormData
+  if (Platform.OS === "web") {
+    const res = await fetch(opt.uri);
+    const blob = await res.blob();
+    const formData = new FormData();
+    formData.append("upload_preset", uploadPreset);
+    formData.append("file", blob, filename);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Cloudinary Video Mobile] Upload error:", errorText);
-    throw new Error(
-      `Failed to upload video to Cloudinary: ${response.statusText}`,
-    );
-  }
-
-  const data = await response.json();
-  if (!data.secure_url) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(
+        `Cloudinary video upload failed: ${response.statusText} - ${errText}`,
+      );
+    }
+    const data = await response.json();
+    if (data.secure_url) return data.secure_url;
     throw new Error("Cloudinary did not return a secure_url for video.");
   }
 
-  return data.secure_url;
+  // 3. React Native Mobile: Use FileSystem.uploadAsync (streaming from native disk)
+  try {
+    const FileSystem = require("expo-file-system");
+    if (
+      FileSystem &&
+      FileSystem.uploadAsync &&
+      FileSystem.FileSystemUploadType
+    ) {
+      const uploadResult = await FileSystem.uploadAsync(endpoint, opt.uri, {
+        httpMethod: "POST",
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: "file",
+        parameters: {
+          upload_preset: uploadPreset,
+        },
+      });
+      if (uploadResult.status >= 200 && uploadResult.status < 300) {
+        const parsed = JSON.parse(uploadResult.body);
+        if (parsed.secure_url) {
+          return parsed.secure_url;
+        }
+      }
+    }
+  } catch (fsErr) {
+    console.warn(
+      "[Cloudinary] FileSystem.uploadAsync failed, attempting XHR fallback:",
+      fsErr,
+    );
+  }
+
+  // 4. Native XHR fallback with React Native's native FormData file object
+  // Native XMLHttpRequest talks to RCTNetworking (okhttp), avoiding Expo JS fetch convertFormDataAsync
+  const xhrResult = await uploadViaNativeXHR(endpoint, uploadPreset, {
+    uri: opt.uri,
+    name: filename,
+    type: mimeType,
+  });
+  if (xhrResult.secure_url) {
+    return xhrResult.secure_url;
+  }
+
+  throw new Error("Could not upload video to Cloudinary.");
 }
 
 export const uploadImageToCloudinary = uploadImageToCloudinaryMobile;

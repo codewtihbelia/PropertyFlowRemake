@@ -86,7 +86,8 @@
       "expo-audio",
       "expo-web-browser",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-video"
     ],
     "updates": {
       "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a"

@@ -163,7 +163,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const [reels, setReels] = useState<CommunityReel[]>([]);
   const [loadingReels, setLoadingReels] = useState(true);
   const [activeReelIndex, setActiveReelIndex] = useState(0);
-  const [isReelsMuted, setIsReelsMuted] = useState(true);
+  const [isReelsMuted, setIsReelsMuted] = useState(false);
   const [selectedReelCategory, setSelectedReelCategory] =
     useState<ReelCategory>("all");
   const [createReelVisible, setCreateReelVisible] = useState(false);

@@ -220,13 +220,36 @@ export interface CommunityReelComment {
 
 export function normalizeFacebookUrl(url: string): string {
   if (!url) return "";
-  const clean = url.trim();
-  // Extract numeric id from /reel/123456789 or /videos/123456789 or ?v=123456789
-  const matchId = clean.match(/(?:reel|videos|watch\/?\?v=|\/v\/)(\d+)/i);
-  if (matchId && matchId[1]) {
-    return `https://www.facebook.com/watch/?v=${matchId[1]}`;
+  let clean = url.trim().replace(/^["']|["']$/g, "");
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = "https://" + clean;
   }
-  return clean;
+
+  // 1. If it has a pure numeric video/reel ID:
+  // e.g. /reel/1041123456789012, /videos/1041123456789012, ?v=1041123456789012
+  const numericMatch =
+    clean.match(/\/(?:reel|reels)\/(\d+)/i) ||
+    clean.match(/\/share\/[rv]\/(\d+)/i) ||
+    clean.match(/[?&]v=(\d+)/i) ||
+    clean.match(/\/videos\/(\d+)/i);
+
+  if (numericMatch && numericMatch[1]) {
+    return `https://www.facebook.com/reel/${numericMatch[1]}/`;
+  }
+
+  // 2. If it's a mobile share redirect link (/share/r/abc123) or fb.watch/abc:
+  // Strip tracking parameters but preserve the original path so Facebook app can resolve it
+  try {
+    const parsed = new URL(clean);
+    parsed.searchParams.delete("mibextid");
+    parsed.searchParams.delete("s");
+    parsed.searchParams.delete("fs");
+    parsed.searchParams.delete("fbclid");
+    parsed.searchParams.delete("ref");
+    return parsed.toString();
+  } catch {
+    return clean.split("?")[0];
+  }
 }
 
 export function getReelVideoType(url: string): "youtube" | "facebook" | "mp4" {
@@ -242,7 +265,8 @@ export function getReelVideoType(url: string): "youtube" | "facebook" | "mp4" {
   if (
     clean.includes("facebook.com") ||
     clean.includes("fb.watch") ||
-    clean.includes("fb.me")
+    clean.includes("fb.me") ||
+    clean.includes("/share/r/")
   ) {
     return "facebook";
   }
@@ -251,10 +275,14 @@ export function getReelVideoType(url: string): "youtube" | "facebook" | "mp4" {
 
 export function extractYouTubeId(url: string): string | null {
   if (!url) return null;
-  const clean = url.trim();
+  let clean = url.trim();
+  clean = clean.replace(/^["']|["']$/g, "");
   // Direct 11-character video ID
   if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) {
     return clean;
+  }
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = "https://" + clean;
   }
   // Standard YouTube Shorts / Watch / Share URL variations (handles query params, handles, channels)
   const match =

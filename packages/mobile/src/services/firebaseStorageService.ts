@@ -130,17 +130,72 @@ export async function uploadVideoToFirebaseStorageMobile(
 
   if (storage) {
     const storageRef = ref(storage, storagePath);
-    const response = await fetch(videoUri);
-    const blob = await response.blob();
-    await uploadBytes(storageRef, blob, {
-      contentType: "video/mp4",
-      customMetadata: {
-        uploadedFrom: "mobile_reels",
-        originalFilename: filename,
-      },
-    });
-    const downloadUrl = await getDownloadURL(storageRef);
-    if (downloadUrl) return downloadUrl;
+
+    // On Web, native fetch blob works with uploadBytes
+    if (
+      typeof window !== "undefined" &&
+      (videoUri.startsWith("blob:") || videoUri.startsWith("data:"))
+    ) {
+      try {
+        const response = await fetch(videoUri);
+        const blob = await response.blob();
+        await uploadBytes(storageRef, blob, {
+          contentType: "video/mp4",
+          customMetadata: {
+            uploadedFrom: "web_reels",
+            originalFilename: filename,
+          },
+        });
+        const downloadUrl = await getDownloadURL(storageRef);
+        if (downloadUrl) return downloadUrl;
+      } catch (webErr) {
+        console.warn("[FirebaseStorageMobile] Web blob upload failed:", webErr);
+      }
+    }
+
+    // On React Native, read via FileSystem as base64 to avoid React Native Blob bugs
+    try {
+      const FileSystem = require("expo-file-system");
+      if (FileSystem?.readAsStringAsync) {
+        const base64Content = await FileSystem.readAsStringAsync(videoUri, {
+          encoding: FileSystem.EncodingType?.Base64 || "base64",
+        });
+        await uploadString(storageRef, base64Content, "base64", {
+          contentType: "video/mp4",
+          customMetadata: {
+            uploadedFrom: "mobile_reels",
+            originalFilename: filename,
+          },
+        });
+        const downloadUrl = await getDownloadURL(storageRef);
+        if (downloadUrl) return downloadUrl;
+      }
+    } catch (fsErr) {
+      console.warn(
+        "[FirebaseStorageMobile] FileSystem base64 upload failed:",
+        fsErr,
+      );
+    }
+
+    // Fallback: standard fetch blob
+    try {
+      const response = await fetch(videoUri);
+      const blob = await response.blob();
+      await uploadBytes(storageRef, blob, {
+        contentType: "video/mp4",
+        customMetadata: {
+          uploadedFrom: "mobile_reels_fallback",
+          originalFilename: filename,
+        },
+      });
+      const downloadUrl = await getDownloadURL(storageRef);
+      if (downloadUrl) return downloadUrl;
+    } catch (err) {
+      console.warn(
+        "[FirebaseStorageMobile] Raw blob upload fallback failed:",
+        err,
+      );
+    }
   }
-  throw new Error("Firebase storage is not configured.");
+  throw new Error("Could not upload video to Firebase Storage.");
 }

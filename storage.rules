@@ -46,6 +46,12 @@ service firebase.storage {
                    && isImageOrPdf() && isValidSize(10 * 1024 * 1024);
     }
 
+    // Community Reels & video clips
+    match /community_reels/{allPaths=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // Fallback for authenticated app assets
     match /{allPaths=**} {
       allow read: if true;

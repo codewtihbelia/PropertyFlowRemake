@@ -271,8 +271,17 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
         );
         return;
       }
-      if (getReelVideoType(trimmed) === "facebook") {
+      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        trimmed = "https://" + trimmed;
+      }
+      const detectedType = getReelVideoType(trimmed);
+      if (detectedType === "facebook") {
         trimmed = normalizeFacebookUrl(trimmed);
+      } else if (detectedType === "youtube") {
+        const ytId = extractYouTubeId(trimmed);
+        if (ytId) {
+          trimmed = `https://www.youtube.com/shorts/${ytId}`;
+        }
       }
       finalVideoUrl = trimmed;
     } else {
@@ -602,6 +611,42 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+
+              {/* Informative Platform Guidance */}
+              <View
+                style={{
+                  backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                  padding: 10,
+                  borderRadius: 10,
+                  gap: 4,
+                }}
+              >
+                <Text
+                  style={{
+                    color: isDark ? "#94A3B8" : "#475569",
+                    fontSize: 11,
+                    lineHeight: 16,
+                  }}
+                >
+                  <Text style={{ fontWeight: "700", color: "#2563EB" }}>
+                    • YouTube Shorts:{" "}
+                  </Text>
+                  Plays directly inside the vertical feed container.
+                </Text>
+                <Text
+                  style={{
+                    color: isDark ? "#94A3B8" : "#475569",
+                    fontSize: 11,
+                    lineHeight: 16,
+                  }}
+                >
+                  <Text style={{ fontWeight: "700", color: "#1877F2" }}>
+                    • Facebook Reels:{" "}
+                  </Text>
+                  Public reels stream in-app; viewers can also tap to launch
+                  directly in the Facebook app.
+                </Text>
+              </View>
 
               {/* Status Detection Badge */}
               {videoLink.trim() && (
