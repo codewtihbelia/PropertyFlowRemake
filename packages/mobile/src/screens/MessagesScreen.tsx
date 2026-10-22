@@ -441,7 +441,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         keyboardHeight > 0
           ? keyboardHeight
           : cachedAndroidKeyboardHeight || 290;
-      return activeHeight + 30;
+      return activeHeight + 50;
     }
     // On iOS, KeyboardAvoidingView (with behavior="padding") automatically offsets the entire
     // container, so 8px padding keeps it flush right above the keyboard.
