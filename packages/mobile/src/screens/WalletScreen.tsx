@@ -11587,7 +11587,14 @@ export function WalletScreen({
                     like to do first:
                   </Text>
 
-                  <View style={{ width: "100%", gap: 10, marginTop: 16 }}>
+                  <View
+                    style={{
+                      width: "100%",
+                      gap: 10,
+                      marginTop: 16,
+                      marginBottom: 20,
+                    }}
+                  >
                     <TouchableOpacity
                       style={styles.walkthroughActionPrimary}
                       onPress={() => handleFinishWalkthrough("cash_in")}

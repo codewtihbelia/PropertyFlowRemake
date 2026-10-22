@@ -1,0 +1,4 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./node_modules/expo/tsconfig.base.json"
+}

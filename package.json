@@ -13,7 +13,8 @@
     "build:web": "npm --workspace=@propertyflow/web run build",
     "dev:mobile": "npm --workspace=@propertyflow/mobile run start",
     "test": "npm --workspace=@propertyflow/shared run test",
-    "build:shared": "npm --workspace=@propertyflow/shared run build"
+    "build:shared": "npm --workspace=@propertyflow/shared run build",
+    "postinstall": "npm --workspace=@propertyflow/mobile run postinstall || true"
   },
   "devDependencies": {
     "@react-native/babel-plugin-codegen": "^0.86.3",

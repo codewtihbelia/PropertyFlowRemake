@@ -441,7 +441,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         keyboardHeight > 0
           ? keyboardHeight
           : cachedAndroidKeyboardHeight || 290;
-      return activeHeight + 8;
+      return activeHeight + 30;
     }
     // On iOS, KeyboardAvoidingView (with behavior="padding") automatically offsets the entire
     // container, so 8px padding keeps it flush right above the keyboard.
@@ -2620,7 +2620,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </Text>
 
             {/* Dedicated action menu button on card when user has an active note */}
-            {currentUserNote && (
+            {/* {currentUserNote && (
               <TouchableOpacity
                 style={[
                   styles.cardActionMenuBtn,
@@ -2641,7 +2641,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   color={isDark ? "#94A3B8" : "#64748B"}
                 />
               </TouchableOpacity>
-            )}
+            )} */}
           </TouchableOpacity>
 
           {/* Cards 1..N: Real Bills Group Members with Presence and Notes */}
