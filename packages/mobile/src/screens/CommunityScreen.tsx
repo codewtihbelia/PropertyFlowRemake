@@ -59,7 +59,6 @@ import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { CreateReelModal } from "../components/CreateReelModal";
 import { ReelCommentsModal } from "../components/ReelCommentsModal";
 import { SplitzyReelItem } from "../components/SplitzyReelItem";
-import { InAppVideoPlayerModal } from "../components/InAppVideoPlayerModal";
 
 const safeCopyTextAsync = async (text: string): Promise<boolean> => {
   try {
@@ -171,9 +170,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const [activeReelForComments, setActiveReelForComments] =
     useState<CommunityReel | null>(null);
   const [reelsViewportHeight, setReelsViewportHeight] = useState(650);
-  const [inAppVideoReel, setInAppVideoReel] = useState<CommunityReel | null>(
-    null,
-  );
 
   // Feed states
   const [posts, setPosts] = useState<CommunityPost[]>([]);
@@ -3165,9 +3161,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                   }
                   onDeleteReel={handleDeleteReel}
                   onActivate={() => setActiveReelIndex(index)}
-                  onPlayInAppModal={(targetReel) =>
-                    setInAppVideoReel(targetReel)
-                  }
                   currentUserId={currentUid}
                   itemHeight={reelsViewportHeight}
                 />
@@ -4156,16 +4149,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         reel={activeReelForComments}
         onClose={() => setActiveReelForComments(null)}
         currentUser={currentUser}
-      />
-
-      {/* In-App Video Player Modal (100% In-App Playback Without External Redirects) */}
-      <InAppVideoPlayerModal
-        visible={!!inAppVideoReel}
-        reel={inAppVideoReel}
-        onClose={() => setInAppVideoReel(null)}
-        onOpenProfile={(uid, name, avatar) =>
-          handleOpenUserProfile({ uid, name, avatar })
-        }
       />
 
       {/* Post Options Bottom Sheet Modal */}

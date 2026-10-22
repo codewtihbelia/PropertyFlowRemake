@@ -39,7 +39,6 @@ interface SplitzyReelItemProps {
   ) => void;
   onDeleteReel?: (reelId: string) => void;
   onActivate?: () => void;
-  onPlayInAppModal?: (reel: CommunityReel) => void;
   currentUserId: string;
   itemHeight: number;
 }
@@ -54,7 +53,6 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
   onOpenProfile,
   onDeleteReel,
   onActivate,
-  onPlayInAppModal,
   currentUserId,
   itemHeight,
 }) => {
@@ -210,10 +208,10 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
   // Construct iframe embed source
   const getEmbedSource = () => {
     if (videoType === "youtube" && youtubeId) {
-      return `https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&enablejsapi=1`;
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&enablejsapi=1`;
     }
     if (videoType === "facebook") {
-      return `https://www.facebook.com/plugins/video.php?height=100%25&href=${encodeURIComponent(reel.videoUrl)}&show_text=false&width=100%25&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`;
+      return `https://www.facebook.com/plugins/video.php?height=100%25&href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=100%25&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`;
     }
     return null;
   };
@@ -237,7 +235,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             }}
           >
             {videoType === "youtube" && youtubeId ? (
-              // Verified YouTube Shorts In-App Embed Player
+              // Direct In-App YouTube Shorts Player
               <div
                 style={{
                   position: "relative",
@@ -247,9 +245,9 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                 }}
               >
                 <iframe
-                  key={youtubeId}
-                  src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3&enablejsapi=1`}
-                  title={reel.caption || "Community Reel"}
+                  key={`yt-${youtubeId}`}
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3&enablejsapi=1`}
+                  title={reel.caption || "YouTube Short"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                   loading="eager"
@@ -262,47 +260,9 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                     objectFit: "cover",
                   }}
                 />
-                {/* In-app popup player button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onPlayInAppModal) {
-                      onPlayInAppModal(reel);
-                    }
-                  }}
-                  style={{
-                    position: "absolute",
-                    bottom: "135px",
-                    left: "16px",
-                    zIndex: 15,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    backgroundColor: "rgba(220, 38, 38, 0.95)",
-                    color: "#FFFFFF",
-                    padding: "6px 14px",
-                    borderRadius: "16px",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                    border: "none",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                  <span>Play In-App</span>
-                </button>
               </div>
             ) : videoType === "facebook" ? (
-              // Facebook Reel In-App Embed Player
+              // Direct In-App Facebook Reel Player
               <div
                 style={{
                   position: "relative",
@@ -328,44 +288,6 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                   allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
                   allowFullScreen
                 />
-                {/* In-app popup player button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onPlayInAppModal) {
-                      onPlayInAppModal(reel);
-                    }
-                  }}
-                  style={{
-                    position: "absolute",
-                    bottom: "135px",
-                    left: "16px",
-                    zIndex: 15,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    backgroundColor: "rgba(24, 119, 242, 0.95)",
-                    color: "#FFFFFF",
-                    padding: "6px 14px",
-                    borderRadius: "16px",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                    border: "none",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                  <span>Play In-App</span>
-                </button>
               </div>
             ) : (
               // Direct MP4 video stream with Native DOM trusted user gesture play control
@@ -506,8 +428,10 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             style={styles.nativeVideoPlaceholder}
             activeOpacity={0.9}
             onPress={() => {
-              if (onPlayInAppModal) {
-                onPlayInAppModal(reel);
+              if (videoType === "youtube" || videoType === "facebook") {
+                handleOpenExternal();
+              } else {
+                togglePlayPause();
               }
             }}
           >
@@ -1029,7 +953,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 76,
-    bottom: 24,
+    bottom: 40,
     gap: 8,
     zIndex: 20,
   },
