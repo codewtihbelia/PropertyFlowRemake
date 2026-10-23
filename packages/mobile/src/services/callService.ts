@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { Platform } from "react-native";
+import { setAudioModeAsync } from "expo-audio";
 
 export type CallType = "voice" | "video";
 export type CallStatus =
@@ -41,6 +42,33 @@ export interface CallSession {
   answer?: any;
   callerCandidates?: any[];
   receiverCandidates?: any[];
+}
+
+export function serializeCandidate(c: any): any {
+  if (!c) return null;
+  const rawCand = typeof c === "string" ? c : c.candidate;
+  if (!rawCand || typeof rawCand !== "string") return null;
+
+  let sdpMid = c.sdpMid;
+  if (sdpMid === undefined || sdpMid === null) {
+    sdpMid = "0";
+  } else {
+    sdpMid = String(sdpMid);
+  }
+
+  let sdpMLineIndex = 0;
+  if (typeof c.sdpMLineIndex === "number") {
+    sdpMLineIndex = c.sdpMLineIndex;
+  } else if (c.sdpMLineIndex !== undefined && c.sdpMLineIndex !== null) {
+    const parsed = parseInt(c.sdpMLineIndex, 10);
+    sdpMLineIndex = isNaN(parsed) ? 0 : parsed;
+  }
+
+  return {
+    candidate: rawCand,
+    sdpMid,
+    sdpMLineIndex,
+  };
 }
 
 // ----------------------------------------------------------------------
@@ -481,6 +509,39 @@ class CallManager {
     });
   }
 
+  // Configure Android/iOS system audio mode for call session (loudspeaker vs earpiece)
+  async configureAudioSession(callType: CallType, isSpeaker: boolean = false) {
+    if (Platform.OS === "web") return;
+    try {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: true,
+        interruptionMode: "doNotMix" as any,
+        shouldRouteThroughEarpiece: !isSpeaker,
+      });
+      console.log(
+        `[CallManager] Audio routing set: ${isSpeaker ? "Loudspeaker" : "Earpiece"}`,
+      );
+    } catch (e) {
+      console.warn("[CallManager] Audio mode configuration warning:", e);
+    }
+  }
+
+  // Restore default audio session mode when call terminates
+  async resetAudioSession() {
+    if (Platform.OS === "web") return;
+    try {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: false,
+        interruptionMode: "mixWithOthers" as any,
+        shouldRouteThroughEarpiece: false,
+      });
+    } catch (e) {
+      console.warn("[CallManager] Audio mode reset warning:", e);
+    }
+  }
+
   // Initialize or fetch local user media with resilient fallback chain
   async startLocalMedia(callType: CallType): Promise<any> {
     const mediaDevices = getMediaDevices();
@@ -490,6 +551,9 @@ class CallManager {
       );
       return null;
     }
+
+    // Configure device audio session upfront
+    await this.configureAudioSession(callType, callType === "video");
 
     // Reuse existing live stream if it already satisfies the requested call type
     if (this.localStream) {
@@ -506,20 +570,14 @@ class CallManager {
       }
     }
 
-    // VIDEO CALL: Multi-tier fallback strategy
+    // VIDEO CALL: Standard multi-tier fallback strategy
     if (callType === "video") {
-      // Tier 1: Mobile-friendly ideal facingMode & audio processing
+      // Tier 1: Hardware-native audio + mobile facingMode constraints
       try {
         const stream = await mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: true,
           video: {
-            facingMode: this.isFrontCamera
-              ? { ideal: "user" }
-              : { ideal: "environment" },
+            facingMode: this.isFrontCamera ? "user" : "environment",
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -528,7 +586,7 @@ class CallManager {
         return stream;
       } catch (e1) {
         console.warn(
-          "[CallManager] Tier 1 ideal video constraints failed, trying basic video+audio:",
+          "[CallManager] Tier 1 facingMode constraints failed, trying basic video+audio:",
           e1,
         );
       }
@@ -581,31 +639,13 @@ class CallManager {
     // VOICE CALL (or audio fallback if camera unavailable)
     try {
       const audioStream = await mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      });
-      this.notifyLocalStream(audioStream);
-      return audioStream;
-    } catch (eAudio1) {
-      console.warn(
-        "[CallManager] High-quality audio failed, trying simple audio:",
-        eAudio1,
-      );
-    }
-
-    try {
-      const audioStream = await mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
       this.notifyLocalStream(audioStream);
       return audioStream;
-    } catch (eAudio2) {
-      console.error("[CallManager] All getUserMedia attempts failed:", eAudio2);
+    } catch (eAudio) {
+      console.error("[CallManager] Voice getUserMedia failed:", eAudio);
       return null;
     }
   }
@@ -745,10 +785,25 @@ class CallManager {
         this.peerConnection = pc;
 
         if (stream) {
-          stream.getTracks().forEach((track: any) => {
-            pc.addTrack(track, stream);
-          });
+          if (typeof pc.addStream === "function") {
+            try {
+              pc.addStream(stream);
+            } catch (e) {}
+          }
+          if (typeof pc.addTrack === "function") {
+            try {
+              stream.getTracks().forEach((track: any) => {
+                pc.addTrack(track, stream);
+              });
+            } catch (e) {}
+          }
         }
+
+        pc.onaddstream = (event: any) => {
+          if (event && event.stream) {
+            this.notifyRemoteStream(event.stream);
+          }
+        };
 
         pc.ontrack = (event: any) => {
           let rStream =
@@ -770,7 +825,7 @@ class CallManager {
 
         pc.onicecandidate = (event: any) => {
           if (event.candidate && this.currentCallId === callId) {
-            const cand = event.candidate.toJSON();
+            const cand = serializeCandidate(event.candidate);
             if (cand && cand.candidate) {
               if (!isCallDocSaved) {
                 initialCandidates.push(cand);
@@ -869,10 +924,25 @@ class CallManager {
         this.peerConnection = pc;
 
         if (stream) {
-          stream.getTracks().forEach((track: any) => {
-            pc.addTrack(track, stream);
-          });
+          if (typeof pc.addStream === "function") {
+            try {
+              pc.addStream(stream);
+            } catch (e) {}
+          }
+          if (typeof pc.addTrack === "function") {
+            try {
+              stream.getTracks().forEach((track: any) => {
+                pc.addTrack(track, stream);
+              });
+            } catch (e) {}
+          }
         }
+
+        pc.onaddstream = (event: any) => {
+          if (event && event.stream) {
+            this.notifyRemoteStream(event.stream);
+          }
+        };
 
         pc.ontrack = (event: any) => {
           let rStream =
@@ -894,7 +964,7 @@ class CallManager {
 
         pc.onicecandidate = (event: any) => {
           if (event.candidate && this.currentCallId === callSession.id) {
-            const cand = event.candidate.toJSON();
+            const cand = serializeCandidate(event.candidate);
             if (cand && cand.candidate) {
               if (!isAnswerSaved) {
                 initialReceiverCandidates.push(cand);
@@ -996,17 +1066,20 @@ class CallManager {
 
     for (const c of candidates) {
       if (!c) continue;
-      const key = typeof c === "string" ? c : c.candidate || JSON.stringify(c);
+      const candObj = serializeCandidate(c);
+      if (!candObj || !candObj.candidate) continue;
+
+      const key = `${candObj.candidate}_${candObj.sdpMid}_${candObj.sdpMLineIndex}`;
       if (this.processedCandidates.has(key)) continue;
       this.processedCandidates.add(key);
 
       if (!this.hasRemoteDescriptionSet) {
-        this.pendingRemoteCandidates.push(c);
+        this.pendingRemoteCandidates.push(candObj);
         continue;
       }
 
       try {
-        await this.peerConnection.addIceCandidate(new RTCIce(c));
+        await this.peerConnection.addIceCandidate(new RTCIce(candObj));
       } catch (e) {
         console.warn("[CallManager] addIceCandidate error:", e);
       }
@@ -1082,6 +1155,7 @@ class CallManager {
   // Clean up streams & peer connection
   cleanup() {
     tonePlayer.stop();
+    this.resetAudioSession().catch(() => {});
     if (this.localStream) {
       try {
         this.localStream.getTracks().forEach((track: any) => track.stop());

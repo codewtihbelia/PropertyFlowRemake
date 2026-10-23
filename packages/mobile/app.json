@@ -17,7 +17,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.splitzy.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Splitzy requires camera access for video calling roommates and community members.",
+        "NSMicrophoneUsageDescription": "Splitzy requires microphone access for voice and video calls."
       },
       "runtimeVersion": {
         "policy": "appVersion"
@@ -37,11 +39,15 @@
       "package": "com.splitzy.app",
       "googleServicesFile": "./google-services.json",
       "permissions": [
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
+      "versionCode": 4,
       "runtimeVersion": "2.9.5"
     },
     "web": {
@@ -91,7 +97,9 @@
       "@config-plugins/react-native-webrtc"
     ],
     "updates": {
-      "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a"
+      "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 5000
     },
     "owner": "splitzy01"
   }

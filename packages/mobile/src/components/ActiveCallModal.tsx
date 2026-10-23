@@ -42,6 +42,9 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
   const [audioNeedsTap, setAudioNeedsTap] = useState<boolean>(false);
   const [localStreamURL, setLocalStreamURL] = useState<string | null>(null);
   const [remoteStreamURL, setRemoteStreamURL] = useState<string | null>(null);
+  const [isSpeakerOn, setIsSpeakerOn] = useState<boolean>(
+    call?.callType === "video",
+  );
 
   const isWebRTCAvailable = isNativeWebRTCAvailable();
   const NativeRTCView = getNativeRTCView();
@@ -50,6 +53,13 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
   const remoteVideoRef = useRef<any>(null);
   const remoteAudioRef = useRef<any>(null);
   const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
+
+  // Synchronize audio output session (loudspeaker vs earpiece)
+  useEffect(() => {
+    if (call?.status === "connected") {
+      callService.configureAudioSession(call.callType, isSpeakerOn);
+    }
+  }, [call?.status, isSpeakerOn, call?.callType]);
 
   // Audio wave visualizer bars for voice calls
   const waveAnim1 = useRef(new Animated.Value(12)).current;
@@ -162,12 +172,12 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
         typeof stream.toURL === "function" ? stream.toURL() : null;
       setRemoteStreamURL(streamUrl);
 
-      const hasTrack = stream.getVideoTracks
-        ? stream
-            .getVideoTracks()
-            .some((t: any) => t.enabled && t.readyState === "live")
-        : false;
-      if (hasTrack) {
+      const videoTracks = stream.getVideoTracks ? stream.getVideoTracks() : [];
+      const hasTrack =
+        videoTracks.length > 0
+          ? videoTracks.some((t: any) => t.enabled !== false)
+          : false;
+      if (hasTrack || Boolean(streamUrl)) {
         setHasRemoteVideo(true);
       }
 
@@ -430,7 +440,7 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
             ) : null}
 
             {/* Backdrop placeholder if remote video is not streaming yet or single user test */}
-            {(!hasRemoteVideo || !isConnected) && (
+            {(!isConnected || (!hasRemoteVideo && !remoteStreamURL)) && (
               <View style={styles.videoPlaceholderSurface}>
                 <View style={styles.videoPlaceholderGlow} />
                 <View style={styles.avatarWrapLarge}>
@@ -640,6 +650,31 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                 name={isMuted ? "mic-off" : "mic"}
                 size={22}
                 color={isMuted ? "#EF4444" : "#F8FAFC"}
+              />
+            </TouchableOpacity>
+
+            {/* Speaker / Earpiece Toggle */}
+            <TouchableOpacity
+              style={[
+                styles.controlBtn,
+                isSpeakerOn && styles.controlBtnActiveSpeaker,
+              ]}
+              onPress={() => {
+                const nextSpeaker = !isSpeakerOn;
+                setIsSpeakerOn(nextSpeaker);
+                if (call) {
+                  callService.configureAudioSession(call.callType, nextSpeaker);
+                }
+              }}
+              activeOpacity={0.8}
+              accessibilityLabel={
+                isSpeakerOn ? "Switch to Earpiece" : "Switch to Speaker"
+              }
+            >
+              <Ionicons
+                name={isSpeakerOn ? "volume-high" : "volume-medium"}
+                size={22}
+                color={isSpeakerOn ? "#60A5FA" : "#F8FAFC"}
               />
             </TouchableOpacity>
 
@@ -975,6 +1010,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239, 68, 68, 0.2)",
     borderWidth: 1,
     borderColor: "rgba(239, 68, 68, 0.4)",
+  },
+  controlBtnActiveSpeaker: {
+    backgroundColor: "rgba(37, 99, 235, 0.25)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.5)",
   },
   endCallBtn: {
     backgroundColor: "#EF4444",

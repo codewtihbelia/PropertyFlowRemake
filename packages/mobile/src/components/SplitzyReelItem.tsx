@@ -628,10 +628,11 @@ const SplitzyReelItemComponent: React.FC<SplitzyReelItemProps> = ({
               />
             </TouchableOpacity>
           ) : (
-            <View style={styles.liveBadge}>
-              <Text style={styles.liveBadgeDot}>•</Text>
-              <Text style={styles.liveBadgeText}>IN-APP STREAM</Text>
-            </View>
+            <View></View>
+            // <View style={styles.liveBadge}>
+            //   <Text style={styles.liveBadgeDot}>•</Text>
+            //   <Text style={styles.liveBadgeText}>IN-APP STREAM</Text>
+            // </View>
           )}
         </View>
 
@@ -1018,6 +1019,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
+    position: "absolute",
+    top: 2,
+    right: -6,
   },
   soundToggleBtnMuted: {
     backgroundColor: "rgba(0, 0, 0, 0.72)",
