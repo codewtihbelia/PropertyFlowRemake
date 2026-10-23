@@ -273,6 +273,14 @@ if (
 
 // ----------------------------------------------------------------------
 // WebRTC Signaling & Connection Manager
+export interface UserPresenceResult {
+  isOnline: boolean;
+  lastActiveAt?: string;
+  statusLabel: string;
+}
+
+// ----------------------------------------------------------------------
+// WebRTC Signaling & Connection Manager
 // ----------------------------------------------------------------------
 const RTC_CONFIG: any = {
   iceServers: [
@@ -289,6 +297,77 @@ class CallManager {
   private activeCallDocUnsub: (() => void) | null = null;
   private currentCallId: string | null = null;
   private isFrontCamera: boolean = true;
+  private processedCandidates = new Set<string>();
+  private pendingRemoteCandidates: any[] = [];
+  private hasRemoteDescriptionSet: boolean = false;
+  private remoteStreamListeners = new Set<(stream: any) => void>();
+
+  /**
+   * Checks whether a contact is currently online or offline.
+   * A user is considered online if their last active timestamp is within 5 minutes.
+   */
+  async checkUserPresence(userId: string): Promise<UserPresenceResult> {
+    const cleanUid = userId.replace(/^mem_/, "").trim();
+    if (!cleanUid) {
+      return { isOnline: false, statusLabel: "Offline" };
+    }
+
+    try {
+      const snap = await getDoc(doc(db, "users", cleanUid));
+      if (snap.exists()) {
+        const data = snap.data();
+        const lastActive = data?.lastActiveAt || data?.lastActiveDate;
+        if (lastActive) {
+          const t = new Date(lastActive).getTime();
+          if (!isNaN(t)) {
+            const diffMs = Date.now() - t;
+            // Within 5 minutes is considered actively online
+            const isOnline = diffMs >= 0 && diffMs < 5 * 60 * 1000;
+            let statusLabel = "Offline";
+            if (isOnline) {
+              statusLabel = "Active now";
+            } else if (diffMs < 60 * 60 * 1000) {
+              const mins = Math.max(1, Math.floor(diffMs / 60000));
+              statusLabel = `Active ${mins}m ago`;
+            } else if (diffMs < 24 * 60 * 60 * 1000) {
+              const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+              statusLabel = `Active ${hrs}h ago`;
+            } else {
+              statusLabel = "Offline";
+            }
+            return { isOnline, lastActiveAt: lastActive, statusLabel };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("checkUserPresence error:", e);
+    }
+    return { isOnline: false, statusLabel: "Offline" };
+  }
+
+  // Subscribe to changes on remote MediaStream
+  onRemoteStream(callback: (stream: any) => void): () => void {
+    this.remoteStreamListeners.add(callback);
+    if (this.remoteStream) {
+      try {
+        callback(this.remoteStream);
+      } catch (e) {}
+    }
+    return () => {
+      this.remoteStreamListeners.delete(callback);
+    };
+  }
+
+  private notifyRemoteStream(stream: any): void {
+    this.remoteStream = stream;
+    this.remoteStreamListeners.forEach((listener) => {
+      try {
+        listener(stream);
+      } catch (e) {
+        console.warn("notifyRemoteStream listener error:", e);
+      }
+    });
+  }
 
   // Initialize or fetch local user media
   async startLocalMedia(callType: CallType): Promise<any> {
@@ -426,8 +505,12 @@ class CallManager {
       `call_${normalizedCallerId}_${normalizedReceiverId}_${Date.now()}`;
     this.currentCallId = callId;
 
+    // Reset candidate tracking & signaling state
+    this.processedCandidates.clear();
+    this.pendingRemoteCandidates = [];
+    this.hasRemoteDescriptionSet = false;
+
     // Immediately create and persist the call document in Firestore so receiver listener triggers right away
-    // and caller subscription immediately finds a valid document
     const callDoc: CallSession = {
       id: callId,
       callerId: normalizedCallerId,
@@ -468,13 +551,13 @@ class CallManager {
 
             pc.ontrack = (event: any) => {
               if (event.streams && event.streams[0]) {
-                this.remoteStream = event.streams[0];
+                this.notifyRemoteStream(event.streams[0]);
               }
             };
 
             pc.onicecandidate = (event: any) => {
-              if (event.candidate && this.currentCallId) {
-                updateDoc(doc(db, "calls", this.currentCallId), {
+              if (event.candidate && this.currentCallId === callId) {
+                updateDoc(doc(db, "calls", callId), {
                   callerCandidates: arrayUnion(event.candidate.toJSON()),
                 }).catch(() => {});
               }
@@ -508,6 +591,11 @@ class CallManager {
     tonePlayer.playConnected();
     this.currentCallId = callSession.id;
 
+    // Reset candidate tracking & signaling state
+    this.processedCandidates.clear();
+    this.pendingRemoteCandidates = [];
+    this.hasRemoteDescriptionSet = false;
+
     await this.startLocalMedia(callSession.callType);
 
     let sdpAnswer: any = null;
@@ -516,6 +604,7 @@ class CallManager {
       typeof (window as any).RTCPeerConnection === "function"
         ? (window as any).RTCPeerConnection
         : null;
+
     if (RTCPeer && callSession.offer) {
       try {
         const pc = new RTCPeer(RTC_CONFIG);
@@ -529,13 +618,13 @@ class CallManager {
 
         pc.ontrack = (event: any) => {
           if (event.streams && event.streams[0]) {
-            this.remoteStream = event.streams[0];
+            this.notifyRemoteStream(event.streams[0]);
           }
         };
 
         pc.onicecandidate = (event: any) => {
-          if (event.candidate && this.currentCallId) {
-            updateDoc(doc(db, "calls", this.currentCallId), {
+          if (event.candidate && this.currentCallId === callSession.id) {
+            updateDoc(doc(db, "calls", callSession.id), {
               receiverCandidates: arrayUnion(event.candidate.toJSON()),
             }).catch(() => {});
           }
@@ -546,28 +635,22 @@ class CallManager {
           typeof (window as any).RTCSessionDescription === "function"
             ? (window as any).RTCSessionDescription
             : null;
+
         if (RTCSession) {
           await pc.setRemoteDescription(new RTCSession(callSession.offer));
+          this.hasRemoteDescriptionSet = true;
+
+          // Add any pending caller candidates
+          if (callSession.callerCandidates?.length) {
+            await this.handleNewCandidates(callSession.callerCandidates);
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sdpAnswer = {
             type: answer.type,
             sdp: answer.sdp,
           };
-        }
-
-        // Add any pending candidates
-        const RTCIce =
-          typeof window !== "undefined" &&
-          typeof (window as any).RTCIceCandidate === "function"
-            ? (window as any).RTCIceCandidate
-            : null;
-        if (RTCIce && callSession.callerCandidates?.length) {
-          callSession.callerCandidates.forEach((c) => {
-            try {
-              pc.addIceCandidate(new RTCIce(c));
-            } catch (e) {}
-          });
         }
       } catch (err) {
         console.warn("WebRTC answer error:", err);
@@ -587,12 +670,26 @@ class CallManager {
       typeof (window as any).RTCSessionDescription === "function"
         ? (window as any).RTCSessionDescription
         : null;
-    if (this.peerConnection && answer && RTCSession) {
+
+    if (
+      this.peerConnection &&
+      answer &&
+      RTCSession &&
+      !this.hasRemoteDescriptionSet
+    ) {
       try {
         if (this.peerConnection.signalingState !== "stable") {
           await this.peerConnection.setRemoteDescription(
             new RTCSession(answer),
           );
+          this.hasRemoteDescriptionSet = true;
+
+          // Flush any remote candidates received prior to remote description
+          if (this.pendingRemoteCandidates.length > 0) {
+            const queued = [...this.pendingRemoteCandidates];
+            this.pendingRemoteCandidates = [];
+            await this.handleNewCandidates(queued);
+          }
         }
       } catch (e) {
         console.warn("handleAnswerReceived error:", e);
@@ -600,19 +697,63 @@ class CallManager {
     }
   }
 
-  // Add received ICE candidates
+  // Add received ICE candidates safely
   async handleNewCandidates(candidates: any[]) {
     const RTCIce =
       typeof window !== "undefined" &&
       typeof (window as any).RTCIceCandidate === "function"
         ? (window as any).RTCIceCandidate
         : null;
-    if (this.peerConnection && candidates && RTCIce) {
-      candidates.forEach((c) => {
-        try {
-          this.peerConnection.addIceCandidate(new RTCIce(c));
-        } catch (e) {}
-      });
+
+    if (
+      !candidates ||
+      !Array.isArray(candidates) ||
+      !RTCIce ||
+      !this.peerConnection
+    ) {
+      return;
+    }
+
+    for (const c of candidates) {
+      if (!c) continue;
+      const key = typeof c === "string" ? c : c.candidate || JSON.stringify(c);
+      if (this.processedCandidates.has(key)) continue;
+      this.processedCandidates.add(key);
+
+      if (!this.hasRemoteDescriptionSet) {
+        this.pendingRemoteCandidates.push(c);
+        continue;
+      }
+
+      try {
+        await this.peerConnection.addIceCandidate(new RTCIce(c));
+      } catch (e) {
+        console.warn("addIceCandidate error:", e);
+      }
+    }
+  }
+
+  // Synchronize Firestore call state with WebRTC PeerConnection
+  async syncSignalingState(callData: CallSession, isCaller: boolean) {
+    if (!this.peerConnection || !callData) return;
+
+    if (isCaller) {
+      // 1. If caller received an answer from receiver
+      if (callData.answer && !this.hasRemoteDescriptionSet) {
+        await this.handleAnswerReceived(callData.answer);
+      }
+      // 2. If caller received ICE candidates from receiver
+      if (
+        callData.receiverCandidates &&
+        callData.receiverCandidates.length > 0
+      ) {
+        await this.handleNewCandidates(callData.receiverCandidates);
+      }
+    } else {
+      // Receiver side: if caller sends additional ICE candidates
+      if (callData.callerCandidates && callData.callerCandidates.length > 0) {
+        await this.handleNewCandidates(callData.callerCandidates);
+      }
     }
   }
 
@@ -668,12 +809,16 @@ class CallManager {
       this.activeCallDocUnsub();
       this.activeCallDocUnsub = null;
     }
+    this.processedCandidates.clear();
+    this.pendingRemoteCandidates = [];
+    this.hasRemoteDescriptionSet = false;
     this.currentCallId = null;
   }
 
   // Subscribe to updates for a specific call session
   subscribeToCall(
     callId: string,
+    isCaller: boolean,
     onUpdate: (call: CallSession | null) => void,
   ) {
     if (this.activeCallDocUnsub) {
@@ -687,6 +832,10 @@ class CallManager {
           return;
         }
         const data = snap.data() as CallSession;
+        // Synchronize WebRTC offer/answer and ICE candidate states automatically
+        this.syncSignalingState(data, isCaller).catch((err) => {
+          console.warn("syncSignalingState error in subscribeToCall:", err);
+        });
         onUpdate(data);
       },
       (err) => {

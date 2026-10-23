@@ -1222,7 +1222,7 @@ export const SplitzyReelItem = memo(
       prevProps.currentUserId === nextProps.currentUserId &&
       (prevProps.reel.likes || []).length ===
         (nextProps.reel.likes || []).length &&
-      (prevProps.reel.viewers || 0) === (nextProps.reel.viewers || 0) &&
+      (prevProps.reel.viewsCount || 0) === (nextProps.reel.viewsCount || 0) &&
       (prevProps.reel.commentsCount || 0) ===
         (nextProps.reel.commentsCount || 0)
     );

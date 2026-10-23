@@ -189,6 +189,58 @@ export class PushDispatchService {
   }
 
   /**
+   * Dispatches high-priority push notification when an incoming voice or video call is placed.
+   * Rings recipient's phone with heads-up alert and opens call on tap even if app is backgrounded or closed.
+   */
+  public async sendIncomingCallPush(params: {
+    callId: string;
+    callerId: string;
+    callerName: string;
+    callerAvatar?: string;
+    receiverId: string;
+    callType: "voice" | "video";
+  }): Promise<boolean> {
+    try {
+      const cleanReceiverId = params.receiverId.replace(/^mem_/, "").trim();
+      const tokens = await this.getPushTokensForUsers([cleanReceiverId]);
+      if (tokens.length === 0) {
+        console.log(
+          `[PushDispatch] No push tokens found for call recipient: ${cleanReceiverId}`,
+        );
+        return false;
+      }
+
+      const isVideo = params.callType === "video";
+      const title = isVideo
+        ? "📹 Incoming Video Call"
+        : "📞 Incoming Voice Call";
+      const body = `${params.callerName} is calling you on Splitzy...`;
+
+      return await this.sendPushToTokens(tokens, {
+        title,
+        body,
+        channelId: "high_priority",
+        sound: "default",
+        data: {
+          type: "incoming_call",
+          callId: params.callId,
+          callerId: params.callerId,
+          callerName: params.callerName,
+          callerAvatar: params.callerAvatar || "",
+          callType: params.callType,
+          screen: "incoming_call",
+        },
+      });
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] Error sending incoming call push notification:",
+        err,
+      );
+      return false;
+    }
+  }
+
+  /**
    * Dispatches push notification for a new household chat message.
    * Notifies all active household members except the sender.
    */

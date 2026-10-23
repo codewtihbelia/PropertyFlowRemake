@@ -36,6 +36,8 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
 
   const localVideoRef = useRef<any>(null);
   const remoteVideoRef = useRef<any>(null);
+  const remoteAudioRef = useRef<any>(null);
+  const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
 
   // Audio wave visualizer bars for voice calls
   const waveAnim1 = useRef(new Animated.Value(12)).current;
@@ -109,6 +111,41 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
     waveAnim4,
   ]);
 
+  // Real-time subscription to remote stream updates via callService
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+
+    const unsubRemoteStream = callService.onRemoteStream((stream) => {
+      if (!stream) return;
+
+      // 1. Permanent audio sink plays remote voice across BOTH voice & video modes
+      if (
+        remoteAudioRef.current &&
+        remoteAudioRef.current.srcObject !== stream
+      ) {
+        remoteAudioRef.current.srcObject = stream;
+        remoteAudioRef.current.play().catch((err: any) => {
+          console.warn(
+            "[ActiveCall] Audio autoplay requires user interaction:",
+            err,
+          );
+        });
+      }
+
+      // 2. Video sink for video calls
+      if (
+        remoteVideoRef.current &&
+        remoteVideoRef.current.srcObject !== stream
+      ) {
+        remoteVideoRef.current.srcObject = stream;
+        setHasRemoteVideo(true);
+        remoteVideoRef.current.play().catch(() => {});
+      }
+    });
+
+    return () => unsubRemoteStream();
+  }, []);
+
   // Attach local and remote MediaStreams on Web
   useEffect(() => {
     if (Platform.OS !== "web") return;
@@ -124,12 +161,23 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
       }
 
       const remoteStream = callService.getRemoteStream();
+      // Ensure audio plays even if onRemoteStream fired before refs mounted
+      if (remoteAudioRef.current && remoteStream) {
+        try {
+          if (remoteAudioRef.current.srcObject !== remoteStream) {
+            remoteAudioRef.current.srcObject = remoteStream;
+          }
+          remoteAudioRef.current.play().catch(() => {});
+        } catch (e) {}
+      }
+
       if (remoteVideoRef.current && remoteStream) {
         try {
           if (remoteVideoRef.current.srcObject !== remoteStream) {
             remoteVideoRef.current.srcObject = remoteStream;
             setHasRemoteVideo(true);
           }
+          remoteVideoRef.current.play().catch(() => {});
         } catch (e) {}
       }
     };
@@ -138,6 +186,14 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
     const streamCheckTimer = setInterval(attachStreams, 1000);
     return () => clearInterval(streamCheckTimer);
   }, [call?.status, isVideoOff]);
+
+  // Audio context resume on user tap (satisfies strict browser autoplay security)
+  const handleContainerPress = () => {
+    tonePlayer.resumeAudioContext();
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.play().catch(() => {});
+    }
+  };
 
   if (!call || call.status === "ended" || call.status === "declined") {
     return null;
@@ -199,7 +255,20 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
             paddingBottom: Math.max(insets.bottom, 24) + 16,
           },
         ]}
+        {...(Platform.OS === "web"
+          ? ({ onClick: handleContainerPress } as any)
+          : {})}
       >
+        {/* Permanent WebRTC remote audio sink: delivers voice output unconditionally in voice & video calls */}
+        {Platform.OS === "web" ? (
+          <audio
+            ref={remoteAudioRef}
+            autoPlay
+            playsInline
+            style={{ display: "none" }}
+          />
+        ) : null}
+
         {/* Main Remote Video Surface (or Voice Background) */}
         {isVideo ? (
           <View style={StyleSheet.absoluteFill}>

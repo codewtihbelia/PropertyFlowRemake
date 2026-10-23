@@ -23,12 +23,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 let cachedAndroidKeyboardHeight = 290;
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import { OfflineCallPromptModal } from "../components/OfflineCallPromptModal";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { useTheme } from "../context/ThemeContext";
 import { useCall } from "../context/CallContext";
 import { mobileDataService } from "../services/firebaseDataService";
 import { communityService } from "../services/communityService";
-import { CallType } from "../services/callService";
+import { callService, CallType } from "../services/callService";
 import { auth } from "../firebase/config";
 import { playMessengerPopChime } from "../utils/soundEffects";
 
@@ -481,9 +482,28 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Real-time Voice & Video Calling via global CallContext
   const { startCall } = useCall();
 
-  // Initiate outgoing call
-  const handleStartCall = async (type: CallType) => {
-    if (!activeThread?.targetUserId) {
+  // Offline Call Confirmation Prompt state
+  const [offlinePromptData, setOfflinePromptData] = useState<{
+    visible: boolean;
+    contactId: string;
+    contactName: string;
+    contactAvatar?: string;
+    lastActiveLabel: string;
+    callType: CallType;
+  } | null>(null);
+
+  // Initiate outgoing call with intelligent presence verification
+  const handleStartCall = async (
+    type: CallType,
+    targetUserOverride?: { id: string; name: string; avatar?: string },
+    bypassPresenceCheck = false,
+  ) => {
+    const targetId = targetUserOverride?.id || activeThread?.targetUserId;
+    const targetName =
+      targetUserOverride?.name || activeThread?.name || "Contact";
+    const targetAvatar = targetUserOverride?.avatar || activeThread?.photoURL;
+
+    if (!targetId) {
       Alert.alert(
         "Calling Unavailable",
         "1-on-1 calling is available in direct chats with friends or roommates.",
@@ -491,11 +511,26 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       return;
     }
 
+    if (!bypassPresenceCheck) {
+      const presence = await callService.checkUserPresence(targetId);
+      if (!presence.isOnline) {
+        setOfflinePromptData({
+          visible: true,
+          contactId: targetId,
+          contactName: targetName,
+          contactAvatar: targetAvatar,
+          lastActiveLabel: presence.statusLabel,
+          callType: type,
+        });
+        return;
+      }
+    }
+
     await startCall(
       {
-        id: activeThread.targetUserId,
-        name: activeThread.name,
-        avatar: activeThread.photoURL,
+        id: targetId,
+        name: targetName,
+        avatar: targetAvatar,
       },
       type,
     );
@@ -2770,6 +2805,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </TouchableOpacity>
           </ScrollView>
         </SmoothBottomSheetModal>
+
+        {/* Offline Call Confirmation Prompt Modal */}
+        <OfflineCallPromptModal
+          visible={Boolean(offlinePromptData?.visible)}
+          onClose={() => setOfflinePromptData(null)}
+          contactName={offlinePromptData?.contactName || "Contact"}
+          contactAvatar={offlinePromptData?.contactAvatar}
+          lastActiveLabel={offlinePromptData?.lastActiveLabel || "Offline"}
+          callType={offlinePromptData?.callType || "voice"}
+          onRingAnyway={() => {
+            if (offlinePromptData) {
+              const data = offlinePromptData;
+              setOfflinePromptData(null);
+              handleStartCall(
+                data.callType,
+                {
+                  id: data.contactId,
+                  name: data.contactName,
+                  avatar: data.contactAvatar,
+                },
+                true,
+              );
+            }
+          }}
+          onSendMessage={() => {
+            setOfflinePromptData(null);
+            setTimeout(() => {
+              chatInputRef.current?.focus();
+            }, 150);
+          }}
+        />
       </KeyboardAvoidingView>
     );
   }
@@ -4982,6 +5048,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           })}
         </ScrollView>
       </SmoothBottomSheetModal>
+
+      {/* Offline Call Confirmation Prompt Modal */}
+      <OfflineCallPromptModal
+        visible={Boolean(offlinePromptData?.visible)}
+        onClose={() => setOfflinePromptData(null)}
+        contactName={offlinePromptData?.contactName || "Contact"}
+        contactAvatar={offlinePromptData?.contactAvatar}
+        lastActiveLabel={offlinePromptData?.lastActiveLabel || "Offline"}
+        callType={offlinePromptData?.callType || "voice"}
+        onRingAnyway={() => {
+          if (offlinePromptData) {
+            const data = offlinePromptData;
+            setOfflinePromptData(null);
+            handleStartCall(
+              data.callType,
+              {
+                id: data.contactId,
+                name: data.contactName,
+                avatar: data.contactAvatar,
+              },
+              true,
+            );
+          }
+        }}
+        onSendMessage={() => {
+          setOfflinePromptData(null);
+          setTimeout(() => {
+            chatInputRef.current?.focus();
+          }, 150);
+        }}
+      />
     </View>
   );
 };

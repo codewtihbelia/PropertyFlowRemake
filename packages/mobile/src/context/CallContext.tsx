@@ -8,6 +8,10 @@ import {
   tonePlayer,
 } from "../services/callService";
 import { mobileDataService } from "../services/firebaseDataService";
+import { pushDispatchService } from "../services/pushDispatchService";
+import { setupNotificationResponseListener } from "../services/pushNotificationService";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase/config";
 import { IncomingCallModal } from "../components/IncomingCallModal";
 import { ActiveCallModal } from "../components/ActiveCallModal";
 
@@ -53,27 +57,63 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => unsub();
   }, [currentUid, activeCall?.id]);
 
+  // 1b. Listen for taps on incoming call push notifications when app is launched/backgrounded
+  useEffect(() => {
+    const unsubNotification = setupNotificationResponseListener(
+      async (data) => {
+        if (data?.type === "incoming_call" && data?.callId) {
+          try {
+            const callSnap = await getDoc(doc(db, "calls", data.callId));
+            if (callSnap.exists()) {
+              const callData = callSnap.data() as CallSession;
+              if (callData.status === "ringing") {
+                setIncomingCall(callData);
+              }
+            }
+          } catch (e) {
+            console.warn(
+              "[CallContext] Error handling incoming call push tap:",
+              e,
+            );
+          }
+        }
+      },
+    );
+
+    return () => unsubNotification();
+  }, []);
+
   // 2. Real-time subscription to active call session state
   useEffect(() => {
     if (!activeCall?.id) return;
 
-    const unsub = callService.subscribeToCall(activeCall.id, (updatedCall) => {
-      if (!updatedCall) {
-        // Do not auto-close on transient nulls
-        return;
-      }
+    const unsub = callService.subscribeToCall(
+      activeCall.id,
+      isCaller,
+      (updatedCall) => {
+        if (!updatedCall) {
+          // Do not auto-close on transient nulls
+          return;
+        }
 
-      if (updatedCall.status === "declined" || updatedCall.status === "ended") {
-        tonePlayer.stop();
-        tonePlayer.playEnded();
-        setActiveCall(null);
-      } else {
-        setActiveCall(updatedCall);
-      }
-    });
+        if (
+          updatedCall.status === "declined" ||
+          updatedCall.status === "ended"
+        ) {
+          tonePlayer.stop();
+          tonePlayer.playEnded();
+          setActiveCall(null);
+        } else {
+          if (updatedCall.status === "connected") {
+            tonePlayer.stop();
+          }
+          setActiveCall(updatedCall);
+        }
+      },
+    );
 
     return () => unsub();
-  }, [activeCall?.id]);
+  }, [activeCall?.id, isCaller]);
 
   // 3. Initiate an outgoing call
   const startCall = async (
@@ -130,6 +170,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         receiverAvatar: target.avatar,
         callType,
       });
+
+      // Dispatch high-priority push notification to alert the recipient even if app is backgrounded/closed
+      pushDispatchService
+        .sendIncomingCallPush({
+          callId,
+          callerId: normalizedCurrentId,
+          callerName: currentUserName,
+          callerAvatar: currentUserPhoto,
+          receiverId: normalizedTargetId,
+          callType,
+        })
+        .catch((pushErr) => {
+          console.warn(
+            "[CallContext] Notice: Push notification dispatch issue:",
+            pushErr,
+          );
+        });
 
       return callId;
     } catch (e: any) {
