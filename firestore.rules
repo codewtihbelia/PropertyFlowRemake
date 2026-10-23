@@ -411,5 +411,14 @@ service cloud.firestore {
     match /directConversations/{conversationId} {
       allow read, write: if isAuthenticated();
     }
+
+    // Splitzy Real-Time Calling (Voice & Video)
+    match /calls/{callId} {
+      allow read, write: if isAuthenticated();
+
+      match /{subcollection=**} {
+        allow read, write: if isAuthenticated();
+      }
+    }
   }
 }

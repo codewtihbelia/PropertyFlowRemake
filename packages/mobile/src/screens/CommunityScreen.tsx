@@ -21,6 +21,7 @@ import {
   Platform,
   StatusBar,
   Modal,
+  BackHandler,
 } from "react-native";
 import {
   SafeAreaView,
@@ -47,6 +48,7 @@ import {
   calculateStoryTimeRemaining,
   resolveUserAvatarUrl,
   getReelVideoType,
+  getDailyShuffledReels,
 } from "../services/communityService";
 import { CreatePostModal } from "../components/CreatePostModal";
 import { PostCommentsModal } from "../components/PostCommentsModal";
@@ -284,15 +286,37 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     return () => unsub();
   }, []);
 
-  // Subscribe to real-time reels
+  // Subscribe to real-time reels with deterministic daily shuffling
   useEffect(() => {
     setLoadingReels(true);
     const unsub = communityService.subscribeReels((list) => {
-      setReels(list);
+      const shuffled = getDailyShuffledReels(list);
+      setReels(shuffled);
       setLoadingReels(false);
     });
     return () => unsub();
   }, []);
+
+  // Intercept hardware Android back button to navigate from Reels back to Feed
+  useEffect(() => {
+    const onHardwareBack = () => {
+      if (selectedProfileUser) {
+        setSelectedProfileUser(null);
+        return true;
+      }
+      if (activeMainTab === "reels") {
+        setActiveMainTab("feed");
+        return true;
+      }
+      return false;
+    };
+
+    const backSub = BackHandler.addEventListener(
+      "hardwareBackPress",
+      onHardwareBack,
+    );
+    return () => backSub.remove();
+  }, [activeMainTab, selectedProfileUser]);
 
   // Filter reels based on selected category (including YouTube Shorts and Facebook Reels)
   const filteredReels = useMemo(() => {
@@ -306,54 +330,60 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     return reels.filter((r) => r.category === selectedReelCategory);
   }, [reels, selectedReelCategory]);
 
-  const handleToggleReelLike = async (reelId: string) => {
-    if (!currentUid) {
-      Alert.alert("Sign In Required", "Please sign in to like reels.");
-      return;
-    }
-    setReels((prev) =>
-      prev.map((r) => {
-        if (r.id !== reelId) return r;
-        const currentLikes = r.likes || [];
-        const isLiked = currentLikes.includes(currentUid);
-        const newLikes = isLiked
-          ? currentLikes.filter((uid) => uid !== currentUid)
-          : [...currentLikes, currentUid];
-        return {
-          ...r,
-          likes: newLikes,
-          likesCount: newLikes.length,
-        };
-      }),
-    );
-    try {
-      await communityService.toggleReelLike(reelId, currentUid);
-    } catch (err) {
-      console.warn("Failed to toggle reel like:", err);
-    }
-  };
+  const handleToggleReelLike = useCallback(
+    async (reelId: string) => {
+      if (!currentUid) {
+        Alert.alert("Sign In Required", "Please sign in to like reels.");
+        return;
+      }
+      setReels((prev) =>
+        prev.map((r) => {
+          if (r.id !== reelId) return r;
+          const currentLikes = r.likes || [];
+          const isLiked = currentLikes.includes(currentUid);
+          const newLikes = isLiked
+            ? currentLikes.filter((uid) => uid !== currentUid)
+            : [...currentLikes, currentUid];
+          return {
+            ...r,
+            likes: newLikes,
+            likesCount: newLikes.length,
+          };
+        }),
+      );
+      try {
+        await communityService.toggleReelLike(reelId, currentUid);
+      } catch (err) {
+        console.warn("Failed to toggle reel like:", err);
+      }
+    },
+    [currentUid],
+  );
 
-  const handleDeleteReel = (reelId: string) => {
-    Alert.alert(
-      "Delete Reel",
-      "Are you sure you want to delete this reel? This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setReels((prev) => prev.filter((r) => r.id !== reelId));
-              await communityService.deleteReel(reelId, currentUid);
-            } catch (err: any) {
-              Alert.alert("Error", err.message || "Failed to delete reel.");
-            }
+  const handleDeleteReel = useCallback(
+    (reelId: string) => {
+      Alert.alert(
+        "Delete Reel",
+        "Are you sure you want to delete this reel? This cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                setReels((prev) => prev.filter((r) => r.id !== reelId));
+                await communityService.deleteReel(reelId, currentUid);
+              } catch (err: any) {
+                Alert.alert("Error", err.message || "Failed to delete reel.");
+              }
+            },
           },
-        },
-      ],
-    );
-  };
+        ],
+      );
+    },
+    [currentUid],
+  );
 
   // Subscribe to friendships
   useEffect(() => {
@@ -640,6 +670,68 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
       setSelectedProfileUser(resolved);
     },
     [discoveredMembers, friendships, currentUid, allIncomingRequests],
+  );
+
+  // Stable FlatList viewability configuration to prevent VirtualizedList lag
+  const viewabilityConfigRef = useRef({
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 100,
+  });
+
+  const onViewableItemsChangedRef = useRef(
+    ({ viewableItems }: { viewableItems: any[] }) => {
+      if (viewableItems && viewableItems.length > 0) {
+        const firstVisible = viewableItems[0];
+        if (typeof firstVisible.index === "number" && firstVisible.index >= 0) {
+          setActiveReelIndex(firstVisible.index);
+        }
+      }
+    },
+  );
+
+  const getReelItemLayout = useCallback(
+    (_: any, index: number) => ({
+      length: reelsViewportHeight,
+      offset: reelsViewportHeight * index,
+      index,
+    }),
+    [reelsViewportHeight],
+  );
+
+  const reelKeyExtractor = useCallback((item: CommunityReel) => item.id, []);
+
+  const handleToggleReelMute = useCallback(() => {
+    setIsReelsMuted((prev) => !prev);
+  }, []);
+
+  const renderReelItem = useCallback(
+    ({ item, index }: { item: CommunityReel; index: number }) => (
+      <SplitzyReelItem
+        reel={item}
+        isActive={activeReelIndex === index}
+        isMuted={isReelsMuted}
+        onToggleMute={handleToggleReelMute}
+        onToggleLike={handleToggleReelLike}
+        onOpenComments={setActiveReelForComments}
+        onOpenProfile={(uid, name, avatar) =>
+          handleOpenUserProfile({ uid, name, avatar })
+        }
+        onDeleteReel={handleDeleteReel}
+        onActivate={() => setActiveReelIndex(index)}
+        currentUserId={currentUid}
+        itemHeight={reelsViewportHeight}
+      />
+    ),
+    [
+      activeReelIndex,
+      isReelsMuted,
+      handleToggleReelMute,
+      handleToggleReelLike,
+      handleOpenUserProfile,
+      handleDeleteReel,
+      currentUid,
+      reelsViewportHeight,
+    ],
   );
 
   // Filter posts
@@ -1977,6 +2069,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             setSelectedProfileUser(null);
             onNavigateToSplitzyProfile?.();
           }}
+          onOpenReel={(reel, reelIndex) => {
+            setSelectedProfileUser(null);
+            const targetIdx = reels.findIndex((r) => r.id === reel.id);
+            setSelectedReelCategory("all");
+            setActiveReelIndex(targetIdx >= 0 ? targetIdx : (reelIndex ?? 0));
+            setActiveMainTab("reels");
+          }}
         />
 
         <PostCommentsModal
@@ -2994,12 +3093,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
               },
             ]}
           >
-            {/* Left: Floating Translucent Back Button */}
+            {/* Left: Floating Translucent Back Button (Returns directly to Community Feed tab) */}
             <TouchableOpacity
-              onPress={onBack}
+              onPress={() => {
+                setActiveMainTab("feed");
+              }}
               style={styles.floatingReelsBackBtn}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityLabel="Back to previous screen"
+              accessibilityLabel="Back to Community Feed"
               activeOpacity={0.8}
             >
               <Feather name="chevron-left" size={24} color="#FFFFFF" />
@@ -3113,58 +3214,20 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           ) : (
             <FlatList
               data={filteredReels}
-              keyExtractor={(item) => item.id}
+              keyExtractor={reelKeyExtractor}
               pagingEnabled
               showsVerticalScrollIndicator={false}
               snapToInterval={reelsViewportHeight}
               snapToAlignment="start"
               decelerationRate="fast"
-              onScroll={(e) => {
-                if (reelsViewportHeight > 0) {
-                  const idx = Math.max(
-                    0,
-                    Math.round(
-                      e.nativeEvent.contentOffset.y / reelsViewportHeight,
-                    ),
-                  );
-                  if (idx !== activeReelIndex && idx < filteredReels.length) {
-                    setActiveReelIndex(idx);
-                  }
-                }
-              }}
-              scrollEventThrottle={16}
-              onMomentumScrollEnd={(e) => {
-                if (reelsViewportHeight > 0) {
-                  const idx = Math.max(
-                    0,
-                    Math.round(
-                      e.nativeEvent.contentOffset.y / reelsViewportHeight,
-                    ),
-                  );
-                  if (idx < filteredReels.length) {
-                    setActiveReelIndex(idx);
-                  }
-                }
-              }}
-              renderItem={({ item, index }) => (
-                <SplitzyReelItem
-                  reel={item}
-                  isActive={activeReelIndex === index}
-                  isMuted={isReelsMuted}
-                  onToggleMute={() => setIsReelsMuted((prev) => !prev)}
-                  onToggleLike={handleToggleReelLike}
-                  onOpenComments={(targetReel) =>
-                    setActiveReelForComments(targetReel)
-                  }
-                  onOpenProfile={(uid, name, avatar) =>
-                    handleOpenUserProfile({ uid, name, avatar })
-                  }
-                  onDeleteReel={handleDeleteReel}
-                  onActivate={() => setActiveReelIndex(index)}
-                  currentUserId={currentUid}
-                  itemHeight={reelsViewportHeight}
-                />
-              )}
+              getItemLayout={getReelItemLayout}
+              viewabilityConfig={viewabilityConfigRef.current}
+              onViewableItemsChanged={onViewableItemsChangedRef.current}
+              windowSize={3}
+              maxToRenderPerBatch={2}
+              initialNumToRender={2}
+              removeClippedSubviews={Platform.OS !== "web"}
+              renderItem={renderReelItem}
             />
           )}
         </View>

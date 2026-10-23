@@ -25,8 +25,10 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { useTheme } from "../context/ThemeContext";
+import { useCall } from "../context/CallContext";
 import { mobileDataService } from "../services/firebaseDataService";
 import { communityService } from "../services/communityService";
+import { CallType } from "../services/callService";
 import { auth } from "../firebase/config";
 import { playMessengerPopChime } from "../utils/soundEffects";
 
@@ -55,7 +57,12 @@ export interface ChatMessage {
   text: string;
   time: string;
   isMe: boolean;
-  type?: "text" | "payment_claim" | "receipt_review" | "expense_split";
+  type?:
+    | "text"
+    | "payment_claim"
+    | "receipt_review"
+    | "expense_split"
+    | "call_log";
   meta?: {
     amount?: string;
     share?: string;
@@ -63,6 +70,9 @@ export interface ChatMessage {
     attachmentName?: string;
     status?: "pending" | "confirmed" | "settled";
     paymentMethod?: string;
+    callType?: "voice" | "video";
+    durationSeconds?: number;
+    callStatus?: "completed" | "missed" | "declined";
   };
   createdAt?: string;
   readBy?: string[];
@@ -467,6 +477,29 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [showComposeModal, setShowComposeModal] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showNoteActionMenu, setShowNoteActionMenu] = useState(false);
+
+  // Real-time Voice & Video Calling via global CallContext
+  const { startCall } = useCall();
+
+  // Initiate outgoing call
+  const handleStartCall = async (type: CallType) => {
+    if (!activeThread?.targetUserId) {
+      Alert.alert(
+        "Calling Unavailable",
+        "1-on-1 calling is available in direct chats with friends or roommates.",
+      );
+      return;
+    }
+
+    await startCall(
+      {
+        id: activeThread.targetUserId,
+        name: activeThread.name,
+        avatar: activeThread.photoURL,
+      },
+      type,
+    );
+  };
 
   // Thought Note Form state (optional emoji)
   const [noteInputText, setNoteInputText] = useState("");
@@ -1791,31 +1824,85 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </View>
           </View>
 
-          {/* Right Action Button (Quick Split Request) */}
-          <TouchableOpacity
-            style={[
-              styles.chatHeaderActionBtn,
-              {
-                backgroundColor: isDark ? "rgba(37, 99, 235, 0.2)" : "#EFF6FF",
-              },
-            ]}
-            onPress={() => {
-              if (activeThread.type === "direct" && activeThread.targetUserId) {
-                setSplitTargetId(activeThread.targetUserId);
-              } else {
-                setSplitTargetId("ALL");
-              }
-              setShowRequestSplitModal(true);
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityLabel="Request Split"
-          >
-            <Feather
-              name="plus-circle"
-              size={20}
-              color={isDark ? "#60A5FA" : "#2563EB"}
-            />
-          </TouchableOpacity>
+          {/* Header Action Buttons: Voice Call, Video Call, and Quick Split Request */}
+          <View style={styles.chatHeaderActionsRow}>
+            {activeThread.type === "direct" && activeThread.targetUserId && (
+              <>
+                {/* Voice Call Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.chatHeaderActionBtn,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(37, 99, 235, 0.2)"
+                        : "#EFF6FF",
+                    },
+                  ]}
+                  onPress={() => handleStartCall("voice")}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Voice Call"
+                >
+                  <Ionicons
+                    name="call-outline"
+                    size={19}
+                    color={isDark ? "#60A5FA" : "#2563EB"}
+                  />
+                </TouchableOpacity>
+
+                {/* Video Call Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.chatHeaderActionBtn,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(37, 99, 235, 0.2)"
+                        : "#EFF6FF",
+                    },
+                  ]}
+                  onPress={() => handleStartCall("video")}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Video Call"
+                >
+                  <Ionicons
+                    name="videocam-outline"
+                    size={20}
+                    color={isDark ? "#60A5FA" : "#2563EB"}
+                  />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Quick Split Request */}
+            <TouchableOpacity
+              style={[
+                styles.chatHeaderActionBtn,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(37, 99, 235, 0.2)"
+                    : "#EFF6FF",
+                },
+              ]}
+              onPress={() => {
+                if (
+                  activeThread.type === "direct" &&
+                  activeThread.targetUserId
+                ) {
+                  setSplitTargetId(activeThread.targetUserId);
+                } else {
+                  setSplitTargetId("ALL");
+                }
+                setShowRequestSplitModal(true);
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Request Split"
+            >
+              <Feather
+                name="plus-circle"
+                size={20}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Messenger-Style Message Request Banner */}
@@ -2107,6 +2194,73 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                           </Text>
                         </View>
                       )}
+
+                      {/* Embedded Call Log Card */}
+                      {msg.type === "call_log" && (
+                        <View
+                          style={[
+                            styles.callLogCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={styles.callLogIconWrap}>
+                            <Ionicons
+                              name={
+                                msg.meta?.callType === "video"
+                                  ? "videocam"
+                                  : "call"
+                              }
+                              size={16}
+                              color={
+                                msg.meta?.callStatus === "missed"
+                                  ? "#EF4444"
+                                  : "#2563EB"
+                              }
+                            />
+                          </View>
+                          <View style={styles.callLogDetails}>
+                            <Text
+                              style={[
+                                styles.callLogTitle,
+                                { color: isDark ? "#FFFFFF" : "#0F172A" },
+                              ]}
+                            >
+                              {msg.meta?.callType === "video"
+                                ? "Video Call"
+                                : "Voice Call"}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.callLogSubtitle,
+                                { color: isDark ? "#94A3B8" : "#64748B" },
+                              ]}
+                            >
+                              {msg.text.split("·")[1]?.trim() || "Completed"}
+                            </Text>
+                          </View>
+                          {activeThread.type === "direct" && (
+                            <TouchableOpacity
+                              style={styles.callBackBtn}
+                              onPress={() =>
+                                handleStartCall(
+                                  msg.meta?.callType === "video"
+                                    ? "video"
+                                    : "voice",
+                                )
+                              }
+                            >
+                              <Text style={styles.callBackBtnText}>Call</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
                     </TouchableOpacity>
 
                     {/* Messenger-style tapped Time & Seen indicator */}
@@ -2261,6 +2415,73 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                           <Text style={styles.msgEmbedAmount}>
                             Amount: {msg.meta.amount}
                           </Text>
+                        </View>
+                      )}
+
+                      {/* Embedded Call Log Card */}
+                      {msg.type === "call_log" && (
+                        <View
+                          style={[
+                            styles.callLogCard,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(0,0,0,0.3)"
+                                : "#FFFFFF",
+                              borderColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={styles.callLogIconWrap}>
+                            <Ionicons
+                              name={
+                                msg.meta?.callType === "video"
+                                  ? "videocam"
+                                  : "call"
+                              }
+                              size={16}
+                              color={
+                                msg.meta?.callStatus === "missed"
+                                  ? "#EF4444"
+                                  : "#2563EB"
+                              }
+                            />
+                          </View>
+                          <View style={styles.callLogDetails}>
+                            <Text
+                              style={[
+                                styles.callLogTitle,
+                                { color: isDark ? "#FFFFFF" : "#0F172A" },
+                              ]}
+                            >
+                              {msg.meta?.callType === "video"
+                                ? "Video Call"
+                                : "Voice Call"}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.callLogSubtitle,
+                                { color: isDark ? "#94A3B8" : "#64748B" },
+                              ]}
+                            >
+                              {msg.text.split("·")[1]?.trim() || "Completed"}
+                            </Text>
+                          </View>
+                          {activeThread.type === "direct" && (
+                            <TouchableOpacity
+                              style={styles.callBackBtn}
+                              onPress={() =>
+                                handleStartCall(
+                                  msg.meta?.callType === "video"
+                                    ? "video"
+                                    : "voice",
+                                )
+                              }
+                            >
+                              <Text style={styles.callBackBtnText}>Call</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
                       )}
                     </TouchableOpacity>
@@ -4766,6 +4987,51 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
+  chatHeaderActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  callLogCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    marginTop: 4,
+    minWidth: 210,
+  },
+  callLogIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  callLogDetails: {
+    flex: 1,
+  },
+  callLogTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  callLogSubtitle: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  callBackBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: "#2563EB",
+  },
+  callBackBtnText: {
+    color: "#FFFFFF",
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
   container: {
     flex: 1,
   },

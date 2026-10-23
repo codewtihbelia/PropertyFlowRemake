@@ -20,6 +20,7 @@ import {
   useNavVisibility,
 } from "./context/NavVisibilityContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
+import { CallProvider } from "./context/CallContext";
 
 import { SplashScreen } from "./screens/SplashScreen";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
@@ -1292,6 +1293,10 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
           setOverlayScreen("none");
           setCurrentTab("profile");
         }}
+        onOpenReel={() => {
+          setUserProfileOverlayConfig(null);
+          setOverlayScreen("community");
+        }}
       />
     );
   }
@@ -1876,9 +1881,11 @@ export default function App() {
       <ThemeProvider>
         <SafeAreaProvider style={{ flex: 1, backgroundColor: "#111215" }}>
           <NavVisibilityProvider>
-            <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
-            <GlobalAppVersionGate isSplashActive={rootFlow === "splash"} />
-            <CustomAlertModal />
+            <CallProvider>
+              <MainAppContent rootFlow={rootFlow} setRootFlow={setRootFlow} />
+              <GlobalAppVersionGate isSplashActive={rootFlow === "splash"} />
+              <CustomAlertModal />
+            </CallProvider>
           </NavVisibilityProvider>
         </SafeAreaProvider>
       </ThemeProvider>

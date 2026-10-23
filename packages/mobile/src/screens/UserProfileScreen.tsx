@@ -13,6 +13,7 @@ import {
   StatusBar,
   Modal,
   TextInput,
+  Dimensions,
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,12 +22,14 @@ import { useTheme } from "../context/ThemeContext";
 import {
   CommunityPost,
   CommunityMember,
+  CommunityReel,
   ReactionType,
   CATEGORY_LABELS,
   formatAuthorDisplayName,
   FB_6_REACTIONS,
   communityService,
   resolveUserAvatarUrl,
+  formatViewCount,
 } from "../services/communityService";
 import { auth } from "../firebase/config";
 import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
@@ -78,6 +81,7 @@ export interface UserProfileScreenProps {
     targetUserAvatar?: string,
   ) => void;
   onNavigateToSplitzyProfile?: () => void;
+  onOpenReel?: (reel: CommunityReel, index: number) => void;
 }
 
 export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
@@ -96,13 +100,15 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   onOpenUserProfile,
   onOpenDirectChat,
   onNavigateToSplitzyProfile,
+  onOpenReel,
 }) => {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
+  const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-  const [activeTab, setActiveTab] = useState<"posts" | "about" | "friends">(
-    "posts",
-  );
+  const [activeTab, setActiveTab] = useState<"all" | "reels" | "about">("all");
+  const [showAllFriendsModal, setShowAllFriendsModal] = useState(false);
+  const [friendsSearchQuery, setFriendsSearchQuery] = useState("");
   const [activeReactionPostId, setActiveReactionPostId] = useState<
     string | null
   >(null);
@@ -113,6 +119,10 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   const [userFriends, setUserFriends] = useState<CommunityMember[]>([]);
   const [myFriends, setMyFriends] = useState<CommunityMember[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(true);
+
+  // User's reels for Reels tab
+  const [userReels, setUserReels] = useState<CommunityReel[]>([]);
+  const [loadingReels, setLoadingReels] = useState(false);
 
   // Synced local profile details supporting Facebook-style updates
   const [profileDetails, setProfileDetails] = useState<UserProfileInfo>(user);
@@ -127,6 +137,17 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   const [editCover, setEditCover] = useState(user.coverImage || "");
   const [editAvatar, setEditAvatar] = useState(user.avatar || "");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // Subscribe to user reels in real-time
+  useEffect(() => {
+    if (!user?.uid) return;
+    setLoadingReels(true);
+    const unsub = communityService.subscribeUserReels(user.uid, (list) => {
+      setUserReels(list);
+      setLoadingReels(false);
+    });
+    return () => unsub();
+  }, [user?.uid]);
 
   // Sync profile details when user prop changes or on initial load from Firestore
   useEffect(() => {
@@ -595,6 +616,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           {
             backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
             borderColor: isDark ? "#334155" : "#E2E8F0",
+            // margin: -15,
+            // marginTop: 8,
           },
         ]}
       >
@@ -1050,7 +1073,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           {/* Quick Stats Row (Friends count, mutual friends, posts) - Real Cloud Data */}
           <View style={styles.statsRow}>
             <TouchableOpacity
-              onPress={() => setActiveTab("friends")}
+              onPress={() => setShowAllFriendsModal(true)}
               style={styles.statItem}
             >
               <Text
@@ -1074,7 +1097,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             <View style={styles.statDivider} />
 
             <TouchableOpacity
-              onPress={() => setActiveTab("posts")}
+              onPress={() => setActiveTab("all")}
               style={styles.statItem}
             >
               <Text
@@ -1098,7 +1121,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             <View style={styles.statDivider} />
 
             <TouchableOpacity
-              onPress={() => setActiveTab("friends")}
+              onPress={() => setShowAllFriendsModal(true)}
               style={styles.statItem}
             >
               <Text
@@ -1415,7 +1438,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           )}
         </View>
 
-        {/* Clean Segmented Navigation Tabs: Posts | About | Friends */}
+        {/* Clean Segmented Navigation Tabs: All | Reels | About */}
         <View
           style={[
             styles.tabsContainer,
@@ -1426,21 +1449,37 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           ]}
         >
           <TouchableOpacity
-            onPress={() => setActiveTab("posts")}
+            onPress={() => setActiveTab("all")}
+            style={[styles.tabBtn, activeTab === "all" && styles.tabBtnActive]}
+          >
+            <Text
+              style={[
+                styles.tabBtnText,
+                activeTab === "all"
+                  ? styles.tabBtnTextActive
+                  : { color: isDark ? "#94A3B8" : "#64748B" },
+              ]}
+            >
+              All
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setActiveTab("reels")}
             style={[
               styles.tabBtn,
-              activeTab === "posts" && styles.tabBtnActive,
+              activeTab === "reels" && styles.tabBtnActive,
             ]}
           >
             <Text
               style={[
                 styles.tabBtnText,
-                activeTab === "posts"
+                activeTab === "reels"
                   ? styles.tabBtnTextActive
                   : { color: isDark ? "#94A3B8" : "#64748B" },
               ]}
             >
-              Posts
+              Reels
             </Text>
           </TouchableOpacity>
 
@@ -1462,31 +1501,399 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               About
             </Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setActiveTab("friends")}
-            style={[
-              styles.tabBtn,
-              activeTab === "friends" && styles.tabBtnActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.tabBtnText,
-                activeTab === "friends"
-                  ? styles.tabBtnTextActive
-                  : { color: isDark ? "#94A3B8" : "#64748B" },
-              ]}
-            >
-              Friends
-            </Text>
-          </TouchableOpacity>
         </View>
 
-        {/* TAB 1: POSTS */}
-        {activeTab === "posts" && (
+        {/* TAB 1: ALL (FRIENDS CAROUSEL + ALL POSTS FEED) */}
+        {activeTab === "all" && (
           <View style={styles.tabContentArea}>
-            {userPosts.length === 0 ? (
+            {/* ─── FRIENDS HORIZONTAL SECTION (MATCHING ATTACHED DESIGN) ─── */}
+            <View
+              style={[
+                styles.allTabFriendsCard,
+                {
+                  backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                  // borderBottomColor: isDark ? "#334155" : "#F1F5F9",
+                },
+              ]}
+            >
+              <View style={styles.allTabFriendsHeader}>
+                <Text
+                  style={[
+                    styles.allTabFriendsTitle,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  Friends
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowAllFriendsModal(true)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.allTabSeeAllText}>See all</Text>
+                </TouchableOpacity>
+              </View>
+
+              {loadingFriends ? (
+                <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                  <ActivityIndicator size="small" color="#2563EB" />
+                </View>
+              ) : userFriends.length === 0 ? (
+                <View style={styles.emptyFriendsInlineRow}>
+                  <Text
+                    style={[
+                      styles.emptyFriendsInlineText,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    {isSelf
+                      ? "No friends yet. Add roommates & neighbors from Community!"
+                      : `${cleanName.split(" ")[0]} has no friends listed yet.`}
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.friendsHorizontalScroll}
+                >
+                  {userFriends.map((friend, idx) => {
+                    const cleanFid = String(friend.uid || "")
+                      .replace(/^mem_/, "")
+                      .trim();
+                    const isMutual =
+                      !isSelf &&
+                      myFriends.some(
+                        (mf) =>
+                          String(mf.uid || "")
+                            .replace(/^mem_/, "")
+                            .trim() === cleanFid,
+                      );
+                    const subtitle = isSelf
+                      ? friend.householdName || friend.role || "Splitzy friend"
+                      : isMutual
+                        ? "Mutual friend"
+                        : friend.householdName || "Splitzy friend";
+
+                    return (
+                      <TouchableOpacity
+                        key={friend.uid || idx}
+                        onPress={() => {
+                          if (onOpenUserProfile) {
+                            onOpenUserProfile({
+                              uid: friend.uid,
+                              name: friend.name,
+                              avatar: friend.avatar,
+                              role: friend.role,
+                              householdName: friend.householdName,
+                              friendshipStatus: "friends",
+                              friendshipId: friend.friendshipId,
+                            });
+                          }
+                        }}
+                        style={styles.circularFriendItem}
+                        activeOpacity={0.82}
+                      >
+                        {/* 100% Circular Avatar with border */}
+                        <View
+                          style={[
+                            styles.circularFriendAvatarWrap,
+                            {
+                              borderColor: isDark ? "#334155" : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          {friend.avatar ? (
+                            <Image
+                              source={{ uri: friend.avatar }}
+                              style={styles.circularFriendAvatar}
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                styles.circularFriendAvatarFallback,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#334155"
+                                    : "#DBEAFE",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.circularFriendInitial,
+                                  {
+                                    color: isDark ? "#94A3B8" : "#1D4ED8",
+                                  },
+                                ]}
+                              >
+                                {(friend.name || "M").charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Name (2-lines, centered) */}
+                        <Text
+                          style={[
+                            styles.circularFriendName,
+                            { color: isDark ? "#F8FAFC" : "#0F172A" },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {friend.name || "Member"}
+                        </Text>
+
+                        {/* Subtitle / mutual friends count */}
+                        <Text
+                          style={[
+                            styles.circularFriendSubtitle,
+                            { color: isDark ? "#94A3B8" : "#64748B" },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {subtitle}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+
+            {/* ─── ALL POSTS SECTION ─── */}
+            <View style={styles.allPostsSection}>
+              {/* Header: All posts */}
+              <View style={styles.allPostsHeaderRow}>
+                <Text
+                  style={[
+                    styles.allPostsHeading,
+                    { color: isDark ? "#F8FAFC" : "#0F172A" },
+                  ]}
+                >
+                  All posts
+                </Text>
+              </View>
+
+              {/* Quick Post Prompt Card (Facebook style when isSelf) */}
+              {isSelf && (
+                <View
+                  style={[
+                    styles.profileQuickPostCard,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                      borderColor: isDark ? "#334155" : "#E2E8F0",
+                    },
+                  ]}
+                >
+                  <View style={styles.profileQuickPostRow}>
+                    {avatarUrl ? (
+                      <Image
+                        source={{ uri: avatarUrl }}
+                        style={styles.profileQuickPostAvatar}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.profileQuickPostAvatarPlaceholder,
+                          {
+                            backgroundColor: isDark ? "#334155" : "#DBEAFE",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.profileQuickPostAvatarInitial,
+                            {
+                              color: isDark ? "#94A3B8" : "#1D4ED8",
+                            },
+                          ]}
+                        >
+                          {cleanName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Alert.alert(
+                          "Create Post",
+                          "Post to Community feed from the Community screen.",
+                          [
+                            { text: "Dismiss", style: "cancel" },
+                            { text: "Go to Community", onPress: onBack },
+                          ],
+                        );
+                      }}
+                      style={[
+                        styles.profileQuickPostInputTrigger,
+                        {
+                          backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                        },
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.profileQuickPostInputPlaceholder,
+                          {
+                            color: isDark ? "#94A3B8" : "#64748B",
+                          },
+                        ]}
+                      >
+                        What's on your mind?
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Alert.alert(
+                          "Share Photos",
+                          "Open Community feed to share photos with roommates.",
+                          [
+                            { text: "Dismiss", style: "cancel" },
+                            { text: "Go to Community", onPress: onBack },
+                          ],
+                        );
+                      }}
+                      style={styles.profileQuickPostMediaBtn}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="images-outline"
+                        size={22}
+                        color="#10B981"
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.profileQuickPostDivider,
+                      { backgroundColor: isDark ? "#334155" : "#F1F5F9" },
+                    ]}
+                  />
+
+                  {/* Action Shortcuts: Reel & Live */}
+                  <View style={styles.profileQuickPostActionsRow}>
+                    <TouchableOpacity
+                      onPress={() => setActiveTab("reels")}
+                      style={[
+                        styles.profileActionShortcutPill,
+                        {
+                          backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                          borderColor: isDark ? "#334155" : "#E2E8F0",
+                        },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="film-outline"
+                        size={16}
+                        color="#EF4444"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text
+                        style={[
+                          styles.profileActionShortcutText,
+                          { color: isDark ? "#F8FAFC" : "#0F172A" },
+                        ]}
+                      >
+                        Reel
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Alert.alert(
+                          "Community Live",
+                          "Community video broadcast will be available in the upcoming release.",
+                        );
+                      }}
+                      style={[
+                        styles.profileActionShortcutPill,
+                        {
+                          backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                          borderColor: isDark ? "#334155" : "#E2E8F0",
+                        },
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="videocam-outline"
+                        size={16}
+                        color="#DC2626"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text
+                        style={[
+                          styles.profileActionShortcutText,
+                          { color: isDark ? "#F8FAFC" : "#0F172A" },
+                        ]}
+                      >
+                        Live
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Feed of Posts */}
+              {userPosts.length === 0 ? (
+                <View
+                  style={[
+                    styles.emptyPostsCard,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="newspaper-outline"
+                    size={42}
+                    color={isDark ? "#475569" : "#CBD5E1"}
+                  />
+                  <Text
+                    style={[
+                      styles.emptyPostsTitle,
+                      { color: isDark ? "#F8FAFC" : "#0F172A" },
+                    ]}
+                  >
+                    No posts yet
+                  </Text>
+                  <Text
+                    style={[
+                      styles.emptyPostsSub,
+                      { color: isDark ? "#94A3B8" : "#64748B" },
+                    ]}
+                  >
+                    When {cleanName.split(" ")[0]} shares roommate tips or
+                    market listings, they'll appear right here.
+                  </Text>
+                </View>
+              ) : (
+                userPosts.map((post) => renderPostCard(post))
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* TAB 2: REELS (3-COLUMN GALLERY MODE WITH VIEW COUNTS) */}
+        {activeTab === "reels" && (
+          <View style={{ padding: 0, margin: 0 }}>
+            {loadingReels ? (
+              <View style={styles.reelsLoadingBox}>
+                <ActivityIndicator size="large" color="#2563EB" />
+                <Text
+                  style={[
+                    styles.reelsLoadingText,
+                    { color: isDark ? "#94A3B8" : "#64748B" },
+                  ]}
+                >
+                  Loading reels...
+                </Text>
+              </View>
+            ) : userReels.length === 0 ? (
               <View
                 style={[
                   styles.emptyPostsCard,
@@ -1497,7 +1904,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 ]}
               >
                 <Ionicons
-                  name="newspaper-outline"
+                  name="film-outline"
                   size={42}
                   color={isDark ? "#475569" : "#CBD5E1"}
                 />
@@ -1507,7 +1914,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                     { color: isDark ? "#F8FAFC" : "#0F172A" },
                   ]}
                 >
-                  No posts yet
+                  No reels yet
                 </Text>
                 <Text
                   style={[
@@ -1515,12 +1922,74 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                     { color: isDark ? "#94A3B8" : "#64748B" },
                   ]}
                 >
-                  When {cleanName.split(" ")[0]} shares roommate tips or market
-                  listings, they'll appear right here.
+                  When {cleanName.split(" ")[0]} posts YouTube Shorts or short
+                  videos, they will appear here in gallery mode.
                 </Text>
               </View>
             ) : (
-              userPosts.map((post) => renderPostCard(post))
+              <View style={styles.reelsGalleryGrid}>
+                {userReels.map((reelItem, rIdx) => {
+                  const numColumns = 3;
+                  const totalGaps = 1 * (numColumns - 1);
+                  const availableWidth = SCREEN_WIDTH - 0 - totalGaps;
+                  const itemWidth = Math.floor(availableWidth / numColumns);
+                  const itemHeight = Math.floor(itemWidth * (14 / 9));
+
+                  return (
+                    <TouchableOpacity
+                      key={reelItem.id || `profile-reel-${rIdx}`}
+                      onPress={() => onOpenReel?.(reelItem, rIdx)}
+                      style={[
+                        styles.reelGalleryCard,
+                        {
+                          width: itemWidth,
+                          height: itemHeight,
+                          backgroundColor: isDark ? "#0F172A" : "#1E293B",
+                        },
+                      ]}
+                      activeOpacity={0.88}
+                    >
+                      {reelItem.thumbnailUrl ? (
+                        <Image
+                          source={{ uri: reelItem.thumbnailUrl }}
+                          style={styles.reelGalleryThumb}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.reelGalleryPlaceholder}>
+                          <Ionicons name="play" size={24} color="#94A3B8" />
+                        </View>
+                      )}
+
+                      {/* Top Pin Badge if pinned */}
+                      {reelItem.pinned && (
+                        <View style={styles.reelPinBadge}>
+                          <Ionicons name="pin" size={12} color="#FFFFFF" />
+                        </View>
+                      )}
+
+                      {/* Bottom Gradient Scrim */}
+                      <View style={styles.reelCardScrim} pointerEvents="none" />
+
+                      {/* Bottom-left formatted view count badge (e.g. 👁 1.1M, 👁 475) */}
+                      <View
+                        style={styles.reelCardViewBadge}
+                        pointerEvents="none"
+                      >
+                        <Ionicons
+                          name="eye-outline"
+                          size={13}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.reelCardViewCount}>
+                          {formatViewCount(reelItem.viewsCount || 0)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             )}
           </View>
         )}
@@ -1533,7 +2002,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 styles.sectionCard,
                 {
                   backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-                  borderColor: isDark ? "#334155" : "#E2E8F0",
+                  // borderColor: isDark ? "#334155" : "#E2E8F0",
                 },
               ]}
             >
@@ -1691,201 +2160,6 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 </Text>
               </View>
             </View>
-          </View>
-        )}
-
-        {/* TAB 3: FRIENDS - Real Cloud Data */}
-        {activeTab === "friends" && (
-          <View style={styles.tabContentArea}>
-            <View
-              style={[
-                styles.sectionCard,
-                {
-                  backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-                  borderColor: isDark ? "#334155" : "#E2E8F0",
-                },
-              ]}
-            >
-              <View style={styles.sectionHeaderRow}>
-                <View>
-                  <Text
-                    style={[
-                      styles.sectionHeading,
-                      { color: isDark ? "#F8FAFC" : "#0F172A" },
-                    ]}
-                  >
-                    Friends
-                  </Text>
-                  <Text
-                    style={[
-                      styles.sectionSubtitle,
-                      { color: isDark ? "#94A3B8" : "#64748B" },
-                    ]}
-                  >
-                    {userFriends.length}{" "}
-                    {userFriends.length === 1 ? "friend" : "friends"}
-                    {!isSelf && ` (${mutualFriends.length} mutual)`}
-                  </Text>
-                </View>
-              </View>
-
-              {loadingFriends ? (
-                <View style={{ paddingVertical: 24, alignItems: "center" }}>
-                  <ActivityIndicator size="small" color="#2563EB" />
-                </View>
-              ) : userFriends.length === 0 ? (
-                <View style={styles.emptyFriendsState}>
-                  <Ionicons
-                    name="people-outline"
-                    size={40}
-                    color={isDark ? "#475569" : "#CBD5E1"}
-                  />
-                  <Text
-                    style={[
-                      styles.emptyFriendsTitle,
-                      { color: isDark ? "#F8FAFC" : "#0F172A" },
-                    ]}
-                  >
-                    No friends yet
-                  </Text>
-                  <Text
-                    style={[
-                      styles.emptyFriendsSubtitle,
-                      { color: isDark ? "#94A3B8" : "#64748B" },
-                    ]}
-                  >
-                    {isSelf
-                      ? "Connect with roommates and community members across Splitzy!"
-                      : `${cleanName.split(" ")[0]} hasn't added any friends on Splitzy Community yet.`}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.friendsGrid}>
-                  {userFriends.map((friend) => (
-                    <TouchableOpacity
-                      key={friend.uid}
-                      onPress={() => {
-                        if (onOpenUserProfile) {
-                          onOpenUserProfile({
-                            uid: friend.uid,
-                            name: friend.name,
-                            avatar: friend.avatar,
-                            role: friend.role,
-                            householdName: friend.householdName,
-                            friendshipStatus: "friends",
-                            friendshipId: friend.friendshipId,
-                          });
-                        }
-                      }}
-                      style={styles.friendGridItem}
-                      activeOpacity={0.8}
-                    >
-                      {friend.avatar ? (
-                        <Image
-                          source={{ uri: friend.avatar }}
-                          style={styles.friendGridAvatar}
-                        />
-                      ) : (
-                        <View style={styles.friendGridFallback}>
-                          <Text style={styles.friendGridFallbackText}>
-                            {(friend.name || "M").charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
-                      <Text
-                        style={[
-                          styles.friendGridName,
-                          { color: isDark ? "#F8FAFC" : "#0F172A" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {friend.name.split(" ")[0]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* If viewing another member and mutual connections exist */}
-            {!isSelf && mutualFriends.length > 0 && (
-              <View
-                style={[
-                  styles.sectionCard,
-                  {
-                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-                    borderColor: isDark ? "#334155" : "#E2E8F0",
-                    marginTop: 12,
-                  },
-                ]}
-              >
-                <View style={styles.sectionHeaderRow}>
-                  <View>
-                    <Text
-                      style={[
-                        styles.sectionHeading,
-                        { color: isDark ? "#F8FAFC" : "#0F172A" },
-                      ]}
-                    >
-                      Mutual Friends ({mutualFriends.length})
-                    </Text>
-                    <Text
-                      style={[
-                        styles.sectionSubtitle,
-                        { color: isDark ? "#94A3B8" : "#64748B" },
-                      ]}
-                    >
-                      Friends you and {cleanName.split(" ")[0]} have in common
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.friendsGrid}>
-                  {mutualFriends.map((mFriend) => (
-                    <TouchableOpacity
-                      key={mFriend.uid}
-                      onPress={() => {
-                        if (onOpenUserProfile) {
-                          onOpenUserProfile({
-                            uid: mFriend.uid,
-                            name: mFriend.name,
-                            avatar: mFriend.avatar,
-                            role: mFriend.role,
-                            householdName: mFriend.householdName,
-                            friendshipStatus: "friends",
-                            friendshipId: mFriend.friendshipId,
-                          });
-                        }
-                      }}
-                      style={styles.friendGridItem}
-                      activeOpacity={0.8}
-                    >
-                      {mFriend.avatar ? (
-                        <Image
-                          source={{ uri: mFriend.avatar }}
-                          style={styles.friendGridAvatar}
-                        />
-                      ) : (
-                        <View style={styles.friendGridFallback}>
-                          <Text style={styles.friendGridFallbackText}>
-                            {(mFriend.name || "M").charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
-                      <Text
-                        style={[
-                          styles.friendGridName,
-                          { color: isDark ? "#F8FAFC" : "#0F172A" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {mFriend.name.split(" ")[0]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
           </View>
         )}
       </ScrollView>
@@ -2372,6 +2646,257 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           </ScrollView>
         </View>
       </Modal>
+
+      {/* ─── ALL FRIENDS DEDICATED MODAL (OPENED VIA "SEE ALL") ─── */}
+      <Modal
+        visible={showAllFriendsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setShowAllFriendsModal(false);
+          setFriendsSearchQuery("");
+        }}
+      >
+        <View
+          style={[
+            styles.allFriendsModalContainer,
+            {
+              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              paddingTop: Math.max(
+                insets.top,
+                Platform.OS === "android" ? 24 : 12,
+              ),
+            },
+          ]}
+        >
+          {/* Header */}
+          <View
+            style={[
+              styles.allFriendsModalHeader,
+              { borderBottomColor: isDark ? "#1E293B" : "#E2E8F0" },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                setShowAllFriendsModal(false);
+                setFriendsSearchQuery("");
+              }}
+              style={styles.allFriendsModalCloseBtn}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={22}
+                color={isDark ? "#F8FAFC" : "#0F172A"}
+              />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text
+                style={[
+                  styles.allFriendsModalTitle,
+                  { color: isDark ? "#F8FAFC" : "#0F172A" },
+                ]}
+              >
+                Friends
+              </Text>
+              <Text
+                style={[
+                  styles.allFriendsModalSub,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {userFriends.length}{" "}
+                {userFriends.length === 1 ? "friend" : "friends"}
+                {!isSelf && ` • ${mutualFriends.length} mutual`}
+              </Text>
+            </View>
+          </View>
+
+          {/* Search bar */}
+          <View
+            style={[
+              styles.allFriendsSearchBox,
+              {
+                backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                borderColor: isDark ? "#334155" : "#E2E8F0",
+              },
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={isDark ? "#94A3B8" : "#64748B"}
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              style={[
+                styles.allFriendsSearchInput,
+                { color: isDark ? "#F8FAFC" : "#0F172A" },
+              ]}
+              placeholder="Search friends..."
+              placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+              value={friendsSearchQuery}
+              onChangeText={setFriendsSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {Boolean(friendsSearchQuery) && (
+              <TouchableOpacity
+                onPress={() => setFriendsSearchQuery("")}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Friends List */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingHorizontal: 16,
+              paddingBottom: insets.bottom + 40,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            {(() => {
+              const q = friendsSearchQuery.trim().toLowerCase();
+              const filtered = userFriends.filter(
+                (f) =>
+                  !q ||
+                  (f.name && f.name.toLowerCase().includes(q)) ||
+                  (f.householdName &&
+                    f.householdName.toLowerCase().includes(q)),
+              );
+
+              if (filtered.length === 0) {
+                return (
+                  <View style={styles.allFriendsEmptyBox}>
+                    <Ionicons
+                      name="people-outline"
+                      size={44}
+                      color={isDark ? "#475569" : "#CBD5E1"}
+                    />
+                    <Text
+                      style={[
+                        styles.allFriendsEmptyTitle,
+                        { color: isDark ? "#F8FAFC" : "#0F172A" },
+                      ]}
+                    >
+                      {friendsSearchQuery
+                        ? "No matching friends"
+                        : "No friends to show"}
+                    </Text>
+                  </View>
+                );
+              }
+
+              return filtered.map((friend) => {
+                const cleanFid = String(friend.uid || "")
+                  .replace(/^mem_/, "")
+                  .trim();
+                const isMutual =
+                  !isSelf &&
+                  myFriends.some(
+                    (mf) =>
+                      String(mf.uid || "")
+                        .replace(/^mem_/, "")
+                        .trim() === cleanFid,
+                  );
+
+                return (
+                  <TouchableOpacity
+                    key={friend.uid}
+                    onPress={() => {
+                      setShowAllFriendsModal(false);
+                      setFriendsSearchQuery("");
+                      if (onOpenUserProfile) {
+                        onOpenUserProfile({
+                          uid: friend.uid,
+                          name: friend.name,
+                          avatar: friend.avatar,
+                          role: friend.role,
+                          householdName: friend.householdName,
+                          friendshipStatus: "friends",
+                          friendshipId: friend.friendshipId,
+                        });
+                      }
+                    }}
+                    style={[
+                      styles.allFriendsListItem,
+                      { borderBottomColor: isDark ? "#1E293B" : "#F1F5F9" },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    {friend.avatar ? (
+                      <Image
+                        source={{ uri: friend.avatar }}
+                        style={styles.allFriendsListAvatar}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.allFriendsListAvatarFallback,
+                          {
+                            backgroundColor: isDark ? "#334155" : "#DBEAFE",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.allFriendsListInitial,
+                            { color: isDark ? "#94A3B8" : "#1D4ED8" },
+                          ]}
+                        >
+                          {(friend.name || "M").charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text
+                        style={[
+                          styles.allFriendsListName,
+                          { color: isDark ? "#F8FAFC" : "#0F172A" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {friend.name || "Splitzy Member"}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.allFriendsListSubtitle,
+                          { color: isDark ? "#94A3B8" : "#64748B" },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {isSelf
+                          ? friend.householdName ||
+                            friend.role ||
+                            "Splitzy friend"
+                          : isMutual
+                            ? "Mutual friend"
+                            : friend.householdName || "Splitzy friend"}
+                      </Text>
+                    </View>
+
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={isDark ? "#64748B" : "#94A3B8"}
+                    />
+                  </TouchableOpacity>
+                );
+              });
+            })()}
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -2413,6 +2938,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
+    backgroundColor: "#FFFFFF",
   },
   headerArea: {
     position: "relative",
@@ -2581,10 +3107,79 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingHorizontal: 16,
   },
+  reelsLoadingBox: {
+    paddingVertical: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  reelsLoadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  reelsGalleryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 1,
+    paddingBottom: 24,
+  },
+  reelGalleryCard: {
+    overflow: "hidden",
+    position: "relative",
+  },
+  reelGalleryThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  reelGalleryPlaceholder: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1E293B",
+  },
+  reelPinBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  },
+  reelCardScrim: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+    // backgroundColor: "rgba(0, 0, 0, 0.4)",
+  },
+  reelCardViewBadge: {
+    position: "absolute",
+    bottom: 6,
+    left: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.40)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    zIndex: 2,
+  },
+  reelCardViewCount: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
   sectionCard: {
     borderRadius: 12,
-    padding: 16,
-    borderWidth: StyleSheet.hairlineWidth,
+    padding: 8,
+    // borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 16,
   },
   sectionHeading: {
@@ -2604,7 +3199,7 @@ const styles = StyleSheet.create({
   detailItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 20,
   },
   detailIcon: {
     width: 28,
@@ -2626,7 +3221,7 @@ const styles = StyleSheet.create({
   friendGridAvatar: {
     width: "100%",
     aspectRatio: 1,
-    borderRadius: 8,
+    borderRadius: 100,
   },
   friendGridName: {
     fontSize: 13,
@@ -2666,7 +3261,7 @@ const styles = StyleSheet.create({
   },
   emptyPostsCard: {
     borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    // borderWidth: StyleSheet.hairlineWidth,
     padding: 24,
     alignItems: "center",
     marginTop: 8,
@@ -2682,16 +3277,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   fbPostCard: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
+    borderTopWidth: 1,
     marginBottom: 14,
+    margin: -15,
+    marginTop: 0,
+    padding: 8,
     overflow: "visible",
     position: "relative",
   },
   fbPostHeader: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
+    paddingHorizontal: 4,
   },
   fbPostAvatar: {
     width: 40,
@@ -2739,8 +3337,9 @@ const styles = StyleSheet.create({
   fbPostContent: {
     fontSize: 14,
     lineHeight: 20,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingBottom: 10,
+    paddingTop: 8,
   },
   fbPostImage: {
     width: "100%",
@@ -3085,5 +3684,235 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+
+  // ─── FRIENDS HORIZONTAL SECTION STYLES (MATCHING USER SCREENSHOT) ───
+  allTabFriendsCard: {
+    paddingVertical: 8,
+    // paddingHorizontal: 16,
+    // borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 8,
+  },
+  allTabFriendsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  allTabFriendsTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  allTabSeeAllText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  emptyFriendsInlineRow: {
+    paddingVertical: 14,
+  },
+  emptyFriendsInlineText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  friendsHorizontalScroll: {
+    paddingRight: 16,
+    gap: 14,
+  },
+  circularFriendItem: {
+    alignItems: "center",
+    width: 80,
+  },
+  circularFriendAvatarWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    borderWidth: 1.5,
+    overflow: "hidden",
+    backgroundColor: "#F1F5F9",
+    marginBottom: 8,
+  },
+  circularFriendAvatar: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 34,
+  },
+  circularFriendAvatarFallback: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  circularFriendInitial: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  circularFriendName: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 16,
+    marginBottom: 2,
+    height: 32,
+  },
+  circularFriendSubtitle: {
+    fontSize: 11,
+    textAlign: "center",
+    lineHeight: 14,
+  },
+
+  // ─── ALL POSTS SECTION ───
+  allPostsSection: {
+    paddingTop: 0,
+  },
+  allPostsHeaderRow: {
+    // paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  allPostsHeading: {
+    fontSize: 19,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  profileQuickPostCard: {
+    // marginHorizontal: 16,
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: "#333333",
+  },
+  profileQuickPostRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  profileQuickPostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  profileQuickPostAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileQuickPostAvatarInitial: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  profileQuickPostInputTrigger: {
+    flex: 1,
+    marginHorizontal: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+  },
+  profileQuickPostInputPlaceholder: {
+    fontSize: 14,
+  },
+  profileQuickPostMediaBtn: {
+    padding: 6,
+  },
+  profileQuickPostDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 10,
+  },
+  profileQuickPostActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  profileActionShortcutPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  profileActionShortcutText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  // ─── ALL FRIENDS MODAL STYLES ───
+  allFriendsModalContainer: {
+    flex: 1,
+  },
+  allFriendsModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  allFriendsModalCloseBtn: {
+    padding: 4,
+  },
+  allFriendsModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  allFriendsModalSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  allFriendsSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+  },
+  allFriendsSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    padding: 0,
+  },
+  allFriendsEmptyBox: {
+    alignItems: "center",
+    paddingVertical: 40,
+  },
+  allFriendsEmptyTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+  allFriendsListItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  allFriendsListAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  allFriendsListAvatarFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  allFriendsListInitial: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  allFriendsListName: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  allFriendsListSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
   },
 });

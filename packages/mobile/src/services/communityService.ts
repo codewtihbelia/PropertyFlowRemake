@@ -11,6 +11,7 @@ import {
   orderBy,
   where,
   increment,
+  arrayUnion,
   limit,
 } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
@@ -206,6 +207,57 @@ export interface CommunityReel {
   createdAt: string;
   duration?: number;
   isCurated?: boolean;
+  viewsCount?: number;
+  viewers?: string[];
+  pinned?: boolean;
+}
+
+/**
+ * Format view count for reel cards and galleries (e.g., 1.1M, 25.4K, 475)
+ */
+export function formatViewCount(views?: number): string {
+  if (!views || views <= 0) return "0";
+  if (views >= 1_000_000) {
+    const formatted = (views / 1_000_000).toFixed(1).replace(/\.0$/, "");
+    return `${formatted}M`;
+  }
+  if (views >= 1_000) {
+    const formatted = (views / 1_000).toFixed(1).replace(/\.0$/, "");
+    return `${formatted}K`;
+  }
+  return String(views);
+}
+
+/**
+ * Deterministically shuffles reels based on the calendar day (YYYY-MM-DD).
+ * Ensures a fresh, randomized feed every day without jittering within the same day.
+ */
+export function getDailyShuffledReels(reels: CommunityReel[]): CommunityReel[] {
+  if (!reels || reels.length <= 1) return reels;
+
+  // Create deterministic seed from today's date string
+  const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  let seed = 0;
+  for (let i = 0; i < todayStr.length; i++) {
+    seed = (seed << 5) - seed + todayStr.charCodeAt(i);
+    seed |= 0;
+  }
+
+  // Seeded pseudo-random generator (LCG)
+  const lcg = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return (seed >>> 0) / 4294967296;
+  };
+
+  const copy = [...reels];
+  // Fisher-Yates shuffle with seeded PRNG
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(lcg() * (i + 1));
+    const temp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = temp;
+  }
+  return copy;
 }
 
 export interface CommunityReelComment {
@@ -320,6 +372,8 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 68,
     createdAt: new Date(Date.now() - 3600 * 1000 * 2).toISOString(),
     isCurated: true,
+    viewsCount: 1140000, // 1.1M views
+    pinned: true,
   },
   {
     id: "curated_reel_2",
@@ -342,6 +396,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 89,
     createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
     isCurated: true,
+    viewsCount: 475,
   },
   {
     id: "curated_reel_3",
@@ -364,6 +419,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 47,
     createdAt: new Date(Date.now() - 3600 * 1000 * 10).toISOString(),
     isCurated: true,
+    viewsCount: 82500, // 82.5K views
   },
   {
     id: "curated_reel_4",
@@ -386,6 +442,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 39,
     createdAt: new Date(Date.now() - 3600 * 1000 * 18).toISOString(),
     isCurated: true,
+    viewsCount: 19200, // 19.2K views
   },
   {
     id: "curated_reel_5",
@@ -408,6 +465,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 62,
     createdAt: new Date(Date.now() - 3600 * 1000 * 26).toISOString(),
     isCurated: true,
+    viewsCount: 2400, // 2.4K views
   },
   {
     id: "curated_reel_6",
@@ -430,6 +488,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 54,
     createdAt: new Date(Date.now() - 3600 * 1000 * 36).toISOString(),
     isCurated: true,
+    viewsCount: 15300,
   },
   {
     id: "curated_reel_7",
@@ -452,6 +511,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 46,
     createdAt: new Date(Date.now() - 3600 * 1000 * 48).toISOString(),
     isCurated: true,
+    viewsCount: 3120,
   },
   {
     id: "curated_reel_8",
@@ -474,6 +534,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 73,
     createdAt: new Date(Date.now() - 3600 * 1000 * 60).toISOString(),
     isCurated: true,
+    viewsCount: 9400,
   },
   {
     id: "curated_reel_yt_1",
@@ -494,6 +555,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 92,
     createdAt: new Date(Date.now() - 3600 * 1000 * 70).toISOString(),
     isCurated: true,
+    viewsCount: 43200,
   },
   {
     id: "curated_reel_yt_2",
@@ -514,6 +576,7 @@ export const CURATED_REELS: CommunityReel[] = [
     sharesCount: 77,
     createdAt: new Date(Date.now() - 3600 * 1000 * 80).toISOString(),
     isCurated: true,
+    viewsCount: 26800,
   },
 ];
 
@@ -2139,6 +2202,99 @@ class CommunityService {
     } catch {}
 
     return commentRef.id;
+  }
+
+  private sessionViewedReels = new Set<string>();
+
+  /**
+   * Record a view for a reel once per user session using Firestore atomic counter.
+   */
+  async recordReelView(reelId: string, viewerId?: string): Promise<void> {
+    if (!reelId) return;
+    const sessionKey = `${reelId}_${viewerId || "guest"}`;
+    if (this.sessionViewedReels.has(sessionKey)) {
+      return; // Already recorded in this session
+    }
+    this.sessionViewedReels.add(sessionKey);
+
+    // Handle curated reel in-memory
+    if (reelId.startsWith("curated_")) {
+      const cr = CURATED_REELS.find((r) => r.id === reelId);
+      if (cr) {
+        cr.viewsCount = (cr.viewsCount || 0) + 1;
+      }
+      return;
+    }
+
+    try {
+      const reelRef = doc(db, "communityReels", reelId);
+      const updatePayload: Record<string, any> = {
+        viewsCount: increment(1),
+      };
+      if (viewerId) {
+        updatePayload.viewers = arrayUnion(viewerId);
+      }
+      await updateDoc(reelRef, updatePayload);
+    } catch (e) {
+      console.warn("[CommunityService] recordReelView non-blocking notice:", e);
+    }
+  }
+
+  /**
+   * Subscribe to reels created by a specific user for Profile Screen Reels tab.
+   */
+  subscribeUserReels(
+    userId: string,
+    callback: (reels: CommunityReel[]) => void,
+  ): () => void {
+    const cleanUid = String(userId || "")
+      .replace(/^mem_/, "")
+      .trim();
+    if (!cleanUid) {
+      callback([]);
+      return () => {};
+    }
+
+    const q = query(
+      collection(db, "communityReels"),
+      where("authorId", "in", [cleanUid, `mem_${cleanUid}`]),
+      orderBy("createdAt", "desc"),
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const userFirestoreReels: CommunityReel[] = snapshot.docs.map(
+          (docSnap) => ({
+            id: docSnap.id,
+            ...(docSnap.data() as any),
+          }),
+        );
+
+        // Include curated reels if matching author (e.g. curator accounts)
+        const matchedCurated = CURATED_REELS.filter(
+          (cr) =>
+            cr.authorId === cleanUid ||
+            cr.authorId === `mem_${cleanUid}` ||
+            (cleanUid === "cebutitans03" &&
+              cr.authorId.startsWith("splitzy_curator")),
+        );
+
+        callback([...userFirestoreReels, ...matchedCurated]);
+      },
+      (err) => {
+        console.warn("[CommunityService] subscribeUserReels error:", err);
+        // Fallback filter from in-memory curated
+        const matchedCurated = CURATED_REELS.filter(
+          (cr) =>
+            cr.authorId === cleanUid ||
+            cr.authorId === `mem_${cleanUid}` ||
+            (cleanUid === "cebutitans03" &&
+              cr.authorId.startsWith("splitzy_curator")),
+        );
+        callback(matchedCurated);
+      },
+    );
   }
 
   async deleteReel(reelId: string, authorId: string): Promise<void> {

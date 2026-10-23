@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback, memo } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,6 +10,7 @@ import {
   Share,
   Animated,
   Linking,
+  ActivityIndicator,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -21,6 +22,8 @@ import {
   getReelVideoType,
   extractYouTubeId,
   normalizeFacebookUrl,
+  communityService,
+  formatViewCount,
 } from "../services/communityService";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -50,7 +53,7 @@ interface SplitzyReelItemProps {
   itemHeight: number;
 }
 
-export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
+const SplitzyReelItemComponent: React.FC<SplitzyReelItemProps> = ({
   reel,
   isActive,
   isMuted,
@@ -65,6 +68,8 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const [isPlaying, setIsPlaying] = useState(false);
+  // Default to false so reels auto-play smoothly without an obstructing initial spinner
+  const [isLoading, setIsLoading] = useState(false);
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [showHeartBurst, setShowHeartBurst] = useState(false);
   const [showPlayPauseIcon, setShowPlayPauseIcon] = useState<
@@ -74,12 +79,58 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
   const heartScaleAnim = useRef(new Animated.Value(0)).current;
   const playPauseAnim = useRef(new Animated.Value(0)).current;
   const videoElemRef = useRef<any>(null);
+  const stallTimerRef = useRef<any>(null);
 
   const isLiked = (reel.likes || []).includes(currentUserId);
   const isAuthor = reel.authorId === currentUserId;
   const videoType = getReelVideoType(reel.videoUrl);
   const youtubeId =
     videoType === "youtube" ? extractYouTubeId(reel.videoUrl) : null;
+
+  // Intelligent Buffering Grace Period: Only show spinner if reel stalls or has trouble loading for > 1.5 seconds
+  const startStallGraceTimer = useCallback(() => {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+    }
+    stallTimerRef.current = setTimeout(() => {
+      setIsLoading(true);
+    }, 1500);
+  }, []);
+
+  const clearStallGraceTimer = useCallback(() => {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+    setIsLoading(false);
+  }, []);
+
+  // Manage playback and buffering states when active reel changes
+  useEffect(() => {
+    if (isActive) {
+      // Do not flash the loading spinner immediately; start the 1.5s trouble-to-load timer
+      startStallGraceTimer();
+      // Failsafe timer so loading spinner never gets permanently stuck
+      const failsafeTimer = setTimeout(() => {
+        clearStallGraceTimer();
+      }, 4500);
+      return () => {
+        clearTimeout(failsafeTimer);
+        clearStallGraceTimer();
+      };
+    } else {
+      clearStallGraceTimer();
+    }
+  }, [isActive, startStallGraceTimer, clearStallGraceTimer]);
+
+  // Record view count once per unique viewer session after 1.2s of active viewing
+  useEffect(() => {
+    if (!isActive) return;
+    const viewTimer = setTimeout(() => {
+      communityService.recordReelView(reel.id, currentUserId);
+    }, 1200);
+    return () => clearTimeout(viewTimer);
+  }, [isActive, reel.id, currentUserId]);
 
   const showIndicator = (type: "play" | "pause") => {
     setShowPlayPauseIcon(type);
@@ -112,24 +163,30 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
           playPromise
             .then(() => {
               setIsPlaying(true);
+              clearStallGraceTimer();
             })
             .catch(() => {
-              // Browser autoplay policy restricted audio; force mute and play
+              // Browser autoplay policy restricted audio; force mute and play immediately
               el.muted = true;
               el.play?.()
-                .then(() => setIsPlaying(true))
+                .then(() => {
+                  setIsPlaying(true);
+                  clearStallGraceTimer();
+                })
                 .catch(() => {
-                  // Requires user gesture to start
+                  // Requires explicit user tap
                   setIsPlaying(false);
+                  clearStallGraceTimer();
                 });
             });
         }
       } else {
         el.pause?.();
         setIsPlaying(false);
+        clearStallGraceTimer();
       }
     }
-  }, [isActive, isMuted, videoType]);
+  }, [isActive, isMuted, videoType, clearStallGraceTimer]);
 
   const togglePlayPause = () => {
     if (onActivate && !isActive) {
@@ -238,7 +295,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             }}
           >
             {videoType === "youtube" && youtubeId ? (
-              // Direct In-App YouTube Shorts Player
+              // Direct In-App YouTube Shorts Player (mounts iframe only when active to eliminate lag)
               <div
                 style={{
                   position: "relative",
@@ -247,25 +304,43 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                   backgroundColor: "#000000",
                 }}
               >
-                <iframe
-                  key={`yt-${youtubeId}-${isMuted ? "muted" : "unmuted"}-${isActive ? "active" : "inactive"}`}
-                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=${isActive ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0`}
-                  title={reel.caption || "YouTube Short"}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                  loading="eager"
-                  referrerPolicy="strict-origin-when-cross-origin"
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    border: "none",
-                    display: "block",
-                    objectFit: "cover",
-                  }}
-                />
+                {isActive ? (
+                  <iframe
+                    key={`yt-${youtubeId}-${isMuted ? "muted" : "unmuted"}`}
+                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=${isMuted ? 1 : 0}&loop=1&playlist=${youtubeId}&controls=1&playsinline=1&modestbranding=1&rel=0`}
+                    title={reel.caption || "YouTube Short"}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    loading="eager"
+                    onLoad={() => clearStallGraceTimer()}
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      border: "none",
+                      display: "block",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  // Lightweight preview poster when inactive (prevents lag, memory leaks, and background play)
+                  <img
+                    src={
+                      reel.thumbnailUrl ||
+                      `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+                    }
+                    alt={reel.caption || "Reel"}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                )}
               </div>
             ) : videoType === "facebook" ? (
-              // Direct In-App Facebook Reel Player
+              // Direct In-App Facebook Reel Player (mounts iframe only when active to eliminate lag)
               <div
                 style={{
                   position: "relative",
@@ -277,20 +352,38 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                   justifyContent: "center",
                 }}
               >
-                <iframe
-                  key={`fb-${reel.id}-${isMuted ? "muted" : "unmuted"}-${isActive ? "active" : "inactive"}`}
-                  src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=380&t=0&autoplay=${isActive ? "true" : "false"}&mute=${isMuted ? "1" : "0"}`}
-                  title={reel.caption || "Facebook Reel"}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    border: "none",
-                    overflow: "hidden",
-                  }}
-                  scrolling="no"
-                  allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                  allowFullScreen
-                />
+                {isActive ? (
+                  <iframe
+                    key={`fb-${reel.id}-${isMuted ? "muted" : "unmuted"}`}
+                    src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(normalizeFacebookUrl(reel.videoUrl) || reel.videoUrl)}&show_text=false&width=380&t=0&autoplay=true&mute=${isMuted ? "1" : "0"}`}
+                    title={reel.caption || "Facebook Reel"}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      border: "none",
+                      overflow: "hidden",
+                    }}
+                    scrolling="no"
+                    onLoad={() => clearStallGraceTimer()}
+                    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                    allowFullScreen
+                  />
+                ) : (
+                  // Lightweight preview poster when inactive
+                  <img
+                    src={
+                      reel.thumbnailUrl ||
+                      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=720&q=80"
+                    }
+                    alt={reel.caption || "Reel"}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                )}
               </div>
             ) : (
               // Direct MP4 video stream (self-recorded & uploaded reels)
@@ -315,10 +408,23 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                   playsInline
                   muted={isMuted}
                   controls={false}
-                  preload="auto"
+                  preload={isActive ? "auto" : "metadata"}
                   crossOrigin="anonymous"
-                  onPlay={() => setIsPlaying(true)}
+                  onWaiting={() => {
+                    if (isActive) startStallGraceTimer();
+                  }}
+                  onPlaying={() => {
+                    setIsPlaying(true);
+                    clearStallGraceTimer();
+                  }}
+                  onCanPlay={() => clearStallGraceTimer()}
+                  onLoadedData={() => clearStallGraceTimer()}
+                  onPlay={() => {
+                    setIsPlaying(true);
+                    clearStallGraceTimer();
+                  }}
                   onPause={() => setIsPlaying(false)}
+                  onError={() => clearStallGraceTimer()}
                   onClick={(e: React.MouseEvent<HTMLVideoElement>) => {
                     e.stopPropagation();
                     const el = e.currentTarget;
@@ -327,6 +433,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                       el.play()
                         .then(() => {
                           setIsPlaying(true);
+                          clearStallGraceTimer();
                           showIndicator("play");
                         })
                         .catch(() => {
@@ -334,6 +441,7 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
                           el.play()
                             .then(() => {
                               setIsPlaying(true);
+                              clearStallGraceTimer();
                               showIndicator("play");
                             })
                             .catch(() => {});
@@ -386,6 +494,15 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
               scrollEnabled={false}
               bounces={false}
               originWhitelist={["*"]}
+              onLoadStart={() => {
+                if (isActive) startStallGraceTimer();
+              }}
+              onLoadEnd={() => {
+                clearStallGraceTimer();
+              }}
+              onError={() => {
+                clearStallGraceTimer();
+              }}
             />
           </View>
         ) : (
@@ -448,6 +565,15 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
               />
             </View>
           </Animated.View>
+        )}
+
+        {/* Centered Circular Progress Loading Indicator */}
+        {isActive && isLoading && (
+          <View style={styles.loadingSpinnerContainer} pointerEvents="none">
+            <View style={styles.loadingSpinnerCircle}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+            </View>
+          </View>
         )}
       </View>
 
@@ -599,6 +725,14 @@ export const SplitzyReelItem: React.FC<SplitzyReelItemProps> = ({
             {formatCount(reel.sharesCount || 0)}
           </Text>
         </TouchableOpacity>
+
+        {/* Views Count Badge */}
+        <View style={styles.railActionBtn}>
+          <Ionicons name="eye-outline" size={25} color="#FFFFFF" />
+          <Text style={styles.railActionText}>
+            {formatViewCount(reel.viewsCount || 0)}
+          </Text>
+        </View>
 
         {/* Author Delete Option */}
         {isAuthor && onDeleteReel && (
@@ -799,6 +933,33 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.65)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  loadingSpinnerContainer: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -32,
+    marginTop: -32,
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 15,
+  },
+  loadingSpinnerCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
   },
   topControlRow: {
     position: "absolute",
@@ -1049,3 +1210,21 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 });
+
+export const SplitzyReelItem = memo(
+  SplitzyReelItemComponent,
+  (prevProps, nextProps) => {
+    return (
+      prevProps.reel.id === nextProps.reel.id &&
+      prevProps.isActive === nextProps.isActive &&
+      prevProps.isMuted === nextProps.isMuted &&
+      prevProps.itemHeight === nextProps.itemHeight &&
+      prevProps.currentUserId === nextProps.currentUserId &&
+      (prevProps.reel.likes || []).length ===
+        (nextProps.reel.likes || []).length &&
+      (prevProps.reel.viewers || 0) === (nextProps.reel.viewers || 0) &&
+      (prevProps.reel.commentsCount || 0) ===
+        (nextProps.reel.commentsCount || 0)
+    );
+  },
+);
