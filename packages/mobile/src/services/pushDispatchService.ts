@@ -212,7 +212,7 @@ export class PushDispatchService {
 
       const isVideo = params.callType === "video";
       const title = isVideo
-        ? "📹 Incoming Video Call"
+        ? "🎦 Incoming Video Call"
         : "📞 Incoming Voice Call";
       const body = `${params.callerName} is calling you on Splitzy...`;
 

@@ -247,8 +247,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const text =
         durationSeconds > 0
-          ? `${isVideo ? "📹 Video" : "📞 Voice"} Call · ${durationStr}`
-          : `${isVideo ? "📹 Video" : "📞 Voice"} Call · Ended`;
+          ? `${isVideo ? "🎦 Video" : "📞 Voice"} Call · ${durationStr}`
+          : `${isVideo ? "🎦 Video" : "📞 Voice"} Call · Ended`;
 
       const otherUserId =
         callSnapshot.callerId === currentUid

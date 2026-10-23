@@ -33,6 +33,7 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
   const [isVideoOff, setIsVideoOff] = useState<boolean>(false);
   const [isFrontCamera, setIsFrontCamera] = useState<boolean>(true);
   const [hasRemoteVideo, setHasRemoteVideo] = useState<boolean>(false);
+  const [audioNeedsTap, setAudioNeedsTap] = useState<boolean>(false);
 
   const localVideoRef = useRef<any>(null);
   const remoteVideoRef = useRef<any>(null);
@@ -111,42 +112,92 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
     waveAnim4,
   ]);
 
-  // Real-time subscription to remote stream updates via callService
+  // Real-time subscription to local and remote stream updates via callService
   useEffect(() => {
     if (Platform.OS !== "web") return;
 
-    const unsubRemoteStream = callService.onRemoteStream((stream) => {
+    // 1. Subscribe to local stream (camera & microphone)
+    const unsubLocalStream = callService.onLocalStream((stream) => {
       if (!stream) return;
-
-      // 1. Permanent audio sink plays remote voice across BOTH voice & video modes
-      if (
-        remoteAudioRef.current &&
-        remoteAudioRef.current.srcObject !== stream
-      ) {
-        remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch((err: any) => {
-          console.warn(
-            "[ActiveCall] Audio autoplay requires user interaction:",
-            err,
-          );
-        });
-      }
-
-      // 2. Video sink for video calls
-      if (
-        remoteVideoRef.current &&
-        remoteVideoRef.current.srcObject !== stream
-      ) {
-        remoteVideoRef.current.srcObject = stream;
-        setHasRemoteVideo(true);
-        remoteVideoRef.current.play().catch(() => {});
+      if (localVideoRef.current && localVideoRef.current.srcObject !== stream) {
+        try {
+          localVideoRef.current.srcObject = stream;
+          localVideoRef.current.muted = true;
+          localVideoRef.current.play().catch((e: any) => {
+            console.warn("[ActiveCall] Local video autoplay notice:", e);
+          });
+        } catch (err) {}
       }
     });
 
-    return () => unsubRemoteStream();
+    // 2. Subscribe to remote stream (peer's camera & microphone)
+    const unsubRemoteStream = callService.onRemoteStream((stream) => {
+      if (!stream) return;
+
+      // HTML5 Audio Sink: plays remote speech with full volume
+      if (remoteAudioRef.current) {
+        try {
+          if (remoteAudioRef.current.srcObject !== stream) {
+            remoteAudioRef.current.srcObject = stream;
+          }
+          remoteAudioRef.current.volume = 1.0;
+          remoteAudioRef.current.muted = false;
+          remoteAudioRef.current
+            .play()
+            .then(() => {
+              setAudioNeedsTap(false);
+            })
+            .catch((err: any) => {
+              console.warn(
+                "[ActiveCall] Remote audio autoplay requires gesture:",
+                err,
+              );
+              if (err?.name === "NotAllowedError") {
+                setAudioNeedsTap(true);
+              }
+            });
+        } catch (e) {}
+      }
+
+      // Web Audio API Pipeline fallback: hardware audio routing
+      try {
+        const AudioCtx =
+          (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = tonePlayer.getAudioContext() || new AudioCtx();
+          if (ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+          }
+        }
+      } catch (audioBridgeErr) {
+        console.warn("[ActiveCall] Web Audio bridge notice:", audioBridgeErr);
+      }
+
+      // Video sink for video calls
+      if (remoteVideoRef.current) {
+        try {
+          if (remoteVideoRef.current.srcObject !== stream) {
+            remoteVideoRef.current.srcObject = stream;
+          }
+          const hasTrack = stream
+            .getVideoTracks()
+            .some((t: any) => t.enabled && t.readyState === "live");
+          if (hasTrack) {
+            setHasRemoteVideo(true);
+          }
+          remoteVideoRef.current.muted = true;
+          remoteVideoRef.current.play().catch(() => {});
+        } catch (e) {}
+      }
+    });
+
+    return () => {
+      unsubLocalStream();
+      unsubRemoteStream();
+    };
   }, []);
 
-  // Attach local and remote MediaStreams on Web
+  // Periodic stream synchronization safeguard on Web
   useEffect(() => {
     if (Platform.OS !== "web") return;
 
@@ -157,17 +208,29 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
           if (localVideoRef.current.srcObject !== localStream) {
             localVideoRef.current.srcObject = localStream;
           }
+          localVideoRef.current.muted = true;
+          localVideoRef.current.play().catch(() => {});
         } catch (e) {}
       }
 
       const remoteStream = callService.getRemoteStream();
-      // Ensure audio plays even if onRemoteStream fired before refs mounted
       if (remoteAudioRef.current && remoteStream) {
         try {
           if (remoteAudioRef.current.srcObject !== remoteStream) {
             remoteAudioRef.current.srcObject = remoteStream;
           }
-          remoteAudioRef.current.play().catch(() => {});
+          remoteAudioRef.current.volume = 1.0;
+          remoteAudioRef.current.muted = false;
+          remoteAudioRef.current
+            .play()
+            .then(() => {
+              setAudioNeedsTap(false);
+            })
+            .catch((err: any) => {
+              if (err?.name === "NotAllowedError") {
+                setAudioNeedsTap(true);
+              }
+            });
         } catch (e) {}
       }
 
@@ -175,15 +238,21 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
         try {
           if (remoteVideoRef.current.srcObject !== remoteStream) {
             remoteVideoRef.current.srcObject = remoteStream;
+          }
+          const hasVideoTrack = remoteStream
+            .getVideoTracks()
+            .some((t: any) => t.enabled && t.readyState === "live");
+          if (hasVideoTrack) {
             setHasRemoteVideo(true);
           }
+          remoteVideoRef.current.muted = true;
           remoteVideoRef.current.play().catch(() => {});
         } catch (e) {}
       }
     };
 
     attachStreams();
-    const streamCheckTimer = setInterval(attachStreams, 1000);
+    const streamCheckTimer = setInterval(attachStreams, 800);
     return () => clearInterval(streamCheckTimer);
   }, [call?.status, isVideoOff]);
 
@@ -191,7 +260,22 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
   const handleContainerPress = () => {
     tonePlayer.resumeAudioContext();
     if (remoteAudioRef.current) {
-      remoteAudioRef.current.play().catch(() => {});
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current
+        .play()
+        .then(() => {
+          setAudioNeedsTap(false);
+        })
+        .catch(() => {});
+    }
+    if (localVideoRef.current && callService.getLocalStream()) {
+      localVideoRef.current.muted = true;
+      localVideoRef.current.play().catch(() => {});
+    }
+    if (remoteVideoRef.current && callService.getRemoteStream()) {
+      remoteVideoRef.current.muted = true;
+      remoteVideoRef.current.play().catch(() => {});
     }
   };
 
@@ -265,7 +349,15 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
             ref={remoteAudioRef}
             autoPlay
             playsInline
-            style={{ display: "none" }}
+            style={{
+              position: "fixed",
+              top: -9999,
+              left: -9999,
+              width: 1,
+              height: 1,
+              opacity: 0.01,
+              pointerEvents: "none",
+            }}
           />
         ) : null}
 
@@ -290,11 +382,20 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
+                  muted
+                  onLoadedMetadata={(e) => {
+                    const el = e.currentTarget;
+                    el.muted = true;
+                    el.play().catch(() => {});
+                    setHasRemoteVideo(true);
+                  }}
+                  onPlaying={() => setHasRemoteVideo(true)}
                   style={{
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    display: hasRemoteVideo ? "block" : "none",
+                    opacity: hasRemoteVideo ? 1 : 0,
+                    transition: "opacity 0.3s ease",
                   }}
                 />
               </div>
@@ -320,7 +421,7 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                 </View>
                 <Text style={styles.videoConnectingText}>
                   {isConnected
-                    ? `${peerName}'s camera is starting...`
+                    ? `${peerName}'s camera is streaming...`
                     : "Connecting video call..."}
                 </Text>
               </View>
@@ -398,6 +499,20 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
           </View>
         </View>
 
+        {/* Tap to Unmute Banner if audio autoplay needs user interaction */}
+        {audioNeedsTap && (
+          <TouchableOpacity
+            style={styles.tapToUnmuteBanner}
+            onPress={handleContainerPress}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="volume-high" size={16} color="#FFFFFF" />
+            <Text style={styles.tapToUnmuteText}>
+              Tap screen to unmute voice audio
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Local Video Picture-in-Picture (Top Right Thumbnail) for Video Calls */}
         {isVideo && (
           <View style={styles.pipContainer}>
@@ -413,10 +528,18 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                 }}
               >
                 <video
-                  ref={localVideoRef}
+                  ref={(el) => {
+                    if (el) el.muted = true;
+                    localVideoRef.current = el;
+                  }}
                   autoPlay
                   playsInline
                   muted
+                  onLoadedMetadata={(e) => {
+                    const el = e.currentTarget;
+                    el.muted = true;
+                    el.play().catch(() => {});
+                  }}
                   style={{
                     width: "100%",
                     height: "100%",
@@ -632,6 +755,29 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  tapToUnmuteBanner: {
+    position: "absolute",
+    top: 72,
+    alignSelf: "center",
+    zIndex: 50,
+    backgroundColor: "rgba(37, 99, 235, 0.95)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 6,
+  },
+  tapToUnmuteText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
   },
   headerInfo: {
     gap: 3,

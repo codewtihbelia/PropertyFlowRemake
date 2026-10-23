@@ -273,22 +273,53 @@ if (
 
 // ----------------------------------------------------------------------
 // WebRTC Signaling & Connection Manager
+// ----------------------------------------------------------------------
+// WebRTC Signaling & Connection Manager
 export interface UserPresenceResult {
   isOnline: boolean;
   lastActiveAt?: string;
   statusLabel: string;
 }
 
-// ----------------------------------------------------------------------
-// WebRTC Signaling & Connection Manager
-// ----------------------------------------------------------------------
 const RTC_CONFIG: any = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
   ],
+  iceCandidatePoolSize: 10,
 };
+
+function getRTCPeerConnection(): any {
+  if (typeof window === "undefined") return null;
+  return (
+    (window as any).RTCPeerConnection ||
+    (window as any).webkitRTCPeerConnection ||
+    (window as any).mozRTCPeerConnection ||
+    null
+  );
+}
+
+function getRTCSessionDescription(): any {
+  if (typeof window === "undefined") return null;
+  return (
+    (window as any).RTCSessionDescription ||
+    (window as any).webkitRTCSessionDescription ||
+    null
+  );
+}
+
+function getRTCIceCandidate(): any {
+  if (typeof window === "undefined") return null;
+  return (
+    (window as any).RTCIceCandidate ||
+    (window as any).webkitRTCIceCandidate ||
+    null
+  );
+}
 
 class CallManager {
   private peerConnection: any = null;
@@ -301,6 +332,7 @@ class CallManager {
   private pendingRemoteCandidates: any[] = [];
   private hasRemoteDescriptionSet: boolean = false;
   private remoteStreamListeners = new Set<(stream: any) => void>();
+  private localStreamListeners = new Set<(stream: any) => void>();
 
   /**
    * Checks whether a contact is currently online or offline.
@@ -345,6 +377,30 @@ class CallManager {
     return { isOnline: false, statusLabel: "Offline" };
   }
 
+  // Subscribe to changes on local MediaStream
+  onLocalStream(callback: (stream: any) => void): () => void {
+    this.localStreamListeners.add(callback);
+    if (this.localStream) {
+      try {
+        callback(this.localStream);
+      } catch (e) {}
+    }
+    return () => {
+      this.localStreamListeners.delete(callback);
+    };
+  }
+
+  private notifyLocalStream(stream: any): void {
+    this.localStream = stream;
+    this.localStreamListeners.forEach((listener) => {
+      try {
+        listener(stream);
+      } catch (e) {
+        console.warn("notifyLocalStream listener error:", e);
+      }
+    });
+  }
+
   // Subscribe to changes on remote MediaStream
   onRemoteStream(callback: (stream: any) => void): () => void {
     this.remoteStreamListeners.add(callback);
@@ -369,7 +425,7 @@ class CallManager {
     });
   }
 
-  // Initialize or fetch local user media
+  // Initialize or fetch local user media with resilient fallback chain
   async startLocalMedia(callType: CallType): Promise<any> {
     if (
       typeof window === "undefined" ||
@@ -379,36 +435,126 @@ class CallManager {
       return null;
     }
 
-    try {
-      const constraints: MediaStreamConstraints = {
-        audio: true,
-        video:
-          callType === "video"
-            ? {
-                facingMode: this.isFrontCamera ? "user" : "environment",
-                width: { ideal: 640 },
-                height: { ideal: 480 },
-              }
-            : false,
-      };
+    // Reuse existing live stream if it already satisfies the requested call type
+    if (this.localStream) {
+      const hasAudio = this.localStream
+        .getAudioTracks()
+        .some((t: any) => t.readyState === "live");
+      const hasVideo = this.localStream
+        .getVideoTracks()
+        .some((t: any) => t.readyState === "live");
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      this.localStream = stream;
-      return stream;
-    } catch (err) {
-      console.warn("Failed to get UserMedia:", err);
-      // Fallback: If video failed or permission denied, try audio only
-      if (callType === "video") {
-        try {
-          const audioOnly = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
-          this.localStream = audioOnly;
-          return audioOnly;
-        } catch (e) {
-          console.warn("Audio only UserMedia also failed:", e);
+      if (hasAudio && (callType !== "video" || hasVideo)) {
+        this.notifyLocalStream(this.localStream);
+        return this.localStream;
+      }
+    }
+
+    // VIDEO CALL: Multi-tier fallback strategy
+    if (callType === "video") {
+      // Tier 1: Mobile-friendly ideal facingMode & audio processing
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: {
+            facingMode: this.isFrontCamera
+              ? { ideal: "user" }
+              : { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+        this.notifyLocalStream(stream);
+        return stream;
+      } catch (e1) {
+        console.warn(
+          "[CallManager] Tier 1 ideal video constraints failed, trying basic video+audio:",
+          e1,
+        );
+      }
+
+      // Tier 2: Universal basic video + audio (compatible with all webcams, PC/Mac, external cameras)
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true,
+        });
+        this.notifyLocalStream(stream);
+        return stream;
+      } catch (e2) {
+        console.warn(
+          "[CallManager] Basic video+audio failed, attempting separate track acquisition:",
+          e2,
+        );
+      }
+
+      // Tier 3: Acquire video and audio independently and merge tracks
+      let separateVideoTrack: any = null;
+      let separateAudioTrack: any = null;
+
+      try {
+        const vStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        separateVideoTrack = vStream.getVideoTracks()[0];
+      } catch (ve) {
+        console.warn("[CallManager] Separate video acquisition warning:", ve);
+      }
+
+      try {
+        const aStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        separateAudioTrack = aStream.getAudioTracks()[0];
+      } catch (ae) {
+        console.warn("[CallManager] Separate audio acquisition warning:", ae);
+      }
+
+      if (separateVideoTrack || separateAudioTrack) {
+        const MediaStreamConstructor =
+          (window as any).MediaStream || (window as any).webkitMediaStream;
+        if (MediaStreamConstructor) {
+          const mergedStream = new MediaStreamConstructor();
+          if (separateVideoTrack) mergedStream.addTrack(separateVideoTrack);
+          if (separateAudioTrack) mergedStream.addTrack(separateAudioTrack);
+          this.notifyLocalStream(mergedStream);
+          return mergedStream;
         }
       }
+    }
+
+    // VOICE CALL (or audio fallback if camera unavailable)
+    try {
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+      this.notifyLocalStream(audioStream);
+      return audioStream;
+    } catch (eAudio1) {
+      console.warn(
+        "[CallManager] High-quality audio failed, trying simple audio:",
+        eAudio1,
+      );
+    }
+
+    try {
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      this.notifyLocalStream(audioStream);
+      return audioStream;
+    } catch (eAudio2) {
+      console.error("[CallManager] All getUserMedia attempts failed:", eAudio2);
       return null;
     }
   }
@@ -443,7 +589,7 @@ class CallManager {
     return enabled;
   }
 
-  // Flip camera between front & back
+  // Flip camera between front & back safely
   async flipCamera(): Promise<boolean> {
     if (
       typeof window === "undefined" ||
@@ -452,26 +598,33 @@ class CallManager {
     ) {
       return false;
     }
-    this.isFrontCamera = !this.isFrontCamera;
-    if (!this.localStream) return this.isFrontCamera;
-
-    const oldVideoTrack = this.localStream.getVideoTracks()[0];
-    if (oldVideoTrack) {
-      oldVideoTrack.stop();
-      this.localStream.removeTrack(oldVideoTrack);
+    const targetFacing = !this.isFrontCamera;
+    if (!this.localStream) {
+      this.isFrontCamera = targetFacing;
+      return this.isFrontCamera;
     }
 
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: this.isFrontCamera ? "user" : "environment",
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          facingMode: targetFacing
+            ? { ideal: "user" }
+            : { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
       });
       const newTrack = newStream.getVideoTracks()[0];
       if (newTrack) {
+        const oldVideoTrack = this.localStream.getVideoTracks()[0];
+        if (oldVideoTrack) {
+          oldVideoTrack.stop();
+          this.localStream.removeTrack(oldVideoTrack);
+        }
         this.localStream.addTrack(newTrack);
+        this.isFrontCamera = targetFacing;
+        this.notifyLocalStream(this.localStream);
+
         if (this.peerConnection) {
           const sender = this.peerConnection
             .getSenders()
@@ -510,7 +663,86 @@ class CallManager {
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescriptionSet = false;
 
-    // Immediately create and persist the call document in Firestore so receiver listener triggers right away
+    // Start ringback tone
+    tonePlayer.playRingback();
+
+    // 1. Acquire local media FIRST so offer contains real media tracks
+    const stream = await this.startLocalMedia(params.callType);
+
+    const RTCPeer = getRTCPeerConnection();
+    let sdpOffer: any = null;
+    const initialCandidates: any[] = [];
+    let isCallDocSaved = false;
+
+    if (RTCPeer) {
+      try {
+        const pc = new RTCPeer(RTC_CONFIG);
+        this.peerConnection = pc;
+
+        if (stream) {
+          stream.getTracks().forEach((track: any) => {
+            pc.addTrack(track, stream);
+          });
+        }
+
+        pc.ontrack = (event: any) => {
+          let rStream =
+            event.streams && event.streams[0] ? event.streams[0] : null;
+          if (!rStream && event.track) {
+            const MediaStreamConstructor =
+              (window as any).MediaStream || (window as any).webkitMediaStream;
+            if (MediaStreamConstructor) {
+              if (!this.remoteStream) {
+                this.remoteStream = new MediaStreamConstructor();
+              }
+              this.remoteStream.addTrack(event.track);
+              rStream = this.remoteStream;
+            }
+          }
+          if (rStream) {
+            this.notifyRemoteStream(rStream);
+          }
+        };
+
+        pc.onicecandidate = (event: any) => {
+          if (event.candidate && this.currentCallId === callId) {
+            const cand = event.candidate.toJSON();
+            if (cand && cand.candidate) {
+              if (!isCallDocSaved) {
+                initialCandidates.push(cand);
+              } else {
+                updateDoc(doc(db, "calls", callId), {
+                  callerCandidates: arrayUnion(cand),
+                }).catch(() => {});
+              }
+            }
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          console.log(
+            `[CallManager] Caller ICE state: ${pc.iceConnectionState}`,
+          );
+        };
+
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: params.callType === "video",
+        });
+        await pc.setLocalDescription(offer);
+        sdpOffer = {
+          type: offer.type,
+          sdp: offer.sdp,
+        };
+
+        // Brief delay (250ms) to allow initial host and STUN ICE candidates to gather
+        await new Promise((r) => setTimeout(r, 250));
+      } catch (err) {
+        console.warn("[CallManager] WebRTC offer negotiation error:", err);
+      }
+    }
+
+    // 2. Persist call document to Firestore WITH offer and initial candidates attached
     const callDoc: CallSession = {
       id: callId,
       callerId: normalizedCallerId,
@@ -522,65 +754,13 @@ class CallManager {
       callType: params.callType,
       status: "ringing",
       createdAt: new Date().toISOString(),
-      callerCandidates: [],
+      offer: sdpOffer,
+      callerCandidates: initialCandidates,
       receiverCandidates: [],
     };
 
     await setDoc(doc(db, "calls", callId), callDoc);
-
-    // Start ringback tone
-    tonePlayer.playRingback();
-
-    // Acquire local media & negotiate WebRTC offer in the background
-    this.startLocalMedia(params.callType)
-      .then(async (stream) => {
-        const RTCPeer =
-          typeof window !== "undefined" &&
-          typeof (window as any).RTCPeerConnection === "function"
-            ? (window as any).RTCPeerConnection
-            : null;
-
-        if (RTCPeer && stream && this.currentCallId === callId) {
-          try {
-            const pc = new RTCPeer(RTC_CONFIG);
-            this.peerConnection = pc;
-
-            stream.getTracks().forEach((track: any) => {
-              pc.addTrack(track, stream);
-            });
-
-            pc.ontrack = (event: any) => {
-              if (event.streams && event.streams[0]) {
-                this.notifyRemoteStream(event.streams[0]);
-              }
-            };
-
-            pc.onicecandidate = (event: any) => {
-              if (event.candidate && this.currentCallId === callId) {
-                updateDoc(doc(db, "calls", callId), {
-                  callerCandidates: arrayUnion(event.candidate.toJSON()),
-                }).catch(() => {});
-              }
-            };
-
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            const sdpOffer = {
-              type: offer.type,
-              sdp: offer.sdp,
-            };
-
-            await updateDoc(doc(db, "calls", callId), {
-              offer: sdpOffer,
-            });
-          } catch (err) {
-            console.warn("WebRTC offer negotiation error:", err);
-          }
-        }
-      })
-      .catch((e) => {
-        console.warn("startLocalMedia error in initiateCall:", e);
-      });
+    isCallDocSaved = true;
 
     return callId;
   }
@@ -596,80 +776,118 @@ class CallManager {
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescriptionSet = false;
 
-    await this.startLocalMedia(callSession.callType);
+    // 1. Acquire local stream
+    const stream = await this.startLocalMedia(callSession.callType);
+
+    // 2. Resolve offer from callSession or fetch from Firestore if missing
+    let offer = callSession.offer;
+    if (!offer) {
+      try {
+        const snap = await getDoc(doc(db, "calls", callSession.id));
+        if (snap.exists() && snap.data()?.offer) {
+          offer = snap.data().offer;
+        }
+      } catch (e) {
+        console.warn("[CallManager] Error re-fetching offer in acceptCall:", e);
+      }
+    }
 
     let sdpAnswer: any = null;
-    const RTCPeer =
-      typeof window !== "undefined" &&
-      typeof (window as any).RTCPeerConnection === "function"
-        ? (window as any).RTCPeerConnection
-        : null;
+    const initialReceiverCandidates: any[] = [];
+    let isAnswerSaved = false;
 
-    if (RTCPeer && callSession.offer) {
+    const RTCPeer = getRTCPeerConnection();
+    const RTCSession = getRTCSessionDescription();
+
+    if (RTCPeer && offer && RTCSession) {
       try {
         const pc = new RTCPeer(RTC_CONFIG);
         this.peerConnection = pc;
 
-        if (this.localStream) {
-          this.localStream.getTracks().forEach((track: any) => {
-            pc.addTrack(track, this.localStream);
+        if (stream) {
+          stream.getTracks().forEach((track: any) => {
+            pc.addTrack(track, stream);
           });
         }
 
         pc.ontrack = (event: any) => {
-          if (event.streams && event.streams[0]) {
-            this.notifyRemoteStream(event.streams[0]);
+          let rStream =
+            event.streams && event.streams[0] ? event.streams[0] : null;
+          if (!rStream && event.track) {
+            const MediaStreamConstructor =
+              (window as any).MediaStream || (window as any).webkitMediaStream;
+            if (MediaStreamConstructor) {
+              if (!this.remoteStream) {
+                this.remoteStream = new MediaStreamConstructor();
+              }
+              this.remoteStream.addTrack(event.track);
+              rStream = this.remoteStream;
+            }
+          }
+          if (rStream) {
+            this.notifyRemoteStream(rStream);
           }
         };
 
         pc.onicecandidate = (event: any) => {
           if (event.candidate && this.currentCallId === callSession.id) {
-            updateDoc(doc(db, "calls", callSession.id), {
-              receiverCandidates: arrayUnion(event.candidate.toJSON()),
-            }).catch(() => {});
+            const cand = event.candidate.toJSON();
+            if (cand && cand.candidate) {
+              if (!isAnswerSaved) {
+                initialReceiverCandidates.push(cand);
+              } else {
+                updateDoc(doc(db, "calls", callSession.id), {
+                  receiverCandidates: arrayUnion(cand),
+                }).catch(() => {});
+              }
+            }
           }
         };
 
-        const RTCSession =
-          typeof window !== "undefined" &&
-          typeof (window as any).RTCSessionDescription === "function"
-            ? (window as any).RTCSessionDescription
-            : null;
+        pc.oniceconnectionstatechange = () => {
+          console.log(
+            `[CallManager] Receiver ICE state: ${pc.iceConnectionState}`,
+          );
+        };
 
-        if (RTCSession) {
-          await pc.setRemoteDescription(new RTCSession(callSession.offer));
-          this.hasRemoteDescriptionSet = true;
+        await pc.setRemoteDescription(new RTCSession(offer));
+        this.hasRemoteDescriptionSet = true;
 
-          // Add any pending caller candidates
-          if (callSession.callerCandidates?.length) {
-            await this.handleNewCandidates(callSession.callerCandidates);
-          }
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          sdpAnswer = {
-            type: answer.type,
-            sdp: answer.sdp,
-          };
+        // Process any caller candidates that were already gathered
+        if (callSession.callerCandidates?.length) {
+          await this.handleNewCandidates(callSession.callerCandidates);
         }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sdpAnswer = {
+          type: answer.type,
+          sdp: answer.sdp,
+        };
+
+        // Brief delay (250ms) to allow initial receiver candidates to gather
+        await new Promise((r) => setTimeout(r, 250));
       } catch (err) {
-        console.warn("WebRTC answer error:", err);
+        console.warn("[CallManager] WebRTC answer error in acceptCall:", err);
       }
     }
 
-    await updateDoc(doc(db, "calls", callSession.id), {
+    const updatePayload: any = {
       status: "connected",
       answer: sdpAnswer,
-    });
+    };
+    if (initialReceiverCandidates.length > 0) {
+      updatePayload.receiverCandidates = arrayUnion(
+        ...initialReceiverCandidates,
+      );
+    }
+    await updateDoc(doc(db, "calls", callSession.id), updatePayload);
+    isAnswerSaved = true;
   }
 
   // Answer received on caller side
   async handleAnswerReceived(answer: any) {
-    const RTCSession =
-      typeof window !== "undefined" &&
-      typeof (window as any).RTCSessionDescription === "function"
-        ? (window as any).RTCSessionDescription
-        : null;
+    const RTCSession = getRTCSessionDescription();
 
     if (
       this.peerConnection &&
@@ -678,11 +896,14 @@ class CallManager {
       !this.hasRemoteDescriptionSet
     ) {
       try {
-        if (this.peerConnection.signalingState !== "stable") {
+        if (this.peerConnection.signalingState === "have-local-offer") {
           await this.peerConnection.setRemoteDescription(
             new RTCSession(answer),
           );
           this.hasRemoteDescriptionSet = true;
+          console.log(
+            "[CallManager] Remote description (answer) set successfully",
+          );
 
           // Flush any remote candidates received prior to remote description
           if (this.pendingRemoteCandidates.length > 0) {
@@ -692,18 +913,14 @@ class CallManager {
           }
         }
       } catch (e) {
-        console.warn("handleAnswerReceived error:", e);
+        console.warn("[CallManager] handleAnswerReceived error:", e);
       }
     }
   }
 
   // Add received ICE candidates safely
   async handleNewCandidates(candidates: any[]) {
-    const RTCIce =
-      typeof window !== "undefined" &&
-      typeof (window as any).RTCIceCandidate === "function"
-        ? (window as any).RTCIceCandidate
-        : null;
+    const RTCIce = getRTCIceCandidate();
 
     if (
       !candidates ||
@@ -728,14 +945,14 @@ class CallManager {
       try {
         await this.peerConnection.addIceCandidate(new RTCIce(c));
       } catch (e) {
-        console.warn("addIceCandidate error:", e);
+        console.warn("[CallManager] addIceCandidate error:", e);
       }
     }
   }
 
   // Synchronize Firestore call state with WebRTC PeerConnection
   async syncSignalingState(callData: CallSession, isCaller: boolean) {
-    if (!this.peerConnection || !callData) return;
+    if (!callData) return;
 
     if (isCaller) {
       // 1. If caller received an answer from receiver
@@ -750,7 +967,22 @@ class CallManager {
         await this.handleNewCandidates(callData.receiverCandidates);
       }
     } else {
-      // Receiver side: if caller sends additional ICE candidates
+      // Receiver side:
+      if (
+        !this.hasRemoteDescriptionSet &&
+        callData.offer &&
+        this.peerConnection
+      ) {
+        const RTCSession = getRTCSessionDescription();
+        if (RTCSession && this.peerConnection.signalingState === "stable") {
+          try {
+            await this.peerConnection.setRemoteDescription(
+              new RTCSession(callData.offer),
+            );
+            this.hasRemoteDescriptionSet = true;
+          } catch (e) {}
+        }
+      }
       if (callData.callerCandidates && callData.callerCandidates.length > 0) {
         await this.handleNewCandidates(callData.callerCandidates);
       }
@@ -813,6 +1045,8 @@ class CallManager {
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescriptionSet = false;
     this.currentCallId = null;
+    this.notifyLocalStream(null);
+    this.notifyRemoteStream(null);
   }
 
   // Subscribe to updates for a specific call session
