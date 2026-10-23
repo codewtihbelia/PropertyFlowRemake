@@ -10,6 +10,7 @@
     "postinstall": "mkdir -p node_modules && ln -sfn ../../../node_modules/expo node_modules/expo || true"
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.2",
     "@expo/vector-icons": "^15.1.1",
     "@propertyflow/shared": "file:../shared",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -39,6 +40,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4",
     "react-native-view-shot": "5.1.0",
+    "react-native-webrtc": "^155.0.1",
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {

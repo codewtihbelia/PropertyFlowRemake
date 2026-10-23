@@ -87,7 +87,8 @@
       "expo-web-browser",
       "expo-font",
       "expo-asset",
-      "expo-video"
+      "expo-video",
+      "@config-plugins/react-native-webrtc"
     ],
     "updates": {
       "url": "https://u.expo.dev/bc0bb695-d19f-44ed-af2e-4ec21899a49a"

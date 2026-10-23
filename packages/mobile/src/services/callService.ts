@@ -13,6 +13,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
+import { Platform } from "react-native";
 
 export type CallType = "voice" | "video";
 export type CallStatus =
@@ -281,6 +282,52 @@ export interface UserPresenceResult {
   statusLabel: string;
 }
 
+let NativeWebRTCModule: any = null;
+try {
+  if (Platform.OS !== "web") {
+    // Dynamic import to prevent crash if native binary is not yet compiled
+    NativeWebRTCModule = require("react-native-webrtc");
+  }
+} catch (e) {
+  // Native module not linked in current APK build
+  NativeWebRTCModule = null;
+}
+
+export function isNativeWebRTCAvailable(): boolean {
+  if (Platform.OS === "web") return true;
+  return Boolean(
+    NativeWebRTCModule &&
+    NativeWebRTCModule.RTCPeerConnection &&
+    NativeWebRTCModule.mediaDevices,
+  );
+}
+
+export function getNativeRTCView(): any {
+  return NativeWebRTCModule?.RTCView || null;
+}
+
+export function getMediaDevices(): any {
+  if (Platform.OS !== "web" && NativeWebRTCModule?.mediaDevices) {
+    return NativeWebRTCModule.mediaDevices;
+  }
+  if (typeof navigator !== "undefined" && navigator?.mediaDevices) {
+    return navigator.mediaDevices;
+  }
+  return null;
+}
+
+function getMediaStreamConstructor(): any {
+  if (Platform.OS !== "web" && NativeWebRTCModule?.MediaStream) {
+    return NativeWebRTCModule.MediaStream;
+  }
+  if (typeof window !== "undefined") {
+    return (
+      (window as any).MediaStream || (window as any).webkitMediaStream || null
+    );
+  }
+  return null;
+}
+
 const RTC_CONFIG: any = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -294,6 +341,9 @@ const RTC_CONFIG: any = {
 };
 
 function getRTCPeerConnection(): any {
+  if (Platform.OS !== "web" && NativeWebRTCModule?.RTCPeerConnection) {
+    return NativeWebRTCModule.RTCPeerConnection;
+  }
   if (typeof window === "undefined") return null;
   return (
     (window as any).RTCPeerConnection ||
@@ -304,6 +354,9 @@ function getRTCPeerConnection(): any {
 }
 
 function getRTCSessionDescription(): any {
+  if (Platform.OS !== "web" && NativeWebRTCModule?.RTCSessionDescription) {
+    return NativeWebRTCModule.RTCSessionDescription;
+  }
   if (typeof window === "undefined") return null;
   return (
     (window as any).RTCSessionDescription ||
@@ -313,6 +366,9 @@ function getRTCSessionDescription(): any {
 }
 
 function getRTCIceCandidate(): any {
+  if (Platform.OS !== "web" && NativeWebRTCModule?.RTCIceCandidate) {
+    return NativeWebRTCModule.RTCIceCandidate;
+  }
   if (typeof window === "undefined") return null;
   return (
     (window as any).RTCIceCandidate ||
@@ -427,11 +483,11 @@ class CallManager {
 
   // Initialize or fetch local user media with resilient fallback chain
   async startLocalMedia(callType: CallType): Promise<any> {
-    if (
-      typeof window === "undefined" ||
-      typeof navigator === "undefined" ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
+    const mediaDevices = getMediaDevices();
+    if (!mediaDevices || !mediaDevices.getUserMedia) {
+      console.warn(
+        "[CallManager] getUserMedia is not supported in this runtime environment.",
+      );
       return null;
     }
 
@@ -439,10 +495,10 @@ class CallManager {
     if (this.localStream) {
       const hasAudio = this.localStream
         .getAudioTracks()
-        .some((t: any) => t.readyState === "live");
+        .some((t: any) => t.readyState === "live" || t.enabled);
       const hasVideo = this.localStream
         .getVideoTracks()
-        .some((t: any) => t.readyState === "live");
+        .some((t: any) => t.readyState === "live" || t.enabled);
 
       if (hasAudio && (callType !== "video" || hasVideo)) {
         this.notifyLocalStream(this.localStream);
@@ -454,7 +510,7 @@ class CallManager {
     if (callType === "video") {
       // Tier 1: Mobile-friendly ideal facingMode & audio processing
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -477,9 +533,9 @@ class CallManager {
         );
       }
 
-      // Tier 2: Universal basic video + audio (compatible with all webcams, PC/Mac, external cameras)
+      // Tier 2: Universal basic video + audio
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await mediaDevices.getUserMedia({
           audio: true,
           video: true,
         });
@@ -497,26 +553,21 @@ class CallManager {
       let separateAudioTrack: any = null;
 
       try {
-        const vStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
+        const vStream = await mediaDevices.getUserMedia({ video: true });
         separateVideoTrack = vStream.getVideoTracks()[0];
       } catch (ve) {
         console.warn("[CallManager] Separate video acquisition warning:", ve);
       }
 
       try {
-        const aStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
+        const aStream = await mediaDevices.getUserMedia({ audio: true });
         separateAudioTrack = aStream.getAudioTracks()[0];
       } catch (ae) {
         console.warn("[CallManager] Separate audio acquisition warning:", ae);
       }
 
       if (separateVideoTrack || separateAudioTrack) {
-        const MediaStreamConstructor =
-          (window as any).MediaStream || (window as any).webkitMediaStream;
+        const MediaStreamConstructor = getMediaStreamConstructor();
         if (MediaStreamConstructor) {
           const mergedStream = new MediaStreamConstructor();
           if (separateVideoTrack) mergedStream.addTrack(separateVideoTrack);
@@ -529,7 +580,7 @@ class CallManager {
 
     // VOICE CALL (or audio fallback if camera unavailable)
     try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({
+      const audioStream = await mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -547,7 +598,7 @@ class CallManager {
     }
 
     try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({
+      const audioStream = await mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
@@ -591,21 +642,33 @@ class CallManager {
 
   // Flip camera between front & back safely
   async flipCamera(): Promise<boolean> {
-    if (
-      typeof window === "undefined" ||
-      typeof navigator === "undefined" ||
-      !navigator?.mediaDevices?.getUserMedia
-    ) {
-      return false;
-    }
     const targetFacing = !this.isFrontCamera;
-    if (!this.localStream) {
+
+    // In react-native-webrtc, video tracks can support direct camera switching
+    if (this.localStream) {
+      const videoTrack = this.localStream.getVideoTracks()[0];
+      if (videoTrack && typeof videoTrack._switchCamera === "function") {
+        try {
+          videoTrack._switchCamera();
+          this.isFrontCamera = targetFacing;
+          return this.isFrontCamera;
+        } catch (e) {
+          console.warn(
+            "[CallManager] _switchCamera failed, trying getUserMedia re-acquisition:",
+            e,
+          );
+        }
+      }
+    }
+
+    const mediaDevices = getMediaDevices();
+    if (!mediaDevices || !mediaDevices.getUserMedia) {
       this.isFrontCamera = targetFacing;
       return this.isFrontCamera;
     }
 
     try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      const newStream = await mediaDevices.getUserMedia({
         video: {
           facingMode: targetFacing
             ? { ideal: "user" }
@@ -616,12 +679,14 @@ class CallManager {
       });
       const newTrack = newStream.getVideoTracks()[0];
       if (newTrack) {
-        const oldVideoTrack = this.localStream.getVideoTracks()[0];
+        const oldVideoTrack = this.localStream?.getVideoTracks()[0];
         if (oldVideoTrack) {
           oldVideoTrack.stop();
           this.localStream.removeTrack(oldVideoTrack);
         }
-        this.localStream.addTrack(newTrack);
+        if (this.localStream) {
+          this.localStream.addTrack(newTrack);
+        }
         this.isFrontCamera = targetFacing;
         this.notifyLocalStream(this.localStream);
 
@@ -689,8 +754,7 @@ class CallManager {
           let rStream =
             event.streams && event.streams[0] ? event.streams[0] : null;
           if (!rStream && event.track) {
-            const MediaStreamConstructor =
-              (window as any).MediaStream || (window as any).webkitMediaStream;
+            const MediaStreamConstructor = getMediaStreamConstructor();
             if (MediaStreamConstructor) {
               if (!this.remoteStream) {
                 this.remoteStream = new MediaStreamConstructor();
@@ -814,8 +878,7 @@ class CallManager {
           let rStream =
             event.streams && event.streams[0] ? event.streams[0] : null;
           if (!rStream && event.track) {
-            const MediaStreamConstructor =
-              (window as any).MediaStream || (window as any).webkitMediaStream;
+            const MediaStreamConstructor = getMediaStreamConstructor();
             if (MediaStreamConstructor) {
               if (!this.remoteStream) {
                 this.remoteStream = new MediaStreamConstructor();

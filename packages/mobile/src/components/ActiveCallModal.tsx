@@ -12,7 +12,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
-import { CallSession, callService, tonePlayer } from "../services/callService";
+import {
+  CallSession,
+  callService,
+  tonePlayer,
+  isNativeWebRTCAvailable,
+  getNativeRTCView,
+} from "../services/callService";
 
 interface ActiveCallModalProps {
   call: CallSession | null;
@@ -34,6 +40,11 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
   const [isFrontCamera, setIsFrontCamera] = useState<boolean>(true);
   const [hasRemoteVideo, setHasRemoteVideo] = useState<boolean>(false);
   const [audioNeedsTap, setAudioNeedsTap] = useState<boolean>(false);
+  const [localStreamURL, setLocalStreamURL] = useState<string | null>(null);
+  const [remoteStreamURL, setRemoteStreamURL] = useState<string | null>(null);
+
+  const isWebRTCAvailable = isNativeWebRTCAvailable();
+  const NativeRTCView = getNativeRTCView();
 
   const localVideoRef = useRef<any>(null);
   const remoteVideoRef = useRef<any>(null);
@@ -114,12 +125,21 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
 
   // Real-time subscription to local and remote stream updates via callService
   useEffect(() => {
-    if (Platform.OS !== "web") return;
-
     // 1. Subscribe to local stream (camera & microphone)
     const unsubLocalStream = callService.onLocalStream((stream) => {
-      if (!stream) return;
-      if (localVideoRef.current && localVideoRef.current.srcObject !== stream) {
+      if (!stream) {
+        setLocalStreamURL(null);
+        return;
+      }
+      const streamUrl =
+        typeof stream.toURL === "function" ? stream.toURL() : null;
+      setLocalStreamURL(streamUrl);
+
+      if (
+        Platform.OS === "web" &&
+        localVideoRef.current &&
+        localVideoRef.current.srcObject !== stream
+      ) {
         try {
           localVideoRef.current.srcObject = stream;
           localVideoRef.current.muted = true;
@@ -132,62 +152,60 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
 
     // 2. Subscribe to remote stream (peer's camera & microphone)
     const unsubRemoteStream = callService.onRemoteStream((stream) => {
-      if (!stream) return;
-
-      // HTML5 Audio Sink: plays remote speech with full volume
-      if (remoteAudioRef.current) {
-        try {
-          if (remoteAudioRef.current.srcObject !== stream) {
-            remoteAudioRef.current.srcObject = stream;
-          }
-          remoteAudioRef.current.volume = 1.0;
-          remoteAudioRef.current.muted = false;
-          remoteAudioRef.current
-            .play()
-            .then(() => {
-              setAudioNeedsTap(false);
-            })
-            .catch((err: any) => {
-              console.warn(
-                "[ActiveCall] Remote audio autoplay requires gesture:",
-                err,
-              );
-              if (err?.name === "NotAllowedError") {
-                setAudioNeedsTap(true);
-              }
-            });
-        } catch (e) {}
+      if (!stream) {
+        setRemoteStreamURL(null);
+        setHasRemoteVideo(false);
+        return;
       }
 
-      // Web Audio API Pipeline fallback: hardware audio routing
-      try {
-        const AudioCtx =
-          (window as any).AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = tonePlayer.getAudioContext() || new AudioCtx();
-          if (ctx.state === "suspended") {
-            ctx.resume().catch(() => {});
-          }
-        }
-      } catch (audioBridgeErr) {
-        console.warn("[ActiveCall] Web Audio bridge notice:", audioBridgeErr);
-      }
+      const streamUrl =
+        typeof stream.toURL === "function" ? stream.toURL() : null;
+      setRemoteStreamURL(streamUrl);
 
-      // Video sink for video calls
-      if (remoteVideoRef.current) {
-        try {
-          if (remoteVideoRef.current.srcObject !== stream) {
-            remoteVideoRef.current.srcObject = stream;
-          }
-          const hasTrack = stream
+      const hasTrack = stream.getVideoTracks
+        ? stream
             .getVideoTracks()
-            .some((t: any) => t.enabled && t.readyState === "live");
-          if (hasTrack) {
-            setHasRemoteVideo(true);
-          }
-          remoteVideoRef.current.muted = true;
-          remoteVideoRef.current.play().catch(() => {});
-        } catch (e) {}
+            .some((t: any) => t.enabled && t.readyState === "live")
+        : false;
+      if (hasTrack) {
+        setHasRemoteVideo(true);
+      }
+
+      if (Platform.OS === "web") {
+        // HTML5 Audio Sink on Web: plays remote speech with full volume
+        if (remoteAudioRef.current) {
+          try {
+            if (remoteAudioRef.current.srcObject !== stream) {
+              remoteAudioRef.current.srcObject = stream;
+            }
+            remoteAudioRef.current.volume = 1.0;
+            remoteAudioRef.current.muted = false;
+            remoteAudioRef.current
+              .play()
+              .then(() => {
+                setAudioNeedsTap(false);
+              })
+              .catch((err: any) => {
+                if (err?.name === "NotAllowedError") {
+                  setAudioNeedsTap(true);
+                }
+              });
+          } catch (e) {}
+        }
+
+        // Video sink on Web
+        if (remoteVideoRef.current) {
+          try {
+            if (remoteVideoRef.current.srcObject !== stream) {
+              remoteVideoRef.current.srcObject = stream;
+            }
+            if (hasTrack) {
+              setHasRemoteVideo(true);
+            }
+            remoteVideoRef.current.muted = true;
+            remoteVideoRef.current.play().catch(() => {});
+          } catch (e) {}
+        }
       }
     });
 
@@ -364,6 +382,16 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
         {/* Main Remote Video Surface (or Voice Background) */}
         {isVideo ? (
           <View style={StyleSheet.absoluteFill}>
+            {/* Native RTCView Video Surface on Android/iOS */}
+            {Platform.OS !== "web" && NativeRTCView && remoteStreamURL ? (
+              <NativeRTCView
+                streamURL={remoteStreamURL}
+                style={StyleSheet.absoluteFill}
+                objectFit="cover"
+                zOrder={0}
+              />
+            ) : null}
+
             {/* Native / Web Video element */}
             {Platform.OS === "web" ? (
               <div
@@ -499,8 +527,8 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
           </View>
         </View>
 
-        {/* Tap to Unmute Banner if audio autoplay needs user interaction */}
-        {audioNeedsTap && (
+        {/* Tap to Unmute Banner only on Web browsers if autoplay restriction triggers */}
+        {Platform.OS === "web" && audioNeedsTap && (
           <TouchableOpacity
             style={styles.tapToUnmuteBanner}
             onPress={handleContainerPress}
@@ -513,9 +541,41 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
           </TouchableOpacity>
         )}
 
+        {/* Informative Diagnostic Banner on Android/iOS when native WebRTC binary is not yet compiled */}
+        {!isWebRTCAvailable && Platform.OS !== "web" && (
+          <View style={styles.nativeNoticeBanner}>
+            <Ionicons name="hardware-chip-outline" size={18} color="#FBBF24" />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.nativeNoticeTitle}>
+                WebRTC Native Module Needed
+              </Text>
+              <Text style={styles.nativeNoticeText}>
+                Android hardware audio & camera streaming requires
+                react-native-webrtc compiled into your APK build (eas build -p
+                android).
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Local Video Picture-in-Picture (Top Right Thumbnail) for Video Calls */}
         {isVideo && (
           <View style={styles.pipContainer}>
+            {/* Native Local Video Thumbnail on Android/iOS */}
+            {Platform.OS !== "web" &&
+            NativeRTCView &&
+            localStreamURL &&
+            !isVideoOff ? (
+              <NativeRTCView
+                streamURL={localStreamURL}
+                style={StyleSheet.absoluteFill}
+                objectFit="cover"
+                mirror={isFrontCamera}
+                zOrder={1}
+              />
+            ) : null}
+
+            {/* Web Local Video Thumbnail */}
             {Platform.OS === "web" ? (
               <div
                 style={{
@@ -778,6 +838,39 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "600",
+  },
+  nativeNoticeBanner: {
+    position: "absolute",
+    top: 76,
+    left: 20,
+    right: 20,
+    zIndex: 60,
+    backgroundColor: "rgba(15, 23, 42, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.35)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  nativeNoticeTitle: {
+    color: "#FBBF24",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
+  nativeNoticeText: {
+    color: "#CBD5E1",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "400",
   },
   headerInfo: {
     gap: 3,
