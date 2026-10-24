@@ -280,7 +280,7 @@ export class PushDispatchService {
       const tokens = await this.getPushTokensForUsers(targetUserIds);
       if (tokens.length === 0) return;
 
-      const groupLabel = params.householdName || "Household";
+      const groupLabel = params.householdName || "New Message";
       const cleanBody =
         params.text.length > 120
           ? `${params.text.substring(0, 117)}...`

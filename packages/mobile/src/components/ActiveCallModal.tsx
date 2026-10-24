@@ -377,6 +377,7 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
             ref={remoteAudioRef}
             autoPlay
             playsInline
+            preload="auto"
             style={{
               position: "fixed",
               top: -9999,
@@ -529,6 +530,10 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                   <Text style={styles.timerText}>
                     {formatDuration(duration)}
                   </Text>
+                  <View style={styles.latencyBadge}>
+                    <Ionicons name="flash" size={10} color="#10B981" />
+                    <Text style={styles.latencyBadgeText}>Real-Time P2P</Text>
+                  </View>
                 </>
               ) : (
                 <Text style={styles.ringingText}>Ringing...</Text>
@@ -932,6 +937,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
+  },
+  latencyBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: "rgba(16, 185, 129, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.32)",
+    marginLeft: 6,
+  },
+  latencyBadgeText: {
+    color: "#6EE7B7",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
   ringingText: {
     color: "#94A3B8",

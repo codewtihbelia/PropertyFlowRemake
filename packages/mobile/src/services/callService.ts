@@ -49,19 +49,30 @@ export function serializeCandidate(c: any): any {
   const rawCand = typeof c === "string" ? c : c.candidate;
   if (!rawCand || typeof rawCand !== "string") return null;
 
-  let sdpMid = c.sdpMid;
-  if (sdpMid === undefined || sdpMid === null) {
-    sdpMid = "0";
-  } else {
-    sdpMid = String(sdpMid);
+  let sdpMid: string | null = null;
+  if (c.sdpMid !== undefined && c.sdpMid !== null) {
+    sdpMid = String(c.sdpMid);
   }
 
-  let sdpMLineIndex = 0;
+  let sdpMLineIndex: number | null = null;
   if (typeof c.sdpMLineIndex === "number") {
     sdpMLineIndex = c.sdpMLineIndex;
   } else if (c.sdpMLineIndex !== undefined && c.sdpMLineIndex !== null) {
     const parsed = parseInt(c.sdpMLineIndex, 10);
-    sdpMLineIndex = isNaN(parsed) ? 0 : parsed;
+    if (!isNaN(parsed)) {
+      sdpMLineIndex = parsed;
+    }
+  }
+
+  // Preserve accurate matching between mid and mline index for video & audio tracks
+  if (sdpMid === null && sdpMLineIndex !== null) {
+    sdpMid = String(sdpMLineIndex);
+  } else if (sdpMLineIndex === null && sdpMid !== null) {
+    const parsed = parseInt(sdpMid, 10);
+    sdpMLineIndex = !isNaN(parsed) ? parsed : 0;
+  } else if (sdpMid === null && sdpMLineIndex === null) {
+    sdpMid = "0";
+    sdpMLineIndex = 0;
   }
 
   return {
@@ -364,9 +375,199 @@ const RTC_CONFIG: any = {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
+    {
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:443",
+        "turn:openrelay.metered.ca:443?transport=tcp",
+      ],
+      username: "openrelay",
+      credential: "openrelay",
+    },
   ],
   iceCandidatePoolSize: 10,
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require",
 };
+
+/**
+ * Munges SDP offers and answers to inject low-latency Opus audio parameters (10ms frame pacing, FEC)
+ * and cap video bandwidth to avoid packet queuing and bufferbloat on mobile uplinks.
+ */
+export function mungeSDPForLowLatency(
+  sdp: string,
+  isVideoCall: boolean = true,
+): string {
+  if (!sdp || typeof sdp !== "string") return sdp;
+
+  let lines = sdp.split("\r\n");
+  if (lines.length <= 1) {
+    lines = sdp.split("\n");
+  }
+
+  let opusPayloadType: string | null = null;
+  for (const line of lines) {
+    const match = line.match(/^a=rtpmap:(\d+)\s+opus\/48000/i);
+    if (match) {
+      opusPayloadType = match[1];
+      break;
+    }
+  }
+
+  const modifiedLines: string[] = [];
+  let currentMediaKind: "audio" | "video" | null = null;
+  let hasFmtpForOpus = false;
+  let audioBandwidthAdded = false;
+  let videoBandwidthAdded = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith("m=audio")) {
+      currentMediaKind = "audio";
+      modifiedLines.push(line);
+      if (!audioBandwidthAdded) {
+        modifiedLines.push("b=AS:32");
+        modifiedLines.push("b=TIAS:32000");
+        audioBandwidthAdded = true;
+      }
+      continue;
+    }
+
+    if (line.startsWith("m=video")) {
+      currentMediaKind = "video";
+      modifiedLines.push(line);
+      if (isVideoCall && !videoBandwidthAdded) {
+        // 750 kbps video cap provides crisp mobile video while preventing uplink queue buildup
+        modifiedLines.push("b=AS:750");
+        modifiedLines.push("b=TIAS:750000");
+        videoBandwidthAdded = true;
+      }
+      continue;
+    }
+
+    // Skip pre-existing b=AS or b=TIAS lines inside media sections
+    if (
+      currentMediaKind &&
+      (line.startsWith("b=AS:") || line.startsWith("b=TIAS:"))
+    ) {
+      continue;
+    }
+
+    // Enhance Opus format parameters for 10ms frame packetization & FEC
+    if (opusPayloadType && line.startsWith(`a=fmtp:${opusPayloadType}`)) {
+      hasFmtpForOpus = true;
+      const params = line.substring(`a=fmtp:${opusPayloadType}`.length).trim();
+      const cleanedParams = params
+        .split(";")
+        .map((p) => p.trim())
+        .filter(
+          (p) =>
+            p &&
+            !p.startsWith("minptime=") &&
+            !p.startsWith("useinbandfec=") &&
+            !p.startsWith("stereo=") &&
+            !p.startsWith("sprop-stereo=") &&
+            !p.startsWith("maxaveragebitrate=") &&
+            !p.startsWith("cbr="),
+        )
+        .join(";");
+
+      const lowLatencyParams =
+        "minptime=10;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=32000;cbr=0";
+      const finalFmtp = `a=fmtp:${opusPayloadType} ${cleanedParams ? cleanedParams + ";" : ""}${lowLatencyParams}`;
+      modifiedLines.push(finalFmtp);
+      continue;
+    }
+
+    modifiedLines.push(line);
+  }
+
+  // If Opus rtpmap was found but no fmtp line existed, add one
+  if (opusPayloadType && !hasFmtpForOpus) {
+    const audioIndex = modifiedLines.findIndex((l) => l.startsWith("m=audio"));
+    if (audioIndex !== -1) {
+      modifiedLines.splice(
+        audioIndex + 3,
+        0,
+        `a=fmtp:${opusPayloadType} minptime=10;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=32000;cbr=0`,
+      );
+    }
+  }
+
+  return modifiedLines.join("\r\n");
+}
+
+/**
+ * Tunes RTCRtpSender parameters on video and audio tracks to cap max bitrate
+ * and enforce frame pacing to eliminate network bufferbloat.
+ */
+export async function optimizeSenders(pc: any): Promise<void> {
+  if (!pc || typeof pc.getSenders !== "function") return;
+  try {
+    const senders = pc.getSenders();
+    if (!senders || !Array.isArray(senders)) return;
+
+    for (const sender of senders) {
+      if (!sender || !sender.track) continue;
+
+      if (
+        typeof sender.getParameters === "function" &&
+        typeof sender.setParameters === "function"
+      ) {
+        try {
+          const params = sender.getParameters() || {};
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+
+          if (sender.track.kind === "video") {
+            params.encodings[0].maxBitrate = 750000; // 750 kbps
+            params.encodings[0].maxFramerate = 24;
+            params.encodings[0].scaleResolutionDownBy = 1.0;
+            params.encodings[0].priority = "low";
+            params.encodings[0].networkPriority = "low";
+            if ("contentHint" in sender.track) {
+              try {
+                sender.track.contentHint = "motion";
+              } catch (e) {}
+            }
+          } else if (sender.track.kind === "audio") {
+            params.encodings[0].maxBitrate = 32000; // 32 kbps
+            params.encodings[0].priority = "high";
+            params.encodings[0].networkPriority = "high";
+            if ("contentHint" in sender.track) {
+              try {
+                sender.track.contentHint = "speech";
+              } catch (e) {}
+            }
+          }
+          await sender.setParameters(params);
+        } catch (err) {
+          // Some WebRTC implementations only allow modifying encodings in stable state
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[CallManager] optimizeSenders error:", e);
+  }
+}
+
+/**
+ * Sets near-zero playout delay hints on RTCRtpReceiver to prevent
+ * accumulating jitter buffer delay.
+ */
+export function tuneReceiverLatency(receiver: any): void {
+  if (!receiver) return;
+  try {
+    if ("playoutDelayHint" in receiver) {
+      receiver.playoutDelayHint = 0;
+    }
+    if ("jitterBufferTarget" in receiver) {
+      receiver.jitterBufferTarget = 50; // ms
+    }
+  } catch (e) {}
+}
 
 function getRTCPeerConnection(): any {
   if (Platform.OS !== "web" && NativeWebRTCModule?.RTCPeerConnection) {
@@ -542,6 +743,20 @@ class CallManager {
     }
   }
 
+  tuneAllReceivers() {
+    if (
+      !this.peerConnection ||
+      typeof this.peerConnection.getReceivers !== "function"
+    )
+      return;
+    try {
+      const receivers = this.peerConnection.getReceivers();
+      if (Array.isArray(receivers)) {
+        receivers.forEach((rx: any) => tuneReceiverLatency(rx));
+      }
+    } catch (e) {}
+  }
+
   // Initialize or fetch local user media with resilient fallback chain
   async startLocalMedia(callType: CallType): Promise<any> {
     const mediaDevices = getMediaDevices();
@@ -572,30 +787,46 @@ class CallManager {
 
     // VIDEO CALL: Standard multi-tier fallback strategy
     if (callType === "video") {
-      // Tier 1: Hardware-native audio + mobile facingMode constraints
+      // Tier 1: Hardware-native audio + mobile facingMode constraints optimized for low latency
       try {
         const stream = await mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: 48000 },
+            latency: { ideal: 0.01 },
+          },
           video: {
             facingMode: this.isFrontCamera ? "user" : "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 640, max: 1280 },
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 24, max: 30 },
           },
         });
         this.notifyLocalStream(stream);
         return stream;
       } catch (e1) {
         console.warn(
-          "[CallManager] Tier 1 facingMode constraints failed, trying basic video+audio:",
+          "[CallManager] Tier 1 low-latency constraints failed, trying basic video+audio:",
           e1,
         );
       }
 
-      // Tier 2: Universal basic video + audio
+      // Tier 2: Universal basic video + audio with low latency constraints
       try {
         const stream = await mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 24 },
+          },
         });
         this.notifyLocalStream(stream);
         return stream;
@@ -611,14 +842,22 @@ class CallManager {
       let separateAudioTrack: any = null;
 
       try {
-        const vStream = await mediaDevices.getUserMedia({ video: true });
+        const vStream = await mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 24 },
+          },
+        });
         separateVideoTrack = vStream.getVideoTracks()[0];
       } catch (ve) {
         console.warn("[CallManager] Separate video acquisition warning:", ve);
       }
 
       try {
-        const aStream = await mediaDevices.getUserMedia({ audio: true });
+        const aStream = await mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
         separateAudioTrack = aStream.getAudioTracks()[0];
       } catch (ae) {
         console.warn("[CallManager] Separate audio acquisition warning:", ae);
@@ -639,14 +878,34 @@ class CallManager {
     // VOICE CALL (or audio fallback if camera unavailable)
     try {
       const audioStream = await mediaDevices.getUserMedia({
-        audio: true,
+        audio: {
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+          channelCount: { ideal: 1 },
+          sampleRate: { ideal: 48000 },
+          latency: { ideal: 0.01 },
+        },
         video: false,
       });
       this.notifyLocalStream(audioStream);
       return audioStream;
-    } catch (eAudio) {
-      console.error("[CallManager] Voice getUserMedia failed:", eAudio);
-      return null;
+    } catch (eVoiceOpt) {
+      console.warn(
+        "[CallManager] Optimized voice getUserMedia failed, trying standard voice:",
+        eVoiceOpt,
+      );
+      try {
+        const fallbackAudio = await mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        this.notifyLocalStream(fallbackAudio);
+        return fallbackAudio;
+      } catch (eAudio) {
+        console.error("[CallManager] Voice getUserMedia failed:", eAudio);
+        return null;
+      }
     }
   }
 
@@ -691,6 +950,9 @@ class CallManager {
         try {
           videoTrack._switchCamera();
           this.isFrontCamera = targetFacing;
+          if (this.peerConnection) {
+            await optimizeSenders(this.peerConnection);
+          }
           return this.isFrontCamera;
         } catch (e) {
           console.warn(
@@ -713,8 +975,9 @@ class CallManager {
           facingMode: targetFacing
             ? { ideal: "user" }
             : { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 480, max: 720 },
+          frameRate: { ideal: 24, max: 30 },
         },
       });
       const newTrack = newStream.getVideoTracks()[0];
@@ -735,7 +998,8 @@ class CallManager {
             .getSenders()
             ?.find((s: any) => s.track?.kind === "video");
           if (sender) {
-            sender.replaceTrack(newTrack);
+            await sender.replaceTrack(newTrack);
+            await optimizeSenders(this.peerConnection);
           }
         }
       }
@@ -800,12 +1064,17 @@ class CallManager {
         }
 
         pc.onaddstream = (event: any) => {
+          this.tuneAllReceivers();
           if (event && event.stream) {
             this.notifyRemoteStream(event.stream);
           }
         };
 
         pc.ontrack = (event: any) => {
+          if (event.receiver) {
+            tuneReceiverLatency(event.receiver);
+          }
+          this.tuneAllReceivers();
           let rStream =
             event.streams && event.streams[0] ? event.streams[0] : null;
           if (!rStream && event.track) {
@@ -848,14 +1117,25 @@ class CallManager {
           offerToReceiveAudio: true,
           offerToReceiveVideo: params.callType === "video",
         });
-        await pc.setLocalDescription(offer);
+        const mungedSdp = mungeSDPForLowLatency(
+          offer.sdp,
+          params.callType === "video",
+        );
+        const RTCSession = getRTCSessionDescription();
+        const lowLatencyOffer = RTCSession
+          ? new RTCSession({ type: offer.type, sdp: mungedSdp })
+          : { type: offer.type, sdp: mungedSdp };
+        await pc.setLocalDescription(lowLatencyOffer);
+        await optimizeSenders(pc);
+        this.tuneAllReceivers();
+
         sdpOffer = {
-          type: offer.type,
-          sdp: offer.sdp,
+          type: lowLatencyOffer.type,
+          sdp: lowLatencyOffer.sdp,
         };
 
-        // Brief delay (250ms) to allow initial host and STUN ICE candidates to gather
-        await new Promise((r) => setTimeout(r, 250));
+        // Brief delay (150ms) to allow initial host and STUN ICE candidates to gather
+        await new Promise((r) => setTimeout(r, 150));
       } catch (err) {
         console.warn("[CallManager] WebRTC offer negotiation error:", err);
       }
@@ -939,12 +1219,17 @@ class CallManager {
         }
 
         pc.onaddstream = (event: any) => {
+          this.tuneAllReceivers();
           if (event && event.stream) {
             this.notifyRemoteStream(event.stream);
           }
         };
 
         pc.ontrack = (event: any) => {
+          if (event.receiver) {
+            tuneReceiverLatency(event.receiver);
+          }
+          this.tuneAllReceivers();
           let rStream =
             event.streams && event.streams[0] ? event.streams[0] : null;
           if (!rStream && event.track) {
@@ -983,8 +1268,18 @@ class CallManager {
           );
         };
 
-        await pc.setRemoteDescription(new RTCSession(offer));
+        const mungedOfferSdp = mungeSDPForLowLatency(
+          offer.sdp,
+          callSession.callType === "video",
+        );
+        await pc.setRemoteDescription(
+          new RTCSession({
+            type: offer.type,
+            sdp: mungedOfferSdp,
+          }),
+        );
         this.hasRemoteDescriptionSet = true;
+        this.tuneAllReceivers();
 
         // Process any caller candidates that were already gathered
         if (callSession.callerCandidates?.length) {
@@ -992,14 +1287,25 @@ class CallManager {
         }
 
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sdpAnswer = {
+        const mungedAnswerSdp = mungeSDPForLowLatency(
+          answer.sdp,
+          callSession.callType === "video",
+        );
+        const lowLatencyAnswer = new RTCSession({
           type: answer.type,
-          sdp: answer.sdp,
+          sdp: mungedAnswerSdp,
+        });
+        await pc.setLocalDescription(lowLatencyAnswer);
+        await optimizeSenders(pc);
+        this.tuneAllReceivers();
+
+        sdpAnswer = {
+          type: lowLatencyAnswer.type,
+          sdp: lowLatencyAnswer.sdp,
         };
 
-        // Brief delay (250ms) to allow initial receiver candidates to gather
-        await new Promise((r) => setTimeout(r, 250));
+        // Brief delay (150ms) to allow initial receiver candidates to gather
+        await new Promise((r) => setTimeout(r, 150));
       } catch (err) {
         console.warn("[CallManager] WebRTC answer error in acceptCall:", err);
       }
@@ -1030,12 +1336,18 @@ class CallManager {
     ) {
       try {
         if (this.peerConnection.signalingState === "have-local-offer") {
+          const mungedAnswerSdp = mungeSDPForLowLatency(answer.sdp, true);
           await this.peerConnection.setRemoteDescription(
-            new RTCSession(answer),
+            new RTCSession({
+              type: answer.type,
+              sdp: mungedAnswerSdp,
+            }),
           );
           this.hasRemoteDescriptionSet = true;
+          await optimizeSenders(this.peerConnection);
+          this.tuneAllReceivers();
           console.log(
-            "[CallManager] Remote description (answer) set successfully",
+            "[CallManager] Remote description (answer) set successfully with low-latency tuning",
           );
 
           // Flush any remote candidates received prior to remote description
@@ -1112,10 +1424,19 @@ class CallManager {
         const RTCSession = getRTCSessionDescription();
         if (RTCSession && this.peerConnection.signalingState === "stable") {
           try {
+            const mungedOffer = mungeSDPForLowLatency(
+              callData.offer.sdp,
+              callData.callType === "video",
+            );
             await this.peerConnection.setRemoteDescription(
-              new RTCSession(callData.offer),
+              new RTCSession({
+                type: callData.offer.type,
+                sdp: mungedOffer,
+              }),
             );
             this.hasRemoteDescriptionSet = true;
+            await optimizeSenders(this.peerConnection);
+            this.tuneAllReceivers();
           } catch (e) {}
         }
       }
