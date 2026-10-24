@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -27,24 +27,27 @@ export interface WaterSettingsModalProps {
   visible: boolean;
   onClose: () => void;
   householdId: string;
+  billingCycleId?: string;
   initialConfig?: {
     pricingModel?: WaterPricingModel;
     rateCentavosPerPersonPerDay?: number;
     fixedMonthlyAmountCentavos?: number;
     fixedPerPersonAmountCentavos?: number;
   } | null;
-  onSaved?: () => void;
+  onSaved?: (syncedCycleId?: string) => void;
 }
 
 export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
   visible,
   onClose,
   householdId,
+  billingCycleId,
   initialConfig,
   onSaved,
 }) => {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const wasVisibleRef = useRef(false);
   const [selectedMode, setSelectedMode] =
     useState<WaterPricingModel>("PER_PERSON_DAY");
   const [dailyRateInput, setDailyRateInput] = useState("5.00");
@@ -53,35 +56,44 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (initialConfig) {
-      if (initialConfig.pricingModel) {
-        setSelectedMode(initialConfig.pricingModel);
-      } else if ((initialConfig.fixedMonthlyAmountCentavos || 0) > 0) {
-        setSelectedMode("FIXED_MONTHLY");
+    if (!visible) {
+      wasVisibleRef.current = false;
+      return;
+    }
+    if (!wasVisibleRef.current) {
+      wasVisibleRef.current = true;
+      if (initialConfig) {
+        if (initialConfig.pricingModel) {
+          setSelectedMode(initialConfig.pricingModel);
+        } else if ((initialConfig.fixedMonthlyAmountCentavos || 0) > 0) {
+          setSelectedMode("FIXED_MONTHLY");
+        } else {
+          setSelectedMode("PER_PERSON_DAY");
+        }
+
+        setDailyRateInput(
+          typeof initialConfig.rateCentavosPerPersonPerDay === "number" &&
+            initialConfig.rateCentavosPerPersonPerDay > 0
+            ? (initialConfig.rateCentavosPerPersonPerDay / 100).toFixed(2)
+            : "5.00",
+        );
+        setFixedMonthlyInput(
+          typeof initialConfig.fixedMonthlyAmountCentavos === "number" &&
+            initialConfig.fixedMonthlyAmountCentavos > 0
+            ? (initialConfig.fixedMonthlyAmountCentavos / 100).toFixed(2)
+            : "1200.00",
+        );
+        setFixedPerPersonInput(
+          typeof initialConfig.fixedPerPersonAmountCentavos === "number" &&
+            initialConfig.fixedPerPersonAmountCentavos > 0
+            ? (initialConfig.fixedPerPersonAmountCentavos / 100).toFixed(2)
+            : "150.00",
+        );
       } else {
         setSelectedMode("PER_PERSON_DAY");
-      }
-
-      if (typeof initialConfig.rateCentavosPerPersonPerDay === "number") {
-        setDailyRateInput(
-          (initialConfig.rateCentavosPerPersonPerDay / 100).toFixed(2),
-        );
-      }
-      if (
-        typeof initialConfig.fixedMonthlyAmountCentavos === "number" &&
-        initialConfig.fixedMonthlyAmountCentavos > 0
-      ) {
-        setFixedMonthlyInput(
-          (initialConfig.fixedMonthlyAmountCentavos / 100).toFixed(2),
-        );
-      }
-      if (
-        typeof initialConfig.fixedPerPersonAmountCentavos === "number" &&
-        initialConfig.fixedPerPersonAmountCentavos > 0
-      ) {
-        setFixedPerPersonInput(
-          (initialConfig.fixedPerPersonAmountCentavos / 100).toFixed(2),
-        );
+        setDailyRateInput("5.00");
+        setFixedMonthlyInput("1200.00");
+        setFixedPerPersonInput("150.00");
       }
     }
   }, [initialConfig, visible]);
@@ -130,13 +142,18 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
 
     setSaving(true);
     try {
-      await mobileDataService.saveWaterConfig(householdId, {
-        pricingModel: selectedMode,
-        rateCentavosPerPersonPerDay: dailyCentavos,
-        fixedMonthlyAmountCentavos: fixedMonthlyCentavos,
-        fixedPerPersonAmountCentavos: fixedPerPersonCentavos,
-        mode: "BILLING_CYCLE",
-      });
+      const syncedCycleId = await mobileDataService.saveWaterConfig(
+        householdId,
+        {
+          pricingModel: selectedMode,
+          rateCentavosPerPersonPerDay: dailyCentavos,
+          fixedMonthlyAmountCentavos: fixedMonthlyCentavos,
+          fixedPerPersonAmountCentavos: fixedPerPersonCentavos,
+          mode: "BILLING_CYCLE",
+          billingCycleId,
+        },
+        { billingCycleId },
+      );
 
       setSaving(false);
       Alert.alert(
@@ -147,7 +164,7 @@ export const WaterSettingsModal: React.FC<WaterSettingsModalProps> = ({
             ? `Fixed Monthly Household mode active (₱${(fixedMonthlyCentavos / 100).toFixed(2)} total). Amount is split equally among active payors.`
             : `Flat Fee Per Person mode active (₱${(fixedPerPersonCentavos / 100).toFixed(2)} / resident). Roommates are billed this flat fee each month.`,
       );
-      if (onSaved) onSaved();
+      if (onSaved) onSaved(syncedCycleId);
       onClose();
     } catch (err: any) {
       setSaving(false);

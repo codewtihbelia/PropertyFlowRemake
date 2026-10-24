@@ -24,6 +24,8 @@ import {
   mobileDataService,
   isPayorMember,
   computeCycleWaterBreakdown,
+  resolveCycleWaterConfig,
+  computeFairSplitShareCentavos,
   getFairSplitShareAtIndex,
   matchesMemberUid,
 } from "../services/firebaseDataService";
@@ -350,22 +352,6 @@ export const AttendanceScreen: React.FC<{
     [cycleDates],
   );
 
-  const pricingModel =
-    waterConfig?.pricingModel ||
-    (waterConfig?.fixedMonthlyAmountCentavos
-      ? "FIXED_MONTHLY"
-      : "PER_PERSON_DAY");
-  const isFixedMode =
-    pricingModel === "FIXED_MONTHLY" ||
-    pricingModel === "FIXED_PER_PERSON_MONTH";
-
-  const ratePerDayPesos =
-    ((waterConfig?.rateCentavosPerPersonPerDay ?? 500) || 500) / 100;
-  const fixedMonthlyPesos =
-    ((waterConfig?.fixedMonthlyAmountCentavos ?? 0) || 0) / 100;
-  const fixedPerPersonPesos =
-    ((waterConfig?.fixedPerPersonAmountCentavos ?? 0) || 0) / 100;
-
   const isHost =
     profile?.role === "HOST" ||
     profile?.role === "SUPER_ADMIN" ||
@@ -384,10 +370,21 @@ export const AttendanceScreen: React.FC<{
   }, [members]);
 
   const payingRoommatesCount = Math.max(1, activePayors.length);
-  const myFixedSharePesos =
-    pricingModel === "FIXED_MONTHLY"
-      ? fixedMonthlyPesos / payingRoommatesCount
-      : fixedPerPersonPesos;
+
+  const myMember = useMemo(
+    () =>
+      members.find(
+        (m) =>
+          (m.userId || m.memberId || m.id) === activeUserId ||
+          (m.userId && m.userId.replace("mem_", "") === activeUserId),
+      ),
+    [members, activeUserId],
+  );
+  // Only Non-Payors choose how Payors cover their water due in the Submit Bottom Sheet
+  const isMyMemberPayor = useMemo(
+    () => (myMember ? isPayorMember(myMember) : true),
+    [myMember],
+  );
 
   const oldestCycleId =
     cycles.length > 0 ? cycles[cycles.length - 1]?.billingCycleId : undefined;
@@ -410,6 +407,70 @@ export const AttendanceScreen: React.FC<{
     cycles.length,
     oldestCycleId,
     knownCycleIds,
+  ]);
+
+  const cycleWaterExpense = useMemo(() => {
+    return currentCycleExpenses.find((e) =>
+      (e.category || "").toLowerCase().includes("water"),
+    );
+  }, [currentCycleExpenses]);
+
+  const hasCycleAttendanceActivity = useMemo(() => {
+    return (
+      allCycleAttendance.some((a) => a?.status === "PRESENT") ||
+      Object.keys(submissions || {}).length > 0
+    );
+  }, [allCycleAttendance, submissions]);
+
+  const cycleWaterData = useMemo(() => {
+    return resolveCycleWaterConfig(waterConfig, resolvedBillingCycleId, {
+      cycleWaterExpense,
+      payorCount: payingRoommatesCount,
+      hasCycleAttendance: hasCycleAttendanceActivity,
+      totalCyclesCount: cycles.length,
+    });
+  }, [
+    waterConfig,
+    resolvedBillingCycleId,
+    cycleWaterExpense,
+    payingRoommatesCount,
+    hasCycleAttendanceActivity,
+    cycles.length,
+  ]);
+
+  const pricingModel = cycleWaterData?.pricingModel || "PER_PERSON_DAY";
+  const isFixedMode = Boolean(
+    cycleWaterData &&
+    (pricingModel === "FIXED_MONTHLY" ||
+      pricingModel === "FIXED_PER_PERSON_MONTH"),
+  );
+
+  const ratePerDayPesos =
+    ((cycleWaterData?.rateCentavosPerPersonPerDay ?? 500) || 500) / 100;
+  const fixedMonthlyPesos =
+    ((cycleWaterData?.fixedMonthlyAmountCentavos ?? 0) || 0) / 100;
+  const fixedPerPersonPesos =
+    ((cycleWaterData?.fixedPerPersonAmountCentavos ?? 0) || 0) / 100;
+
+  const myFixedSharePesos = useMemo(() => {
+    if (!isMyMemberPayor || !isFixedMode) return 0;
+    if (pricingModel === "FIXED_PER_PERSON_MONTH") {
+      return fixedPerPersonPesos;
+    }
+    const shareCents = computeFairSplitShareCentavos(
+      Math.round(fixedMonthlyPesos * 100),
+      activePayors,
+      activeUserId,
+    );
+    return shareCents / 100;
+  }, [
+    isMyMemberPayor,
+    isFixedMode,
+    pricingModel,
+    fixedPerPersonPesos,
+    fixedMonthlyPesos,
+    activePayors,
+    activeUserId,
   ]);
 
   const settledPayorUids = useMemo(() => {
@@ -512,28 +573,72 @@ export const AttendanceScreen: React.FC<{
       allPayorsSettled),
   );
 
+  // Lock presence-based water attendance for ALL members (payors & non-payors) once any payor initiates payment for this cycle
+  const hasCyclePaymentStarted = useMemo(() => {
+    const cycleId = activeCycle?.billingCycleId;
+    if (!cycleId) return false;
+    const isSingleCycle = cycles.length <= 1;
+
+    const anyCyclePayment = payments.some((pmt) => {
+      const statusUpper = String(pmt.status || "").toUpperCase();
+      if (statusUpper === "REJECTED" || statusUpper === "CANCELLED") {
+        return false;
+      }
+      if ((Number(pmt.amountCentavos) || 0) <= 0) return false;
+      return (
+        pmt.billingCycleId === cycleId ||
+        ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+          isSingleCycle)
+      );
+    });
+    if (anyCyclePayment) return true;
+
+    const anyExpenseSplitPaid = currentCycleExpenses.some((exp) => {
+      if ((Number(exp.amountCents) || 0) <= 0) return false;
+      if (exp.status === "PAID" || exp.isPaid === true) return true;
+      if (Array.isArray(exp.splitDetails)) {
+        return exp.splitDetails.some(
+          (s: any) =>
+            !s?.isExempt &&
+            (s?.isPaid === true ||
+              (Number(s?.paidAmountCentavos) || 0) > 0 ||
+              Boolean(s?.paymentId)),
+        );
+      }
+      return false;
+    });
+    if (anyExpenseSplitPaid) return true;
+
+    const anyMemberBillPaid = memberBills.some(
+      (mb) =>
+        mb.billingCycleId === cycleId &&
+        (Number(mb.totalPaidCentavos || mb.paidCentavos) || 0) > 0,
+    );
+    return anyMemberBillPaid;
+  }, [
+    activeCycle?.billingCycleId,
+    cycles.length,
+    payments,
+    currentCycleExpenses,
+    memberBills,
+  ]);
+
+  const isLockedByCyclePayment = Boolean(
+    cycleWaterData &&
+    !isFixedMode &&
+    !isCycleClosedOrPaidOff &&
+    hasCyclePaymentStarted,
+  );
+
   const mySubmission = submissions[activeUserId];
   const isMyAttendanceSubmitted =
     Boolean(mySubmission) && !isCycleClosedOrPaidOff;
 
-  const myMember = useMemo(
-    () =>
-      members.find(
-        (m) =>
-          (m.userId || m.memberId || m.id) === activeUserId ||
-          (m.userId && m.userId.replace("mem_", "") === activeUserId),
-      ),
-    [members, activeUserId],
-  );
-  // Only Non-Payors choose how Payors cover their water due in the Submit Bottom Sheet
-  const isMyMemberPayor = useMemo(
-    () => (myMember ? isPayorMember(myMember) : true),
-    [myMember],
-  );
-
-  // Calendar is locked when submitted and user hasn't tapped "Edit Attendance"
+  // Calendar is locked when closed/paid off, when cycle payments have started, or when submitted and not editing
   const isCalendarLocked = Boolean(
-    isCycleClosedOrPaidOff || (isMyAttendanceSubmitted && !isEditingAttendance),
+    isCycleClosedOrPaidOff ||
+    isLockedByCyclePayment ||
+    (isMyAttendanceSubmitted && !isEditingAttendance),
   );
 
   // Detect whether draft markings differ from saved Firestore markings
@@ -546,7 +651,9 @@ export const AttendanceScreen: React.FC<{
   }, [presentSet, savedPresentSet]);
 
   const hasUnsavedChanges = Boolean(
+    cycleWaterData &&
     !isCycleClosedOrPaidOff &&
+    !isLockedByCyclePayment &&
     !isFixedMode &&
     hasUserModifiedDraft &&
     (areDraftDatesDifferent ||
@@ -777,7 +884,7 @@ export const AttendanceScreen: React.FC<{
   ]);
 
   useEffect(() => {
-    if (isCycleClosedOrPaidOff) {
+    if (isCycleClosedOrPaidOff || isLockedByCyclePayment) {
       if (flushTimerRef.current) {
         clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
@@ -788,12 +895,17 @@ export const AttendanceScreen: React.FC<{
       }
       pendingMutationsRef.current.clear();
       inFlightMutationsRef.current.clear();
+      if (isLockedByCyclePayment && hasUserModifiedDraftRef.current) {
+        optimisticPresentRef.current = new Set(savedPresentDates);
+        setPresentDates([...savedPresentDates]);
+      }
       hasUserModifiedDraftRef.current = false;
       setHasUserModifiedDraft(false);
       setIsEditingAttendance(false);
+      setShowSubmitModal(false);
       setShowLockedHint(false);
     }
-  }, [isCycleClosedOrPaidOff]);
+  }, [isCycleClosedOrPaidOff, isLockedByCyclePayment, savedPresentDates]);
 
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId)
@@ -858,6 +970,13 @@ export const AttendanceScreen: React.FC<{
 
   const handleStartEditing = () => {
     if (isCycleClosedOrPaidOff) return;
+    if (isLockedByCyclePayment) {
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
+      );
+      return;
+    }
     setIsEditingAttendance(true);
     setShowLockedHint(false);
   };
@@ -880,6 +999,14 @@ export const AttendanceScreen: React.FC<{
       Alert.alert(
         "Cycle Settled & Closed",
         "This billing cycle has already been paid off or closed. Attendance has been reset and will unlock when your host starts the next billing cycle.",
+      );
+      return;
+    }
+
+    if (isLockedByCyclePayment) {
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
       );
       return;
     }
@@ -910,6 +1037,14 @@ export const AttendanceScreen: React.FC<{
     )
       return;
 
+    if (isLockedByCyclePayment) {
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
+      );
+      return;
+    }
+
     if (isCalendarLocked) {
       setShowLockedHint(true);
       return;
@@ -934,6 +1069,14 @@ export const AttendanceScreen: React.FC<{
     )
       return;
 
+    if (isLockedByCyclePayment) {
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
+      );
+      return;
+    }
+
     if (isCalendarLocked) {
       setShowLockedHint(true);
       return;
@@ -954,7 +1097,9 @@ export const AttendanceScreen: React.FC<{
   const waterFee = isCycleClosedOrPaidOff
     ? 0
     : isFixedMode
-      ? myFixedSharePesos
+      ? isMyMemberPayor
+        ? myFixedSharePesos
+        : 0
       : presentCount * ratePerDayPesos;
   const { onScroll, keyboardHeight } = useNavVisibility();
 
@@ -972,6 +1117,14 @@ export const AttendanceScreen: React.FC<{
       Alert.alert(
         "Cycle Settled & Closed",
         "This billing cycle is already paid off or closed. Attendance is reset to zero until the next billing cycle starts.",
+      );
+      return;
+    }
+
+    if (isLockedByCyclePayment) {
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
       );
       return;
     }
@@ -1227,6 +1380,14 @@ export const AttendanceScreen: React.FC<{
   // Confirm & Submit Attendance from the slide-up Bottom Sheet
   const handleConfirmSubmitAttendance = async () => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId || !activeUserId) {
+      return;
+    }
+    if (isLockedByCyclePayment) {
+      setShowSubmitModal(false);
+      Alert.alert(
+        "Attendance Locked",
+        "One or more payors have already started paying bills for this cycle. Water attendance can no longer be edited so bill shares remain accurate.",
+      );
       return;
     }
 
@@ -1558,11 +1719,13 @@ export const AttendanceScreen: React.FC<{
               } else {
                 Alert.alert(
                   "Water Mode Info",
-                  pricingModel === "FIXED_MONTHLY"
-                    ? `Fixed monthly water bill is split evenly across ${payingRoommatesCount} roommates.`
-                    : pricingModel === "FIXED_PER_PERSON_MONTH"
-                      ? `Flat water fee of ₱${fixedPerPersonPesos.toFixed(2)} / resident / month.`
-                      : `Daily rate is ₱${ratePerDayPesos.toFixed(2)}/day present. Configured by host.`,
+                  !cycleWaterData
+                    ? "Water billing rule has not been configured by your host for this billing cycle yet."
+                    : pricingModel === "FIXED_MONTHLY"
+                      ? `Fixed monthly water bill is split evenly across ${payingRoommatesCount} roommates.`
+                      : pricingModel === "FIXED_PER_PERSON_MONTH"
+                        ? `Flat water fee of ₱${fixedPerPersonPesos.toFixed(2)} / resident / month.`
+                        : `Daily rate is ₱${ratePerDayPesos.toFixed(2)}/day present. Configured by host.`,
                 );
               }
             }}
@@ -1763,6 +1926,80 @@ export const AttendanceScreen: React.FC<{
                 water attendance.
               </Text>
             </View>
+          ) : !cycleWaterData && !isCycleClosedOrPaidOff ? (
+            <View
+              style={[
+                styles.emptyCard,
+                isDark && {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 30,
+                  backgroundColor: isDark
+                    ? "rgba(2, 132, 199, 0.16)"
+                    : "#E0F2FE",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: 4,
+                }}
+              >
+                <Ionicons
+                  name="water-outline"
+                  size={30}
+                  color={isDark ? colors.accent : "#0284C7"}
+                />
+              </View>
+              <Text
+                style={[styles.emptyTitle, isDark && { color: colors.text }]}
+              >
+                Waiting for Host Setup
+              </Text>
+              <Text
+                style={[
+                  styles.emptySub,
+                  isDark && { color: colors.textSecondary },
+                ]}
+              >
+                {isHost
+                  ? `Set up the water billing rule for ${activeCycle.name || "this billing cycle"} to choose Daily Attendance, Fixed Monthly Split, or Flat Rate.`
+                  : `${hostName} hasn't configured the water billing rule for ${activeCycle.name || "this billing cycle"} yet. Once configured, your water billing details or attendance calendar will appear here.`}
+              </Text>
+              {isHost && (
+                <TouchableOpacity
+                  style={{
+                    marginTop: 18,
+                    minHeight: 46,
+                    paddingHorizontal: 22,
+                    paddingVertical: 12,
+                    borderRadius: 14,
+                    backgroundColor: isDark ? colors.primary : "#1E60E6",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                  onPress={() => setShowWaterSettingsModal(true)}
+                  activeOpacity={0.85}
+                >
+                  <Feather name="settings" size={15} color="#FFFFFF" />
+                  <Text
+                    style={{
+                      color: "#FFFFFF",
+                      fontSize: 13,
+                      fontWeight: "800",
+                    }}
+                  >
+                    Configure Water Billing
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ) : (
             <>
               {/* =========================================================================
@@ -1829,7 +2066,9 @@ export const AttendanceScreen: React.FC<{
                   >
                     {isCycleClosedOrPaidOff
                       ? "Reset to 0"
-                      : `${totalDays} Total Days`}
+                      : isFixedMode
+                        ? "Fixed Monthly"
+                        : `${totalDays} Total Days`}
                   </Text>
                 </View>
 
@@ -1891,7 +2130,7 @@ export const AttendanceScreen: React.FC<{
                         isDark && { color: colors.text },
                       ]}
                     >
-                      {presentCount}
+                      {isFixedMode ? "—" : presentCount}
                     </Text>
                   </View>
 
@@ -1918,7 +2157,7 @@ export const AttendanceScreen: React.FC<{
                         isDark && { color: colors.text },
                       ]}
                     >
-                      {absentCount}
+                      {isFixedMode ? "—" : absentCount}
                     </Text>
                   </View>
 
@@ -1946,7 +2185,9 @@ export const AttendanceScreen: React.FC<{
                         isDark && { color: colors.accent },
                       ]}
                     >
-                      ₱{waterFee.toFixed(2)}
+                      {isFixedMode && !isMyMemberPayor
+                        ? "Exempt"
+                        : `₱${waterFee.toFixed(2)}`}
                     </Text>
                   </View>
                 </View>
@@ -2055,8 +2296,42 @@ export const AttendanceScreen: React.FC<{
                     </Text>
                   </View>
 
+                  {isLockedByCyclePayment && (
+                    <View
+                      style={[
+                        styles.settledFeePill,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(245, 158, 11, 0.16)"
+                            : "#FEF3C7",
+                          borderColor: isDark
+                            ? "rgba(245, 158, 11, 0.35)"
+                            : "#FDE68A",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 5,
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="lock"
+                        size={11}
+                        color={isDark ? "#FBBF24" : "#B45309"}
+                      />
+                      <Text
+                        style={[
+                          styles.settledFeePillText,
+                          { color: isDark ? "#FBBF24" : "#B45309" },
+                        ]}
+                      >
+                        Payments Started
+                      </Text>
+                    </View>
+                  )}
+
                   {!isFixedMode &&
                     !isCycleClosedOrPaidOff &&
+                    !isLockedByCyclePayment &&
                     isCalendarLocked && (
                       <TouchableOpacity
                         style={[
@@ -2087,6 +2362,7 @@ export const AttendanceScreen: React.FC<{
 
                   {!isFixedMode &&
                     !isCycleClosedOrPaidOff &&
+                    !isLockedByCyclePayment &&
                     !isCalendarLocked &&
                     isEditingAttendance &&
                     isMyAttendanceSubmitted && (
@@ -2230,9 +2506,42 @@ export const AttendanceScreen: React.FC<{
                   )}
               </View>
 
-              {/* Locked Calendar Hint Banner (when user taps a locked date) */}
+              {/* Locked Banner when cycle payments have started */}
+              {isLockedByCyclePayment && (
+                <View
+                  style={[
+                    styles.lockedHintBanner,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(245, 158, 11, 0.14)"
+                        : "#FFFBEB",
+                      borderColor: isDark
+                        ? "rgba(245, 158, 11, 0.35)"
+                        : "#FDE68A",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="lock"
+                    size={15}
+                    color={isDark ? "#FBBF24" : "#D97706"}
+                  />
+                  <Text
+                    style={[
+                      styles.lockedHintText,
+                      { color: isDark ? "#FDE68A" : "#92400E" },
+                    ]}
+                  >
+                    Attendance is locked for everyone because bill payments have
+                    already started for this cycle.
+                  </Text>
+                </View>
+              )}
+
+              {/* Locked Calendar Hint Banner (when user taps a locked date after submitting) */}
               {showLockedHint &&
                 isCalendarLocked &&
+                !isLockedByCyclePayment &&
                 !isCycleClosedOrPaidOff && (
                   <View
                     style={[
@@ -2621,8 +2930,8 @@ export const AttendanceScreen: React.FC<{
                       members,
                       allCycleAttendance,
                       submissions,
-                      Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
-                        ? Number(waterConfig?.rateCentavosPerPersonPerDay)
+                      Number(cycleWaterData?.rateCentavosPerPersonPerDay) > 0
+                        ? Number(cycleWaterData?.rateCentavosPerPersonPerDay)
                         : 500,
                     );
                     return members.map((member, index) => {
@@ -2674,26 +2983,35 @@ export const AttendanceScreen: React.FC<{
                         : Math.max(0, totalDays - memberPresentCount);
                       // Effective daily rate (defaults safely to ₱5.00/day)
                       const effectiveDailyRate =
-                        Number(waterConfig?.rateCentavosPerPersonPerDay) > 0
-                          ? Number(waterConfig.rateCentavosPerPersonPerDay) /
-                            100
+                        Number(cycleWaterData?.rateCentavosPerPersonPerDay) > 0
+                          ? Number(
+                              cycleWaterData?.rateCentavosPerPersonPerDay,
+                            ) / 100
                           : 5.0;
 
                       const ownWaterPesos = isCycleClosedOrPaidOff
                         ? 0
-                        : memberPresentCount > 0
-                          ? memberPresentCount * effectiveDailyRate
-                          : isFixedMode
-                            ? myFixedSharePesos
+                        : isFixedMode
+                          ? !isPayor
+                            ? 0
+                            : pricingModel === "FIXED_PER_PERSON_MONTH"
+                              ? fixedPerPersonPesos
+                              : computeFairSplitShareCentavos(
+                                  Math.round(fixedMonthlyPesos * 100),
+                                  activePayors,
+                                  mUid,
+                                ) / 100
+                          : memberPresentCount > 0
+                            ? memberPresentCount * effectiveDailyRate
                             : 0;
 
                       const absorbedNonPayorPesos =
-                        isCycleClosedOrPaidOff || !isPayor
+                        isCycleClosedOrPaidOff || !isPayor || isFixedMode
                           ? 0
                           : (memberWaterInfo?.nonPayorWaterCentavos || 0) / 100;
 
                       // For Payors, show their total effective water share (own + absorbed Non-Payor share).
-                      // For Non-Payors, show their generated water amount alongside who covers it.
+                      // For Non-Payors, show their generated water amount alongside who covers it (on presence mode only).
                       const memberWaterTotal = isCycleClosedOrPaidOff
                         ? 0
                         : isPayor
@@ -2701,19 +3019,22 @@ export const AttendanceScreen: React.FC<{
                           : ownWaterPesos;
 
                       const memberSubmission = memberSub || submissions[mUid];
-                      const isSubmitted = isCycleClosedOrPaidOff
-                        ? false
-                        : isMe
-                          ? isMyAttendanceSubmitted
-                          : Boolean(memberSubmission);
-                      const hasMarked = isCycleClosedOrPaidOff
-                        ? false
-                        : isMe
-                          ? presentCount > 0
-                          : memberPresentCount > 0;
+                      const isSubmitted =
+                        isCycleClosedOrPaidOff || isFixedMode
+                          ? false
+                          : isMe
+                            ? isMyAttendanceSubmitted
+                            : Boolean(memberSubmission);
+                      const hasMarked =
+                        isCycleClosedOrPaidOff || isFixedMode
+                          ? false
+                          : isMe
+                            ? presentCount > 0
+                            : memberPresentCount > 0;
 
-                      const nonPayorAllocationLabel =
-                        !isPayor && (isSubmitted || memberSubmission)
+                      const nonPayorAllocationLabel = isFixedMode
+                        ? null
+                        : !isPayor && (isSubmitted || memberSubmission)
                           ? memberWaterInfo?.nonPayorAllocationSummary ||
                             (memberSubmission?.allocationMode ===
                             "SPECIFIC_PAYOR"
@@ -2831,28 +3152,37 @@ export const AttendanceScreen: React.FC<{
                                 isDark && { color: colors.textSecondary },
                               ]}
                             >
-                              {memberPresentCount} days present •{" "}
-                              {memberAbsentCount} off
-                              {nonPayorAllocationLabel
-                                ? ` • ${nonPayorAllocationLabel}`
-                                : ""}
+                              {isFixedMode
+                                ? isPayor
+                                  ? pricingModel === "FIXED_MONTHLY"
+                                    ? "Equal monthly split"
+                                    : "Flat monthly fee"
+                                  : "Exempt from fixed water bill"
+                                : `${memberPresentCount} days present • ${memberAbsentCount} off${
+                                    nonPayorAllocationLabel
+                                      ? ` • ${nonPayorAllocationLabel}`
+                                      : ""
+                                  }`}
                             </Text>
                           </View>
 
                           {/* Right Due & Status */}
                           <View style={styles.memberDueCol}>
-                            <Text
-                              style={[
-                                styles.memberDueAmount,
-                                isDark && { color: colors.text },
-                              ]}
-                            >
-                              ₱{memberWaterTotal.toFixed(2)}
-                            </Text>
+                            {!(isFixedMode && !isPayor) && (
+                              <Text
+                                style={[
+                                  styles.memberDueAmount,
+                                  isDark && { color: colors.text },
+                                ]}
+                              >
+                                ₱{memberWaterTotal.toFixed(2)}
+                              </Text>
+                            )}
                             <Text
                               style={[
                                 styles.memberStatusLabel,
                                 isCycleClosedOrPaidOff ||
+                                (isFixedMode && isPayor) ||
                                 hasMarked ||
                                 isSubmitted
                                   ? [
@@ -2869,13 +3199,17 @@ export const AttendanceScreen: React.FC<{
                                 ? !isPayor
                                   ? "Exempt"
                                   : "Settled"
-                                : hasMarked || isSubmitted
+                                : isFixedMode
                                   ? !isPayor
-                                    ? "Marked (Exempt)"
-                                    : "Marked"
-                                  : !isPayor
                                     ? "Exempt"
-                                    : "Pending"}
+                                    : "Fixed Share"
+                                  : hasMarked || isSubmitted
+                                    ? !isPayor
+                                      ? "Marked (Exempt)"
+                                      : "Marked"
+                                    : !isPayor
+                                      ? "Exempt"
+                                      : "Pending"}
                             </Text>
                           </View>
                         </View>
@@ -2886,233 +3220,278 @@ export const AttendanceScreen: React.FC<{
               </View>
 
               {/* =========================================================================
-                SUBMIT / EDIT BUTTON & BANNER
+                SUBMIT / EDIT BUTTON & BANNER (Presence-Based Mode Only)
                 Requires explicit submit before leaving; locks calendar after submission
-                with an Edit Attendance button, and opens the bottom sheet on Submit
+                or when cycle payments have started. Omitted completely on Fixed rules.
                 ========================================================================= */}
-              <View style={styles.submissionContainer}>
-                <View
-                  style={[
-                    styles.submissionNoticeBox,
-                    isCycleClosedOrPaidOff || isCalendarLocked
-                      ? styles.submissionNoticeBoxSubmitted
-                      : hasUnsavedChanges
+              {!isFixedMode && (
+                <View style={styles.submissionContainer}>
+                  <View
+                    style={[
+                      styles.submissionNoticeBox,
+                      isLockedByCyclePayment
                         ? styles.submissionNoticeBoxWarning
-                        : styles.submissionNoticeBoxPending,
-                    isDark &&
-                      (isCycleClosedOrPaidOff || isCalendarLocked
-                        ? {
-                            backgroundColor: "rgba(16, 185, 129, 0.12)",
-                            borderColor: "rgba(16, 185, 129, 0.25)",
-                          }
-                        : hasUnsavedChanges
+                        : isCycleClosedOrPaidOff || isCalendarLocked
+                          ? styles.submissionNoticeBoxSubmitted
+                          : hasUnsavedChanges
+                            ? styles.submissionNoticeBoxWarning
+                            : styles.submissionNoticeBoxPending,
+                      isDark &&
+                        (isLockedByCyclePayment || hasUnsavedChanges
                           ? {
                               backgroundColor: "rgba(245, 158, 11, 0.14)",
                               borderColor: "rgba(245, 158, 11, 0.32)",
                             }
-                          : {
-                              backgroundColor: "rgba(59, 130, 246, 0.12)",
-                              borderColor: "rgba(59, 130, 246, 0.25)",
-                            }),
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      isCycleClosedOrPaidOff || isCalendarLocked
-                        ? "lock-closed"
-                        : hasUnsavedChanges
-                          ? "alert-circle"
-                          : "water-outline"
-                    }
-                    size={18}
-                    color={
-                      isCycleClosedOrPaidOff || isCalendarLocked
-                        ? isDark
-                          ? colors.success
-                          : "#059669"
-                        : hasUnsavedChanges
+                          : isCycleClosedOrPaidOff || isCalendarLocked
+                            ? {
+                                backgroundColor: "rgba(16, 185, 129, 0.12)",
+                                borderColor: "rgba(16, 185, 129, 0.25)",
+                              }
+                            : {
+                                backgroundColor: "rgba(59, 130, 246, 0.12)",
+                                borderColor: "rgba(59, 130, 246, 0.25)",
+                              }),
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        isCycleClosedOrPaidOff || isCalendarLocked
+                          ? "lock-closed"
+                          : hasUnsavedChanges
+                            ? "alert-circle"
+                            : "water-outline"
+                      }
+                      size={18}
+                      color={
+                        isLockedByCyclePayment || hasUnsavedChanges
                           ? isDark
                             ? "#FBBF24"
                             : "#D97706"
-                          : isDark
-                            ? colors.accent
-                            : "#2563EB"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.submissionNoticeText,
-                      (isCycleClosedOrPaidOff || isCalendarLocked) &&
-                        styles.submissionNoticeTextSubmitted,
-                      hasUnsavedChanges && styles.submissionNoticeTextWarning,
-                      isDark && {
-                        color:
-                          isCycleClosedOrPaidOff || isCalendarLocked
-                            ? "#6EE7B7"
-                            : hasUnsavedChanges
+                          : isCycleClosedOrPaidOff || isCalendarLocked
+                            ? isDark
+                              ? colors.success
+                              : "#059669"
+                            : isDark
+                              ? colors.accent
+                              : "#2563EB"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.submissionNoticeText,
+                        (isCycleClosedOrPaidOff ||
+                          (isCalendarLocked && !isLockedByCyclePayment)) &&
+                          styles.submissionNoticeTextSubmitted,
+                        (hasUnsavedChanges || isLockedByCyclePayment) &&
+                          styles.submissionNoticeTextWarning,
+                        isDark && {
+                          color:
+                            isLockedByCyclePayment || hasUnsavedChanges
                               ? "#FDE68A"
-                              : "#93C5FD",
-                      },
-                    ]}
-                  >
-                    {isCycleClosedOrPaidOff
-                      ? "This billing cycle is paid off and closed. Your water attendance and dues have been reset to zero (₱0.00) for the next cycle."
-                      : isCalendarLocked
-                        ? `Attendance submitted & locked (${presentCount} days, ₱${waterFee.toFixed(
-                            2,
-                          )})${
-                            !isMyMemberPayor && mySubmission
-                              ? mySubmission.allocationMode === "SPECIFIC_PAYOR"
-                                ? ` • Covered by ${mySubmission.assignedPayorName || "Specific Payor"}`
-                                : mySubmission.allocationMode === "CUSTOM_SPLIT"
-                                  ? " • Covered via Custom Payor Split"
-                                  : " • Split fairly across Payors"
-                              : ""
-                          }. Tap Edit Attendance below to modify.`
-                        : hasUnsavedChanges
-                          ? `You have unsaved attendance markings (${presentCount} days, ₱${waterFee.toFixed(
+                              : isCycleClosedOrPaidOff || isCalendarLocked
+                                ? "#6EE7B7"
+                                : "#93C5FD",
+                        },
+                      ]}
+                    >
+                      {isCycleClosedOrPaidOff
+                        ? "This billing cycle is paid off and closed. Your water attendance and dues have been reset to zero (₱0.00) for the next cycle."
+                        : isLockedByCyclePayment
+                          ? `Attendance is locked (${presentCount} days, ₱${waterFee.toFixed(
                               2,
-                            )}). Please submit your markings before leaving this screen.`
-                          : "Mark the days you were present above, then tap Submit Attendance to confirm and lock your markings."}
-                  </Text>
-                </View>
+                            )}) because one or more payors have already started paying bills for this cycle.`
+                          : isCalendarLocked
+                            ? `Attendance submitted & locked (${presentCount} days, ₱${waterFee.toFixed(
+                                2,
+                              )})${
+                                !isMyMemberPayor && mySubmission
+                                  ? mySubmission.allocationMode ===
+                                    "SPECIFIC_PAYOR"
+                                    ? ` • Covered by ${mySubmission.assignedPayorName || "Specific Payor"}`
+                                    : mySubmission.allocationMode ===
+                                        "CUSTOM_SPLIT"
+                                      ? " • Covered via Custom Payor Split"
+                                      : " • Split fairly across Payors"
+                                  : ""
+                              }. Tap Edit Attendance below to modify.`
+                            : hasUnsavedChanges
+                              ? `You have unsaved attendance markings (${presentCount} days, ₱${waterFee.toFixed(
+                                  2,
+                                )}). Please submit your markings before leaving this screen.`
+                              : "Mark the days you were present above, then tap Submit Attendance to confirm and lock your markings."}
+                    </Text>
+                  </View>
 
-                {isCycleClosedOrPaidOff ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.submitButton,
-                      {
-                        backgroundColor: isDark
-                          ? colors.surfaceInset
-                          : "#94A3B8",
-                        shadowOpacity: 0,
-                        elevation: 0,
-                      },
-                    ]}
-                    disabled
-                  >
-                    <View style={styles.submitBtnInner}>
-                      <Text
-                        style={[
-                          styles.submitButtonText,
-                          isDark && { color: colors.textSecondary },
-                        ]}
-                      >
-                        Cycle Settled · Attendance Reset (₱0.00)
-                      </Text>
-                      <Feather
-                        name="check"
-                        size={18}
-                        color={isDark ? colors.textSecondary : "#FFFFFF"}
-                        style={{ marginLeft: 8 }}
-                      />
-                    </View>
-                  </TouchableOpacity>
-                ) : isCalendarLocked ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.editAttendanceMainBtn,
-                      isDark && {
-                        backgroundColor: colors.card,
-                        borderColor: colors.primary,
-                      },
-                    ]}
-                    onPress={handleStartEditing}
-                    activeOpacity={0.85}
-                  >
-                    <View style={styles.submitBtnInner}>
-                      <Feather
-                        name="edit-2"
-                        size={17}
-                        color={isDark ? colors.accent : "#2563EB"}
-                        style={{ marginRight: 8 }}
-                      />
-                      <Text
-                        style={[
-                          styles.editAttendanceMainBtnText,
-                          isDark && { color: colors.accent },
-                        ]}
-                      >
-                        Edit Attendance Markings
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.submitActionRow}>
-                    {isMyAttendanceSubmitted && isEditingAttendance && (
-                      <TouchableOpacity
-                        style={[
-                          styles.cancelEditMainBtn,
-                          isDark && {
-                            backgroundColor: colors.surfaceInset,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                        onPress={handleCancelEditing}
-                        disabled={isSubmitting}
-                        activeOpacity={0.8}
-                      >
-                        <Text
-                          style={[
-                            styles.cancelEditMainBtnText,
-                            isDark && { color: colors.textSecondary },
-                          ]}
-                        >
-                          Cancel
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-
+                  {isCycleClosedOrPaidOff ? (
                     <TouchableOpacity
                       style={[
                         styles.submitButton,
-                        { flex: 1 },
-                        isDark && {
-                          backgroundColor: colors.primary,
-                          shadowColor: colors.primary,
+                        {
+                          backgroundColor: isDark
+                            ? colors.surfaceInset
+                            : "#94A3B8",
+                          shadowOpacity: 0,
+                          elevation: 0,
                         },
-                        isSubmitting && { opacity: 0.75 },
                       ]}
-                      onPress={handleOpenSubmitModal}
-                      disabled={isSubmitting}
+                      disabled
+                    >
+                      <View style={styles.submitBtnInner}>
+                        <Text
+                          style={[
+                            styles.submitButtonText,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Cycle Settled · Attendance Reset (₱0.00)
+                        </Text>
+                        <Feather
+                          name="check"
+                          size={18}
+                          color={isDark ? colors.textSecondary : "#FFFFFF"}
+                          style={{ marginLeft: 8 }}
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  ) : isLockedByCyclePayment ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        {
+                          backgroundColor: isDark
+                            ? colors.surfaceInset
+                            : "#94A3B8",
+                          shadowOpacity: 0,
+                          elevation: 0,
+                        },
+                      ]}
+                      disabled
+                    >
+                      <View style={styles.submitBtnInner}>
+                        <Feather
+                          name="lock"
+                          size={17}
+                          color={isDark ? colors.textSecondary : "#FFFFFF"}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text
+                          style={[
+                            styles.submitButtonText,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          Attendance Locked · Payments Started
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : isCalendarLocked ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.editAttendanceMainBtn,
+                        isDark && {
+                          backgroundColor: colors.card,
+                          borderColor: colors.primary,
+                        },
+                      ]}
+                      onPress={handleStartEditing}
                       activeOpacity={0.85}
                     >
-                      {isSubmitting ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <View style={styles.submitBtnInner}>
-                          <Text style={styles.submitButtonText}>
-                            {isMyAttendanceSubmitted
-                              ? `Update (₱${waterFee.toFixed(2)})`
-                              : `Submit Attendance (₱${waterFee.toFixed(2)})`}
-                          </Text>
-                          <Feather
-                            name="arrow-up-circle"
-                            size={18}
-                            color="#FFFFFF"
-                            style={{ marginLeft: 8 }}
-                          />
-                        </View>
-                      )}
+                      <View style={styles.submitBtnInner}>
+                        <Feather
+                          name="edit-2"
+                          size={17}
+                          color={isDark ? colors.accent : "#2563EB"}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text
+                          style={[
+                            styles.editAttendanceMainBtnText,
+                            isDark && { color: colors.accent },
+                          ]}
+                        >
+                          Edit Attendance Markings
+                        </Text>
+                      </View>
                     </TouchableOpacity>
-                  </View>
-                )}
+                  ) : (
+                    <View style={styles.submitActionRow}>
+                      {isMyAttendanceSubmitted && isEditingAttendance && (
+                        <TouchableOpacity
+                          style={[
+                            styles.cancelEditMainBtn,
+                            isDark && {
+                              backgroundColor: colors.surfaceInset,
+                              borderColor: colors.border,
+                            },
+                          ]}
+                          onPress={handleCancelEditing}
+                          disabled={isSubmitting}
+                          activeOpacity={0.8}
+                        >
+                          <Text
+                            style={[
+                              styles.cancelEditMainBtnText,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                          >
+                            Cancel
+                          </Text>
+                        </TouchableOpacity>
+                      )}
 
-                <Text
-                  style={[
-                    styles.submissionFootnote,
-                    isDark && { color: colors.textMuted },
-                  ]}
-                >
-                  {isCycleClosedOrPaidOff
-                    ? "✓ Cycle closed & settled · Ready for your host to start the next cycle"
-                    : isCalendarLocked
-                      ? "🔒 Locked after submission to prevent accidental edits"
-                      : !isMyMemberPayor
-                        ? "Tap Submit to choose which Payors cover your water share"
-                        : "Tap Submit to confirm and lock your water attendance markings"}
-                </Text>
-              </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.submitButton,
+                          { flex: 1 },
+                          isDark && {
+                            backgroundColor: colors.primary,
+                            shadowColor: colors.primary,
+                          },
+                          isSubmitting && { opacity: 0.75 },
+                        ]}
+                        onPress={handleOpenSubmitModal}
+                        disabled={isSubmitting}
+                        activeOpacity={0.85}
+                      >
+                        {isSubmitting ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <View style={styles.submitBtnInner}>
+                            <Text style={styles.submitButtonText}>
+                              {isMyAttendanceSubmitted
+                                ? `Update (₱${waterFee.toFixed(2)})`
+                                : `Submit Attendance (₱${waterFee.toFixed(2)})`}
+                            </Text>
+                            <Feather
+                              name="arrow-up-circle"
+                              size={18}
+                              color="#FFFFFF"
+                              style={{ marginLeft: 8 }}
+                            />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <Text
+                    style={[
+                      styles.submissionFootnote,
+                      isDark && { color: colors.textMuted },
+                    ]}
+                  >
+                    {isCycleClosedOrPaidOff
+                      ? "✓ Cycle closed & settled · Ready for your host to start the next cycle"
+                      : isLockedByCyclePayment
+                        ? "🔒 Attendance locked for everyone once cycle bill payments begin"
+                        : isCalendarLocked
+                          ? "🔒 Locked after submission to prevent accidental edits"
+                          : !isMyMemberPayor
+                            ? "Tap Submit to choose which Payors cover your water share"
+                            : "Tap Submit to confirm and lock your water attendance markings"}
+                  </Text>
+                </View>
+              )}
             </>
           )}
         </ScrollView>
@@ -4084,7 +4463,10 @@ export const AttendanceScreen: React.FC<{
           visible={showWaterSettingsModal}
           onClose={() => setShowWaterSettingsModal(false)}
           householdId={resolvedHouseholdId}
-          initialConfig={waterConfig}
+          billingCycleId={resolvedBillingCycleId || undefined}
+          initialConfig={
+            cycleWaterData || (waterConfig?.updatedAt ? waterConfig : null)
+          }
           onSaved={() => {
             if (resolvedBillingCycleId) {
               mobileDataService

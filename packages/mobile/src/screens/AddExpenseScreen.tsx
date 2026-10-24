@@ -694,7 +694,7 @@ export const AddExpenseScreen: React.FC<AddExpenseScreenProps> = ({
             styles.scrollContent,
             {
               paddingBottom: Math.max(
-                120,
+                40,
                 insets.bottom + (isKeyboardVisible ? keyboardHeight + 40 : 60),
               ),
             },
@@ -2196,7 +2196,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   cardActionBtn: {
-    borderRadius: 10,
+    borderRadius: 100,
     paddingVertical: 7,
     alignItems: "center",
     justifyContent: "center",
@@ -2457,7 +2457,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 12,
+    borderRadius: 100,
     paddingHorizontal: 16,
     height: 48,
     justifyContent: "center",
@@ -2527,7 +2527,7 @@ const styles = StyleSheet.create({
     height: 46,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 12,
+    borderRadius: 100,
     borderWidth: 1,
   },
   splitOptionActive: {
@@ -2602,7 +2602,7 @@ const styles = StyleSheet.create({
   // Bottom Primary Button matching screen.png
   updateBtn: {
     backgroundColor: "#2563EB",
-    borderRadius: 14,
+    borderRadius: 100,
     paddingVertical: 15,
     alignItems: "center",
     justifyContent: "center",

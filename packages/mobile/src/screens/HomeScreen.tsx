@@ -27,6 +27,7 @@ import {
   computeCycleWaterBreakdown,
   computeFairSplitShareCentavos,
   matchesMemberUid,
+  evaluateHouseholdCycleSettlements,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { formatPesos } from "@propertyflow/shared";
@@ -243,7 +244,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [expenses, setExpenses] = useState<MobileExpense[]>([]);
   const [cycles, setCycles] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
-  const [memberBills, setMemberBills] = useState<any[]>([]);
+  const [allMemberBills, setAllMemberBills] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
   const [cycleAttendance, setCycleAttendance] = useState<any[]>([]);
@@ -314,6 +315,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId)),
     );
   }, [expenses, activeCycle?.billingCycleId, cycles.length, oldestCycleId]);
+  const memberBills = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return allMemberBills;
+    return allMemberBills.filter(
+      (b) => b.billingCycleId === activeCycle.billingCycleId,
+    );
+  }, [allMemberBills, activeCycle?.billingCycleId]);
   const myBill = memberBills.find((bill) => bill.userId === firebaseUser?.uid);
   const totalExpenses = activeCycleExpenses.reduce(
     (sum, expense) => sum + expense.amountCents,
@@ -464,7 +471,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       setCycles([]);
       setMembers([]);
       setPayments([]);
-      setMemberBills([]);
+      setAllMemberBills([]);
       setCycleAttendance([]);
       setInitialLoading(false);
       return;
@@ -546,16 +553,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [householdId, isProfileLoaded]);
 
   useEffect(() => {
-    if (!householdId || !activeCycle?.billingCycleId) {
-      setMemberBills([]);
+    if (!householdId) {
+      setAllMemberBills([]);
       return;
     }
     return mobileDataService.listenToMemberBills(
       householdId,
-      activeCycle.billingCycleId,
-      setMemberBills,
+      setAllMemberBills,
     );
-  }, [activeCycle?.billingCycleId, householdId]);
+  }, [householdId]);
 
   // Real-time Water Attendance for active cycle
   useEffect(() => {
@@ -681,82 +687,39 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
   const isPaymentsLocked = isCyclePaymentsLocked(activeCycle, household);
 
-  // Track which active payors have settled their shares for the active cycle
-  const settledPayorUidsForActiveCycle = useMemo(() => {
-    const settled = new Set<string>();
-    if (activePayorsList.length === 0 || activeCycleExpenses.length === 0) {
-      return settled;
-    }
-    const cycleId = activeCycle?.billingCycleId;
-    const isSingleCycle = cycles.length <= 1;
-
-    activePayorsList.forEach((p) => {
-      const uid = p.userId || p.memberId || p.id;
-      if (!uid) return;
-      const b = memberBills.find((mb) => mb.userId === uid);
-      const userPaidFromPmts = payments
-        .filter((pmt) => {
-          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
-          if (!cycleId) return true;
-          return (
-            pmt.billingCycleId === cycleId ||
-            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
-              isSingleCycle)
-          );
-        })
-        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
-
-      let payorShareTotal = 0;
-      let allUserSplitsMarkedPaid = true;
-      activeCycleExpenses.forEach((exp) => {
-        const mySplit = Array.isArray(exp.splitDetails)
-          ? exp.splitDetails.find((s: any) => s.userId === uid)
-          : null;
-        if (mySplit?.isExempt) return;
-        const share =
-          mySplit && typeof mySplit.shareCentavos === "number"
-            ? mySplit.shareCentavos
-            : Math.round((exp.amountCents || 0) / payorCount);
-        payorShareTotal += share;
-        if (
-          !exp.isPaid &&
-          exp.status !== "PAID" &&
-          !mySplit?.isPaid &&
-          share > 0
-        ) {
-          allUserSplitsMarkedPaid = false;
-        }
-      });
-
-      if (payorShareTotal <= 0) return;
-      const effectivePaid = Math.max(
-        b?.totalPaidCentavos || 0,
-        userPaidFromPmts,
-      );
-      const isMemberBillSettled =
-        b &&
-        typeof b.outstandingCentavos === "number" &&
-        b.outstandingCentavos === 0 &&
-        (b.totalPaidCentavos || 0) > 0;
-      if (
-        effectivePaid >= payorShareTotal ||
-        allUserSplitsMarkedPaid ||
-        isMemberBillSettled
-      ) {
-        settled.add(uid);
+  const cycleNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    cycles.forEach((c) => {
+      if (c?.billingCycleId) {
+        map.set(
+          String(c.billingCycleId),
+          c.name || c.cycleName || "Previous Cycle",
+        );
       }
     });
+    return map;
+  }, [cycles]);
 
-    return settled;
-  }, [
-    activePayorsList,
-    activeCycleExpenses,
-    activeCycle?.billingCycleId,
-    cycles.length,
-    memberBills,
-    payments,
-    payorCount,
-  ]);
+  // Track which active payors have settled their shares for each billing cycle (active + all prior cycles)
+  const cycleSettlement = useMemo(() => {
+    return evaluateHouseholdCycleSettlements({
+      cycles,
+      expenses,
+      payments,
+      allMemberBills,
+      members: activeMembersList,
+    });
+  }, [cycles, expenses, payments, allMemberBills, activeMembersList]);
+
+  const settledPayorUidsByCycle = cycleSettlement.settledPayorUidsByCycle;
+
+  const settledPayorUidsForActiveCycle = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return new Set<string>();
+    return (
+      settledPayorUidsByCycle.get(String(activeCycle.billingCycleId)) ||
+      new Set<string>()
+    );
+  }, [settledPayorUidsByCycle, activeCycle?.billingCycleId]);
 
   // Check if all active payors have settled their shares strictly for the active cycle
   const allPayorsSettled = useMemo(() => {
@@ -773,22 +736,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   ]);
 
   useEffect(() => {
-    if (allPayorsSettled && householdId && activeCycle?.billingCycleId) {
-      const hasUnpaid = activeCycleExpenses.some(
-        (e) => e.status !== "PAID" || !e.isPaid,
+    if (!householdId || cycles.length === 0) return;
+    mobileDataService
+      .reconcileStaleArrearsAndSettledCycles(householdId)
+      .catch(() => {});
+  }, [householdId, cycles.length, payments.length]);
+
+  useEffect(() => {
+    if (!householdId || activePayorsList.length === 0) return;
+    settledPayorUidsByCycle.forEach((settledSet, cycId) => {
+      const allCyclePayorsDone = activePayorsList.every((p) => {
+        const uid = p.userId || p.memberId || p.id;
+        return Boolean(uid && settledSet.has(uid));
+      });
+      if (!allCyclePayorsDone) return;
+      const hasUnpaidInCycle = expenses.some(
+        (e) => e.billingCycleId === cycId && (e.status !== "PAID" || !e.isPaid),
       );
-      if (hasUnpaid) {
+      if (hasUnpaidInCycle) {
         mobileDataService
-          .markExpensesPaidIfAllSettled(householdId, activeCycle.billingCycleId)
+          .markExpensesPaidIfAllSettled(householdId, cycId)
           .catch(() => {});
       }
-    }
-  }, [
-    allPayorsSettled,
-    householdId,
-    activeCycle?.billingCycleId,
-    activeCycleExpenses,
-  ]);
+    });
+  }, [settledPayorUidsByCycle, activePayorsList, expenses, householdId]);
 
   // Map real Firestore expenses to UI items
   const realExpensesMapped = useMemo(() => {
@@ -800,10 +771,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         (!exp.billingCycleId &&
           (cycles.length <= 1 || activeCycle.billingCycleId === oldestCycleId));
 
+      const expCycleSettledSet = exp.billingCycleId
+        ? settledPayorUidsByCycle.get(String(exp.billingCycleId))
+        : belongsToActiveCycle
+          ? settledPayorUidsForActiveCycle
+          : undefined;
+
+      const allExpCyclePayorsSettled =
+        activePayorsList.length > 0 &&
+        Boolean(expCycleSettledSet) &&
+        activePayorsList.every((p) => {
+          const pUid = p.userId || p.memberId || p.id;
+          return Boolean(pUid && expCycleSettledSet!.has(pUid));
+        });
+
       const isPaid =
         exp.status === "PAID" ||
         exp.isPaid === true ||
-        (belongsToActiveCycle && allPayorsSettled);
+        (belongsToActiveCycle && allPayorsSettled) ||
+        allExpCyclePayorsSettled;
       const formatted = isPaid
         ? `-₱${(exp.amountCents / 100).toFixed(2)}`
         : `₱${(exp.amountCents / 100).toFixed(2)}`;
@@ -819,7 +805,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           const isPersonDayMode =
             waterConfig?.pricingModel === "PER_PERSON_DAY" ||
             !waterConfig?.pricingModel;
-          if (isPersonDayMode) {
+          if (isPersonDayMode && belongsToActiveCycle) {
             const rate = Number(
               waterConfig?.rateCentavosPerPersonPerDay ?? 500,
             );
@@ -831,6 +817,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               exp.splitDetails,
             );
             myShareCents = getPayorShareCentavos(firebaseUser?.uid);
+          } else if (mySplit && typeof mySplit.shareCentavos === "number") {
+            myShareCents = mySplit.shareCentavos;
           } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
             myShareCents = waterConfig.fixedPerPersonAmountCentavos || 0;
           } else {
@@ -878,9 +866,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         Boolean(
           isPaid ||
           mySplitEntry?.isPaid ||
-          (belongsToActiveCycle &&
-            firebaseUser?.uid &&
-            settledPayorUidsForActiveCycle.has(firebaseUser.uid)),
+          (firebaseUser?.uid && expCycleSettledSet?.has(firebaseUser.uid)),
         );
 
       let paidPayorsCount = 0;
@@ -894,11 +880,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             )
           : null;
         const isPayorPaid = Boolean(
-          isPaid ||
-          pSplit?.isPaid ||
-          (belongsToActiveCycle &&
-            pUid &&
-            settledPayorUidsForActiveCycle.has(pUid)),
+          isPaid || pSplit?.isPaid || (pUid && expCycleSettledSet?.has(pUid)),
         );
         if (isPayorPaid) {
           paidPayorsCount += 1;
@@ -920,12 +902,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       const groupProgressText =
         paidPayorsCount > 0 && waitingSummary
           ? `${paidPayorsCount}/${payorCount} payors settled · ${waitingSummary}`
-          : `${paidPayorsCount}/${payorCount} payors settled`;
+          : waitingSummary
+            ? `${paidPayorsCount}/${payorCount} payors settled · ${waitingSummary}`
+            : `${paidPayorsCount}/${payorCount} payors settled`;
+
+      const originCycleName = exp.billingCycleId
+        ? cycleNameById.get(String(exp.billingCycleId)) || "Previous Cycle"
+        : activeCycle?.name || "Current Cycle";
 
       return {
         id: exp.id,
         rawExpense: exp,
         billingCycleId: exp.billingCycleId,
+        originCycleName,
         dueDate: (exp as any).dueDate || (exp as any).due_date,
         title: displayTitle,
         category: exp.category || "General",
@@ -955,8 +944,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     attendanceSubmissions,
     activeMembersList,
     activePayorsList,
+    settledPayorUidsByCycle,
     settledPayorUidsForActiveCycle,
     allPayorsSettled,
+    cycleNameById,
+    activeCycle?.name,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    oldestCycleId,
   ]);
 
   const allDisplayExpenses = realExpensesMapped;
@@ -975,7 +970,176 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     );
   }, [allDisplayExpenses, searchQuery]);
 
-  // Separate Upcoming (Unpaid) Bills for the active cycle from Settled Expenses
+  // Separate Overdue Bills (unpaid dues from previous closed cycles) from Upcoming Bills (active cycle)
+  const overdueBills = useMemo(() => {
+    if (cycles.length <= 1 || !activeCycle?.billingCycleId) return [];
+
+    const fromPriorExpenses = filteredExpenses.filter((e) => {
+      if (e.isPaid) return false;
+      if (!e.billingCycleId) return false;
+      return (
+        e.billingCycleId !== activeCycle.billingCycleId &&
+        Boolean(e.waitingSummary)
+      );
+    });
+
+    const coveredPriorCycleIds = new Set(
+      fromPriorExpenses.map((e) => String(e.billingCycleId || "")),
+    );
+
+    // Fallback: include any carried-over unpaid Arrears on active memberBills if no matching prior expense doc exists
+    const arrearsByPriorCycle = new Map<
+      string,
+      {
+        priorCycleId: string;
+        originCycleName: string;
+        totalUnpaidCents: number;
+        myUnpaidCents: number;
+        unpaidNames: string[];
+      }
+    >();
+
+    memberBills.forEach((mb) => {
+      const mUid = mb.userId;
+      const memberDoc = activePayorsList.find((p) => matchesMemberUid(p, mUid));
+      if (!memberDoc) return;
+
+      const truePriorUnpaid = cycleSettlement.getPriorUnpaidArrearsBeforeCycle(
+        activeCycle.billingCycleId,
+        memberDoc,
+      );
+      if (truePriorUnpaid <= 0) return;
+
+      const mbPaid = Number(mb.totalPaidCentavos || 0);
+      let remCredit = mbPaid;
+      let remainingCap = truePriorUnpaid;
+
+      (mb.lineItems || []).forEach((li: any) => {
+        if (li.isExempt || remainingCap <= 0) return;
+        const isArr = Boolean(li.category === "Arrears" || li.isArrears);
+        const amt = Number(li.amountCentavos) || 0;
+        if (!isArr) return;
+        if (li.status === "PAID" || li.isSettled) {
+          if (remCredit >= amt) remCredit -= amt;
+          return;
+        }
+        if (amt > 0 && remCredit >= amt) {
+          remCredit -= amt;
+          return;
+        }
+        const rawRemAmt = Math.max(0, amt - remCredit);
+        remCredit = 0;
+        const remAmt = Math.min(rawRemAmt, remainingCap);
+        if (remAmt <= 0) return;
+
+        const pCycId = String(li.priorCycleId || "prior");
+        if (pCycId !== "prior") {
+          const pSummary = cycleSettlement.getMemberCycleSummary(
+            pCycId,
+            memberDoc,
+          );
+          if (
+            pSummary.remainingCycleCentavos <= 0 &&
+            pSummary.priorUnpaidArrearsCentavos <= 0
+          ) {
+            return;
+          }
+        }
+        if (coveredPriorCycleIds.has(pCycId)) return;
+        remainingCap -= remAmt;
+
+        const existing: {
+          priorCycleId: string;
+          originCycleName: string;
+          totalUnpaidCents: number;
+          myUnpaidCents: number;
+          unpaidNames: string[];
+        } = arrearsByPriorCycle.get(pCycId) || {
+          priorCycleId: pCycId,
+          originCycleName:
+            cycleNameById.get(pCycId) ||
+            li.description?.replace(/^Previous Balance\s*\((.*)\)$/i, "$1") ||
+            "Previous Cycle",
+          totalUnpaidCents: 0,
+          myUnpaidCents: 0,
+          unpaidNames: [] as string[],
+        };
+        existing.totalUnpaidCents += remAmt;
+        if (
+          firebaseUser?.uid &&
+          matchesMemberUid(memberDoc, firebaseUser.uid)
+        ) {
+          existing.myUnpaidCents += remAmt;
+        }
+        const fName: string = String(
+          memberDoc.displayName || memberDoc.name || "Roommate",
+        ).split(" ")[0];
+        if (!existing.unpaidNames.includes(fName)) {
+          existing.unpaidNames.push(fName);
+        }
+        arrearsByPriorCycle.set(pCycId, existing);
+      });
+    });
+
+    const fallbackArrearsBills = Array.from(arrearsByPriorCycle.values())
+      .filter((item) => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase();
+        return (
+          item.originCycleName.toLowerCase().includes(q) ||
+          "overdue arrears previous balance".includes(q)
+        );
+      })
+      .map((item) => {
+        const paidCount = Math.max(0, payorCount - item.unpaidNames.length);
+        const waitingSummary =
+          item.unpaidNames.length <= 2
+            ? `Waiting on ${item.unpaidNames.join(", ")}`
+            : `Waiting on ${item.unpaidNames.slice(0, 2).join(", ")} +${item.unpaidNames.length - 2}`;
+        return {
+          id: `overdue_arrears_${item.priorCycleId}`,
+          rawExpense: null,
+          billingCycleId: item.priorCycleId,
+          originCycleName: item.originCycleName,
+          dueDate: undefined,
+          title: `Previous Cycle Dues`,
+          category: "Arrears",
+          categoryMeta: {
+            featherIcon: "clock",
+            color: isDark ? "#F87171" : "#EF4444",
+            bgColor: "#FEE2E2",
+          },
+          date: item.originCycleName,
+          payerName: "Host",
+          amountCents: item.totalUnpaidCents,
+          amountFormatted: formatPesos(item.totalUnpaidCents),
+          myShareCents: item.myUnpaidCents,
+          myShareFormatted: formatPesos(item.myUnpaidCents),
+          mySharePaid: isCurrentUserPayor && item.myUnpaidCents === 0,
+          paidPayorsCount: paidCount,
+          waitingSummary,
+          groupProgressText: `${paidCount}/${payorCount} payors settled · ${waitingSummary}`,
+          isPaid: false,
+          status: "UNPAID",
+        };
+      });
+
+    return [...fromPriorExpenses, ...fallbackArrearsBills];
+  }, [
+    cycles.length,
+    activeCycle?.billingCycleId,
+    filteredExpenses,
+    memberBills,
+    activePayorsList,
+    cycleSettlement,
+    cycleNameById,
+    firebaseUser?.uid,
+    searchQuery,
+    payorCount,
+    isDark,
+    isCurrentUserPayor,
+  ]);
+
   const upcomingBills = useMemo(() => {
     return filteredExpenses.filter((e) => {
       if (e.isPaid) return false;
@@ -997,95 +1161,144 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return filteredExpenses.filter((e) => e.isPaid);
   }, [filteredExpenses]);
 
-  // Unpaid total dues calculation strictly for the active billing cycle
+  // Active cycle payments and balance calculation
+  const activeCycleUserPaidCents = useMemo(() => {
+    const isSingleCycle = cycles.length <= 1;
+    const pmtsSum = payments
+      .filter(
+        (p) =>
+          p.userId === firebaseUser?.uid &&
+          p.status !== "REJECTED" &&
+          (!activeCycle?.billingCycleId ||
+            p.billingCycleId === activeCycle.billingCycleId ||
+            ((!p.billingCycleId || p.billingCycleId === "general") &&
+              isSingleCycle)),
+      )
+      .reduce((sum, p) => sum + (Number(p.amountCentavos) || 0), 0);
+    const billPaid =
+      myBill && typeof myBill.totalPaidCentavos === "number"
+        ? myBill.totalPaidCentavos
+        : 0;
+    return Math.max(billPaid, pmtsSum);
+  }, [
+    payments,
+    firebaseUser?.uid,
+    activeCycle?.billingCycleId,
+    cycles.length,
+    myBill,
+  ]);
+
   const unpaidExpenses = activeCycleExpenses.filter(
     (e) => e.status !== "PAID" && !e.isPaid,
   );
 
-  const liveShareCents = isCurrentUserPayor
-    ? unpaidExpenses.reduce((sum, e) => {
-        const isWater = (e.category || "").toLowerCase().includes("water");
-        if (isWater) {
-          const isPersonDayMode =
-            waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-            !waterConfig?.pricingModel;
-          if (isPersonDayMode) {
-            const rate = Number(
-              waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-            );
-            const { getPayorShareCentavos } = computeCycleWaterBreakdown(
-              activeMembersList,
-              cycleAttendance,
-              attendanceSubmissions,
-              rate,
-              e.splitDetails,
-            );
-            return sum + getPayorShareCentavos(firebaseUser?.uid);
-          } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
-            return sum + (waterConfig.fixedPerPersonAmountCentavos || 0);
-          } else {
-            return (
-              sum +
-              computeFairSplitShareCentavos(
-                e.amountCents,
-                activePayorsList,
-                firebaseUser?.uid,
-              )
-            );
-          }
-        }
-
-        const splitPayors = e.splitDetails
-          ? e.splitDetails.filter(
-              (s: any) => !s.isExempt && s.shareCentavos > 0,
-            )
-          : [];
-        const splitPayorsSum = splitPayors.reduce(
-          (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
-          0,
+  const computeMyExpenseShareOnHome = (e: MobileExpense): number => {
+    const isWater = (e.category || "").toLowerCase().includes("water");
+    if (isWater) {
+      const isPersonDayMode =
+        waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+        !waterConfig?.pricingModel;
+      if (isPersonDayMode) {
+        const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+        const { getPayorShareCentavos } = computeCycleWaterBreakdown(
+          activeMembersList,
+          cycleAttendance,
+          attendanceSubmissions,
+          rate,
+          e.splitDetails,
         );
-        const isSplitStale =
-          (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
-          (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
-        if (
-          !isSplitStale &&
-          e.splitDetails &&
-          Array.isArray(e.splitDetails) &&
-          e.splitDetails.length > 0
-        ) {
-          const mySplit = e.splitDetails.find(
+        return getPayorShareCentavos(firebaseUser?.uid);
+      } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+        return waterConfig.fixedPerPersonAmountCentavos || 0;
+      } else {
+        return computeFairSplitShareCentavos(
+          e.amountCents,
+          activePayorsList,
+          firebaseUser?.uid,
+        );
+      }
+    }
+
+    const splitPayors = e.splitDetails
+      ? e.splitDetails.filter((s: any) => !s.isExempt && s.shareCentavos > 0)
+      : [];
+    const splitPayorsSum = splitPayors.reduce(
+      (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
+      0,
+    );
+    const isSplitStale =
+      (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+      (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
+    if (
+      !isSplitStale &&
+      e.splitDetails &&
+      Array.isArray(e.splitDetails) &&
+      e.splitDetails.length > 0
+    ) {
+      const mySplit = e.splitDetails.find(
+        (s: any) => s.userId === firebaseUser?.uid,
+      );
+      if (mySplit && typeof mySplit.shareCentavos === "number")
+        return mySplit.shareCentavos;
+    }
+    return computeFairSplitShareCentavos(
+      e.amountCents,
+      activePayorsList,
+      firebaseUser?.uid,
+    );
+  };
+
+  const liveShareCents = isCurrentUserPayor
+    ? (activeCycleUserPaidCents > 0
+        ? activeCycleExpenses
+        : unpaidExpenses
+      ).reduce((sum, e) => {
+        if (activeCycleUserPaidCents === 0) {
+          const mySplit = e.splitDetails?.find(
             (s: any) => s.userId === firebaseUser?.uid,
           );
-          if (mySplit && typeof mySplit.shareCentavos === "number")
-            return sum + mySplit.shareCentavos;
+          if (mySplit?.isPaid) return sum;
         }
-        return (
-          sum +
-          computeFairSplitShareCentavos(
-            e.amountCents,
-            activePayorsList,
-            firebaseUser?.uid,
-          )
-        );
+        return sum + computeMyExpenseShareOnHome(e);
       }, 0)
     : 0;
 
   const arrearsShareCents = useMemo(() => {
-    if (!myBill?.lineItems || !Array.isArray(myBill.lineItems)) return 0;
-    return myBill.lineItems
-      .filter(
-        (li: any) =>
-          (li.category === "Arrears" || li.isArrears) &&
-          li.status !== "PAID" &&
-          !li.isExempt,
-      )
+    const mySummary = cycleSettlement.getMemberCycleSummary(
+      activeCycle?.billingCycleId,
+      firebaseUser?.uid,
+    );
+    if (!myBill?.lineItems || !Array.isArray(myBill.lineItems)) {
+      return activeCycleUserPaidCents > 0
+        ? mySummary.priorUnpaidArrearsCentavos +
+            mySummary.settledArrearsInCycleCentavos
+        : mySummary.priorUnpaidArrearsCentavos;
+    }
+    const rawArrears = myBill.lineItems
+      .filter((li: any) => {
+        if (!(li.category === "Arrears" || li.isArrears) || li.isExempt) {
+          return false;
+        }
+        if (li.status === "PAID" || li.isSettled) {
+          return activeCycleUserPaidCents > 0;
+        }
+        return mySummary.priorUnpaidArrearsCentavos > 0;
+      })
       .reduce((sum: number, li: any) => sum + (li.amountCentavos || 0), 0);
-  }, [myBill]);
 
-  const paidCentavos =
-    myBill && typeof myBill.totalPaidCentavos === "number"
-      ? myBill.totalPaidCentavos
-      : 0;
+    if (activeCycleUserPaidCents === 0) {
+      return Math.min(rawArrears, mySummary.priorUnpaidArrearsCentavos);
+    }
+    return rawArrears;
+  }, [
+    myBill,
+    activeCycleUserPaidCents,
+    cycleSettlement,
+    activeCycle?.billingCycleId,
+    firebaseUser?.uid,
+  ]);
+
+  const paidCentavos = activeCycleUserPaidCents;
   const totalUserShareCents = liveShareCents + arrearsShareCents;
   const outstandingCents = isCurrentUserPayor
     ? Math.max(0, totalUserShareCents - paidCentavos)
@@ -2349,6 +2562,266 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 )}
               </TouchableOpacity>
             </ScrollView>
+
+            {/* Overdue Bills Section (Previous Closed Cycles with Unsettled Payors) */}
+            {overdueBills.length > 0 && (
+              <>
+                <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.sectionTitle,
+                        isDark && { color: colors.text },
+                      ]}
+                    >
+                      Overdue Bills
+                    </Text>
+                    <View
+                      style={[
+                        styles.overdueCountBadge,
+                        isDark && {
+                          backgroundColor: "rgba(239, 68, 68, 0.16)",
+                          borderColor: "rgba(239, 68, 68, 0.35)",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.overdueCountBadgeText,
+                          isDark && { color: "#F87171" },
+                        ]}
+                      >
+                        {overdueBills.length}
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => onNavigate("bills")}>
+                    <Text
+                      style={[
+                        styles.viewAllText,
+                        { color: isDark ? "#F87171" : "#DC2626" },
+                      ]}
+                    >
+                      Review Dues
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.expenseList}>
+                  {overdueBills.map((bill) => {
+                    const canUserPayOverdueNow =
+                      isCurrentUserPayor &&
+                      !bill.mySharePaid &&
+                      bill.myShareCents > 0 &&
+                      outstandingCents > 0;
+
+                    return (
+                      <TouchableOpacity
+                        key={`overdue_${bill.id}`}
+                        style={[
+                          styles.upcomingBillCard,
+                          styles.overdueBillCard,
+                          isDark && {
+                            backgroundColor: colors.card,
+                            borderColor: "rgba(239, 68, 68, 0.32)",
+                          },
+                        ]}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          if (
+                            canUserPayOverdueNow &&
+                            (!isPaymentsLocked || isHost) &&
+                            onOpenSettleDues
+                          ) {
+                            onOpenSettleDues();
+                          } else {
+                            onNavigate("bills");
+                          }
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.upcomingBillIconContainer,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(239, 68, 68, 0.14)"
+                                : "#FEF2F2",
+                            },
+                          ]}
+                        >
+                          <Feather
+                            name={bill.categoryMeta.featherIcon as any}
+                            size={20}
+                            color={isDark ? "#F87171" : "#DC2626"}
+                          />
+                        </View>
+
+                        <View style={styles.upcomingBillDetailsWrap}>
+                          <Text
+                            style={[
+                              styles.upcomingBillTitle,
+                              isDark && { color: colors.text },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {cleanBillTitle(
+                              bill.title,
+                              bill.category,
+                              group1Title,
+                            )}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.upcomingBillSubtitle,
+                              isDark && { color: colors.textSecondary },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {bill.originCycleName} · {bill.groupProgressText}
+                          </Text>
+                          {isCurrentUserPayor && bill.myShareCents > 0 ? (
+                            <Text
+                              style={[
+                                styles.upcomingBillShareText,
+                                {
+                                  fontVariant: ["tabular-nums"],
+                                  color: bill.mySharePaid
+                                    ? isDark
+                                      ? "#34D399"
+                                      : "#16A34A"
+                                    : isDark
+                                      ? "#F87171"
+                                      : "#DC2626",
+                                },
+                              ]}
+                            >
+                              {bill.mySharePaid
+                                ? `Your share: ${bill.myShareFormatted} (Paid ✓)`
+                                : `Your overdue share: ${bill.myShareFormatted}`}
+                            </Text>
+                          ) : !isCurrentUserPayor ? (
+                            <Text
+                              style={[
+                                styles.upcomingBillShareText,
+                                {
+                                  color: isDark ? colors.textMuted : "#64748B",
+                                },
+                              ]}
+                            >
+                              Exempt (Non-payor) ·{" "}
+                              {bill.waitingSummary || "Awaiting payors"}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <View style={styles.upcomingBillRightCol}>
+                          <TouchableOpacity
+                            style={[
+                              styles.overdueActionBtn,
+                              bill.mySharePaid
+                                ? {
+                                    backgroundColor: isDark
+                                      ? "rgba(16, 185, 129, 0.16)"
+                                      : "#DCFCE7",
+                                    borderColor: isDark
+                                      ? "rgba(16, 185, 129, 0.35)"
+                                      : "#86EFAC",
+                                  }
+                                : canUserPayOverdueNow
+                                  ? isPaymentsLocked && !isHost
+                                    ? {
+                                        backgroundColor: isDark
+                                          ? "rgba(245, 158, 11, 0.16)"
+                                          : "#FEF3C7",
+                                        borderColor: isDark
+                                          ? "rgba(245, 158, 11, 0.3)"
+                                          : "#FDE68A",
+                                      }
+                                    : {
+                                        backgroundColor: isDark
+                                          ? "#DC2626"
+                                          : "#EF4444",
+                                        borderColor: isDark
+                                          ? "#EF4444"
+                                          : "#DC2626",
+                                      }
+                                  : {
+                                      backgroundColor: isDark
+                                        ? "rgba(239, 68, 68, 0.14)"
+                                        : "#FEF2F2",
+                                      borderColor: isDark
+                                        ? "rgba(239, 68, 68, 0.32)"
+                                        : "#FECACA",
+                                    },
+                            ]}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (
+                                canUserPayOverdueNow &&
+                                (!isPaymentsLocked || isHost) &&
+                                onOpenSettleDues
+                              ) {
+                                onOpenSettleDues();
+                              } else {
+                                onNavigate("bills");
+                              }
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.overdueActionBtnText,
+                                {
+                                  color: bill.mySharePaid
+                                    ? isDark
+                                      ? "#34D399"
+                                      : "#15803D"
+                                    : canUserPayOverdueNow
+                                      ? isPaymentsLocked && !isHost
+                                        ? isDark
+                                          ? "#FBBF24"
+                                          : "#B45309"
+                                        : "#FFFFFF"
+                                      : isDark
+                                        ? "#F87171"
+                                        : "#DC2626",
+                                },
+                              ]}
+                            >
+                              {bill.mySharePaid
+                                ? "Your Share Paid ✓"
+                                : canUserPayOverdueNow
+                                  ? isPaymentsLocked && !isHost
+                                    ? "Locked"
+                                    : "Pay Now"
+                                  : "Overdue"}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <View style={styles.upcomingBillAmountWrap}>
+                            <Text
+                              style={[
+                                styles.billTotalAmountText,
+                                { fontVariant: ["tabular-nums"] },
+                                isDark && { color: colors.text },
+                              ]}
+                            >
+                              {formatPesos(bill.amountCents)}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
 
             {/* Upcoming Bills Section */}
             <View style={[styles.sectionHeader, { marginTop: 24 }]}>
@@ -4921,5 +5394,37 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#2563EB",
+  },
+  overdueCountBadge: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  overdueCountBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#DC2626",
+    fontVariant: ["tabular-nums"],
+  },
+  overdueBillCard: {
+    borderColor: "#FECACA",
+    backgroundColor: "#FFFFFF",
+  },
+  overdueActionBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 28,
+  },
+  overdueActionBtnText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
 });

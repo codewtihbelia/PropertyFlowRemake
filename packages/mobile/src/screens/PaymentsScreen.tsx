@@ -38,6 +38,7 @@ import {
   DEFAULT_HOST_PAYMENT_METHODS,
   computeCycleWaterBreakdown,
   matchesMemberUid,
+  evaluateHouseholdCycleSettlements,
 } from "../services/firebaseDataService";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useNavVisibility } from "../context/NavVisibilityContext";
@@ -132,6 +133,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
   );
   const [cycles, setCycles] = useState<any[]>([]);
   const [memberBills, setMemberBills] = useState<any[]>([]);
+  const [allMemberBills, setAllMemberBills] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
@@ -286,10 +288,28 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
   const liveOutstandingCentavos = useMemo(() => {
     const payorCount = Math.max(1, activePayors.length);
-    const unpaidExpenses = currentCycleExpenses.filter(
-      (e) => e.status !== "PAID" && !e.isPaid,
+    const userPaidCentavos = payments
+      .filter(
+        (p) =>
+          p.userId === currentUser?.uid &&
+          p.status !== "REJECTED" &&
+          (!resolvedBillingCycleId ||
+            p.billingCycleId === resolvedBillingCycleId),
+      )
+      .reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
+
+    const myBill = memberBills.find((b) => b.userId === currentUser?.uid);
+    const effectivePaid = Math.max(
+      Number(myBill?.totalPaidCentavos || 0),
+      userPaidCentavos,
     );
-    const liveShare = unpaidExpenses.reduce((sum, e) => {
+
+    const expensesToSum =
+      effectivePaid > 0
+        ? currentCycleExpenses
+        : currentCycleExpenses.filter((e) => e.status !== "PAID" && !e.isPaid);
+
+    const liveShare = expensesToSum.reduce((sum, e) => {
       const isWater = (e.category || "").toLowerCase().includes("water");
       if (isWater) {
         const isPersonDayMode =
@@ -334,35 +354,47 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
         const mySplit = e.splitDetails.find((s: any) =>
           matchesMemberUid(s, currentUser.uid),
         );
-        if (mySplit?.isPaid) return sum;
+        if (effectivePaid === 0 && mySplit?.isPaid) return sum;
         return sum + (mySplit?.shareCentavos || 0);
       }
       return sum + Math.round(e.amountCents / payorCount);
     }, 0);
 
-    const userPaidCentavos = payments
-      .filter(
-        (p) =>
-          p.userId === currentUser?.uid &&
-          (!resolvedBillingCycleId ||
-            p.billingCycleId === resolvedBillingCycleId),
-      )
-      .reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
+    const cycleSettlement = evaluateHouseholdCycleSettlements({
+      cycles,
+      expenses,
+      payments,
+      allMemberBills: allMemberBills.length > 0 ? allMemberBills : memberBills,
+      members,
+    });
+    const mySummary = cycleSettlement.getMemberCycleSummary(
+      resolvedBillingCycleId,
+      currentUser?.uid,
+    );
 
-    const myBill = memberBills.find((b) => b.userId === currentUser?.uid);
-    const arrearsCentavos = (myBill?.lineItems || [])
-      .filter(
-        (li: any) =>
-          (li.category === "Arrears" || li.isArrears) &&
-          li.status !== "PAID" &&
-          !li.isExempt,
-      )
+    const rawArrearsCentavos = (myBill?.lineItems || [])
+      .filter((li: any) => {
+        if (!(li.category === "Arrears" || li.isArrears) || li.isExempt) {
+          return false;
+        }
+        if (li.status === "PAID" || li.isSettled) {
+          return effectivePaid > 0;
+        }
+        return mySummary.priorUnpaidArrearsCentavos > 0;
+      })
       .reduce((sum: number, li: any) => sum + (li.amountCentavos || 0), 0);
 
-    return Math.max(0, liveShare + arrearsCentavos - userPaidCentavos);
+    const arrearsCentavos =
+      effectivePaid > 0
+        ? rawArrearsCentavos
+        : Math.min(rawArrearsCentavos, mySummary.priorUnpaidArrearsCentavos);
+
+    return Math.max(0, liveShare + arrearsCentavos - effectivePaid);
   }, [
     currentCycleExpenses,
     activePayors,
+    cycles,
+    expenses,
     members,
     cycleAttendance,
     attendanceSubmissions,
@@ -371,6 +403,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     payments,
     resolvedBillingCycleId,
     memberBills,
+    allMemberBills,
   ]);
 
   useEffect(() => {
@@ -444,6 +477,11 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       },
     );
 
+    const unsubAllBills = mobileDataService.listenToMemberBills(
+      resolvedHouseholdId,
+      (data: any) => setAllMemberBills(data || []),
+    );
+
     return () => {
       unsubExpenses();
       unsubCycles();
@@ -451,6 +489,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       unsubWater();
       unsubPayments();
       unsubHousehold();
+      unsubAllBills();
     };
   }, [resolvedHouseholdId]);
 

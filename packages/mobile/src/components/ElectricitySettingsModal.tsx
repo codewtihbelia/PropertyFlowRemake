@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -30,7 +30,7 @@ export interface ElectricitySettingsModalProps {
   householdId: string;
   billingCycleId?: string;
   initialConfig?: ElectricityConfigData | null;
-  onSaved?: () => void;
+  onSaved?: (syncedCycleId?: string) => void;
 }
 
 export const ElectricitySettingsModal: React.FC<
@@ -49,28 +49,50 @@ export const ElectricitySettingsModal: React.FC<
   const [currentReadingInput, setCurrentReadingInput] = useState("0");
   const [ratePerKwhInput, setRatePerKwhInput] = useState("12.00");
   const [saving, setSaving] = useState(false);
+  const wasVisibleRef = useRef(false);
 
   useEffect(() => {
-    if (initialConfig) {
-      if (typeof initialConfig.previousReadingKwh === "number") {
-        setPreviousReadingInput(String(initialConfig.previousReadingKwh));
+    if (visible && !wasVisibleRef.current) {
+      wasVisibleRef.current = true;
+      if (initialConfig) {
+        const prevVal = Number(initialConfig.previousReadingKwh ?? 0);
+        const currVal = Number(initialConfig.currentReadingKwh ?? prevVal);
+        const rateCents = Number(initialConfig.rateCentavosPerKwh ?? 1200);
+        setPreviousReadingInput(
+          String(Number.isFinite(prevVal) && prevVal >= 0 ? prevVal : 0),
+        );
+        setCurrentReadingInput(
+          String(Number.isFinite(currVal) && currVal >= 0 ? currVal : 0),
+        );
+        setRatePerKwhInput(
+          (Number.isFinite(rateCents) && rateCents > 0
+            ? rateCents / 100
+            : 12
+          ).toFixed(2),
+        );
       }
-      if (typeof initialConfig.currentReadingKwh === "number") {
-        setCurrentReadingInput(String(initialConfig.currentReadingKwh));
-      }
-      if (
-        typeof initialConfig.rateCentavosPerKwh === "number" &&
-        initialConfig.rateCentavosPerKwh > 0
-      ) {
-        setRatePerKwhInput((initialConfig.rateCentavosPerKwh / 100).toFixed(2));
-      }
+    } else if (!visible) {
+      wasVisibleRef.current = false;
     }
-  }, [initialConfig, visible]);
+  }, [visible, initialConfig]);
+
+  const parseNumericField = (raw: string): number => {
+    const cleaned = String(raw || "")
+      .replace(/,/g, "")
+      .replace(/[^0-9.]/g, "")
+      .trim();
+    if (!cleaned) return 0;
+    const parsed = parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  };
 
   const calculation = useMemo(() => {
-    const prev = parseFloat(previousReadingInput.replace(/,/g, "")) || 0;
-    const curr = parseFloat(currentReadingInput.replace(/,/g, "")) || 0;
-    const ratePesos = parseFloat(ratePerKwhInput.replace(/,/g, "")) || 0;
+    const prevRaw = parseNumericField(previousReadingInput);
+    const currRaw = parseNumericField(currentReadingInput);
+    const rateRaw = parseNumericField(ratePerKwhInput);
+    const prev = Number.isFinite(prevRaw) ? prevRaw : 0;
+    const curr = Number.isFinite(currRaw) ? currRaw : 0;
+    const ratePesos = Number.isFinite(rateRaw) ? rateRaw : 0;
     const diffKwh = curr - prev;
     const consumedKwh = Math.max(0, Math.round(diffKwh * 100) / 100);
     const totalPesos = Math.max(0, consumedKwh * ratePesos);
@@ -83,7 +105,8 @@ export const ElectricitySettingsModal: React.FC<
       consumedKwh,
       totalPesos,
       totalCentavos,
-      isInvalidReading: curr > 0 && curr < prev,
+      isInvalidReading:
+        currentReadingInput.trim().length > 0 && curr >= 0 && curr < prev,
     };
   }, [previousReadingInput, currentReadingInput, ratePerKwhInput]);
 
@@ -93,9 +116,9 @@ export const ElectricitySettingsModal: React.FC<
       return;
     }
 
-    const prev = parseFloat(previousReadingInput.replace(/,/g, ""));
-    const curr = parseFloat(currentReadingInput.replace(/,/g, ""));
-    const ratePesos = parseFloat(ratePerKwhInput.replace(/,/g, ""));
+    const prev = parseNumericField(previousReadingInput);
+    const curr = parseNumericField(currentReadingInput);
+    const ratePesos = parseNumericField(ratePerKwhInput);
 
     if (isNaN(prev) || prev < 0) {
       Alert.alert(
@@ -135,7 +158,7 @@ export const ElectricitySettingsModal: React.FC<
 
     setSaving(true);
     try {
-      await mobileDataService.saveElectricityConfig(
+      const syncedCycleId = await mobileDataService.saveElectricityConfig(
         householdId,
         {
           previousReadingKwh: prev,
@@ -149,14 +172,14 @@ export const ElectricitySettingsModal: React.FC<
       );
 
       setSaving(false);
+      if (onSaved) onSaved(syncedCycleId || billingCycleId);
+      onClose();
       Alert.alert(
         "Electricity Settings Saved",
         consumedKwh > 0
           ? `Meter Bill Calculated: (${curr} - ${prev} = ${consumedKwh} kWh) × ₱${ratePesos.toFixed(2)}/kWh = ₱${(totalAmountCentavos / 100).toFixed(2)}. Synced to the current billing cycle.`
           : `Electricity rate (₱${ratePesos.toFixed(2)}/kWh) and base reading (${prev} kWh) saved.`,
       );
-      if (onSaved) onSaved();
-      onClose();
     } catch (err: any) {
       setSaving(false);
       Alert.alert(

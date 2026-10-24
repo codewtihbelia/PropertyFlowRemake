@@ -198,6 +198,9 @@ export interface WaterConfig {
   mode?: "BILLING_CYCLE" | "MONTHLY_CUSTOM";
   customStartDate?: string;
   customEndDate?: string;
+  billingCycleId?: string;
+  updatedAt?: string;
+  cycles?: Record<string, Omit<WaterConfig, "cycles">>;
 }
 
 export interface MemberBillItem {

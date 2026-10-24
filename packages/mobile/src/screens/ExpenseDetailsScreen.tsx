@@ -21,6 +21,7 @@ import {
   MobilePayment,
   isPayorMember,
   computeFairSplitShareCentavos,
+  matchesMemberUid,
 } from "../services/firebaseDataService";
 import { auth } from "../firebase/config";
 import { useTheme } from "../context/ThemeContext";
@@ -152,8 +153,8 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
     const list: ExpensePayorBreakdownItem[] = sourceMembers.map((m: any) => {
       const uid = m.userId || m.memberId || m.id;
       const isPayor = isPayorMember(m);
-      const splitEntry = rawSplits.find(
-        (s: any) => s.userId === uid || s.memberId === uid || s.id === uid,
+      const splitEntry = rawSplits.find((s: any) =>
+        matchesMemberUid(m, s.userId || s.memberId || s.id),
       );
       const isExempt = !isPayor || Boolean(splitEntry?.isExempt);
       const shareCentavos = isExempt
@@ -176,8 +177,20 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
           : Math.round((100 / effPayorCount) * 10) / 10;
 
       const matchedPayment = payments.find((pmt) => {
-        if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
+        if (!matchesMemberUid(m, pmt.userId) || pmt.status === "REJECTED") {
+          return false;
+        }
         if (splitEntry?.paymentId && pmt.paymentId === splitEntry.paymentId) {
+          return true;
+        }
+        if (
+          Array.isArray(pmt.breakdownItems) &&
+          pmt.breakdownItems.some(
+            (bi) =>
+              bi.id === expense.id ||
+              (expense.billingCycleId && bi.cycleId === expense.billingCycleId),
+          )
+        ) {
           return true;
         }
         if (!expense.billingCycleId) return true;
@@ -470,7 +483,7 @@ export const ExpenseDetailsScreen: React.FC<ExpenseDetailsScreenProps> = ({
                   { color: colors.textSecondary },
                 ]}
               >
-                Paid collectively by household payors ({expense.splitMethod})
+                Paid collectively by group payors ({expense.splitMethod})
               </Text>
             </View>
 

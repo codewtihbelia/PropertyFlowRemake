@@ -18,12 +18,16 @@ import { auth } from "../firebase/config";
 import {
   mobileDataService,
   MobileExpense,
+  MobilePayment,
   cleanBillTitle,
   isPayorMember,
   isCyclePaymentsLocked,
   computeCycleWaterBreakdown,
+  resolveCycleWaterConfig,
   computeFairSplitShareCentavos,
   matchesMemberUid,
+  normalizeCleanUid,
+  evaluateHouseholdCycleSettlements,
 } from "../services/firebaseDataService";
 import { formatPesos } from "@propertyflow/shared";
 import { getCategoryMeta } from "../services/categoryService";
@@ -102,6 +106,8 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   const [selectedCycleId, setSelectedCycleId] = useState<string>("");
   const [cloudMembers, setCloudMembers] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
+  const [allBills, setAllBills] = useState<any[]>([]);
+  const [payments, setPayments] = useState<MobilePayment[]>([]);
   const [waterConfig, setWaterConfig] = useState<any | null>(null);
   const [electricityConfig, setElectricityConfig] = useState<any | null>(null);
   const [userPhotosMap, setUserPhotosMap] = useState<Record<string, string>>(
@@ -231,6 +237,14 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       householdId,
       setElectricityConfig,
     );
+    const unsubPmts = mobileDataService.listenToPayments(
+      householdId,
+      setPayments,
+    );
+    const unsubAllBills = mobileDataService.listenToMemberBills(
+      householdId,
+      setAllBills,
+    );
 
     return () => {
       clearTimeout(safetyTimer);
@@ -240,6 +254,8 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       unsubMem();
       unsubWater();
       unsubElec();
+      unsubPmts();
+      unsubAllBills();
     };
   }, [householdId, isProfileLoaded]);
 
@@ -355,36 +371,69 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     : expenses;
 
   const cycleElectricityExpense = useMemo(() => {
-    return currentCycleExpenses.find(
-      (e) => (e.category || "").toLowerCase() === "electricity",
-    );
+    return currentCycleExpenses.find((e) => {
+      const cat = (e.category || "").toLowerCase();
+      const title = (e.title || "").toLowerCase();
+      return cat.includes("electric") || title.includes("electric");
+    });
   }, [currentCycleExpenses]);
 
   const cycleElectricityData = useMemo(() => {
     const cycleId = activeCycle?.billingCycleId;
+    const cycleSaved =
+      cycleId && electricityConfig?.cycles?.[cycleId]
+        ? electricityConfig.cycles[cycleId]
+        : null;
+
     if (cycleElectricityExpense) {
-      const cycleSaved =
-        cycleId && electricityConfig?.cycles?.[cycleId]
-          ? electricityConfig.cycles[cycleId]
-          : null;
+      const expUpdatedIso = String(
+        (cycleElectricityExpense as any).updatedAt ||
+          (cycleElectricityExpense as any).updatedDate ||
+          cycleElectricityExpense.createdAt ||
+          "",
+      );
+      const savedUpdatedIso = String(cycleSaved?.updatedAt || "");
+      const preferSavedReadings =
+        Boolean(cycleSaved) &&
+        (savedUpdatedIso > expUpdatedIso ||
+          (cycleElectricityExpense.previousReadingKwh === undefined &&
+            cycleElectricityExpense.currentReadingKwh === undefined));
+
       const rateCentavosPerKwh = Number(
-        cycleElectricityExpense.rateCentavosPerKwh ??
+        (preferSavedReadings
+          ? cycleSaved?.rateCentavosPerKwh
+          : cycleElectricityExpense.rateCentavosPerKwh) ??
           cycleSaved?.rateCentavosPerKwh ??
+          cycleElectricityExpense.rateCentavosPerKwh ??
           electricityConfig?.rateCentavosPerKwh ??
           1200,
       );
       const previousReadingKwh = Number(
-        cycleElectricityExpense.previousReadingKwh ??
+        (preferSavedReadings
+          ? cycleSaved?.previousReadingKwh
+          : cycleElectricityExpense.previousReadingKwh) ??
           cycleSaved?.previousReadingKwh ??
+          cycleElectricityExpense.previousReadingKwh ??
           0,
       );
       const currentReadingKwh = Number(
-        cycleElectricityExpense.currentReadingKwh ??
+        (preferSavedReadings
+          ? cycleSaved?.currentReadingKwh
+          : cycleElectricityExpense.currentReadingKwh) ??
           cycleSaved?.currentReadingKwh ??
-          0,
+          cycleElectricityExpense.currentReadingKwh ??
+          previousReadingKwh,
       );
-      const consumedKwh =
-        cycleElectricityExpense.consumedKwh !== undefined
+      const consumedKwh = preferSavedReadings
+        ? Math.max(
+            0,
+            Number(
+              cycleSaved?.consumedKwh ??
+                Math.round((currentReadingKwh - previousReadingKwh) * 100) /
+                  100,
+            ),
+          )
+        : cycleElectricityExpense.consumedKwh !== undefined
           ? Number(cycleElectricityExpense.consumedKwh)
           : Math.max(
               0,
@@ -392,6 +441,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
             );
       const totalAmountCentavos = Number(
         cycleElectricityExpense.amountCents ??
+          cycleSaved?.totalAmountCentavos ??
           Math.round(consumedKwh * rateCentavosPerKwh),
       );
       return {
@@ -407,11 +457,10 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       };
     }
 
-    if (cycleId && electricityConfig?.cycles?.[cycleId]) {
-      const cycleSaved = electricityConfig.cycles[cycleId];
+    if (cycleSaved) {
       const rateCentavosPerKwh = Number(
         cycleSaved.rateCentavosPerKwh ??
-          electricityConfig.rateCentavosPerKwh ??
+          electricityConfig?.rateCentavosPerKwh ??
           1200,
       );
       const previousReadingKwh = Number(cycleSaved.previousReadingKwh ?? 0);
@@ -426,16 +475,14 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         cycleSaved.totalAmountCentavos ??
           Math.round(consumedKwh * rateCentavosPerKwh),
       );
-      if (consumedKwh > 0 || totalAmountCentavos > 0) {
-        return {
-          rateCentavosPerKwh,
-          previousReadingKwh,
-          currentReadingKwh,
-          consumedKwh,
-          totalAmountCentavos,
-          hasReadings: true,
-        };
-      }
+      return {
+        rateCentavosPerKwh,
+        previousReadingKwh,
+        currentReadingKwh,
+        consumedKwh,
+        totalAmountCentavos,
+        hasReadings: true,
+      };
     }
 
     return null;
@@ -444,8 +491,15 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   const uniqueBills = useMemo(() => {
     const map = new Map<string, any>();
     bills.forEach((b) => {
-      const uid = b.userId || b.billId;
-      if (!map.has(uid) || b.billId?.startsWith("bill_")) {
+      const uid = normalizeCleanUid(b.userId || b.memberId || b.billId);
+      if (!uid) return;
+      const existing = map.get(uid);
+      if (
+        !existing ||
+        b.billId?.startsWith("bill_") ||
+        Number(b.totalPaidCentavos || 0) >
+          Number(existing.totalPaidCentavos || 0)
+      ) {
         map.set(uid, b);
       }
     });
@@ -478,8 +532,31 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     );
   }, [currentCycleExpenses]);
 
+  const hasCycleAttendanceActivity = useMemo(() => {
+    return (
+      cycleAttendance.some((a) => a?.status === "PRESENT") ||
+      Object.keys(attendanceSubmissions || {}).length > 0
+    );
+  }, [cycleAttendance, attendanceSubmissions]);
+
+  const cycleWaterData = useMemo(() => {
+    return resolveCycleWaterConfig(waterConfig, activeCycle?.billingCycleId, {
+      cycleWaterExpense,
+      payorCount,
+      hasCycleAttendance: hasCycleAttendanceActivity,
+      totalCyclesCount: cycles.length,
+    });
+  }, [
+    waterConfig,
+    activeCycle?.billingCycleId,
+    cycleWaterExpense,
+    payorCount,
+    hasCycleAttendanceActivity,
+    cycles.length,
+  ]);
+
   const cycleWaterBreakdown = useMemo(() => {
-    const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+    const rate = Number(cycleWaterData?.rateCentavosPerPersonPerDay ?? 500);
     return computeCycleWaterBreakdown(
       activeMembersList,
       cycleAttendance,
@@ -491,7 +568,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     activeMembersList,
     cycleAttendance,
     attendanceSubmissions,
-    waterConfig?.rateCentavosPerPersonPerDay,
+    cycleWaterData?.rateCentavosPerPersonPerDay,
     cycleWaterExpense?.splitDetails,
   ]);
 
@@ -503,10 +580,8 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       if (e.status === "PAID" || e.isPaid) return false;
       const isWater = (e.category || "").toLowerCase().includes("water");
       if (isWater) {
-        if (
-          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-          !waterConfig?.pricingModel
-        ) {
+        if (!cycleWaterData) return false;
+        if (cycleWaterData.pricingModel === "PER_PERSON_DAY") {
           if (!e.splitDetails || !Array.isArray(e.splitDetails)) return true;
           const hasDivergentPayor = activePayorsList.some((p) => {
             const pUid = p.userId || p.memberId || p.id;
@@ -530,14 +605,18 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     });
     if (hasStaleSplit) {
       mobileDataService
-        .recalculateUnpaidExpensesForHousehold(householdId)
+        .recalculateUnpaidExpensesForHousehold(
+          householdId,
+          activeCycle?.billingCycleId,
+        )
         .catch(() => {});
     }
   }, [
     householdId,
     payorCount,
     currentCycleExpenses,
-    waterConfig?.pricingModel,
+    cycleWaterData,
+    activeCycle?.billingCycleId,
     activePayorsList,
     cycleWaterBreakdown,
   ]);
@@ -545,14 +624,80 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   const myPhoto =
     profile?.profilePicture || profile?.photoURL || firebaseUser?.photoURL;
 
+  const cycleSettlement = useMemo(() => {
+    const selectedCid = activeCycle?.billingCycleId;
+    return evaluateHouseholdCycleSettlements({
+      cycles,
+      expenses,
+      payments,
+      allMemberBills: allBills.length > 0 ? allBills : uniqueBills,
+      members: activeMembersList,
+      getCustomExpenseShare: (exp, cid, payor) => {
+        if (!selectedCid || cid !== selectedCid) return undefined;
+        const isWater = (exp.category || "").toLowerCase().includes("water");
+        if (!isWater || !cycleWaterData) return undefined;
+        const pUid = payor.userId || payor.memberId || payor.id;
+        if (cycleWaterData.pricingModel === "PER_PERSON_DAY") {
+          const wm = cycleWaterBreakdown.membersBreakdown.find((mb) =>
+            matchesMemberUid(payor, mb.userId),
+          );
+          if (wm) return wm.shareCentavos;
+          const rate = Number(
+            cycleWaterData.rateCentavosPerPersonPerDay ?? 500,
+          );
+          return getMemberAttendanceDays(pUid) * rate;
+        }
+        if (cycleWaterData.pricingModel === "FIXED_PER_PERSON_MONTH") {
+          return Number(cycleWaterData.fixedPerPersonAmountCentavos || 0);
+        }
+        const fixedTotal = Number(
+          cycleWaterData.fixedMonthlyAmountCentavos || exp.amountCents || 0,
+        );
+        return computeFairSplitShareCentavos(
+          fixedTotal,
+          activePayorsList,
+          pUid,
+        );
+      },
+    });
+  }, [
+    cycles,
+    expenses,
+    payments,
+    allBills,
+    uniqueBills,
+    activeMembersList,
+    activePayorsList,
+    activeCycle?.billingCycleId,
+    cycleWaterData,
+    cycleWaterBreakdown,
+    cycleAttendance,
+    attendanceSubmissions,
+  ]);
+
+  const isViewingNewestActiveCycle = Boolean(
+    !activeCycle ||
+    activeCycle.status === "ACTIVE" ||
+    activeCycle.billingCycleId === cycles[0]?.billingCycleId,
+  );
+
+  const anyPayorHadArrearsInSelectedCycle = useMemo(() => {
+    const cid = activeCycle?.billingCycleId;
+    if (!cid) return false;
+    return activePayorsList.some((p) => {
+      const s = cycleSettlement.getMemberCycleSummary(cid, p);
+      return (
+        s.priorUnpaidArrearsCentavos > 0 || s.settledArrearsInCycleCentavos > 0
+      );
+    });
+  }, [activeCycle?.billingCycleId, activePayorsList, cycleSettlement]);
+
   const participants: ParticipantInfo[] = useMemo(() => {
     if (activeMembersList.length === 0) return [];
     return activeMembersList.map((m) => {
       const uid = m.userId || m.memberId;
-      const userBill = uniqueBills.find((b) => matchesMemberUid(m, b.userId));
       const isPayor = isPayorMember(m);
       let owes = 0;
-      let totalCycleShare = 0;
       let memberWaterShare = 0;
       let memberWaterOwn = 0;
       let memberWaterNonPayor = 0;
@@ -563,26 +708,33 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
       const memberWaterDays =
         waterMember?.daysPresent ?? getMemberAttendanceDays(uid);
 
-      if (isPayor) {
-        const isPersonDayMode =
-          waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-          !waterConfig?.pricingModel;
+      const summary = cycleSettlement.getMemberCycleSummary(
+        activeCycle?.billingCycleId,
+        m,
+      );
 
-        if (isPersonDayMode) {
-          const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
+      if (isPayor) {
+        if (!cycleWaterData) {
+          memberWaterShare = 0;
+          memberWaterOwn = 0;
+          memberWaterNonPayor = 0;
+        } else if (cycleWaterData.pricingModel === "PER_PERSON_DAY") {
+          const rate = Number(
+            cycleWaterData.rateCentavosPerPersonPerDay ?? 500,
+          );
           memberWaterOwn =
             waterMember?.ownWaterCentavos ?? memberWaterDays * rate;
           memberWaterNonPayor = waterMember?.nonPayorWaterCentavos ?? 0;
           memberWaterShare =
             waterMember?.shareCentavos ?? memberWaterOwn + memberWaterNonPayor;
-        } else if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
-          const flat = Number(waterConfig?.fixedPerPersonAmountCentavos || 0);
+        } else if (cycleWaterData.pricingModel === "FIXED_PER_PERSON_MONTH") {
+          const flat = Number(cycleWaterData.fixedPerPersonAmountCentavos || 0);
           memberWaterShare = flat;
           memberWaterOwn = flat;
           memberWaterNonPayor = 0;
         } else {
           const fixedTotal = Number(
-            waterConfig?.fixedMonthlyAmountCentavos ||
+            cycleWaterData.fixedMonthlyAmountCentavos ||
               cycleWaterExpense?.amountCents ||
               0,
           );
@@ -596,92 +748,9 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
           memberWaterNonPayor = 0;
         }
 
-        totalCycleShare = currentCycleExpenses.reduce((sum, e) => {
-          const isWater = (e.category || "").toLowerCase().includes("water");
-          if (isWater) {
-            return sum + memberWaterShare;
-          }
-          const splitPayors = e.splitDetails
-            ? e.splitDetails.filter(
-                (s: any) => !s.isExempt && s.shareCentavos > 0,
-              )
-            : [];
-          const splitPayorsSum = splitPayors.reduce(
-            (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
-            0,
-          );
-          const isSplitStale =
-            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
-            (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
-          if (
-            !isSplitStale &&
-            e.splitDetails &&
-            Array.isArray(e.splitDetails) &&
-            e.splitDetails.length > 0
-          ) {
-            const mySplit = e.splitDetails.find((s: any) =>
-              matchesMemberUid(m, s.userId),
-            );
-            if (mySplit && typeof mySplit.shareCentavos === "number") {
-              return sum + mySplit.shareCentavos;
-            }
-          }
-          return (
-            sum +
-            computeFairSplitShareCentavos(
-              e.amountCents || 0,
-              activePayorsList,
-              uid,
-            )
-          );
-        }, 0);
-
-        const liveShare = unpaidCycleExpenses.reduce((sum, e) => {
-          const isWater = (e.category || "").toLowerCase().includes("water");
-          if (isWater) {
-            return sum + memberWaterShare;
-          }
-
-          const splitPayors = e.splitDetails
-            ? e.splitDetails.filter(
-                (s: any) => !s.isExempt && s.shareCentavos > 0,
-              )
-            : [];
-          const splitPayorsSum = splitPayors.reduce(
-            (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
-            0,
-          );
-          const isSplitStale =
-            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
-            (splitPayors.length > 0 && splitPayorsSum !== e.amountCents);
-          if (
-            !isSplitStale &&
-            e.splitDetails &&
-            Array.isArray(e.splitDetails) &&
-            e.splitDetails.length > 0
-          ) {
-            const mySplit = e.splitDetails.find((s: any) =>
-              matchesMemberUid(m, s.userId),
-            );
-            if (mySplit && typeof mySplit.shareCentavos === "number") {
-              return sum + mySplit.shareCentavos;
-            }
-          }
-          return (
-            sum +
-            computeFairSplitShareCentavos(
-              e.amountCents || 0,
-              activePayorsList,
-              uid,
-            )
-          );
-        }, 0);
-
-        const paidCentavos =
-          userBill && typeof userBill.totalPaidCentavos === "number"
-            ? userBill.totalPaidCentavos
-            : 0;
-        owes = Math.max(0, liveShare - paidCentavos);
+        owes = isViewingNewestActiveCycle
+          ? summary.totalOwesAsOfCycleCentavos
+          : summary.remainingCycleCentavos;
       } else {
         // Non-payor member
         memberWaterShare = 0;
@@ -689,18 +758,18 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
         memberWaterNonPayor = 0;
       }
 
-      const paidForCycle =
-        userBill && typeof userBill.totalPaidCentavos === "number"
-          ? userBill.totalPaidCentavos
-          : 0;
-      const isPayorCycleSettled =
-        !isPayor ||
-        (totalCycleShare > 0 &&
-          owes === 0 &&
-          (paidForCycle > 0 ||
-            currentCycleExpenses.every(
-              (e) => e.status === "PAID" || e.isPaid,
-            )));
+      const isPayorCycleSettled = !isPayor
+        ? true
+        : isViewingNewestActiveCycle
+          ? owes === 0 &&
+            (currentCycleExpenses.length > 0 ||
+              summary.isFullySettledAsOfCycle ||
+              (anyPayorHadArrearsInSelectedCycle &&
+                summary.totalPriorGrossCentavos > 0))
+          : summary.grossShareCentavos > 0
+            ? summary.isCycleSettled
+            : summary.settledArrearsInCycleCentavos > 0 ||
+              summary.allocatedPaidInCycleCentavos > 0;
 
       const isCurrentUser =
         firebaseUser?.uid &&
@@ -730,13 +799,14 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
   }, [
     activeMembersList,
     activePayorsList,
-    uniqueBills,
-    currentCycleExpenses,
-    unpaidCycleExpenses,
+    currentCycleExpenses.length,
     cycleWaterExpense,
     cycleWaterBreakdown,
     waterConfig,
-    payorCount,
+    cycleSettlement,
+    activeCycle?.billingCycleId,
+    isViewingNewestActiveCycle,
+    anyPayorHadArrearsInSelectedCycle,
     userPhotosMap,
     myPhoto,
     firebaseUser?.uid,
@@ -754,6 +824,13 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
     payingParticipants.every(
       (p) => p.status === "Settled" && p.owesCents === 0,
     );
+
+  useEffect(() => {
+    if (!householdId || cycles.length === 0) return;
+    mobileDataService
+      .reconcileStaleArrearsAndSettledCycles(householdId)
+      .catch(() => {});
+  }, [householdId, cycles.length, payments.length]);
 
   useEffect(() => {
     if (allPayorsSettled && householdId) {
@@ -1367,95 +1444,97 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
           </View>
         )}
 
-        {/* Water Billing Info Card (Read-Only - No Configure Button) */}
-        <View
-          style={[
-            styles.waterConfigCard,
-            isDark && {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <View style={styles.waterConfigHeader}>
-            <View
-              style={[
-                styles.waterConfigIconWrap,
-                isDark && { backgroundColor: "rgba(59, 130, 246, 0.15)" },
-              ]}
-            >
-              <Feather
-                name="droplet"
-                size={18}
-                color={isDark ? colors.accent : "#0284C7"}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.waterConfigTitle,
-                  isDark && { color: colors.text },
-                ]}
-              >
-                Water Billing Rule
-              </Text>
-              <Text
-                style={[
-                  styles.waterConfigSub,
-                  isDark && { color: colors.accent },
-                ]}
-              >
-                {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
-                  ? `Flat Rate · ₱${((waterConfig?.fixedPerPersonAmountCentavos || 0) / 100).toFixed(2)} / resident / mo`
-                  : waterConfig?.pricingModel === "FIXED_MONTHLY"
-                    ? `Fixed Household · ₱${((waterConfig?.fixedMonthlyAmountCentavos || 0) / 100).toFixed(2)} / month`
-                    : `Daily Attendance · ₱${((waterConfig?.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)} / person / day`}
-              </Text>
-            </View>
-          </View>
+        {/* Water Billing Info Card (Read-Only - Hidden Until Host Configures Cycle Rule) */}
+        {cycleWaterData ? (
           <View
             style={[
-              styles.waterConfigDetailsRow,
-              isDark && { borderTopColor: colors.border },
+              styles.waterConfigCard,
+              isDark && {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
           >
-            <Text
-              style={[
-                styles.waterModeSummary,
-                isDark && { color: colors.textSecondary },
-              ]}
-              numberOfLines={2}
-            >
-              {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
-                ? "Each paying roommate is billed a fixed monthly water rate."
-                : waterConfig?.pricingModel === "FIXED_MONTHLY"
-                  ? "Water bill is split equally among paying roommates."
-                  : "Calculated from daily attendance logged in the calendar."}
-            </Text>
+            <View style={styles.waterConfigHeader}>
+              <View
+                style={[
+                  styles.waterConfigIconWrap,
+                  isDark && { backgroundColor: "rgba(59, 130, 246, 0.15)" },
+                ]}
+              >
+                <Feather
+                  name="droplet"
+                  size={18}
+                  color={isDark ? colors.accent : "#0284C7"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.waterConfigTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
+                  Water Billing Rule
+                </Text>
+                <Text
+                  style={[
+                    styles.waterConfigSub,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  {cycleWaterData.pricingModel === "FIXED_PER_PERSON_MONTH"
+                    ? `Flat Rate · ₱${((cycleWaterData.fixedPerPersonAmountCentavos || 0) / 100).toFixed(2)} / resident / mo`
+                    : cycleWaterData.pricingModel === "FIXED_MONTHLY"
+                      ? `Fixed Household · ₱${((cycleWaterData.fixedMonthlyAmountCentavos || 0) / 100).toFixed(2)} / month`
+                      : `Daily Attendance · ₱${((cycleWaterData.rateCentavosPerPersonPerDay ?? 500) / 100).toFixed(2)} / person / day`}
+                </Text>
+              </View>
+            </View>
             <View
               style={[
-                styles.waterModeTag,
-                isDark && {
-                  backgroundColor: "rgba(59, 130, 246, 0.12)",
-                  borderColor: "rgba(59, 130, 246, 0.25)",
-                },
+                styles.waterConfigDetailsRow,
+                isDark && { borderTopColor: colors.border },
               ]}
             >
               <Text
                 style={[
-                  styles.waterModeTagText,
-                  isDark && { color: colors.accent },
+                  styles.waterModeSummary,
+                  isDark && { color: colors.textSecondary },
+                ]}
+                numberOfLines={2}
+              >
+                {cycleWaterData.pricingModel === "FIXED_PER_PERSON_MONTH"
+                  ? "Each paying roommate is billed a fixed monthly water rate."
+                  : cycleWaterData.pricingModel === "FIXED_MONTHLY"
+                    ? "Water bill is split equally among paying roommates."
+                    : "Calculated from daily attendance logged in the calendar."}
+              </Text>
+              <View
+                style={[
+                  styles.waterModeTag,
+                  isDark && {
+                    backgroundColor: "rgba(59, 130, 246, 0.12)",
+                    borderColor: "rgba(59, 130, 246, 0.25)",
+                  },
                 ]}
               >
-                {waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
-                  ? "Flat Fee Mode"
-                  : waterConfig?.pricingModel === "FIXED_MONTHLY"
-                    ? "Equal Split Mode"
-                    : "Attendance Based"}
-              </Text>
+                <Text
+                  style={[
+                    styles.waterModeTagText,
+                    isDark && { color: colors.accent },
+                  ]}
+                >
+                  {cycleWaterData.pricingModel === "FIXED_PER_PERSON_MONTH"
+                    ? "Flat Fee Mode"
+                    : cycleWaterData.pricingModel === "FIXED_MONTHLY"
+                      ? "Equal Split Mode"
+                      : "Attendance Based"}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Electricity Billing Info Card (Strictly Scoped to Selected Cycle) */}
         {cycleElectricityData ? (
@@ -1915,6 +1994,7 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                       </Text>
                     </View>
                     {p.role !== "NON_PAYOR" &&
+                      cycleWaterData &&
                       p.waterShareCents !== undefined &&
                       p.waterShareCents > 0 && (
                         <View style={styles.participantWaterBreakdownWrap}>
@@ -1929,43 +2009,49 @@ export const ViewGroupScreen: React.FC<ViewGroupScreenProps> = ({
                               isDark && { color: colors.accent },
                             ]}
                           >
-                            {formatPesos(p.waterShareCents)} (
-                            {p.waterDaysPresent || 0}d own
-                            {p.waterNonPayorCents && p.waterNonPayorCents > 0
-                              ? ` + ${formatPesos(p.waterNonPayorCents)} NP`
-                              : ""}
-                            )
+                            {cycleWaterData.pricingModel ===
+                            "FIXED_PER_PERSON_MONTH"
+                              ? `${formatPesos(p.waterShareCents)} (Flat rate)`
+                              : cycleWaterData.pricingModel === "FIXED_MONTHLY"
+                                ? `${formatPesos(p.waterShareCents)} (Equal split)`
+                                : `${formatPesos(p.waterShareCents)} (${p.waterDaysPresent || 0}d own${
+                                    p.waterNonPayorCents &&
+                                    p.waterNonPayorCents > 0
+                                      ? ` + ${formatPesos(p.waterNonPayorCents)} NP`
+                                      : ""
+                                  })`}
                           </Text>
                         </View>
                       )}
-                    {p.role === "NON_PAYOR" && (
-                      <View
-                        style={[
-                          styles.participantWaterBreakdownWrap,
-                          isDark && {
-                            backgroundColor: "rgba(100, 116, 139, 0.15)",
-                            borderColor: "rgba(100, 116, 139, 0.3)",
-                          },
-                        ]}
-                      >
-                        <Feather
-                          name="droplet"
-                          size={11}
-                          color={isDark ? colors.textMuted : "#64748B"}
-                        />
-                        <Text
+                    {p.role === "NON_PAYOR" &&
+                      cycleWaterData?.pricingModel === "PER_PERSON_DAY" && (
+                        <View
                           style={[
-                            styles.participantWaterBreakdownText,
-                            { color: isDark ? colors.textMuted : "#64748B" },
+                            styles.participantWaterBreakdownWrap,
+                            isDark && {
+                              backgroundColor: "rgba(100, 116, 139, 0.15)",
+                              borderColor: "rgba(100, 116, 139, 0.3)",
+                            },
                           ]}
                         >
-                          {p.waterDaysPresent || 0}d
-                          {p.waterAllocationSummary
-                            ? ` · ${p.waterAllocationSummary}`
-                            : ""}
-                        </Text>
-                      </View>
-                    )}
+                          <Feather
+                            name="droplet"
+                            size={11}
+                            color={isDark ? colors.textMuted : "#64748B"}
+                          />
+                          <Text
+                            style={[
+                              styles.participantWaterBreakdownText,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            {p.waterDaysPresent || 0}d
+                            {p.waterAllocationSummary
+                              ? ` · ${p.waterAllocationSummary}`
+                              : ""}
+                          </Text>
+                        </View>
+                      )}
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
                     <Text

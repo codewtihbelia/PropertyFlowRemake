@@ -2749,7 +2749,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             )}
 
             {/* Quick Split Request */}
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={[
                 styles.chatHeaderActionBtn,
                 {
@@ -2777,7 +2777,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 size={20}
                 color={isDark ? "#60A5FA" : "#2563EB"}
               />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </View>
 

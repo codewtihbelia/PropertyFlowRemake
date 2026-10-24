@@ -745,6 +745,194 @@ export interface ComputedWaterMemberBreakdown {
   note: string;
 }
 
+export interface CycleWaterConfig {
+  pricingModel: "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH";
+  rateCentavosPerPersonPerDay: number;
+  fixedMonthlyAmountCentavos: number;
+  fixedPerPersonAmountCentavos: number;
+  billingCycleId?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Resolves the water billing configuration strictly for a specific billing cycle.
+ * Returns `null` if the host has not configured water for this cycle yet, while
+ * preserving backward compatibility for historical cycles that already have water bills
+ * or attendance records.
+ */
+export function resolveCycleWaterConfig(
+  waterConfig: any | null | undefined,
+  cycleId?: string | null,
+  options?: {
+    cycleWaterExpense?: any | null;
+    payorCount?: number;
+    hasCycleAttendance?: boolean;
+    totalCyclesCount?: number;
+  },
+): CycleWaterConfig | null {
+  const normalizeEntry = (raw: any, resolvedCid?: string): CycleWaterConfig => {
+    const pricingModel: CycleWaterConfig["pricingModel"] =
+      raw?.pricingModel === "FIXED_PER_PERSON_MONTH" ||
+      raw?.pricingModel === "FIXED_MONTHLY" ||
+      raw?.pricingModel === "PER_PERSON_DAY"
+        ? raw.pricingModel
+        : Number(raw?.fixedPerPersonAmountCentavos || 0) > 0
+          ? "FIXED_PER_PERSON_MONTH"
+          : Number(raw?.fixedMonthlyAmountCentavos || 0) > 0
+            ? "FIXED_MONTHLY"
+            : "PER_PERSON_DAY";
+    return {
+      pricingModel,
+      rateCentavosPerPersonPerDay:
+        Number(raw?.rateCentavosPerPersonPerDay ?? 500) > 0
+          ? Number(raw?.rateCentavosPerPersonPerDay ?? 500)
+          : 500,
+      fixedMonthlyAmountCentavos: Math.max(
+        0,
+        Number(raw?.fixedMonthlyAmountCentavos ?? 0),
+      ),
+      fixedPerPersonAmountCentavos: Math.max(
+        0,
+        Number(raw?.fixedPerPersonAmountCentavos ?? 0),
+      ),
+      billingCycleId: resolvedCid || raw?.billingCycleId,
+      updatedAt: raw?.updatedAt,
+    };
+  };
+
+  // 1. Explicit per-cycle snapshot saved under systemSettings/water.cycles[cycleId]
+  const cycleSaved =
+    cycleId && waterConfig?.cycles && typeof waterConfig.cycles === "object"
+      ? waterConfig.cycles[cycleId]
+      : null;
+  if (cycleSaved) {
+    return normalizeEntry(cycleSaved, cycleId || undefined);
+  }
+
+  // 2. Top-level billingCycleId explicitly stamped for this cycle
+  if (
+    cycleId &&
+    waterConfig?.billingCycleId &&
+    waterConfig.billingCycleId === cycleId
+  ) {
+    return normalizeEntry(waterConfig, cycleId);
+  }
+
+  // 3. Historical or existing water expense already posted on this cycle
+  const exp = options?.cycleWaterExpense;
+  if (exp) {
+    const splitMethod = String(exp.splitMethod || "").toLowerCase();
+    const titleLower = String(exp.title || "").toLowerCase();
+    const safePayors = Math.max(1, Number(options?.payorCount || 1));
+    const sampleNonExemptSplit = Array.isArray(exp.splitDetails)
+      ? exp.splitDetails.find((s: any) => !s?.isExempt)
+      : null;
+
+    if (
+      splitMethod.includes("flat per person") ||
+      titleLower.includes("flat per person")
+    ) {
+      const perPerson = Number(
+        sampleNonExemptSplit?.shareCentavos ??
+          waterConfig?.fixedPerPersonAmountCentavos ??
+          Math.round((Number(exp.amountCents) || 0) / safePayors),
+      );
+      return {
+        pricingModel: "FIXED_PER_PERSON_MONTH",
+        rateCentavosPerPersonPerDay: Number(
+          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+        ),
+        fixedMonthlyAmountCentavos: 0,
+        fixedPerPersonAmountCentavos: Math.max(0, perPerson),
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    if (
+      splitMethod.includes("equal split") ||
+      titleLower.includes("fixed household")
+    ) {
+      return {
+        pricingModel: "FIXED_MONTHLY",
+        rateCentavosPerPersonPerDay: Number(
+          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+        ),
+        fixedMonthlyAmountCentavos: Math.max(
+          0,
+          Number(
+            exp.amountCents ?? waterConfig?.fixedMonthlyAmountCentavos ?? 0,
+          ),
+        ),
+        fixedPerPersonAmountCentavos: 0,
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    if (
+      splitMethod.includes("daily attendance") ||
+      titleLower.includes("attendance")
+    ) {
+      const splitRate = Number(
+        sampleNonExemptSplit?.rateCentavosPerDay ??
+          waterConfig?.rateCentavosPerPersonPerDay ??
+          500,
+      );
+      return {
+        pricingModel: "PER_PERSON_DAY",
+        rateCentavosPerPersonPerDay: splitRate > 0 ? splitRate : 500,
+        fixedMonthlyAmountCentavos: 0,
+        fixedPerPersonAmountCentavos: 0,
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    // Custom/manual water bill fallback
+    if (waterConfig?.updatedAt) {
+      return normalizeEntry(waterConfig, cycleId || exp.billingCycleId);
+    }
+    return {
+      pricingModel: "FIXED_MONTHLY",
+      rateCentavosPerPersonPerDay: 500,
+      fixedMonthlyAmountCentavos: Math.max(0, Number(exp.amountCents || 0)),
+      fixedPerPersonAmountCentavos: 0,
+      billingCycleId: cycleId || exp.billingCycleId,
+    };
+  }
+
+  // 4. Legacy cycle that already has roommate attendance submissions/present days
+  if (options?.hasCycleAttendance) {
+    return {
+      pricingModel: "PER_PERSON_DAY",
+      rateCentavosPerPersonPerDay:
+        Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500) > 0
+          ? Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500)
+          : 500,
+      fixedMonthlyAmountCentavos: 0,
+      fixedPerPersonAmountCentavos: 0,
+      billingCycleId: cycleId || undefined,
+    };
+  }
+
+  // 5. Legacy single-cycle household configured prior to per-cycle water snapshots
+  const hasCyclesMap = Boolean(
+    waterConfig?.cycles && typeof waterConfig.cycles === "object",
+  );
+  const hasExplicitCycleField =
+    waterConfig !== null &&
+    waterConfig !== undefined &&
+    typeof waterConfig.billingCycleId === "string";
+  if (
+    !hasCyclesMap &&
+    !hasExplicitCycleField &&
+    Boolean(waterConfig?.updatedAt) &&
+    (options?.totalCyclesCount ?? 0) <= 1
+  ) {
+    return normalizeEntry(waterConfig, cycleId || undefined);
+  }
+
+  return null;
+}
+
 /**
  * Shared deterministic calculator for PER_PERSON_DAY water attendance shares.
  * Honors each Non-Payor's saved allocationMode (FAIR_SPLIT, SPECIFIC_PAYOR, CUSTOM_SPLIT)
@@ -1266,10 +1454,22 @@ export const DEFAULT_HOST_PAYMENT_METHODS: HostPaymentMethod[] = [
   },
 ];
 
+export interface MobilePaymentBreakdownItem {
+  id: string;
+  title: string;
+  category: string;
+  cycleId?: string;
+  cycleName?: string;
+  isOverdue?: boolean;
+  householdAmountCentavos?: number;
+  shareCentavos: number;
+}
+
 export interface MobilePayment {
   paymentId: string;
   householdId: string;
   billingCycleId: string;
+  billingCycleName?: string;
   userId: string;
   userName: string;
   amountCentavos: number;
@@ -1283,6 +1483,7 @@ export interface MobilePayment {
   verifiedDate?: string;
   verifiedBy?: string | null;
   rejectionReason?: string | null;
+  breakdownItems?: MobilePaymentBreakdownItem[];
 }
 
 export interface MobileAttendance {
@@ -1329,6 +1530,698 @@ export function sortBillingCyclesNewest(cycles: any[]): any[] {
   });
 }
 
+export function normalizeCleanUid(raw?: string | null): string {
+  return String(raw || "")
+    .replace(/^mem_/, "")
+    .trim();
+}
+
+export interface MemberCycleSettlementSummary {
+  cycleId: string;
+  userId: string;
+  grossShareCentavos: number;
+  unpaidSplitShareCentavos: number;
+  allocatedPaidCentavos: number;
+  allocatedPaidInCycleCentavos: number;
+  settledArrearsInCycleCentavos: number;
+  remainingCycleCentavos: number;
+  priorUnpaidArrearsCentavos: number;
+  totalPriorGrossCentavos: number;
+  totalOwesAsOfCycleCentavos: number;
+  isCycleSettled: boolean;
+  isFullySettledAsOfCycle: boolean;
+  settledViaRollover: boolean;
+  settledViaCycleId?: string;
+  matchedPayment?: MobilePayment;
+}
+
+export interface HouseholdCycleSettlementResult {
+  orderedCycleIdsOldestFirst: string[];
+  settledPayorUidsByCycle: Map<string, Set<string>>;
+  allPayorsSettledByCycle: Map<string, boolean>;
+  getMemberCycleSummary: (
+    cycleId: string | undefined | null,
+    memberOrUid: any,
+  ) => MemberCycleSettlementSummary;
+  getPriorUnpaidArrearsBeforeCycle: (
+    cycleId: string | undefined | null,
+    memberOrUid: any,
+  ) => number;
+  getMatchedPaymentForExpense: (
+    exp: MobileExpense,
+    memberOrUid: any,
+  ) => MobilePayment | undefined;
+}
+
+export function evaluateHouseholdCycleSettlements(params: {
+  cycles: any[];
+  expenses: MobileExpense[];
+  payments: MobilePayment[];
+  allMemberBills: any[];
+  members: any[];
+  getCustomExpenseShare?: (
+    exp: MobileExpense,
+    cycleId: string,
+    payor: any,
+  ) => number | undefined;
+}): HouseholdCycleSettlementResult {
+  const rawMembers = Array.isArray(params.members) ? params.members : [];
+  const seenMemberKeys = new Set<string>();
+  const activeMembers: any[] = [];
+  rawMembers.forEach((m) => {
+    if (!m) return;
+    const st = String(m.status || "").toUpperCase();
+    const jst = String(m.joinRequestStatus || "").toUpperCase();
+    if (
+      st === "PENDING" ||
+      st === "REJECTED" ||
+      st === "DECLINED" ||
+      st === "REMOVED" ||
+      st === "INACTIVE" ||
+      st === "CANCELLED" ||
+      jst === "PENDING" ||
+      jst === "REJECTED" ||
+      jst === "DECLINED" ||
+      jst === "REMOVED"
+    ) {
+      return;
+    }
+    const cleanKey =
+      normalizeCleanUid(getMemberPrimaryId(m)) ||
+      String(m.email || "")
+        .trim()
+        .toLowerCase();
+    if (!cleanKey || seenMemberKeys.has(cleanKey)) return;
+    seenMemberKeys.add(cleanKey);
+    activeMembers.push(m);
+  });
+
+  const activePayors = activeMembers.filter((m) => isPayorMember(m));
+  const effectivePayors =
+    activePayors.length > 0 ? activePayors : activeMembers;
+  const payorCount = Math.max(1, effectivePayors.length);
+
+  const sortedNewest = sortBillingCyclesNewest(params.cycles || []);
+  const orderedOldestFirst = [...sortedNewest].reverse();
+  const orderedCycleIdsOldestFirst: string[] = [];
+  orderedOldestFirst.forEach((c) => {
+    const cid = String(c?.billingCycleId || "").trim();
+    if (cid && !orderedCycleIdsOldestFirst.includes(cid)) {
+      orderedCycleIdsOldestFirst.push(cid);
+    }
+  });
+
+  const allExpenses = Array.isArray(params.expenses) ? params.expenses : [];
+  allExpenses.forEach((e) => {
+    const cid = String(e?.billingCycleId || "").trim();
+    if (cid && cid !== "general" && !orderedCycleIdsOldestFirst.includes(cid)) {
+      orderedCycleIdsOldestFirst.unshift(cid);
+    }
+  });
+
+  if (orderedCycleIdsOldestFirst.length === 0) {
+    orderedCycleIdsOldestFirst.push("general");
+  }
+
+  const knownCycleIds = new Set<string>(orderedCycleIdsOldestFirst);
+  const oldestCycleId = orderedCycleIdsOldestFirst[0];
+  const newestCycleId =
+    orderedCycleIdsOldestFirst[orderedCycleIdsOldestFirst.length - 1];
+  const isSingleCycle = orderedCycleIdsOldestFirst.length <= 1;
+
+  const expensesByCycle = new Map<string, MobileExpense[]>();
+  orderedCycleIdsOldestFirst.forEach((cid) => expensesByCycle.set(cid, []));
+  allExpenses.forEach((exp) => {
+    const rawCid = String(exp?.billingCycleId || "").trim();
+    const targetCid =
+      rawCid && knownCycleIds.has(rawCid) ? rawCid : oldestCycleId;
+    const bucket = expensesByCycle.get(targetCid);
+    if (bucket) bucket.push(exp);
+  });
+
+  const allBills = Array.isArray(params.allMemberBills)
+    ? params.allMemberBills
+    : [];
+  const allPayments = Array.isArray(params.payments) ? params.payments : [];
+
+  const getCycleBillForPayor = (cycleId: string, payor: any): any | null => {
+    let best: any = null;
+    for (const mb of allBills) {
+      if (!mb) continue;
+      const mbCid = String(mb.billingCycleId || "").trim();
+      const cidMatches =
+        mbCid === cycleId || ((!mbCid || mbCid === "general") && isSingleCycle);
+      if (!cidMatches) continue;
+      if (!matchesMemberUid(payor, mb.userId || mb.memberId || mb.billId)) {
+        continue;
+      }
+      if (!best) {
+        best = mb;
+      } else {
+        const bestCanonical = String(best.billId || "").startsWith("bill_");
+        const curCanonical = String(mb.billId || "").startsWith("bill_");
+        const bestPaid = Number(
+          best.totalPaidCentavos || best.paidCentavos || 0,
+        );
+        const curPaid = Number(mb.totalPaidCentavos || mb.paidCentavos || 0);
+        if (
+          (curCanonical && !bestCanonical) ||
+          (curCanonical === bestCanonical && curPaid > bestPaid)
+        ) {
+          best = mb;
+        }
+      }
+    }
+    return best;
+  };
+
+  const summaryMap = new Map<string, MemberCycleSettlementSummary>();
+  const settledPayorUidsByCycle = new Map<string, Set<string>>();
+  orderedCycleIdsOldestFirst.forEach((cid) =>
+    settledPayorUidsByCycle.set(cid, new Set<string>()),
+  );
+
+  for (const payor of effectivePayors) {
+    const rawPrimaryId = getMemberPrimaryId(payor);
+    const cleanUid = normalizeCleanUid(rawPrimaryId);
+    if (!cleanUid) continue;
+
+    const grossShareByCycle = new Map<string, number>();
+    const unpaidSplitShareByCycle = new Map<string, number>();
+    const allSplitsMarkedPaidByCycle = new Map<string, boolean>();
+
+    for (const cid of orderedCycleIdsOldestFirst) {
+      const cycExps = expensesByCycle.get(cid) || [];
+      let gross = 0;
+      let unpaidSplits = 0;
+      let allMarkedPaid = cycExps.length > 0;
+
+      for (const exp of cycExps) {
+        const splits = Array.isArray(exp.splitDetails) ? exp.splitDetails : [];
+        const mySplit = splits.find((s: any) =>
+          matchesMemberUid(payor, s?.userId || s?.memberId || s?.id),
+        );
+        if (mySplit?.isExempt) continue;
+
+        let share = 0;
+        const customVal = params.getCustomExpenseShare?.(exp, cid, payor);
+        if (typeof customVal === "number" && Number.isFinite(customVal)) {
+          share = Math.max(0, Math.round(customVal));
+        } else {
+          const isWater = (exp.category || "").toLowerCase().includes("water");
+          const splitPayors = splits.filter(
+            (s: any) => !s?.isExempt && (Number(s?.shareCentavos) || 0) > 0,
+          );
+          const splitSum = splitPayors.reduce(
+            (acc: number, s: any) => acc + (Number(s?.shareCentavos) || 0),
+            0,
+          );
+          const isSplitStale =
+            (splitPayors.length > 0 && splitPayors.length !== payorCount) ||
+            (!isWater &&
+              splitPayors.length > 0 &&
+              splitSum !== (Number(exp.amountCents) || 0));
+
+          if (
+            !isSplitStale &&
+            mySplit &&
+            typeof mySplit.shareCentavos === "number"
+          ) {
+            share = Math.max(0, mySplit.shareCentavos);
+          } else {
+            share = computeFairSplitShareCentavos(
+              Number(exp.amountCents) || 0,
+              effectivePayors,
+              cleanUid,
+            );
+          }
+        }
+
+        gross += share;
+
+        const isExpOrSplitPaid = Boolean(
+          exp.status === "PAID" || exp.isPaid === true || mySplit?.isPaid,
+        );
+        if (!isExpOrSplitPaid && share > 0) {
+          const partialPaid = Math.max(
+            0,
+            Number((mySplit as any)?.paidAmountCentavos) || 0,
+          );
+          const rem = Math.max(0, share - partialPaid);
+          unpaidSplits += rem;
+          if (rem > 0) {
+            allMarkedPaid = false;
+          }
+        }
+      }
+
+      // Handle orphan carried-over arrears where original prior-cycle expense docs no longer exist
+      if (gross === 0 && cycExps.length === 0) {
+        let orphanArrearsAmt = 0;
+        let orphanSettled = false;
+        for (const mb of allBills) {
+          if (!mb || !matchesMemberUid(payor, mb.userId || mb.memberId))
+            continue;
+          for (const li of mb.lineItems || []) {
+            if (
+              (li?.category === "Arrears" || li?.isArrears) &&
+              !li?.isExempt &&
+              String(li?.priorCycleId || "") === cid
+            ) {
+              const amt = Math.max(0, Number(li.amountCentavos) || 0);
+              if (amt > orphanArrearsAmt) orphanArrearsAmt = amt;
+              if (
+                li.status === "PAID" ||
+                li.isSettled ||
+                (mb.status === "PAID" &&
+                  Number(mb.outstandingCentavos || 0) === 0 &&
+                  Number(mb.totalPaidCentavos || 0) > 0)
+              ) {
+                orphanSettled = true;
+              }
+            }
+          }
+        }
+        if (orphanArrearsAmt > 0) {
+          gross = orphanArrearsAmt;
+          unpaidSplits = orphanSettled ? 0 : orphanArrearsAmt;
+          allMarkedPaid = orphanSettled;
+        }
+      }
+
+      grossShareByCycle.set(cid, gross);
+      unpaidSplitShareByCycle.set(cid, unpaidSplits);
+      allSplitsMarkedPaidByCycle.set(cid, gross > 0 && allMarkedPaid);
+    }
+
+    // Pass 1: Allocate non-rejected payments by explicit breakdownItems cycleId or payment's billingCycleId
+    const userPayments = allPayments
+      .filter(
+        (pmt) =>
+          pmt &&
+          pmt.status !== "REJECTED" &&
+          matchesMemberUid(payor, pmt.userId),
+      )
+      .slice()
+      .sort((a, b) => {
+        const tA = new Date(a.createdDate || a.paymentDate || 0).getTime() || 0;
+        const tB = new Date(b.createdDate || b.paymentDate || 0).getTime() || 0;
+        return tA - tB;
+      });
+
+    const allocatedPaidByCycle = new Map<string, number>();
+    const directPaidInCycle = new Map<string, number>();
+    const paymentsTouchingCycle = new Map<string, MobilePayment[]>();
+    orderedCycleIdsOldestFirst.forEach((cid) => {
+      allocatedPaidByCycle.set(cid, 0);
+      directPaidInCycle.set(cid, 0);
+      paymentsTouchingCycle.set(cid, []);
+    });
+
+    const recordPaymentTouch = (cid: string, pmt: MobilePayment) => {
+      const list = paymentsTouchingCycle.get(cid);
+      if (list && !list.some((x) => x.paymentId === pmt.paymentId)) {
+        list.push(pmt);
+      }
+    };
+
+    for (const pmt of userPayments) {
+      const rawPmtCid = String(pmt.billingCycleId || "").trim();
+      const pmtOriginCid =
+        rawPmtCid && rawPmtCid !== "general" && knownCycleIds.has(rawPmtCid)
+          ? rawPmtCid
+          : isSingleCycle
+            ? oldestCycleId
+            : newestCycleId;
+      const pmtAmt = Math.max(0, Number(pmt.amountCentavos) || 0);
+      directPaidInCycle.set(
+        pmtOriginCid,
+        (directPaidInCycle.get(pmtOriginCid) || 0) + pmtAmt,
+      );
+
+      if (Array.isArray(pmt.breakdownItems) && pmt.breakdownItems.length > 0) {
+        let allocatedFromBd = 0;
+        for (const bi of pmt.breakdownItems) {
+          const biAmt = Math.max(0, Number(bi?.shareCentavos) || 0);
+          if (biAmt <= 0) continue;
+          const rawBiCid = String(bi?.cycleId || "").trim();
+          let targetCid = pmtOriginCid;
+          if (
+            rawBiCid &&
+            rawBiCid !== "general" &&
+            knownCycleIds.has(rawBiCid)
+          ) {
+            targetCid = rawBiCid;
+          } else if (bi?.isOverdue) {
+            const pmtIdx = orderedCycleIdsOldestFirst.indexOf(pmtOriginCid);
+            const fallbackOlder = orderedCycleIdsOldestFirst
+              .slice(0, pmtIdx > 0 ? pmtIdx : orderedCycleIdsOldestFirst.length)
+              .find(
+                (c) =>
+                  (grossShareByCycle.get(c) || 0) >
+                  (allocatedPaidByCycle.get(c) || 0),
+              );
+            targetCid = fallbackOlder || oldestCycleId;
+          }
+          allocatedPaidByCycle.set(
+            targetCid,
+            (allocatedPaidByCycle.get(targetCid) || 0) + biAmt,
+          );
+          recordPaymentTouch(targetCid, pmt);
+          allocatedFromBd += biAmt;
+        }
+        const leftover = Math.max(0, pmtAmt - allocatedFromBd);
+        if (leftover > 0) {
+          allocatedPaidByCycle.set(
+            pmtOriginCid,
+            (allocatedPaidByCycle.get(pmtOriginCid) || 0) + leftover,
+          );
+          recordPaymentTouch(pmtOriginCid, pmt);
+        }
+      } else {
+        allocatedPaidByCycle.set(
+          pmtOriginCid,
+          (allocatedPaidByCycle.get(pmtOriginCid) || 0) + pmtAmt,
+        );
+        recordPaymentTouch(pmtOriginCid, pmt);
+      }
+    }
+
+    // Honor direct memberBill paidCentavos if a cycle had bill-level credit with no payment docs and was not a rollover mirror
+    for (const cid of orderedCycleIdsOldestFirst) {
+      const cBill = getCycleBillForPayor(cid, payor);
+      if (
+        cBill &&
+        !cBill.settledViaCycleId &&
+        (directPaidInCycle.get(cid) || 0) === 0
+      ) {
+        const billPaid = Math.max(
+          0,
+          Number(cBill.totalPaidCentavos || cBill.paidCentavos || 0),
+        );
+        if (billPaid > (allocatedPaidByCycle.get(cid) || 0)) {
+          allocatedPaidByCycle.set(cid, billPaid);
+        }
+      }
+    }
+
+    // Pass 2: Chronological FIFO rollover spillover from newer cycles with excess payment to older unpaid cycles
+    for (let k = 0; k < orderedCycleIdsOldestFirst.length; k++) {
+      const cidK = orderedCycleIdsOldestFirst[k];
+      const grossK = grossShareByCycle.get(cidK) || 0;
+      const paidK = allocatedPaidByCycle.get(cidK) || 0;
+      let excess = Math.max(0, paidK - grossK);
+      if (excess <= 0) continue;
+
+      for (let j = 0; j < k; j++) {
+        if (excess <= 0) break;
+        const cidJ = orderedCycleIdsOldestFirst[j];
+        const grossJ = grossShareByCycle.get(cidJ) || 0;
+        const paidJ = allocatedPaidByCycle.get(cidJ) || 0;
+        const needJ = Math.max(0, grossJ - paidJ);
+        if (needJ <= 0) continue;
+
+        const spill = Math.min(excess, needJ);
+        allocatedPaidByCycle.set(cidJ, paidJ + spill);
+        allocatedPaidByCycle.set(
+          cidK,
+          Math.max(0, (allocatedPaidByCycle.get(cidK) || 0) - spill),
+        );
+        excess -= spill;
+        const kTouches = paymentsTouchingCycle.get(cidK) || [];
+        kTouches.forEach((pmt) => recordPaymentTouch(cidJ, pmt));
+      }
+    }
+
+    // Step D: Evaluate per-cycle settlement and cumulative unpaid arrears
+    let cumulativeUnpaidPrior = 0;
+    let cumulativePriorGross = 0;
+
+    for (const cid of orderedCycleIdsOldestFirst) {
+      const gross = grossShareByCycle.get(cid) || 0;
+      const unpaidSplits = unpaidSplitShareByCycle.get(cid) || 0;
+      const allocPaid = allocatedPaidByCycle.get(cid) || 0;
+      const paidInCyc = directPaidInCycle.get(cid) || 0;
+      const cycleBill = getCycleBillForPayor(cid, payor);
+
+      let settledViaLaterBill = false;
+      let resolvedSettledViaCid: string | undefined =
+        cycleBill?.settledViaCycleId
+          ? String(cycleBill.settledViaCycleId)
+          : undefined;
+
+      if (resolvedSettledViaCid && cycleBill?.status === "PAID") {
+        settledViaLaterBill = true;
+      }
+
+      if (!settledViaLaterBill) {
+        for (const mb of allBills) {
+          if (!mb) continue;
+          const mbCid = String(mb.billingCycleId || "").trim();
+          if (!mbCid || mbCid === cid) continue;
+          if (!matchesMemberUid(payor, mb.userId || mb.memberId || mb.billId)) {
+            continue;
+          }
+          const matchingArr = Array.isArray(mb.lineItems)
+            ? mb.lineItems.find(
+                (li: any) =>
+                  (li?.category === "Arrears" || li?.isArrears) &&
+                  String(li?.priorCycleId || "") === cid,
+              )
+            : null;
+          if (matchingArr) {
+            const arrPaid = Boolean(
+              matchingArr.status === "PAID" ||
+              matchingArr.isSettled ||
+              (mb.status === "PAID" &&
+                Number(mb.outstandingCentavos || 0) === 0 &&
+                Number(mb.totalPaidCentavos || mb.paidCentavos || 0) > 0),
+            );
+            if (arrPaid) {
+              settledViaLaterBill = true;
+              resolvedSettledViaCid = mbCid;
+              break;
+            }
+          }
+        }
+      }
+
+      const isCycleBillExplicitlyPaid = Boolean(
+        cycleBill &&
+        cycleBill.status === "PAID" &&
+        Number(cycleBill.outstandingCentavos || 0) === 0 &&
+        (Number(cycleBill.totalPaidCentavos || cycleBill.paidCentavos || 0) >
+          0 ||
+          Boolean(cycleBill.settledViaCycleId)),
+      );
+
+      let settledArrearsInCycleCentavos = 0;
+      if (cycleBill && Array.isArray(cycleBill.lineItems)) {
+        for (const li of cycleBill.lineItems) {
+          if (
+            (li?.category === "Arrears" || li?.isArrears) &&
+            !li?.isExempt &&
+            (li?.status === "PAID" ||
+              li?.isSettled ||
+              isCycleBillExplicitlyPaid)
+          ) {
+            settledArrearsInCycleCentavos += Math.max(
+              0,
+              Number(li.amountCentavos) || 0,
+            );
+          }
+        }
+      }
+
+      let remainingCycleCentavos = 0;
+      if (gross > 0) {
+        if (
+          allSplitsMarkedPaidByCycle.get(cid) ||
+          isCycleBillExplicitlyPaid ||
+          settledViaLaterBill ||
+          allocPaid >= gross
+        ) {
+          remainingCycleCentavos = 0;
+        } else {
+          remainingCycleCentavos = Math.min(
+            unpaidSplits,
+            Math.max(0, gross - allocPaid),
+          );
+        }
+      }
+
+      const touches = paymentsTouchingCycle.get(cid) || [];
+      const matchedPayment =
+        touches.length > 0 ? touches[touches.length - 1] : undefined;
+
+      const settledViaRollover = Boolean(
+        settledViaLaterBill ||
+        (matchedPayment &&
+          matchedPayment.billingCycleId &&
+          matchedPayment.billingCycleId !== "general" &&
+          matchedPayment.billingCycleId !== cid),
+      );
+
+      const isCycleSettled =
+        gross > 0
+          ? remainingCycleCentavos === 0
+          : settledArrearsInCycleCentavos > 0 || paidInCyc > 0;
+
+      if (isCycleSettled) {
+        const set = settledPayorUidsByCycle.get(cid);
+        if (set) {
+          set.add(cleanUid);
+          if (rawPrimaryId) set.add(rawPrimaryId);
+          if (payor.userId) set.add(String(payor.userId));
+          if (payor.memberId) set.add(String(payor.memberId));
+        }
+      }
+
+      const priorUnpaidArrearsCentavos = cumulativeUnpaidPrior;
+      const totalOwesAsOfCycleCentavos =
+        remainingCycleCentavos + priorUnpaidArrearsCentavos;
+      const isFullySettledAsOfCycle =
+        totalOwesAsOfCycleCentavos === 0 &&
+        (gross > 0 || settledArrearsInCycleCentavos > 0 || paidInCyc > 0);
+
+      const summary: MemberCycleSettlementSummary = {
+        cycleId: cid,
+        userId: cleanUid,
+        grossShareCentavos: gross,
+        unpaidSplitShareCentavos: unpaidSplits,
+        allocatedPaidCentavos: allocPaid,
+        allocatedPaidInCycleCentavos: paidInCyc,
+        settledArrearsInCycleCentavos,
+        remainingCycleCentavos,
+        priorUnpaidArrearsCentavos,
+        totalPriorGrossCentavos: cumulativePriorGross,
+        totalOwesAsOfCycleCentavos,
+        isCycleSettled,
+        isFullySettledAsOfCycle,
+        settledViaRollover,
+        settledViaCycleId:
+          resolvedSettledViaCid ||
+          (settledViaRollover ? matchedPayment?.billingCycleId : undefined),
+        matchedPayment,
+      };
+
+      summaryMap.set(`${cid}__${cleanUid}`, summary);
+      cumulativeUnpaidPrior += remainingCycleCentavos;
+      cumulativePriorGross += gross;
+    }
+  }
+
+  const allPayorsSettledByCycle = new Map<string, boolean>();
+  for (const cid of orderedCycleIdsOldestFirst) {
+    const cycExps = expensesByCycle.get(cid) || [];
+    const hasPositiveExpense = cycExps.some(
+      (e) => (Number(e.amountCents) || 0) > 0,
+    );
+    if (!hasPositiveExpense || effectivePayors.length === 0) {
+      allPayorsSettledByCycle.set(cid, false);
+      continue;
+    }
+    const allDone = effectivePayors.every((p) => {
+      const cUid = normalizeCleanUid(getMemberPrimaryId(p));
+      const sum = summaryMap.get(`${cid}__${cUid}`);
+      if (!sum) return false;
+      if (sum.grossShareCentavos <= 0) return true;
+      return sum.remainingCycleCentavos === 0 && sum.isCycleSettled;
+    });
+    allPayorsSettledByCycle.set(cid, allDone);
+  }
+
+  const resolveCleanUid = (memberOrUid: any): string => {
+    if (!memberOrUid) return "";
+    if (typeof memberOrUid === "string") return normalizeCleanUid(memberOrUid);
+    return normalizeCleanUid(getMemberPrimaryId(memberOrUid));
+  };
+
+  const getMemberCycleSummary = (
+    cycleId: string | undefined | null,
+    memberOrUid: any,
+  ): MemberCycleSettlementSummary => {
+    const cleanUid = resolveCleanUid(memberOrUid);
+    const rawCid = String(cycleId || "").trim();
+    const targetCid =
+      rawCid && knownCycleIds.has(rawCid) ? rawCid : newestCycleId;
+    const found = summaryMap.get(`${targetCid}__${cleanUid}`);
+    if (found) return found;
+    return {
+      cycleId: targetCid,
+      userId: cleanUid,
+      grossShareCentavos: 0,
+      unpaidSplitShareCentavos: 0,
+      allocatedPaidCentavos: 0,
+      allocatedPaidInCycleCentavos: 0,
+      settledArrearsInCycleCentavos: 0,
+      remainingCycleCentavos: 0,
+      priorUnpaidArrearsCentavos: 0,
+      totalPriorGrossCentavos: 0,
+      totalOwesAsOfCycleCentavos: 0,
+      isCycleSettled: false,
+      isFullySettledAsOfCycle: false,
+      settledViaRollover: false,
+    };
+  };
+
+  const getPriorUnpaidArrearsBeforeCycle = (
+    cycleId: string | undefined | null,
+    memberOrUid: any,
+  ): number => {
+    return getMemberCycleSummary(cycleId, memberOrUid)
+      .priorUnpaidArrearsCentavos;
+  };
+
+  const getMatchedPaymentForExpense = (
+    exp: MobileExpense,
+    memberOrUid: any,
+  ): MobilePayment | undefined => {
+    const cleanUid = resolveCleanUid(memberOrUid);
+    if (!cleanUid) return undefined;
+    const splits = Array.isArray(exp.splitDetails) ? exp.splitDetails : [];
+    const splitEntry: any = splits.find((s: any) =>
+      matchesMemberUid({ userId: cleanUid }, s?.userId || s?.memberId || s?.id),
+    );
+    if (splitEntry?.paymentId) {
+      const exactById = allPayments.find(
+        (pmt) =>
+          pmt.paymentId === splitEntry.paymentId && pmt.status !== "REJECTED",
+      );
+      if (exactById) return exactById;
+    }
+
+    const byBreakdownId = allPayments.find(
+      (pmt) =>
+        pmt.status !== "REJECTED" &&
+        matchesMemberUid({ userId: cleanUid }, pmt.userId) &&
+        Array.isArray(pmt.breakdownItems) &&
+        pmt.breakdownItems.some(
+          (bi) =>
+            bi.id === exp.id ||
+            (exp.billingCycleId && bi.cycleId === exp.billingCycleId),
+        ),
+    );
+    if (byBreakdownId) return byBreakdownId;
+
+    const rawCid = String(exp?.billingCycleId || "").trim();
+    const targetCid =
+      rawCid && knownCycleIds.has(rawCid) ? rawCid : oldestCycleId;
+    return summaryMap.get(`${targetCid}__${cleanUid}`)?.matchedPayment;
+  };
+
+  return {
+    orderedCycleIdsOldestFirst,
+    settledPayorUidsByCycle,
+    allPayorsSettledByCycle,
+    getMemberCycleSummary,
+    getPriorUnpaidArrearsBeforeCycle,
+    getMatchedPaymentForExpense,
+  };
+}
+
+const _reconcileArrearsInFlight = new Map<string, number>();
+
 export function isCyclePaymentsLocked(cycle?: any, household?: any): boolean {
   if (cycle) {
     if (cycle.paymentsLocked === true) return true;
@@ -1364,7 +2257,7 @@ function sanitizeData<T>(val: T): T {
 }
 
 const _recalcInFlight = new Map<string, Promise<number>>();
-const _recalcPending = new Set<string>();
+const _recalcPendingCycle = new Map<string, string | undefined>();
 
 function normalizeHostApplication(docId: string, raw: any): any {
   const appId = raw?.applicationId || raw?.id || docId;
@@ -1539,6 +2432,33 @@ export const mobileDataService = {
       mergeUserReadMap(effectiveUid, _cachedUserProfile.readNotificationIdsV2);
     }
     return { ...getUserReadMap(effectiveUid) };
+  },
+  resolveCycleWaterConfig(
+    waterConfig: any | null | undefined,
+    cycleId?: string | null,
+    options?: {
+      cycleWaterExpense?: any | null;
+      payorCount?: number;
+      hasCycleAttendance?: boolean;
+      totalCyclesCount?: number;
+    },
+  ): CycleWaterConfig | null {
+    return resolveCycleWaterConfig(waterConfig, cycleId, options);
+  },
+  computeCycleWaterBreakdown(
+    activeMembers: any[],
+    cycleAttendance: any[] = [],
+    attendanceSubmissions: Record<string, any> | any[] = {},
+    rateCentavosPerDay: number = 500,
+    existingSplitDetails?: any[],
+  ) {
+    return computeCycleWaterBreakdown(
+      activeMembers,
+      cycleAttendance,
+      attendanceSubmissions,
+      rateCentavosPerDay,
+      existingSplitDetails,
+    );
   },
   clearCache() {
     _cachedUserProfile = null;
@@ -3533,24 +4453,37 @@ export const mobileDataService = {
    */
   async recalculateUnpaidExpensesForHousehold(
     householdId: string,
+    targetCycleId?: string,
   ): Promise<number> {
     if (!householdId) return 0;
     const existingRun = _recalcInFlight.get(householdId);
     if (existingRun) {
-      _recalcPending.add(householdId);
-      return existingRun;
+      _recalcPendingCycle.set(
+        householdId,
+        targetCycleId ?? _recalcPendingCycle.get(householdId),
+      );
+      await existingRun.catch(() => 0);
+      const followUp = _recalcInFlight.get(householdId);
+      if (followUp) {
+        return followUp;
+      }
     }
 
     const runPromise = (async (): Promise<number> => {
       try {
-        return await this._executeRecalculateUnpaidExpenses(householdId);
+        return await this._executeRecalculateUnpaidExpenses(
+          householdId,
+          targetCycleId,
+        );
       } finally {
         _recalcInFlight.delete(householdId);
-        if (_recalcPending.has(householdId)) {
-          _recalcPending.delete(householdId);
-          this.recalculateUnpaidExpensesForHousehold(householdId).catch(
-            () => {},
-          );
+        if (_recalcPendingCycle.has(householdId)) {
+          const nextCycleId = _recalcPendingCycle.get(householdId);
+          _recalcPendingCycle.delete(householdId);
+          this.recalculateUnpaidExpensesForHousehold(
+            householdId,
+            nextCycleId,
+          ).catch(() => {});
         }
       }
     })();
@@ -3561,20 +4494,43 @@ export const mobileDataService = {
 
   async _executeRecalculateUnpaidExpenses(
     householdId: string,
+    targetCycleId?: string,
   ): Promise<number> {
     try {
       if (!householdId) return 0;
       const membersSnap = await getDocs(
         collection(db, `households/${householdId}/members`),
       );
-      const activeMembers = membersSnap.docs
-        .map((d) => d.data())
-        .filter((m: any) => m.status === "ACTIVE" || !m.status);
+      let activeMembers: any[] = membersSnap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter(
+          (m: any) =>
+            m.status === "ACTIVE" || m.status === "SETTLED" || !m.status,
+        );
+
+      if (activeMembers.length === 0) {
+        try {
+          const hhSnap = await getDoc(doc(db, "households", householdId));
+          const hhData = hhSnap.exists() ? hhSnap.data() : null;
+          const fallbackUid = hhData?.hostId || auth.currentUser?.uid;
+          if (fallbackUid) {
+            activeMembers = [
+              {
+                id: fallbackUid,
+                userId: fallbackUid,
+                memberId: fallbackUid,
+                displayName: auth.currentUser?.displayName || "Host",
+                role: "HOST",
+                status: "ACTIVE",
+              },
+            ];
+          }
+        } catch {}
+      }
 
       if (activeMembers.length === 0) return 0;
 
       const activePayors = activeMembers.filter((m) => isPayorMember(m));
-      const activeNonPayors = activeMembers.filter((m) => !isPayorMember(m));
       const effectivePayors =
         activePayors.length > 0 ? activePayors : activeMembers;
 
@@ -3586,17 +4542,29 @@ export const mobileDataService = {
       // Function-level map of member attendance days for water billing calculations
       const memberDaysMap = new Map<string, number>();
       let preActiveCycleId: string | undefined;
+      let preOldestCycleId: string | undefined;
       let preIsSingleCycle = true;
+      const preKnownCycleIds = new Set<string>();
       try {
         const preCyclesSnap = await getDocs(
           collection(db, `households/${householdId}/billingCycles`),
         );
         const preCycles = sortBillingCyclesNewest(
-          preCyclesSnap.docs.map((cd) => cd.data()),
+          preCyclesSnap.docs.map((cd) => ({
+            ...cd.data(),
+            billingCycleId: cd.data().billingCycleId || cd.id,
+          })),
         );
+        preCycles.forEach((c: any) => {
+          if (c?.billingCycleId) preKnownCycleIds.add(c.billingCycleId);
+        });
         preIsSingleCycle = preCycles.length <= 1;
-        const preActiveCycle = preCycles[0];
-        preActiveCycleId = preActiveCycle?.billingCycleId;
+        preOldestCycleId = preCycles[preCycles.length - 1]?.billingCycleId;
+        const requestedCycle = targetCycleId
+          ? preCycles.find((c: any) => c.billingCycleId === targetCycleId)
+          : null;
+        const preActiveCycle = requestedCycle || preCycles[0];
+        preActiveCycleId = targetCycleId || preActiveCycle?.billingCycleId;
         if (preActiveCycleId) {
           const [attSnap, subSnap] = await Promise.all([
             getDocs(
@@ -3618,7 +4586,7 @@ export const mobileDataService = {
           const preAtt = attSnap ? attSnap.docs.map((sd) => sd.data()) : [];
           const preSub = subSnap ? subSnap.docs.map((sd) => sd.data()) : [];
           for (const m of activeMembers) {
-            const uid = m.userId || m.memberId;
+            const uid = m.userId || m.memberId || m.id;
             const present = preAtt.filter(
               (a: any) => a.userId === uid && a.status === "PRESENT",
             ).length;
@@ -3633,17 +4601,14 @@ export const mobileDataService = {
         // Attendance pre-population fallback
       }
 
-      // Fetch water configuration to apply correct pricing mode
-      let waterConfig: any = {
-        pricingModel: "PER_PERSON_DAY",
-        rateCentavosPerPersonPerDay: 500,
-      };
+      // Fetch water configuration to apply cycle-scoped pricing mode
+      let rawWaterConfig: any = null;
       try {
         const waterSnap = await getDoc(
           doc(db, `households/${householdId}/systemSettings`, "water"),
         );
         if (waterSnap.exists()) {
-          waterConfig = waterSnap.data();
+          rawWaterConfig = waterSnap.data();
         }
       } catch (wErr) {
         console.warn(
@@ -3655,20 +4620,39 @@ export const mobileDataService = {
       for (const d of expSnap.docs) {
         const expData = d.data();
         if (expData.isPaid === true || expData.status === "PAID") continue;
+        const isUnscopedOrOrphan =
+          !expData.billingCycleId ||
+          (preKnownCycleIds.size > 0 &&
+            !preKnownCycleIds.has(expData.billingCycleId));
         if (
           preActiveCycleId &&
           expData.billingCycleId !== preActiveCycleId &&
-          !(!expData.billingCycleId && preIsSingleCycle)
+          !(
+            isUnscopedOrOrphan &&
+            (preIsSingleCycle || preActiveCycleId === preOldestCycleId)
+          )
         ) {
           continue;
         }
 
-        const isWater = (expData.category || "")
-          .toLowerCase()
-          .includes("water");
+        const catLower = (expData.category || "").toLowerCase();
+        const isWater = catLower.includes("water");
+        const isElectricity =
+          catLower.includes("electric") ||
+          (expData.title || "").toLowerCase().includes("electric");
         let newSplitDetails: any[] = [];
 
         if (isWater) {
+          const expCycleId = expData.billingCycleId || preActiveCycleId;
+          const waterConfig = resolveCycleWaterConfig(
+            rawWaterConfig,
+            expCycleId,
+            {
+              cycleWaterExpense: expData,
+              payorCount: effectivePayors.length,
+              totalCyclesCount: preKnownCycleIds.size,
+            },
+          );
           if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
             // Mode 3: Flat fee per resident
             const perPersonCentavos =
@@ -3679,7 +4663,7 @@ export const mobileDataService = {
               const isPayor = isPayorMember(m);
               if (isPayor) {
                 return {
-                  userId: m.userId || m.memberId,
+                  userId: m.userId || m.memberId || m.id,
                   displayName: m.displayName || "Roommate",
                   shareCentavos: perPersonCentavos,
                   isPaid: false,
@@ -3689,7 +4673,7 @@ export const mobileDataService = {
                 };
               } else {
                 return {
-                  userId: m.userId || m.memberId,
+                  userId: m.userId || m.memberId || m.id,
                   displayName: m.displayName || "Roommate",
                   shareCentavos: 0,
                   isPaid: true,
@@ -3729,7 +4713,7 @@ export const mobileDataService = {
                 };
               } else {
                 return {
-                  userId: m.userId || m.memberId,
+                  userId: m.userId || m.memberId || m.id,
                   displayName: m.displayName || "Roommate",
                   shareCentavos: 0,
                   isPaid: true,
@@ -3749,13 +4733,16 @@ export const mobileDataService = {
             }
           } else {
             // Mode 1: Daily Attendance (PER_PERSON_DAY)
-            let cycleId = expData.billingCycleId;
+            let cycleId = expCycleId;
             if (!cycleId) {
               try {
                 const cycSnap = await getDocs(
                   collection(db, `households/${householdId}/billingCycles`),
                 );
-                const allCycles = cycSnap.docs.map((cd) => cd.data());
+                const allCycles = cycSnap.docs.map((cd) => ({
+                  ...cd.data(),
+                  billingCycleId: cd.data().billingCycleId || cd.id,
+                }));
                 const act =
                   allCycles.find((c: any) => c.status === "ACTIVE") ||
                   allCycles[0];
@@ -3848,6 +4835,10 @@ export const mobileDataService = {
           }
         } else {
           const payorCount = Math.max(1, effectivePayors.length);
+          const elecMeterNote =
+            isElectricity && expData.notes
+              ? `${expData.notes} · Split among ${payorCount} payors`
+              : null;
 
           newSplitDetails = activeMembers.map((m: any) => {
             const uid = m.userId || m.memberId || m.id || "";
@@ -3866,7 +4857,9 @@ export const mobileDataService = {
                 isPaid: false,
                 isExempt: false,
                 role: m.role || "PAYOR",
-                note: `Fair share among ${payorCount} payors (Non-payors exempt)`,
+                note:
+                  elecMeterNote ||
+                  `Fair share among ${payorCount} payors (Non-payors exempt)`,
               };
             } else {
               return {
@@ -3883,30 +4876,39 @@ export const mobileDataService = {
           });
         }
 
-        // Preserve existing paid status per user on splitDetails so partial/prior settlements are never lost
+        // Preserve existing paid status per user ONLY when actual paid amount covers the new share
         if (
           Array.isArray(expData.splitDetails) &&
           expData.splitDetails.length > 0
         ) {
-          const prevSplitMap = new Map<string, any>();
-          expData.splitDetails.forEach((s: any) => {
-            if (s.userId) prevSplitMap.set(s.userId, s);
-          });
           newSplitDetails = newSplitDetails.map((s: any) => {
             if (s.isExempt) return sanitizeData(s);
-            const prev = prevSplitMap.get(s.userId);
+            const prev = expData.splitDetails.find((ps: any) =>
+              matchesMemberUid(
+                { userId: s.userId },
+                ps?.userId || ps?.memberId || ps?.id,
+              ),
+            );
             if (prev && prev.isPaid) {
-              return sanitizeData({
-                ...s,
-                isPaid: true,
-                paidAmountCentavos: prev.paidAmountCentavos ?? s.shareCentavos,
-                ...(prev.paidDate !== undefined
-                  ? { paidDate: prev.paidDate }
-                  : {}),
-                ...(prev.paymentId !== undefined
-                  ? { paymentId: prev.paymentId }
-                  : {}),
-              });
+              const prevActualPaid =
+                typeof prev.paidAmountCentavos === "number"
+                  ? prev.paidAmountCentavos
+                  : prev.paymentId || prev.paidDate
+                    ? Number(prev.shareCentavos) || 0
+                    : 0;
+              if (s.shareCentavos > 0 && prevActualPaid >= s.shareCentavos) {
+                return sanitizeData({
+                  ...s,
+                  isPaid: true,
+                  paidAmountCentavos: prevActualPaid,
+                  ...(prev.paidDate !== undefined
+                    ? { paidDate: prev.paidDate }
+                    : {}),
+                  ...(prev.paymentId !== undefined
+                    ? { paymentId: prev.paymentId }
+                    : {}),
+                });
+              }
             }
             return sanitizeData(s);
           });
@@ -3939,11 +4941,23 @@ export const mobileDataService = {
           getDocs(collection(db, `households/${householdId}/payments`)),
         ]);
         const cycles = sortBillingCyclesNewest(
-          cyclesSnap.docs.map((cd) => cd.data()),
+          cyclesSnap.docs.map((cd) => ({
+            ...cd.data(),
+            billingCycleId: cd.data().billingCycleId || cd.id,
+          })),
         );
+        const knownCycleIds = new Set<string>();
+        cycles.forEach((c: any) => {
+          if (c?.billingCycleId) knownCycleIds.add(c.billingCycleId);
+        });
         const isSingleCycle = cycles.length <= 1;
-        const activeCycle = cycles[0];
-        const activeCycleId = activeCycle?.billingCycleId || `bc_${Date.now()}`;
+        const oldestCycleId = cycles[cycles.length - 1]?.billingCycleId;
+        const requestedCycle = targetCycleId
+          ? cycles.find((c: any) => c.billingCycleId === targetCycleId)
+          : null;
+        const activeCycle = requestedCycle || cycles[0];
+        const activeCycleId =
+          targetCycleId || activeCycle?.billingCycleId || `bc_${Date.now()}`;
 
         const paymentsByUser = new Map<string, number>();
         paymentsSnap.docs.forEach((pd) => {
@@ -3954,15 +4968,16 @@ export const mobileDataService = {
             ((!pData.billingCycleId || pData.billingCycleId === "general") &&
               isSingleCycle);
           if (matchesCycle && pData.userId) {
+            const cleanPUid = normalizeCleanUid(pData.userId);
             paymentsByUser.set(
-              pData.userId,
-              (paymentsByUser.get(pData.userId) || 0) +
+              cleanPUid,
+              (paymentsByUser.get(cleanPUid) || 0) +
                 (Number(pData.amountCentavos) || 0),
             );
           }
         });
 
-        // Re-read updated expenses scoped strictly to the active billing cycle
+        // Re-read updated expenses scoped strictly to the target/active billing cycle
         const updatedExpSnap = await getDocs(
           collection(db, `households/${householdId}/expenses`),
         );
@@ -3971,14 +4986,21 @@ export const mobileDataService = {
             id: ed.id,
             ...(ed.data() as any),
           }))
-          .filter(
-            (exp: any) =>
+          .filter((exp: any) => {
+            const isUnscopedOrOrphan =
+              !exp.billingCycleId ||
+              (knownCycleIds.size > 0 &&
+                !knownCycleIds.has(exp.billingCycleId));
+            return (
               exp.billingCycleId === activeCycleId ||
-              (!exp.billingCycleId && isSingleCycle),
-          );
+              (isUnscopedOrOrphan &&
+                (isSingleCycle || activeCycleId === oldestCycleId))
+            );
+          });
 
         for (const member of activeMembers) {
-          const uid = member.userId || member.memberId;
+          const rawUid = member.userId || member.memberId || member.id;
+          const uid = normalizeCleanUid(rawUid) || rawUid;
           const billId = `bill_${activeCycleId}_${uid}`;
           const billRef = doc(
             db,
@@ -4001,15 +5023,26 @@ export const mobileDataService = {
             const isWater = (exp.category || "")
               .toLowerCase()
               .includes("water");
-            const split = exp.splitDetails?.find((s: any) => s.userId === uid);
+            const split = exp.splitDetails?.find((s: any) =>
+              matchesMemberUid(member, s?.userId || s?.memberId || s?.id),
+            );
             const isPayor = isPayorMember(member);
             let share = 0;
             if (isPayor) {
               if (split && typeof split.shareCentavos === "number") {
                 share = split.shareCentavos;
               } else if (isWater) {
-                if (waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH") {
-                  share = waterConfig.fixedPerPersonAmountCentavos || 0;
+                const expWaterCfg = resolveCycleWaterConfig(
+                  rawWaterConfig,
+                  exp.billingCycleId || activeCycleId,
+                  {
+                    cycleWaterExpense: exp,
+                    payorCount: effectivePayors.length,
+                    totalCyclesCount: preKnownCycleIds.size,
+                  },
+                );
+                if (expWaterCfg?.pricingModel === "FIXED_PER_PERSON_MONTH") {
+                  share = expWaterCfg.fixedPerPersonAmountCentavos || 0;
                 } else {
                   share = computeFairSplitShareCentavos(
                     exp.amountCents,
@@ -4026,9 +5059,13 @@ export const mobileDataService = {
               }
             }
             const isExempt = !isPayor || Boolean(split?.isExempt);
-            const isExpPaid = exp.status === "PAID" || exp.isPaid;
+            const isExpPaid =
+              exp.status === "PAID" || exp.isPaid || Boolean(split?.isPaid);
             const daysPresent =
-              split?.daysPresent ?? memberDaysMap.get(uid) ?? 0;
+              split?.daysPresent ??
+              memberDaysMap.get(rawUid) ??
+              memberDaysMap.get(uid) ??
+              0;
 
             return {
               itemId: exp.id,
@@ -4043,6 +5080,7 @@ export const mobileDataService = {
               status: isExpPaid ? "PAID" : "UNPAID",
               note:
                 split?.note ||
+                exp.notes ||
                 (isExempt
                   ? "Exempted (Non-payor)"
                   : isWater
@@ -4053,14 +5091,41 @@ export const mobileDataService = {
           });
 
           const allLineItems = [...arrearsLineItems, ...expenseLineItems];
-          const unpaidLineItems = allLineItems.filter(
-            (li: any) => li.status === "UNPAID" && !li.isExempt,
+          const nonExemptLineItems = allLineItems.filter(
+            (li: any) => !li.isExempt,
           );
-          const newTotalDue = unpaidLineItems.reduce(
+          const grossTotalDue = nonExemptLineItems.reduce(
             (sum: number, li: any) => sum + (li.amountCentavos || 0),
             0,
           );
+          const unpaidLineItems = nonExemptLineItems.filter(
+            (li: any) => li.status !== "PAID" && !li.isSettled,
+          );
+          const unpaidOnlyTotalDue = unpaidLineItems.reduce(
+            (sum: number, li: any) => sum + (li.amountCentavos || 0),
+            0,
+          );
+          const newTotalDue = prevPaid > 0 ? grossTotalDue : unpaidOnlyTotalDue;
           const newOutstanding = Math.max(0, newTotalDue - prevPaid);
+
+          let remainingCredit = prevPaid;
+          const reconciledLineItems = allLineItems.map((li: any) => {
+            if (li.isExempt) return li;
+            if (li.category === "Arrears" || li.isArrears) {
+              const amt = Number(li.amountCentavos) || 0;
+              if (amt > 0 && remainingCredit >= amt) {
+                remainingCredit -= amt;
+                return { ...li, status: "PAID", isSettled: true };
+              }
+              return li;
+            }
+            const amt = Number(li.amountCentavos) || 0;
+            if (amt > 0 && remainingCredit >= amt) {
+              remainingCredit -= amt;
+              return { ...li, isSettled: true };
+            }
+            return li;
+          });
 
           const billData = sanitizeData({
             billId,
@@ -4071,7 +5136,7 @@ export const mobileDataService = {
             totalDueCentavos: newTotalDue,
             outstandingCentavos: newOutstanding,
             totalPaidCentavos: prevPaid,
-            lineItems: allLineItems,
+            lineItems: reconciledLineItems,
             status: newTotalDue > 0 && newOutstanding === 0 ? "PAID" : "UNPAID",
             updatedDate: new Date().toISOString(),
           });
@@ -4387,18 +5452,22 @@ export const mobileDataService = {
     } else if (isWater) {
       // Water mode: 5/person/day attendance rule.
       // Payors pay their OWN water + water from non-payors. NEVER split other payors' water on this payor!
-      let waterConfig: any = null;
+      const cycleId = resolvedCycleId || expense.billingCycleId;
+      let rawWaterConfig: any = null;
       try {
         const wSnap = await getDoc(
-          doc(db, "households", expense.householdId, "waterConfig", "settings"),
+          doc(db, `households/${expense.householdId}/systemSettings`, "water"),
         );
-        if (wSnap.exists()) waterConfig = wSnap.data();
+        if (wSnap.exists()) rawWaterConfig = wSnap.data();
       } catch {}
+      const waterConfig = resolveCycleWaterConfig(rawWaterConfig, cycleId, {
+        cycleWaterExpense: expense,
+        payorCount: effectivePayors.length,
+      });
 
       const pricingModel = waterConfig?.pricingModel || "PER_PERSON_DAY";
       if (pricingModel === "PER_PERSON_DAY") {
         const rate = Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500);
-        const cycleId = resolvedCycleId || expense.billingCycleId;
         let attRecords: any[] = [];
         let subRecords: any[] = [];
         if (cycleId) {
@@ -4574,13 +5643,20 @@ export const mobileDataService = {
             lineItem,
           ];
           const prevPaid = existing?.totalPaidCentavos || 0;
-          // Calculate new total due accurately from unpaid line items
-          const newTotalDue = updatedLineItems
-            .filter((li: any) => li.status === "UNPAID" && !li.isExempt)
+          const nonExemptItems = updatedLineItems.filter(
+            (li: any) => !li.isExempt,
+          );
+          const grossTotalDue = nonExemptItems.reduce(
+            (sum: number, li: any) => sum + (Number(li.amountCentavos) || 0),
+            0,
+          );
+          const unpaidOnlyTotalDue = nonExemptItems
+            .filter((li: any) => li.status !== "PAID" && !li.isSettled)
             .reduce(
-              (sum: number, li: any) => sum + (li.amountCentavos || 0),
+              (sum: number, li: any) => sum + (Number(li.amountCentavos) || 0),
               0,
             );
+          const newTotalDue = prevPaid > 0 ? grossTotalDue : unpaidOnlyTotalDue;
           const newOutstanding = Math.max(0, newTotalDue - prevPaid);
 
           const billData = sanitizeData({
@@ -4840,13 +5916,28 @@ export const mobileDataService = {
         updates.amountCents !== currentData.amountCents
       ) {
         const payorEntries = splitDetails.filter((s: any) => !s.isExempt);
-        const count = Math.max(1, payorEntries.length);
-        const sharePerPayor = Math.round(newAmountCents / count);
-        splitDetails = splitDetails.map((s: any) => ({
-          ...s,
-          shareCentavos: s.isExempt ? 0 : sharePerPayor,
-          isPaid: s.isExempt ? true : isPaid,
-        }));
+        splitDetails = splitDetails.map((s: any) => {
+          if (s.isExempt) {
+            return { ...s, shareCentavos: 0, isPaid: true };
+          }
+          const shareCentavos = computeFairSplitShareCentavos(
+            newAmountCents,
+            payorEntries,
+            s.userId || s.memberId || s.id || "",
+          );
+          const prevActualPaid =
+            typeof s.paidAmountCentavos === "number"
+              ? s.paidAmountCentavos
+              : s.paymentId || s.paidDate
+                ? Number(s.shareCentavos) || 0
+                : 0;
+          return {
+            ...s,
+            shareCentavos,
+            isPaid:
+              isPaid || (shareCentavos > 0 && prevActualPaid >= shareCentavos),
+          };
+        });
       } else if (
         Array.isArray(splitDetails) &&
         (updates.status !== undefined || updates.isPaid !== undefined)
@@ -4857,6 +5948,18 @@ export const mobileDataService = {
         }));
       }
 
+      const splitsMap: Record<string, number> = {};
+      if (Array.isArray(splitDetails)) {
+        splitDetails.forEach((s: any) => {
+          if (s.userId) splitsMap[s.userId] = Number(s.shareCentavos) || 0;
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const effectiveCycleId =
+        updates.billingCycleId || currentData.billingCycleId;
+      const effectiveCategory = updates.category ?? currentData.category ?? "";
+
       await updateDoc(
         expRef,
         sanitizeData({
@@ -4864,14 +5967,109 @@ export const mobileDataService = {
           status: newStatus,
           isPaid,
           splitDetails,
-          updatedDate: new Date().toISOString(),
+          splits:
+            Object.keys(splitsMap).length > 0 ? splitsMap : currentData.splits,
+          updatedAt: nowIso,
+          updatedDate: nowIso,
         }),
       );
 
+      // Keep mirrored charges document in sync if present
+      await setDoc(
+        doc(db, `households/${householdId}/charges`, expenseId),
+        sanitizeData({
+          chargeId: expenseId,
+          householdId,
+          billingCycleId: effectiveCycleId,
+          name: updates.title ?? currentData.title,
+          description: updates.notes ?? currentData.notes ?? "",
+          amountCentavos: newAmountCents,
+          splitDetails,
+          updatedDate: nowIso,
+        }),
+        { merge: true },
+      ).catch(() => {});
+
+      // Keep systemSettings/electricity in sync when editing an Electricity bill
+      if (effectiveCategory.toLowerCase().includes("electric")) {
+        try {
+          const elecRef = doc(
+            db,
+            `households/${householdId}/systemSettings`,
+            "electricity",
+          );
+          const elecSnap = await getDoc(elecRef);
+          const elecData = elecSnap.exists() ? elecSnap.data() : {};
+          const existingCycles =
+            elecData.cycles && typeof elecData.cycles === "object"
+              ? { ...elecData.cycles }
+              : {};
+          const prevCycleEntry =
+            (effectiveCycleId && existingCycles[effectiveCycleId]) || {};
+          const updatedPrevKwh =
+            updates.previousReadingKwh ??
+            currentData.previousReadingKwh ??
+            prevCycleEntry.previousReadingKwh;
+          const updatedCurrKwh =
+            updates.currentReadingKwh ??
+            currentData.currentReadingKwh ??
+            prevCycleEntry.currentReadingKwh;
+          const updatedRate =
+            updates.rateCentavosPerKwh ??
+            currentData.rateCentavosPerKwh ??
+            prevCycleEntry.rateCentavosPerKwh ??
+            elecData.rateCentavosPerKwh ??
+            1200;
+          const updatedConsumed =
+            updates.consumedKwh ??
+            currentData.consumedKwh ??
+            prevCycleEntry.consumedKwh;
+
+          if (effectiveCycleId) {
+            existingCycles[effectiveCycleId] = sanitizeData({
+              ...prevCycleEntry,
+              previousReadingKwh: updatedPrevKwh,
+              currentReadingKwh: updatedCurrKwh,
+              rateCentavosPerKwh: updatedRate,
+              consumedKwh: updatedConsumed,
+              totalAmountCentavos: newAmountCents,
+              billingCycleId: effectiveCycleId,
+              updatedAt: nowIso,
+            });
+          }
+
+          await setDoc(
+            elecRef,
+            sanitizeData({
+              totalAmountCentavos: newAmountCents,
+              ...(updatedPrevKwh !== undefined
+                ? { previousReadingKwh: updatedPrevKwh }
+                : {}),
+              ...(updatedCurrKwh !== undefined
+                ? {
+                    currentReadingKwh: updatedCurrKwh,
+                    lastCurrentReadingKwh: updatedCurrKwh,
+                  }
+                : {}),
+              ...(updatedRate !== undefined
+                ? { rateCentavosPerKwh: updatedRate }
+                : {}),
+              ...(updatedConsumed !== undefined
+                ? { consumedKwh: updatedConsumed }
+                : {}),
+              cycles: existingCycles,
+              updatedAt: nowIso,
+            }),
+            { merge: true },
+          );
+        } catch {}
+      }
+
       // Recalculate unpaid expenses and member bills across household
-      await this.recalculateUnpaidExpensesForHousehold(householdId).catch(
-        () => {},
-      );
+      await this.recalculateUnpaidExpensesForHousehold(
+        householdId,
+        effectiveCycleId,
+      ).catch(() => {});
       return true;
     } catch (err) {
       console.error("[updateExpense] Error:", err);
@@ -4885,12 +6083,74 @@ export const mobileDataService = {
   ): Promise<boolean> {
     try {
       const expRef = doc(db, `households/${householdId}/expenses`, expenseId);
+      const expSnap = await getDoc(expRef).catch(() => null);
+      const expData = expSnap && expSnap.exists() ? expSnap.data() : null;
+      const targetCycleId = expData?.billingCycleId;
       await deleteDoc(expRef);
+      await deleteDoc(
+        doc(db, `households/${householdId}/charges`, expenseId),
+      ).catch(() => {});
+
+      if (
+        targetCycleId &&
+        (expData?.category || "").toLowerCase().includes("electric")
+      ) {
+        try {
+          const elecRef = doc(
+            db,
+            `households/${householdId}/systemSettings`,
+            "electricity",
+          );
+          const elecSnap = await getDoc(elecRef);
+          if (elecSnap.exists()) {
+            const elecData = elecSnap.data();
+            if (elecData?.cycles?.[targetCycleId]) {
+              const nextCycles = { ...elecData.cycles };
+              delete nextCycles[targetCycleId];
+              await updateDoc(elecRef, {
+                cycles: nextCycles,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+        } catch {}
+      }
+
+      if (
+        targetCycleId &&
+        (expData?.category || "").toLowerCase().includes("water")
+      ) {
+        try {
+          const waterRef = doc(
+            db,
+            `households/${householdId}/systemSettings`,
+            "water",
+          );
+          const waterSnap = await getDoc(waterRef);
+          if (waterSnap.exists()) {
+            const waterData = waterSnap.data();
+            const nextCycles =
+              waterData?.cycles && typeof waterData.cycles === "object"
+                ? { ...waterData.cycles }
+                : {};
+            delete nextCycles[targetCycleId];
+            await updateDoc(waterRef, {
+              cycles: nextCycles,
+              billingCycleId:
+                waterData?.billingCycleId === targetCycleId
+                  ? ""
+                  : waterData?.billingCycleId || "",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch {}
+      }
 
       // Recalculate unpaid expenses and member bills across household
-      await this.recalculateUnpaidExpensesForHousehold(householdId).catch(
-        () => {},
-      );
+      await this.recalculateUnpaidExpensesForHousehold(
+        householdId,
+        targetCycleId,
+      ).catch(() => {});
       return true;
     } catch (err) {
       console.error("[deleteExpense] Error:", err);
@@ -4944,9 +6204,18 @@ export const mobileDataService = {
 
           priorMemberBillsSnap.docs.forEach((bd) => {
             const bData = bd.data();
-            const bUser = bData.userId || bData.memberId;
-            if (bData.billingCycleId === priorCycleId && bUser) {
-              priorBillsByUser.set(bUser, bData);
+            const rawUser = bData.userId || bData.memberId;
+            const cleanUser = normalizeCleanUid(rawUser);
+            if (bData.billingCycleId === priorCycleId && cleanUser) {
+              const existing = priorBillsByUser.get(cleanUser);
+              if (
+                !existing ||
+                bd.id.startsWith("bill_") ||
+                Number(bData.totalPaidCentavos || 0) >
+                  Number(existing.totalPaidCentavos || 0)
+              ) {
+                priorBillsByUser.set(cleanUser, bData);
+              }
             }
           });
 
@@ -5046,6 +6315,61 @@ export const mobileDataService = {
       }
     } catch {}
 
+    // 1c. Snapshot closing cycle's water configuration into cycles[priorCycleId] and clear top-level billingCycleId so the new cycle starts unconfigured
+    try {
+      const waterRef = doc(
+        db,
+        `households/${householdId}/systemSettings`,
+        "water",
+      );
+      const waterSnap = await getDoc(waterRef);
+      if (waterSnap.exists()) {
+        const waterData = waterSnap.data();
+        const existingWaterCycles =
+          waterData.cycles && typeof waterData.cycles === "object"
+            ? { ...waterData.cycles }
+            : {};
+        const closingWaterCid =
+          waterData.billingCycleId ||
+          (!waterData.cycles && waterData.updatedAt && priorCycleId
+            ? priorCycleId
+            : "");
+        if (
+          closingWaterCid &&
+          !existingWaterCycles[closingWaterCid] &&
+          waterData.updatedAt
+        ) {
+          existingWaterCycles[closingWaterCid] = {
+            pricingModel:
+              waterData.pricingModel ||
+              (waterData.fixedMonthlyAmountCentavos
+                ? "FIXED_MONTHLY"
+                : "PER_PERSON_DAY"),
+            rateCentavosPerPersonPerDay: Number(
+              waterData.rateCentavosPerPersonPerDay ?? 500,
+            ),
+            fixedMonthlyAmountCentavos: Number(
+              waterData.fixedMonthlyAmountCentavos ?? 0,
+            ),
+            fixedPerPersonAmountCentavos: Number(
+              waterData.fixedPerPersonAmountCentavos ?? 0,
+            ),
+            mode: waterData.mode || "BILLING_CYCLE",
+            billingCycleId: closingWaterCid,
+            updatedAt: waterData.updatedAt || nowIso,
+          };
+        }
+        await setDoc(
+          waterRef,
+          sanitizeData({
+            billingCycleId: "",
+            cycles: existingWaterCycles,
+          }),
+          { merge: true },
+        ).catch(() => {});
+      }
+    } catch {}
+
     // 2. Create the new ACTIVE billing cycle starting with 0 bills and payments locked until host opens them
     const ref = doc(
       db,
@@ -5076,15 +6400,61 @@ export const mobileDataService = {
       }).catch(() => {}),
     ]);
 
-    // 3. Reset all active payors' settlement status and initialize fresh memberBills for the new cycle (carrying forward prior cycle Arrears)
+    // 3. Reset all active payors' settlement status and initialize fresh memberBills for the new cycle (carrying forward ONLY genuinely unpaid prior-cycle arrears)
     try {
-      const membersSnap = await getDocs(
-        collection(db, `households/${householdId}/members`),
-      );
+      const [
+        membersSnap,
+        latestCyclesSnap,
+        latestExpSnap,
+        latestBillsSnap,
+        latestPmtsSnap,
+      ] = await Promise.all([
+        getDocs(collection(db, `households/${householdId}/members`)),
+        getDocs(collection(db, `households/${householdId}/billingCycles`)),
+        getDocs(collection(db, `households/${householdId}/expenses`)),
+        getDocs(collection(db, `households/${householdId}/memberBills`)),
+        getDocs(collection(db, `households/${householdId}/payments`)),
+      ]);
+
+      const priorCyclesOnly = latestCyclesSnap.docs
+        .map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        }))
+        .filter((c: any) => c.billingCycleId !== billingCycleId);
+
+      const priorSettlement = evaluateHouseholdCycleSettlements({
+        cycles: priorCyclesOnly,
+        expenses: latestExpSnap.docs.map(
+          (ed) => ({ id: ed.id, ...ed.data() }) as MobileExpense,
+        ),
+        payments: latestPmtsSnap.docs.map((pd) => pd.data() as MobilePayment),
+        allMemberBills: latestBillsSnap.docs.map((bd) => ({
+          billId: bd.id,
+          ...bd.data(),
+        })),
+        members: membersSnap.docs.map((md) => ({
+          id: md.id,
+          ...md.data(),
+        })),
+      });
+
+      // Also persist PAID status on any prior cycles whose payors settled via rollover
+      if (priorCycleId) {
+        for (const cycId of priorSettlement.orderedCycleIdsOldestFirst) {
+          if (priorSettlement.allPayorsSettledByCycle.get(cycId)) {
+            await this.markExpensesPaidIfAllSettled(householdId, cycId).catch(
+              () => {},
+            );
+          }
+        }
+      }
+
       await Promise.all(
         membersSnap.docs.map(async (md) => {
           const mData = md.data();
           const uid = mData.userId || mData.memberId || md.id;
+          const cleanUid = normalizeCleanUid(uid);
           const isActiveOrSettled =
             !mData.status ||
             mData.status === "ACTIVE" ||
@@ -5108,28 +6478,23 @@ export const mobileDataService = {
             ).catch(() => {});
           }
 
-          if (uid) {
-            const priorBill = priorBillsByUser.get(uid);
+          if (uid && cleanUid) {
             let priorOutstandingCentavos = 0;
-            if (priorBill) {
-              if (typeof priorBill.outstandingCentavos === "number") {
-                priorOutstandingCentavos = Math.max(
-                  0,
-                  priorBill.outstandingCentavos,
-                );
-              } else {
-                const due = Number(priorBill.totalDueCentavos || 0);
-                const paid = Number(
-                  priorBill.totalPaidCentavos || priorBill.paidCentavos || 0,
-                );
-                priorOutstandingCentavos = Math.max(0, due - paid);
-              }
+            if (priorCycleId && isPayorMember(mData)) {
+              const summary = priorSettlement.getMemberCycleSummary(
+                priorCycleId,
+                mData,
+              );
+              priorOutstandingCentavos = Math.max(
+                0,
+                summary.totalOwesAsOfCycleCentavos,
+              );
             }
 
             const initialLineItems: any[] = [];
-            if (priorOutstandingCentavos > 0) {
+            if (priorOutstandingCentavos > 0 && priorCycleId) {
               initialLineItems.push({
-                itemId: `arrears_${priorCycleId}_${uid}`,
+                itemId: `arrears_${priorCycleId}_${cleanUid}`,
                 description: `Previous Balance (${priorCycleName})`,
                 category: "Arrears",
                 amountCentavos: priorOutstandingCentavos,
@@ -5142,7 +6507,7 @@ export const mobileDataService = {
               });
             }
 
-            const billId = `bill_${billingCycleId}_${uid}`;
+            const billId = `bill_${billingCycleId}_${cleanUid}`;
             const billRef = doc(
               db,
               `households/${householdId}/memberBills`,
@@ -5154,7 +6519,7 @@ export const mobileDataService = {
                 billId,
                 householdId,
                 billingCycleId,
-                userId: uid,
+                userId: cleanUid,
                 displayName: mData.displayName || "Roommate",
                 totalDueCentavos: priorOutstandingCentavos,
                 outstandingCentavos: priorOutstandingCentavos,
@@ -5299,6 +6664,7 @@ export const mobileDataService = {
           callback({
             ...defaultConfig,
             ...data,
+            hasDoc: true,
             pricingModel:
               data.pricingModel ||
               (data.fixedMonthlyAmountCentavos
@@ -5306,38 +6672,149 @@ export const mobileDataService = {
                 : "PER_PERSON_DAY"),
           });
         } else {
-          callback(defaultConfig);
+          callback({
+            ...defaultConfig,
+            hasDoc: false,
+          });
         }
       },
       (_err) => {
-        callback(defaultConfig);
+        callback({
+          ...defaultConfig,
+          hasDoc: false,
+        });
       },
     );
   },
 
-  async saveWaterConfig(householdId: string, config: any): Promise<void> {
-    if (!householdId) return;
+  async saveWaterConfig(
+    householdId: string,
+    config: any,
+    options?: { billingCycleId?: string; skipExpenseSync?: boolean },
+  ): Promise<string | undefined> {
+    if (!householdId) return undefined;
     try {
       const ref = doc(db, `households/${householdId}/systemSettings`, "water");
-      const cleanConfig = sanitizeData({
-        pricingModel: config.pricingModel || "PER_PERSON_DAY",
-        rateCentavosPerPersonPerDay: Number(
-          config.rateCentavosPerPersonPerDay ?? 500,
-        ),
-        fixedMonthlyAmountCentavos: Number(
-          config.fixedMonthlyAmountCentavos ?? 0,
-        ),
-        fixedPerPersonAmountCentavos: Number(
-          config.fixedPerPersonAmountCentavos ?? 0,
-        ),
+      const nowIso = new Date().toISOString();
+      let targetCycleId = (
+        options?.billingCycleId ||
+        config?.billingCycleId ||
+        ""
+      ).trim();
+
+      if (!targetCycleId) {
+        const cyclesSnap = await getDocs(
+          collection(db, `households/${householdId}/billingCycles`),
+        );
+        const cycles = sortBillingCyclesNewest(
+          cyclesSnap.docs.map((cd) => ({
+            ...cd.data(),
+            billingCycleId: cd.data().billingCycleId || cd.id,
+          })),
+        );
+        const activeCycle =
+          cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
+        if (activeCycle?.billingCycleId) {
+          targetCycleId = activeCycle.billingCycleId;
+        } else if (!options?.skipExpenseSync) {
+          targetCycleId = `bc_${Date.now()}`;
+          const now = new Date();
+          const monthNames = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+          ];
+          const cycleName = `${monthNames[now.getMonth()]} ${now.getFullYear()} Billing`;
+          await setDoc(
+            doc(db, `households/${householdId}/billingCycles`, targetCycleId),
+            sanitizeData({
+              billingCycleId: targetCycleId,
+              householdId,
+              name: cycleName,
+              startDate: new Date(now.getFullYear(), now.getMonth(), 1)
+                .toISOString()
+                .slice(0, 10),
+              endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                .toISOString()
+                .slice(0, 10),
+              status: "ACTIVE",
+              paymentsLocked: true,
+              isFinalized: false,
+              paymentsOpenedByHost: false,
+              createdDate: nowIso,
+              updatedDate: nowIso,
+            }),
+            { merge: true },
+          );
+        }
+      }
+
+      const pricingModel: CycleWaterConfig["pricingModel"] =
+        config.pricingModel || "PER_PERSON_DAY";
+      const rateCentavosPerPersonPerDay = Number(
+        config.rateCentavosPerPersonPerDay ?? 500,
+      );
+      const fixedMonthlyAmountCentavos = Number(
+        config.fixedMonthlyAmountCentavos ?? 0,
+      );
+      const fixedPerPersonAmountCentavos = Number(
+        config.fixedPerPersonAmountCentavos ?? 0,
+      );
+
+      const cycleSnapshot = {
+        pricingModel,
+        rateCentavosPerPersonPerDay,
+        fixedMonthlyAmountCentavos,
+        fixedPerPersonAmountCentavos,
         mode: config.mode || "BILLING_CYCLE",
-        updatedAt: new Date().toISOString(),
+        billingCycleId: targetCycleId,
+        updatedAt: nowIso,
+      };
+
+      const waterSnap = await getDoc(ref);
+      const existingDoc = waterSnap.exists() ? waterSnap.data() : {};
+      const existingCycles =
+        existingDoc.cycles && typeof existingDoc.cycles === "object"
+          ? { ...existingDoc.cycles }
+          : {};
+      if (targetCycleId) {
+        existingCycles[targetCycleId] = cycleSnapshot;
+      }
+
+      const cleanConfig = sanitizeData({
+        pricingModel,
+        rateCentavosPerPersonPerDay,
+        fixedMonthlyAmountCentavos,
+        fixedPerPersonAmountCentavos,
+        mode: config.mode || "BILLING_CYCLE",
+        billingCycleId: targetCycleId || existingDoc.billingCycleId || "",
+        cycles: existingCycles,
+        updatedAt: nowIso,
       });
       await setDoc(ref, cleanConfig, { merge: true });
 
-      // Automatically sync water charge for the current cycle and recalculate member bills
-      await this.syncCycleWaterBill(householdId);
-      await this.recalculateUnpaidExpensesForHousehold(householdId);
+      if (!options?.skipExpenseSync) {
+        await this.syncCycleWaterBill(
+          householdId,
+          targetCycleId || undefined,
+          cycleSnapshot,
+        );
+        await this.recalculateUnpaidExpensesForHousehold(
+          householdId,
+          targetCycleId || undefined,
+        );
+      }
+
+      return targetCycleId || undefined;
     } catch (err) {
       console.error("[saveWaterConfig Mobile] Error:", err);
       throw err;
@@ -5345,12 +6822,13 @@ export const mobileDataService = {
   },
 
   /**
-   * Generates or synchronizes the active billing cycle's Water line item
-   * according to the household's configured water mode (PER_PERSON_DAY, FIXED_MONTHLY, or FIXED_PER_PERSON_MONTH).
+   * Generates or synchronizes the target billing cycle's Water line item
+   * according to that cycle's configured water mode (PER_PERSON_DAY, FIXED_MONTHLY, or FIXED_PER_PERSON_MONTH).
    */
   async syncCycleWaterBill(
     householdId: string,
     billingCycleId?: string,
+    overrideConfig?: Partial<CycleWaterConfig> & Record<string, any>,
   ): Promise<string | null> {
     try {
       if (!householdId) return null;
@@ -5370,7 +6848,10 @@ export const mobileDataService = {
 
       let targetCycle: any = null;
       const cycles = sortBillingCyclesNewest(
-        cyclesSnap.docs.map((cd) => cd.data()),
+        cyclesSnap.docs.map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        })),
       );
       if (billingCycleId) {
         targetCycle = cycles.find(
@@ -5384,6 +6865,12 @@ export const mobileDataService = {
       if (!targetCycle) {
         return null;
       }
+      if (
+        !overrideConfig &&
+        (targetCycle.status === "CLOSED" || targetCycle.status === "ARCHIVED")
+      ) {
+        return null;
+      }
       const cycleId = targetCycle.billingCycleId;
 
       // 2. Resolve members
@@ -5393,24 +6880,42 @@ export const mobileDataService = {
       if (activeMembers.length === 0) return null;
 
       const activePayors = activeMembers.filter((m) => isPayorMember(m));
-      const activeNonPayors = activeMembers.filter((m) => !isPayorMember(m));
       const effectivePayors =
         activePayors.length > 0 ? activePayors : activeMembers;
 
-      // 3. Resolve water configuration
-      let waterConfig: any = {
-        pricingModel: "PER_PERSON_DAY",
-        rateCentavosPerPersonPerDay: 500,
-      };
-      if (waterSnap.exists()) {
-        waterConfig = waterSnap.data();
+      const existingWaterExp = expSnap.docs.find((ed) => {
+        const data = ed.data();
+        const cat = (data.category || "").toLowerCase();
+        return (
+          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
+          (cat.includes("water") || ed.id.startsWith("water_"))
+        );
+      });
+      const existingWaterData = existingWaterExp
+        ? existingWaterExp.data()
+        : null;
+
+      // 3. Resolve cycle-scoped water configuration; do NOT create phantom water bills if unconfigured
+      const rawWaterData = waterSnap.exists() ? waterSnap.data() : null;
+      const resolvedWater = overrideConfig
+        ? resolveCycleWaterConfig(
+            {
+              ...overrideConfig,
+              billingCycleId: cycleId,
+            },
+            cycleId,
+          )
+        : resolveCycleWaterConfig(rawWaterData, cycleId, {
+            cycleWaterExpense: existingWaterData,
+            payorCount: effectivePayors.length,
+            totalCyclesCount: cycles.length,
+          });
+
+      if (!resolvedWater) {
+        return null;
       }
 
-      const pricingModel =
-        waterConfig.pricingModel ||
-        (waterConfig.fixedMonthlyAmountCentavos
-          ? "FIXED_MONTHLY"
-          : "PER_PERSON_DAY");
+      const pricingModel = resolvedWater.pricingModel;
 
       let billTitle = "Water Attendance";
       let totalAmountCentavos = 0;
@@ -5418,7 +6923,7 @@ export const mobileDataService = {
 
       if (pricingModel === "FIXED_PER_PERSON_MONTH") {
         const perPersonCentavos = Number(
-          waterConfig.fixedPerPersonAmountCentavos || 0,
+          resolvedWater.fixedPerPersonAmountCentavos || 0,
         );
         totalAmountCentavos = perPersonCentavos * effectivePayors.length;
         billTitle = "Water (Flat Per Person)";
@@ -5449,7 +6954,7 @@ export const mobileDataService = {
         });
       } else if (pricingModel === "FIXED_MONTHLY") {
         totalAmountCentavos = Number(
-          waterConfig.fixedMonthlyAmountCentavos || 0,
+          resolvedWater.fixedMonthlyAmountCentavos || 0,
         );
         billTitle = "Water (Fixed Household)";
 
@@ -5486,7 +6991,7 @@ export const mobileDataService = {
       } else {
         // Mode 1: PER_PERSON_DAY
         billTitle = "Water Attendance";
-        const rate = Number(waterConfig.rateCentavosPerPersonPerDay || 500);
+        const rate = Number(resolvedWater.rateCentavosPerPersonPerDay || 500);
 
         const [attSnap, subSnap] = await Promise.all([
           getDocs(
@@ -5529,21 +7034,9 @@ export const mobileDataService = {
         }));
       }
 
-      const existingWaterExp = expSnap.docs.find((ed) => {
-        const data = ed.data();
-        const cat = (data.category || "").toLowerCase();
-        return (
-          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
-          (cat.includes("water") || ed.id.startsWith("water_"))
-        );
-      });
-
       const expenseId = existingWaterExp
         ? existingWaterExp.id
         : `water_bill_${cycleId}`;
-      const existingWaterData = existingWaterExp
-        ? existingWaterExp.data()
-        : null;
       const splitsMap: Record<string, number> = {};
       splitDetails.forEach((s) => {
         if (s.userId) splitsMap[s.userId] = s.shareCentavos;
@@ -5553,26 +7046,42 @@ export const mobileDataService = {
         existingWaterData?.status === "PAID" ||
         existingWaterData?.isPaid === true;
 
-      // Preserve isPaid on existing splitDetails if previously settled
+      // Preserve isPaid on existing splitDetails if previously settled and share hasn't increased
       if (
         existingWaterData?.splitDetails &&
         Array.isArray(existingWaterData.splitDetails)
       ) {
-        const paidUserMap = new Map<string, boolean>();
+        const paidUserMap = new Map<
+          string,
+          { isPaid: boolean; share: number }
+        >();
         existingWaterData.splitDetails.forEach((s: any) => {
-          if (s.userId && s.isPaid) paidUserMap.set(s.userId, true);
+          if (s.userId && s.isPaid) {
+            paidUserMap.set(s.userId, {
+              isPaid: true,
+              share: Number(s.shareCentavos || 0),
+            });
+          }
         });
-        splitDetails = splitDetails.map((s: any) => ({
-          ...s,
-          isPaid:
-            s.isExempt || Boolean(paidUserMap.get(s.userId)) || wasAlreadyPaid,
-        }));
+        splitDetails = splitDetails.map((s: any) => {
+          const prev = paidUserMap.get(s.userId);
+          const stillPaid =
+            s.isExempt ||
+            (Boolean(prev?.isPaid) &&
+              Number(s.shareCentavos || 0) <= (prev?.share ?? 0));
+          return {
+            ...s,
+            isPaid: stillPaid,
+          };
+        });
       }
 
       const allWaterPaid =
-        wasAlreadyPaid ||
-        (splitDetails.length > 0 &&
-          splitDetails.every((s) => s.isExempt || s.isPaid));
+        splitDetails.length > 0 &&
+        splitDetails.some((s) => !s.isExempt && s.shareCentavos > 0) &&
+        splitDetails.every((s) => s.isExempt || s.isPaid) &&
+        (wasAlreadyPaid ||
+          totalAmountCentavos <= Number(existingWaterData?.amountCents || 0));
 
       const expensePayload = sanitizeData({
         id: expenseId,
@@ -5580,7 +7089,7 @@ export const mobileDataService = {
         title: billTitle,
         category: "Water",
         amountCents: totalAmountCentavos,
-        date: new Date().toISOString().slice(0, 10),
+        date: existingWaterData?.date || new Date().toISOString().slice(0, 10),
         payerName: "Household",
         payerId: "system",
         splitMethod:
@@ -5624,8 +7133,10 @@ export const mobileDataService = {
         ),
       ]);
 
-      // Immediately refresh all member bills in Firestore
-      this.recalculateUnpaidExpensesForHousehold(householdId).catch(() => {});
+      // Immediately refresh member bills for this cycle in Firestore
+      this.recalculateUnpaidExpensesForHousehold(householdId, cycleId).catch(
+        () => {},
+      );
 
       return expenseId;
     } catch (err) {
@@ -5694,8 +7205,8 @@ export const mobileDataService = {
       billingCycleId?: string;
     },
     options?: { billingCycleId?: string; skipExpenseSync?: boolean },
-  ): Promise<void> {
-    if (!householdId) return;
+  ): Promise<string | undefined> {
+    if (!householdId) return undefined;
     try {
       const ref = doc(
         db,
@@ -5707,9 +7218,69 @@ export const mobileDataService = {
       const rate = Math.max(0, Number(config.rateCentavosPerKwh ?? 1200));
       const consumedKwh = Math.max(0, Math.round((curr - prev) * 100) / 100);
       const totalAmountCentavos = Math.round(consumedKwh * rate);
-      const targetCycleId =
-        options?.billingCycleId || config.billingCycleId || "";
+      let targetCycleId = (
+        options?.billingCycleId ||
+        config.billingCycleId ||
+        ""
+      ).trim();
       const nowIso = new Date().toISOString();
+
+      // Ensure an active billing cycle exists so electricity configuration & expense sync always bind cleanly
+      if (!targetCycleId) {
+        const cyclesSnap = await getDocs(
+          collection(db, `households/${householdId}/billingCycles`),
+        );
+        const cycles = sortBillingCyclesNewest(
+          cyclesSnap.docs.map((cd) => ({
+            ...cd.data(),
+            billingCycleId: cd.data().billingCycleId || cd.id,
+          })),
+        );
+        const activeCycle =
+          cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
+        if (activeCycle?.billingCycleId) {
+          targetCycleId = activeCycle.billingCycleId;
+        } else if (!options?.skipExpenseSync) {
+          targetCycleId = `bc_${Date.now()}`;
+          const now = new Date();
+          const monthNames = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+          ];
+          const cycleName = `${monthNames[now.getMonth()]} ${now.getFullYear()} Billing`;
+          await setDoc(
+            doc(db, `households/${householdId}/billingCycles`, targetCycleId),
+            sanitizeData({
+              billingCycleId: targetCycleId,
+              householdId,
+              name: cycleName,
+              startDate: new Date(now.getFullYear(), now.getMonth(), 1)
+                .toISOString()
+                .slice(0, 10),
+              endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                .toISOString()
+                .slice(0, 10),
+              status: "ACTIVE",
+              paymentsLocked: true,
+              isFinalized: false,
+              paymentsOpenedByHost: false,
+              createdDate: nowIso,
+              updatedDate: nowIso,
+            }),
+            { merge: true },
+          );
+        }
+      }
 
       const cycleSnapshot = {
         previousReadingKwh: prev,
@@ -5745,9 +7316,14 @@ export const mobileDataService = {
       await setDoc(ref, cleanConfig, { merge: true });
 
       if (!options?.skipExpenseSync) {
-        await this.syncCycleElectricityBill(householdId, targetCycleId);
-        await this.recalculateUnpaidExpensesForHousehold(householdId);
+        await this.syncCycleElectricityBill(
+          householdId,
+          targetCycleId || undefined,
+          cycleSnapshot,
+        );
       }
+
+      return targetCycleId || undefined;
     } catch (err) {
       console.error("[saveElectricityConfig Mobile] Error:", err);
       throw err;
@@ -5757,10 +7333,16 @@ export const mobileDataService = {
   async syncCycleElectricityBill(
     householdId: string,
     billingCycleId?: string,
+    overrideConfig?: {
+      previousReadingKwh?: number;
+      currentReadingKwh?: number;
+      rateCentavosPerKwh?: number;
+      consumedKwh?: number;
+      totalAmountCentavos?: number;
+    },
   ): Promise<string | null> {
+    if (!householdId) return null;
     try {
-      if (!householdId) return null;
-
       const elecRef = doc(
         db,
         `households/${householdId}/systemSettings`,
@@ -5773,10 +7355,18 @@ export const mobileDataService = {
         getDocs(collection(db, `households/${householdId}/expenses`)),
       ]);
 
-      let targetCycle: any = null;
       const cycles = sortBillingCyclesNewest(
-        cyclesSnap.docs.map((cd) => cd.data()),
+        cyclesSnap.docs.map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        })),
       );
+      const knownCycleIds = new Set<string>();
+      cycles.forEach((c: any) => {
+        if (c?.billingCycleId) knownCycleIds.add(c.billingCycleId);
+      });
+
+      let targetCycle: any = null;
       if (billingCycleId) {
         targetCycle = cycles.find(
           (c: any) => c.billingCycleId === billingCycleId,
@@ -5786,22 +7376,86 @@ export const mobileDataService = {
         targetCycle =
           cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
       }
-      if (!targetCycle) return null;
-      const cycleId = targetCycle.billingCycleId;
 
-      const activeMembers = memSnap.docs
-        .map((d) => d.data())
-        .filter((m: any) => m.status === "ACTIVE" || !m.status);
-      if (activeMembers.length === 0) return null;
+      let cycleId = targetCycle?.billingCycleId || billingCycleId || "";
+      if (!cycleId) {
+        cycleId = `bc_${Date.now()}`;
+        const now = new Date();
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        const cycleName = `${monthNames[now.getMonth()]} ${now.getFullYear()} Billing`;
+        const nowCreateIso = now.toISOString();
+        await setDoc(
+          doc(db, `households/${householdId}/billingCycles`, cycleId),
+          sanitizeData({
+            billingCycleId: cycleId,
+            householdId,
+            name: cycleName,
+            startDate: new Date(now.getFullYear(), now.getMonth(), 1)
+              .toISOString()
+              .slice(0, 10),
+            endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
+              .toISOString()
+              .slice(0, 10),
+            status: "ACTIVE",
+            paymentsLocked: true,
+            isFinalized: false,
+            paymentsOpenedByHost: false,
+            createdDate: nowCreateIso,
+            updatedDate: nowCreateIso,
+          }),
+          { merge: true },
+        );
+        knownCycleIds.add(cycleId);
+      }
+
+      let activeMembers: any[] = memSnap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter(
+          (m: any) =>
+            m.status === "ACTIVE" || m.status === "SETTLED" || !m.status,
+        );
+
+      if (activeMembers.length === 0) {
+        const hhSnap = await getDoc(doc(db, "households", householdId)).catch(
+          () => null,
+        );
+        const hhData = hhSnap && hhSnap.exists() ? hhSnap.data() : null;
+        const fallbackUid = hhData?.hostId || auth.currentUser?.uid || "host";
+        activeMembers = [
+          {
+            id: fallbackUid,
+            userId: fallbackUid,
+            memberId: fallbackUid,
+            displayName: auth.currentUser?.displayName || "Host",
+            role: "HOST",
+            status: "ACTIVE",
+          },
+        ];
+      }
 
       const activePayors = activeMembers.filter((m) => isPayorMember(m));
       const effectivePayors =
         activePayors.length > 0 ? activePayors : activeMembers;
 
-      if (!elecSnap.exists()) return null;
-      const elecDoc = elecSnap.data();
+      if (!overrideConfig && !elecSnap.exists()) return null;
+      const elecDoc = elecSnap.exists() ? elecSnap.data() : {};
       const elecConfig =
-        (cycleId && elecDoc.cycles && elecDoc.cycles[cycleId]) || elecDoc;
+        overrideConfig ||
+        (cycleId && elecDoc.cycles && elecDoc.cycles[cycleId]) ||
+        elecDoc;
       const prev = Math.max(0, Number(elecConfig.previousReadingKwh ?? 0));
       const curr = Math.max(prev, Number(elecConfig.currentReadingKwh ?? prev));
       const rateCentavos = Math.max(
@@ -5817,48 +7471,95 @@ export const mobileDataService = {
       const ratePesosStr = (rateCentavos / 100).toFixed(2);
       const meterSummaryNote = `Prev: ${prev} kWh → Curr: ${curr} kWh (${consumedKwh} kWh × ₱${ratePesosStr}/kWh)`;
 
-      const existingElecExp = expSnap.docs.find((ed) => {
-        const data = ed.data();
-        const cat = (data.category || "").toLowerCase();
-        const title = (data.title || "").toLowerCase();
-        return (
-          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
-          (cat.includes("electric") ||
+      const oldestCycleId = cycles[cycles.length - 1]?.billingCycleId;
+      const isSingleOrOldestCycle =
+        cycles.length <= 1 || cycleId === oldestCycleId;
+
+      // Find all electricity expenses belonging to this cycle (including unscoped ones on single/oldest cycle)
+      const matchingElecDocs = expSnap.docs
+        .filter((ed) => {
+          const data = ed.data();
+          const cat = (data.category || "").toLowerCase();
+          const title = (data.title || "").toLowerCase();
+          const isElec =
+            cat.includes("electric") ||
             title.includes("electric") ||
-            ed.id.startsWith("elec_"))
-        );
-      });
+            ed.id.startsWith("elec_");
+          if (!isElec) return false;
+          const isUnscopedOrOrphan =
+            !data.billingCycleId ||
+            (knownCycleIds.size > 0 && !knownCycleIds.has(data.billingCycleId));
+          return (
+            data.billingCycleId === cycleId ||
+            ed.id.includes(cycleId) ||
+            (isUnscopedOrOrphan && isSingleOrOldestCycle)
+          );
+        })
+        .sort((a, b) => {
+          const aTime = String(a.data().createdAt || a.data().date || "");
+          const bTime = String(b.data().createdAt || b.data().date || "");
+          return bTime.localeCompare(aTime);
+        });
+
+      const existingElecExp = matchingElecDocs[0];
+      const duplicateElecDocs = matchingElecDocs.slice(1);
+
+      // Clean up any duplicate electricity bills in the same cycle so the UI always displays the synced bill
+      for (const dupDoc of duplicateElecDocs) {
+        await deleteDoc(dupDoc.ref).catch(() => {});
+        await deleteDoc(
+          doc(db, `households/${householdId}/charges`, dupDoc.id),
+        ).catch(() => {});
+      }
 
       if (totalAmountCentavos <= 0) {
         if (existingElecExp) {
-          const zeroSplits = activeMembers.map((m: any) => ({
-            userId: m.userId || m.memberId || m.id || "",
-            displayName: m.displayName || "Roommate",
-            shareCentavos: 0,
-            percentage: 0,
-            isPaid: true,
-            isExempt: !isPayorMember(m),
-            role: m.role || "PAYOR",
-            note: `${meterSummaryNote} (0 kWh)`,
-          }));
-          await setDoc(
-            doc(db, `households/${householdId}/expenses`, existingElecExp.id),
-            sanitizeData({
-              amountCents: 0,
-              previousReadingKwh: prev,
-              currentReadingKwh: curr,
-              consumedKwh: 0,
-              rateCentavosPerKwh: rateCentavos,
-              notes: meterSummaryNote,
-              splitDetails: zeroSplits,
-              status: "PAID",
+          const existingData = existingElecExp.data();
+          const hasVerifiedPayments =
+            Array.isArray(existingData?.splitDetails) &&
+            existingData.splitDetails.some(
+              (s: any) =>
+                !s.isExempt &&
+                ((Number(s.paidAmountCentavos) || 0) > 0 ||
+                  Boolean(s.paymentId) ||
+                  Boolean(s.paidDate)),
+            );
+          if (!hasVerifiedPayments) {
+            await deleteDoc(existingElecExp.ref).catch(() => {});
+            await deleteDoc(
+              doc(db, `households/${householdId}/charges`, existingElecExp.id),
+            ).catch(() => {});
+          } else {
+            const zeroSplits = activeMembers.map((m: any) => ({
+              userId: m.userId || m.memberId || m.id || "",
+              displayName: m.displayName || "Roommate",
+              shareCentavos: 0,
+              percentage: 0,
               isPaid: true,
-              updatedAt: new Date().toISOString(),
-            }),
-            { merge: true },
-          ).catch(() => {});
-          await this.recalculateUnpaidExpensesForHousehold(householdId);
+              isExempt: !isPayorMember(m),
+              role: m.role || "PAYOR",
+              note: `${meterSummaryNote} (0 kWh)`,
+            }));
+            await setDoc(
+              existingElecExp.ref,
+              sanitizeData({
+                amountCents: 0,
+                billingCycleId: cycleId,
+                previousReadingKwh: prev,
+                currentReadingKwh: curr,
+                consumedKwh: 0,
+                rateCentavosPerKwh: rateCentavos,
+                notes: meterSummaryNote,
+                splitDetails: zeroSplits,
+                status: "PAID",
+                isPaid: true,
+                updatedAt: new Date().toISOString(),
+              }),
+              { merge: true },
+            );
+          }
         }
+        await this.recalculateUnpaidExpensesForHousehold(householdId, cycleId);
         return null;
       }
 
@@ -5883,7 +7584,7 @@ export const mobileDataService = {
           };
         } else {
           return {
-            userId: m.userId || m.memberId,
+            userId: m.userId || m.memberId || m.id || "",
             displayName: m.displayName || "Roommate",
             shareCentavos: 0,
             percentage: 0,
@@ -5900,29 +7601,54 @@ export const mobileDataService = {
         : `elec_bill_${cycleId}`;
       const existingElecData = existingElecExp ? existingElecExp.data() : null;
 
-      const wasAlreadyPaid =
-        existingElecData?.status === "PAID" ||
-        existingElecData?.isPaid === true;
-
+      // Only preserve a payor's paid status if they actually settled at least the new shareCentavos
       if (
         existingElecData?.splitDetails &&
         Array.isArray(existingElecData.splitDetails)
       ) {
-        const paidUserMap = new Map<string, boolean>();
-        existingElecData.splitDetails.forEach((s: any) => {
-          if (s.userId && s.isPaid) paidUserMap.set(s.userId, true);
+        splitDetails = splitDetails.map((s: any) => {
+          if (s.isExempt) return s;
+          const prevSplit = existingElecData.splitDetails.find((ps: any) =>
+            matchesMemberUid(
+              { userId: s.userId },
+              ps?.userId || ps?.memberId || ps?.id,
+            ),
+          );
+          if (!prevSplit || !prevSplit.isPaid) return s;
+          const prevActualPaid =
+            typeof prevSplit.paidAmountCentavos === "number"
+              ? prevSplit.paidAmountCentavos
+              : prevSplit.paymentId || prevSplit.paidDate
+                ? Number(prevSplit.shareCentavos) || 0
+                : 0;
+          const coversNewShare =
+            s.shareCentavos > 0 && prevActualPaid >= s.shareCentavos;
+          if (!coversNewShare) {
+            return {
+              ...s,
+              isPaid: false,
+              ...(prevActualPaid > 0
+                ? { paidAmountCentavos: prevActualPaid }
+                : {}),
+            };
+          }
+          return {
+            ...s,
+            isPaid: true,
+            paidAmountCentavos: prevActualPaid,
+            ...(prevSplit.paidDate !== undefined
+              ? { paidDate: prevSplit.paidDate }
+              : {}),
+            ...(prevSplit.paymentId !== undefined
+              ? { paymentId: prevSplit.paymentId }
+              : {}),
+          };
         });
-        splitDetails = splitDetails.map((s: any) => ({
-          ...s,
-          isPaid:
-            s.isExempt || Boolean(paidUserMap.get(s.userId)) || wasAlreadyPaid,
-        }));
       }
 
       const allElecPaid =
-        wasAlreadyPaid ||
-        (splitDetails.length > 0 &&
-          splitDetails.every((s) => s.isExempt || s.isPaid));
+        splitDetails.length > 0 &&
+        splitDetails.every((s) => s.isExempt || s.isPaid);
 
       const splitsMap: Record<string, number> = {};
       splitDetails.forEach((s) => {
@@ -5933,12 +7659,12 @@ export const mobileDataService = {
       const expensePayload = sanitizeData({
         id: expenseId,
         householdId,
-        title: "Electricity",
+        title: existingElecData?.title || "Electricity",
         category: "Electricity",
         amountCents: totalAmountCentavos,
         date: nowIso.slice(0, 10),
-        payerName: "Host",
-        payerId: auth.currentUser?.uid || "system",
+        payerName: existingElecData?.payerName || "Host",
+        payerId: existingElecData?.payerId || auth.currentUser?.uid || "system",
         splitMethod: "Equal",
         billingCycleId: cycleId,
         status: allElecPaid ? "PAID" : "UNPAID",
@@ -5950,8 +7676,12 @@ export const mobileDataService = {
         notes: meterSummaryNote,
         splitDetails,
         splits: splitsMap,
+        participantUserIds: splitDetails
+          .filter((s) => !s.isExempt && Boolean(s.userId))
+          .map((s) => s.userId),
         createdAt: existingElecData?.createdAt || nowIso,
         updatedAt: nowIso,
+        updatedDate: nowIso,
       });
 
       await Promise.all([
@@ -5967,7 +7697,7 @@ export const mobileDataService = {
             householdId,
             billingCycleId: cycleId,
             chargeType: "ELECTRICITY",
-            name: "Electricity",
+            name: existingElecData?.title || "Electricity",
             description: meterSummaryNote,
             amountCentavos: totalAmountCentavos,
             distributionMethod: "PAYORS_ONLY",
@@ -5976,17 +7706,18 @@ export const mobileDataService = {
               .map((s) => s.userId),
             splitDetails,
             createdDate: existingElecData?.createdAt || nowIso,
+            updatedDate: nowIso,
             createdBy: auth.currentUser?.uid || "system",
           }),
           { merge: true },
         ),
       ]);
 
-      await this.recalculateUnpaidExpensesForHousehold(householdId);
+      await this.recalculateUnpaidExpensesForHousehold(householdId, cycleId);
       return expenseId;
     } catch (err) {
-      console.warn("[syncCycleElectricityBill] error:", err);
-      return null;
+      console.error("[syncCycleElectricityBill] error:", err);
+      throw err;
     }
   },
 
@@ -6028,23 +7759,37 @@ export const mobileDataService = {
   ): Promise<boolean> {
     if (!householdId) return false;
     try {
-      const membersSnap = await getDocs(
-        collection(db, `households/${householdId}/members`),
-      );
-      const allMembers = membersSnap.docs.map((d) => d.data());
+      const [membersSnap, cyclesSnap, expSnap, pmtSnap, billsSnap] =
+        await Promise.all([
+          getDocs(collection(db, `households/${householdId}/members`)),
+          getDocs(collection(db, `households/${householdId}/billingCycles`)),
+          getDocs(collection(db, `households/${householdId}/expenses`)),
+          getDocs(collection(db, `households/${householdId}/payments`)),
+          getDocs(collection(db, `households/${householdId}/memberBills`)),
+        ]);
+
+      const allMembers = membersSnap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
       const activeMembers = allMembers.filter(
-        (m: any) => m.status === "ACTIVE" || !m.status,
+        (m: any) =>
+          !m.status || m.status === "ACTIVE" || m.status === "SETTLED",
       );
       const activePayors = activeMembers.filter((m) => isPayorMember(m));
       if (activePayors.length === 0) return false;
 
-      const cyclesSnap = await getDocs(
-        collection(db, `households/${householdId}/billingCycles`),
-      );
       const cycles = sortBillingCyclesNewest(
-        cyclesSnap.docs.map((cd) => cd.data()),
+        cyclesSnap.docs.map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        })),
       );
       const isSingleCycle = cycles.length <= 1;
+      const oldestCycleId =
+        cycles.length > 0
+          ? cycles[cycles.length - 1]?.billingCycleId
+          : undefined;
       let cycleId = billingCycleId;
       if (!cycleId) {
         const activeCycle = cycles[0];
@@ -6052,17 +7797,11 @@ export const mobileDataService = {
       }
       if (!cycleId) return false;
 
-      // Fetch expenses and payments for this cycle to verify settlement accurately
-      const [expSnap, pmtSnap] = await Promise.all([
-        getDocs(collection(db, `households/${householdId}/expenses`)),
-        getDocs(collection(db, `households/${householdId}/payments`)),
-      ]);
-
       const cycleExpenses = expSnap.docs.filter((ed) => {
         const data = ed.data();
         return (
           data.billingCycleId === cycleId ||
-          (!data.billingCycleId && isSingleCycle)
+          (!data.billingCycleId && (isSingleCycle || cycleId === oldestCycleId))
         );
       });
 
@@ -6073,85 +7812,22 @@ export const mobileDataService = {
       );
       if (!hasPositiveExpense) return false;
 
-      const paymentsByUser = new Map<string, number>();
-      pmtSnap.docs.forEach((pd) => {
-        const pData = pd.data();
-        if (pData.status === "REJECTED") return;
-        const matchesCycle =
-          pData.billingCycleId === cycleId ||
-          ((!pData.billingCycleId || pData.billingCycleId === "general") &&
-            isSingleCycle);
-        if (matchesCycle && pData.userId) {
-          paymentsByUser.set(
-            pData.userId,
-            (paymentsByUser.get(pData.userId) || 0) +
-              (Number(pData.amountCentavos) || 0),
-          );
-        }
+      const settlement = evaluateHouseholdCycleSettlements({
+        cycles,
+        expenses: expSnap.docs.map(
+          (ed) => ({ id: ed.id, ...ed.data() }) as MobileExpense,
+        ),
+        payments: pmtSnap.docs.map((pd) => pd.data() as MobilePayment),
+        allMemberBills: billsSnap.docs.map((bd) => ({
+          billId: bd.id,
+          ...bd.data(),
+        })),
+        members: activeMembers,
       });
 
-      const payorCount = Math.max(1, activePayors.length);
-
-      // Check each payor's member bill and payment coverage strictly within this cycle
-      let allPayorsSettled = true;
-      for (const p of activePayors) {
-        const uid = p.userId || p.memberId || p.id;
-        const userPaidTotal = paymentsByUser.get(uid) || 0;
-
-        // Calculate this payor's total share across cycle expenses
-        let payorShareTotal = 0;
-        let allUserSplitsMarkedPaid = true;
-        cycleExpenses.forEach((ed) => {
-          const exp = ed.data();
-          const mySplit = Array.isArray(exp.splitDetails)
-            ? exp.splitDetails.find((s: any) => s.userId === uid)
-            : null;
-          if (mySplit?.isExempt) return;
-          const share =
-            mySplit && typeof mySplit.shareCentavos === "number"
-              ? mySplit.shareCentavos
-              : Math.round((exp.amountCents || 0) / payorCount);
-          payorShareTotal += share;
-          if (
-            !exp.isPaid &&
-            exp.status !== "PAID" &&
-            !mySplit?.isPaid &&
-            share > 0
-          ) {
-            allUserSplitsMarkedPaid = false;
-          }
-        });
-
-        if (payorShareTotal <= 0) continue;
-
-        const billSnap = await getDoc(
-          doc(
-            db,
-            `households/${householdId}/memberBills`,
-            `bill_${cycleId}_${uid}`,
-          ),
-        );
-        if (billSnap.exists()) {
-          const bData = billSnap.data();
-          const billPaid = Math.max(
-            bData.totalPaidCentavos || 0,
-            userPaidTotal,
-          );
-          const isSettledByPayments =
-            payorShareTotal > 0 && billPaid >= payorShareTotal;
-          if (!isSettledByPayments && !allUserSplitsMarkedPaid) {
-            allPayorsSettled = false;
-            break;
-          }
-        } else {
-          const isSettledByPayments =
-            payorShareTotal > 0 && userPaidTotal >= payorShareTotal;
-          if (!isSettledByPayments && !allUserSplitsMarkedPaid) {
-            allPayorsSettled = false;
-            break;
-          }
-        }
-      }
+      const allPayorsSettled = Boolean(
+        settlement.allPayorsSettledByCycle.get(cycleId),
+      );
 
       if (allPayorsSettled) {
         const nowIso = new Date().toISOString();
@@ -6160,13 +7836,20 @@ export const mobileDataService = {
           if (data.status !== "PAID" || !data.isPaid) {
             let splits = data.splitDetails;
             if (Array.isArray(splits)) {
-              splits = splits.map((s: any) =>
-                sanitizeData({
+              splits = splits.map((s: any) => {
+                const matchedPmt = settlement.getMatchedPaymentForExpense(
+                  { id: expDoc.id, ...data } as MobileExpense,
+                  s?.userId || s?.memberId,
+                );
+                return sanitizeData({
                   ...s,
                   isPaid: true,
-                  paidDate: s.paidDate || nowIso,
-                }),
-              );
+                  paidDate: s.paidDate || matchedPmt?.createdDate || nowIso,
+                  ...(s.paymentId || matchedPmt?.paymentId
+                    ? { paymentId: s.paymentId || matchedPmt?.paymentId }
+                    : {}),
+                });
+              });
             }
             await updateDoc(
               doc(db, `households/${householdId}/expenses`, expDoc.id),
@@ -6188,50 +7871,419 @@ export const mobileDataService = {
     }
   },
 
+  async reconcileStaleArrearsAndSettledCycles(
+    householdId: string,
+  ): Promise<void> {
+    if (!householdId) return;
+    const nowMs = Date.now();
+    const lastRun = _reconcileArrearsInFlight.get(householdId) || 0;
+    if (nowMs - lastRun < 6000) return;
+    _reconcileArrearsInFlight.set(householdId, nowMs);
+
+    try {
+      const [membersSnap, cyclesSnap, expSnap, pmtSnap, billsSnap] =
+        await Promise.all([
+          getDocs(collection(db, `households/${householdId}/members`)),
+          getDocs(collection(db, `households/${householdId}/billingCycles`)),
+          getDocs(collection(db, `households/${householdId}/expenses`)),
+          getDocs(collection(db, `households/${householdId}/payments`)),
+          getDocs(collection(db, `households/${householdId}/memberBills`)),
+        ]);
+
+      const activeMembers = membersSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(
+          (m: any) =>
+            !m.status || m.status === "ACTIVE" || m.status === "SETTLED",
+        );
+      if (activeMembers.length === 0) return;
+
+      const cycles = sortBillingCyclesNewest(
+        cyclesSnap.docs.map((cd) => ({
+          ...cd.data(),
+          billingCycleId: cd.data().billingCycleId || cd.id,
+        })),
+      );
+      if (cycles.length === 0) return;
+
+      const allExpenses = expSnap.docs.map(
+        (ed) => ({ id: ed.id, ...ed.data() }) as MobileExpense,
+      );
+      const allPayments = pmtSnap.docs.map((pd) => pd.data() as MobilePayment);
+      const allBills = billsSnap.docs.map((bd) => ({
+        billId: bd.id,
+        _docId: bd.id,
+        ...bd.data(),
+      }));
+
+      const settlement = evaluateHouseholdCycleSettlements({
+        cycles,
+        expenses: allExpenses,
+        payments: allPayments,
+        allMemberBills: allBills,
+        members: activeMembers,
+      });
+
+      const nowIso = new Date().toISOString();
+
+      // 1. Mark any fully-settled cycles' expenses as PAID (fixes historical cycles paid via rollover)
+      for (const cid of settlement.orderedCycleIdsOldestFirst) {
+        if (!settlement.allPayorsSettledByCycle.get(cid)) continue;
+        const unpaidExps = expSnap.docs.filter((ed) => {
+          const d = ed.data();
+          return d.billingCycleId === cid && (d.status !== "PAID" || !d.isPaid);
+        });
+        for (const ed of unpaidExps) {
+          const d = ed.data();
+          let splits = d.splitDetails;
+          if (Array.isArray(splits)) {
+            splits = splits.map((s: any) => {
+              const matchedPmt = settlement.getMatchedPaymentForExpense(
+                { id: ed.id, ...d } as MobileExpense,
+                s?.userId || s?.memberId,
+              );
+              return sanitizeData({
+                ...s,
+                isPaid: true,
+                paidDate: s.paidDate || matchedPmt?.createdDate || nowIso,
+                ...(s.paymentId || matchedPmt?.paymentId
+                  ? { paymentId: s.paymentId || matchedPmt?.paymentId }
+                  : {}),
+              });
+            });
+          }
+          await updateDoc(
+            doc(db, `households/${householdId}/expenses`, ed.id),
+            sanitizeData({
+              status: "PAID",
+              isPaid: true,
+              ...(splits ? { splitDetails: splits } : {}),
+              updatedAt: nowIso,
+            }),
+          ).catch(() => {});
+        }
+      }
+
+      // 2. Remove or mark PAID any stale Arrears line items on newer memberBills whose prior cycles are already settled
+      const activeCycle =
+        cycles.find((c: any) => c.status === "ACTIVE") || cycles[0];
+      const activeCycleId = activeCycle?.billingCycleId;
+      if (activeCycleId) {
+        for (const bd of billsSnap.docs) {
+          const bData = bd.data();
+          if (bData.billingCycleId !== activeCycleId) continue;
+          const bUid = bData.userId || bData.memberId;
+          if (!bUid || !Array.isArray(bData.lineItems)) continue;
+
+          const truePriorArrears = settlement.getPriorUnpaidArrearsBeforeCycle(
+            activeCycleId,
+            bUid,
+          );
+          const prevPaid = Number(
+            bData.totalPaidCentavos || bData.paidCentavos || 0,
+          );
+
+          const hasStaleUnpaidArrears = bData.lineItems.some((li: any) => {
+            if (!(li?.category === "Arrears" || li?.isArrears) || li?.isExempt)
+              return false;
+            if (li.status === "PAID" || li.isSettled) return false;
+            const pCid = String(li.priorCycleId || "").trim();
+            if (truePriorArrears === 0) return true;
+            if (pCid) {
+              const pSummary = settlement.getMemberCycleSummary(pCid, bUid);
+              if (
+                pSummary.remainingCycleCentavos === 0 &&
+                pSummary.priorUnpaidArrearsCentavos === 0
+              ) {
+                return true;
+              }
+            }
+            return false;
+          });
+
+          if (hasStaleUnpaidArrears && prevPaid === 0) {
+            const cleanedLineItems = bData.lineItems.filter((li: any) => {
+              if (!(li?.category === "Arrears" || li?.isArrears)) return true;
+              if (truePriorArrears === 0) return false;
+              const pCid = String(li.priorCycleId || "").trim();
+              if (pCid) {
+                const pSummary = settlement.getMemberCycleSummary(pCid, bUid);
+                if (
+                  pSummary.remainingCycleCentavos === 0 &&
+                  pSummary.priorUnpaidArrearsCentavos === 0
+                ) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            const newDue = cleanedLineItems
+              .filter(
+                (li: any) =>
+                  !li.isExempt && li.status !== "PAID" && !li.isSettled,
+              )
+              .reduce(
+                (sum: number, li: any) =>
+                  sum + (Number(li.amountCentavos) || 0),
+                0,
+              );
+            const newOut = Math.max(0, newDue - prevPaid);
+            await updateDoc(
+              bd.ref,
+              sanitizeData({
+                lineItems: cleanedLineItems,
+                totalDueCentavos: newDue,
+                outstandingCentavos: newOut,
+                status: newDue > 0 && newOut === 0 ? "PAID" : "UNPAID",
+                updatedDate: nowIso,
+              }),
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[reconcileStaleArrearsAndSettledCycles] warning:", err);
+    }
+  },
+
   // --- PAYMENTS ---
   async applyPaymentToMemberBills(
     householdId: string,
     billingCycleId: string,
     userId: string,
     amountCentavos: number,
+    breakdownItems?: MobilePaymentBreakdownItem[],
   ): Promise<void> {
     try {
       const cycleKey = billingCycleId || "general";
-      const billId = `bill_${cycleKey}_${userId}`;
+      const cleanUid = normalizeCleanUid(userId) || userId;
+      const billId = `bill_${cycleKey}_${cleanUid}`;
       const billRef = doc(db, `households/${householdId}/memberBills`, billId);
-      const snap = await getDoc(billRef);
+      let snap = await getDoc(billRef);
+      let activeTargetRef = billRef;
+      if (!snap.exists() && cleanUid !== userId) {
+        const legacyRef = doc(
+          db,
+          `households/${householdId}/memberBills`,
+          `bill_${cycleKey}_${userId}`,
+        );
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists()) {
+          snap = legacySnap;
+          activeTargetRef = legacyRef;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const settledPriorCycleIds = new Set<string>();
+      const breakdownAmountByCycle = new Map<string, number>();
+
+      if (Array.isArray(breakdownItems)) {
+        for (const bi of breakdownItems) {
+          const bCid = String(bi?.cycleId || "").trim();
+          const bAmt = Math.max(0, Number(bi?.shareCentavos) || 0);
+          if (bCid && bCid !== "general" && bCid !== cycleKey && bAmt > 0) {
+            breakdownAmountByCycle.set(
+              bCid,
+              (breakdownAmountByCycle.get(bCid) || 0) + bAmt,
+            );
+            settledPriorCycleIds.add(bCid);
+          }
+        }
+      }
+
+      let isNowFullyPaid = false;
+
       if (snap.exists()) {
         const bill = snap.data();
         const prevPaid = bill.totalPaidCentavos || bill.paidCentavos || 0;
         const newPaid = prevPaid + amountCentavos;
-        const totalDue = bill.totalDueCentavos || 0;
+        const existingItems = Array.isArray(bill.lineItems)
+          ? bill.lineItems
+          : [];
+        const grossFromItems = existingItems
+          .filter((li: any) => !li.isExempt)
+          .reduce(
+            (sum: number, li: any) => sum + (Number(li.amountCentavos) || 0),
+            0,
+          );
+        const totalDue = Math.max(bill.totalDueCentavos || 0, grossFromItems);
         const newOutstanding = Math.max(0, totalDue - newPaid);
         const newStatus = newOutstanding === 0 ? "PAID" : "PARTIALLY_PAID";
-        await updateDoc(billRef, {
-          totalPaidCentavos: newPaid,
-          paidCentavos: newPaid,
-          outstandingCentavos: newOutstanding,
-          status: newStatus,
-          updatedDate: new Date().toISOString(),
+        isNowFullyPaid = newOutstanding === 0;
+
+        let creditPool = newPaid;
+        const updatedLineItems = existingItems.map((li: any) => {
+          if (li.isExempt) return sanitizeData(li);
+          const itemAmt = Number(li.amountCentavos) || 0;
+          const isArrearsItem = Boolean(
+            li.category === "Arrears" || li.isArrears,
+          );
+          if ((itemAmt > 0 && creditPool >= itemAmt) || newOutstanding === 0) {
+            if (itemAmt > 0 && creditPool >= itemAmt) {
+              creditPool -= itemAmt;
+            }
+            if (isArrearsItem && li.priorCycleId) {
+              settledPriorCycleIds.add(String(li.priorCycleId));
+            }
+            return sanitizeData({
+              ...li,
+              status: "PAID",
+              isSettled: true,
+              paidDate: li.paidDate || nowIso,
+            });
+          }
+          return sanitizeData(li);
         });
+
+        await updateDoc(
+          activeTargetRef,
+          sanitizeData({
+            userId: cleanUid,
+            totalDueCentavos: totalDue,
+            totalPaidCentavos: newPaid,
+            paidCentavos: newPaid,
+            outstandingCentavos: newOutstanding,
+            status: newStatus,
+            ...(existingItems.length > 0
+              ? { lineItems: updatedLineItems }
+              : {}),
+            updatedDate: nowIso,
+          }),
+        );
+
+        // If all dues on this bill are cleared, also reconcile any older unpaid memberBills for this user
+        if (newOutstanding === 0) {
+          try {
+            const allBillsSnap = await getDocs(
+              collection(db, `households/${householdId}/memberBills`),
+            );
+            for (const bDoc of allBillsSnap.docs) {
+              const bData = bDoc.data();
+              if (
+                !matchesMemberUid(
+                  { userId: cleanUid },
+                  bData.userId || bData.memberId,
+                )
+              ) {
+                continue;
+              }
+              if (
+                bData.billingCycleId &&
+                bData.billingCycleId !== cycleKey &&
+                (bData.status !== "PAID" ||
+                  (Number(bData.outstandingCentavos) || 0) > 0)
+              ) {
+                settledPriorCycleIds.add(String(bData.billingCycleId));
+              }
+            }
+          } catch {}
+        }
       } else {
+        isNowFullyPaid = true;
         await setDoc(
           billRef,
           sanitizeData({
             billId,
             householdId,
             billingCycleId: cycleKey,
-            userId,
+            userId: cleanUid,
             totalDueCentavos: amountCentavos,
             totalPaidCentavos: amountCentavos,
             paidCentavos: amountCentavos,
             outstandingCentavos: 0,
             status: "PAID",
-            updatedDate: new Date().toISOString(),
-            createdDate: new Date().toISOString(),
+            updatedDate: nowIso,
+            createdDate: nowIso,
           }),
           { merge: true },
         );
+      }
+
+      // Sync member doc payment status when fully settled
+      if (isNowFullyPaid) {
+        try {
+          const memSnap = await getDocs(
+            collection(db, `households/${householdId}/members`),
+          );
+          for (const md of memSnap.docs) {
+            const mData = md.data();
+            if (matchesMemberUid(mData, cleanUid) || md.id === cleanUid) {
+              await updateDoc(md.ref, {
+                paymentStatus: "PAID",
+                isPaid: true,
+                updatedDate: nowIso,
+              }).catch(() => {});
+            }
+          }
+        } catch {}
+      }
+
+      // Mark settled prior-cycle memberBills as PAID (creating canonical doc if missing) so cross-cycle overdue tracking stays consistent
+      for (const priorCycleId of Array.from(settledPriorCycleIds)) {
+        if (!priorCycleId || priorCycleId === cycleKey) continue;
+        try {
+          const priorBillId = `bill_${priorCycleId}_${cleanUid}`;
+          const priorBillRef = doc(
+            db,
+            `households/${householdId}/memberBills`,
+            priorBillId,
+          );
+          const priorSnap = await getDoc(priorBillRef);
+          const coveredFromBreakdown =
+            breakdownAmountByCycle.get(priorCycleId) || 0;
+
+          if (priorSnap.exists()) {
+            const pBill = priorSnap.data();
+            const pDue = Math.max(
+              Number(pBill.totalDueCentavos || 0),
+              coveredFromBreakdown,
+            );
+            const pPaid = Math.max(
+              pDue,
+              Number(pBill.totalPaidCentavos || pBill.paidCentavos || 0),
+              coveredFromBreakdown,
+            );
+            const pItems = Array.isArray(pBill.lineItems)
+              ? pBill.lineItems.map((li: any) =>
+                  sanitizeData({ ...li, status: "PAID", isSettled: true }),
+                )
+              : undefined;
+            await updateDoc(
+              priorBillRef,
+              sanitizeData({
+                totalDueCentavos: pDue,
+                totalPaidCentavos: pPaid,
+                paidCentavos: pPaid,
+                outstandingCentavos: 0,
+                status: "PAID",
+                settledViaCycleId: cycleKey,
+                ...(pItems ? { lineItems: pItems } : {}),
+                updatedDate: nowIso,
+              }),
+            );
+          } else {
+            await setDoc(
+              priorBillRef,
+              sanitizeData({
+                billId: priorBillId,
+                householdId,
+                billingCycleId: priorCycleId,
+                userId: cleanUid,
+                totalDueCentavos: coveredFromBreakdown,
+                totalPaidCentavos: coveredFromBreakdown,
+                paidCentavos: coveredFromBreakdown,
+                outstandingCentavos: 0,
+                status: "PAID",
+                settledViaCycleId: cycleKey,
+                createdDate: nowIso,
+                updatedDate: nowIso,
+              }),
+              { merge: true },
+            );
+          }
+        } catch {}
       }
     } catch (err) {
       console.warn("[applyPaymentToMemberBills] warning:", err);
@@ -6244,41 +8296,83 @@ export const mobileDataService = {
     amountCentavos: number,
     paymentId?: string,
     billingCycleId?: string,
+    breakdownItems?: MobilePaymentBreakdownItem[],
   ): Promise<void> {
     try {
       const expSnap = await getDocs(
         collection(db, `households/${householdId}/expenses`),
       );
       let remainingPayment = amountCentavos;
+      const touchedCycleIds = new Set<string>();
+      if (billingCycleId && billingCycleId !== "general") {
+        touchedCycleIds.add(billingCycleId);
+      }
+      if (Array.isArray(breakdownItems)) {
+        breakdownItems.forEach((bi) => {
+          if (bi?.cycleId && bi.cycleId !== "general") {
+            touchedCycleIds.add(String(bi.cycleId));
+          }
+        });
+      }
 
-      for (const d of expSnap.docs) {
+      // Sort FIFO: settle overdue prior-cycle expenses first, then active-cycle expenses
+      const sortedDocs = [...expSnap.docs].sort((a, b) => {
+        const expA = a.data();
+        const expB = b.data();
+        const aIsPrior =
+          billingCycleId &&
+          billingCycleId !== "general" &&
+          expA.billingCycleId &&
+          expA.billingCycleId !== billingCycleId
+            ? 0
+            : 1;
+        const bIsPrior =
+          billingCycleId &&
+          billingCycleId !== "general" &&
+          expB.billingCycleId &&
+          expB.billingCycleId !== billingCycleId
+            ? 0
+            : 1;
+        if (aIsPrior !== bIsPrior) return aIsPrior - bIsPrior;
+        const tA = new Date(expA.createdAt || expA.date || 0).getTime() || 0;
+        const tB = new Date(expB.createdAt || expB.date || 0).getTime() || 0;
+        return tA - tB;
+      });
+
+      for (const d of sortedDocs) {
         if (remainingPayment <= 0) break;
         const exp = d.data();
         if (exp.status === "PAID" && exp.isPaid) continue;
-        if (
-          billingCycleId &&
-          billingCycleId !== "general" &&
-          exp.billingCycleId &&
-          exp.billingCycleId !== billingCycleId
-        ) {
-          continue;
-        }
 
         let modified = false;
         let splits = exp.splitDetails || [];
         if (Array.isArray(splits)) {
           splits = splits.map((s: any) => {
             const isUser =
-              s.userId === userId || s.memberId === userId || s.id === userId;
-            if (isUser && !s.isPaid && s.shareCentavos > 0) {
-              const toPay = Math.min(remainingPayment, s.shareCentavos);
+              matchesMemberUid(s, userId) ||
+              s.userId === userId ||
+              s.memberId === userId ||
+              s.id === userId;
+            if (isUser && !s.isPaid && (Number(s.shareCentavos) || 0) > 0) {
+              const unpaidForSplit = Math.max(
+                0,
+                (Number(s.shareCentavos) || 0) -
+                  (Number(s.paidAmountCentavos) || 0),
+              );
+              const targetAmt =
+                unpaidForSplit > 0 ? unpaidForSplit : Number(s.shareCentavos);
+              const toPay = Math.min(remainingPayment, targetAmt);
+              if (toPay <= 0) return sanitizeData(s);
               remainingPayment -= toPay;
               modified = true;
+              const newSplitPaid = (Number(s.paidAmountCentavos) || 0) + toPay;
+              const isFullyPaidSplit =
+                newSplitPaid >= (Number(s.shareCentavos) || 0);
               const resolvedPmtId = paymentId || s.paymentId;
               return sanitizeData({
                 ...s,
-                isPaid: true,
-                paidAmountCentavos: (s.paidAmountCentavos || 0) + toPay,
+                isPaid: isFullyPaidSplit,
+                paidAmountCentavos: newSplitPaid,
                 paidDate: new Date().toISOString(),
                 ...(resolvedPmtId ? { paymentId: resolvedPmtId } : {}),
               });
@@ -6293,6 +8387,9 @@ export const mobileDataService = {
           splits.every((s: any) => s.isExempt || s.isPaid);
 
         if (modified) {
+          if (exp.billingCycleId) {
+            touchedCycleIds.add(String(exp.billingCycleId));
+          }
           await updateDoc(
             doc(db, `households/${householdId}/expenses`, d.id),
             sanitizeData({
@@ -6304,8 +8401,10 @@ export const mobileDataService = {
         }
       }
 
-      // Check and update any expenses if all payors settled for this cycle
-      await this.markExpensesPaidIfAllSettled(householdId, billingCycleId);
+      // Check and update expenses for all affected cycles (both prior overdue cycles and active cycle)
+      for (const cycId of Array.from(touchedCycleIds)) {
+        await this.markExpensesPaidIfAllSettled(householdId, cycId);
+      }
     } catch (err) {
       console.warn("[applyPaymentToExpenses] warning:", err);
     }
@@ -6352,20 +8451,21 @@ export const mobileDataService = {
 
       let resolvedCycleId = payment.billingCycleId;
       let resolvedCycleDoc: any = null;
+      let allCyclesList: any[] = [];
       if (payment.householdId) {
         try {
           const cycSnap = await getDocs(
             collection(db, `households/${payment.householdId}/billingCycles`),
           );
-          const allCycles = sortBillingCyclesNewest(
+          allCyclesList = sortBillingCyclesNewest(
             cycSnap.docs.map((d) => d.data()),
           );
           if (resolvedCycleId && resolvedCycleId !== "general") {
             resolvedCycleDoc =
-              allCycles.find((c) => c.billingCycleId === resolvedCycleId) ||
-              allCycles[0];
+              allCyclesList.find((c) => c.billingCycleId === resolvedCycleId) ||
+              allCyclesList[0];
           } else {
-            resolvedCycleDoc = allCycles[0];
+            resolvedCycleDoc = allCyclesList[0];
             if (resolvedCycleDoc?.billingCycleId) {
               resolvedCycleId = resolvedCycleDoc.billingCycleId;
             }
@@ -6373,6 +8473,11 @@ export const mobileDataService = {
         } catch {}
       }
       const effectiveCycleId = resolvedCycleId || "general";
+      const resolvedCycleName =
+        payment.billingCycleName ||
+        resolvedCycleDoc?.name ||
+        resolvedCycleDoc?.cycleName ||
+        undefined;
 
       // Block payment submission for non-host payors when the host has not opened payments for the cycle
       if (
@@ -6384,10 +8489,211 @@ export const mobileDataService = {
         );
       }
 
+      // Build immutable itemized receipt breakdown snapshot (FIFO: Overdue charges first, then active cycle charges)
+      let breakdownItems: MobilePaymentBreakdownItem[] | undefined =
+        Array.isArray(payment.breakdownItems) &&
+        payment.breakdownItems.length > 0
+          ? payment.breakdownItems
+          : undefined;
+
+      if (!breakdownItems && payment.householdId && uid) {
+        try {
+          const cycleNameMap = new Map<string, string>();
+          allCyclesList.forEach((c) => {
+            if (c?.billingCycleId) {
+              cycleNameMap.set(
+                String(c.billingCycleId),
+                c.name || c.cycleName || "Billing Cycle",
+              );
+            }
+          });
+
+          const [expSnap, memSnap, activeBillSnap] = await Promise.all([
+            getDocs(
+              collection(db, `households/${payment.householdId}/expenses`),
+            ),
+            getDocs(
+              collection(db, `households/${payment.householdId}/members`),
+            ),
+            getDoc(
+              doc(
+                db,
+                `households/${payment.householdId}/memberBills`,
+                `bill_${effectiveCycleId}_${uid}`,
+              ),
+            ),
+          ]);
+
+          const activePayors = memSnap.docs
+            .map((md) => md.data())
+            .filter((m) => m.status === "ACTIVE" && isPayorMember(m));
+          const payorCount = Math.max(1, activePayors.length);
+
+          let budget = Number(payment.amountCentavos) || 0;
+          const computedBreakdown: MobilePaymentBreakdownItem[] = [];
+          const coveredPriorCycleAmounts = new Map<string, number>();
+
+          const allExpenseDocs = expSnap.docs
+            .map((ed) => ({ id: ed.id, ...(ed.data() as any) }))
+            .filter((e) => !(e.status === "PAID" && e.isPaid));
+
+          const priorExpenses = allExpenseDocs
+            .filter(
+              (e) =>
+                e.billingCycleId &&
+                effectiveCycleId !== "general" &&
+                e.billingCycleId !== effectiveCycleId,
+            )
+            .sort((a, b) => {
+              const tA = new Date(a.createdAt || a.date || 0).getTime() || 0;
+              const tB = new Date(b.createdAt || b.date || 0).getTime() || 0;
+              return tA - tB;
+            });
+
+          const activeExpenses = allExpenseDocs
+            .filter(
+              (e) =>
+                !e.billingCycleId ||
+                effectiveCycleId === "general" ||
+                e.billingCycleId === effectiveCycleId,
+            )
+            .sort((a, b) => {
+              const tA = new Date(a.createdAt || a.date || 0).getTime() || 0;
+              const tB = new Date(b.createdAt || b.date || 0).getTime() || 0;
+              return tA - tB;
+            });
+
+          const getShareForUser = (exp: any): number => {
+            const split = Array.isArray(exp.splitDetails)
+              ? exp.splitDetails.find(
+                  (s: any) =>
+                    matchesMemberUid(s, uid) ||
+                    s.userId === uid ||
+                    s.memberId === uid,
+                )
+              : null;
+            if (split?.isExempt || split?.isPaid) return 0;
+            if (split && typeof split.shareCentavos === "number") {
+              const rem =
+                split.shareCentavos - (Number(split.paidAmountCentavos) || 0);
+              return Math.max(0, rem > 0 ? rem : split.shareCentavos);
+            }
+            return (
+              computeFairSplitShareCentavos(
+                Number(exp.amountCents) || 0,
+                activePayors,
+                uid,
+              ) || Math.round((Number(exp.amountCents) || 0) / payorCount)
+            );
+          };
+
+          // 1. Overdue expenses from closed/prior cycles
+          for (const exp of priorExpenses) {
+            if (budget <= 0) break;
+            const share = getShareForUser(exp);
+            if (share <= 0) continue;
+            const covered = Math.min(budget, share);
+            budget -= covered;
+            const pCycId = String(exp.billingCycleId || "");
+            coveredPriorCycleAmounts.set(
+              pCycId,
+              (coveredPriorCycleAmounts.get(pCycId) || 0) + covered,
+            );
+            computedBreakdown.push({
+              id: exp.id,
+              title:
+                cleanBillTitle(
+                  exp.title,
+                  exp.category,
+                  _cachedHousehold?.householdName || _cachedHousehold?.name,
+                ) ||
+                exp.category ||
+                "Overdue Charge",
+              category: exp.category || "General",
+              cycleId: pCycId || undefined,
+              cycleName: cycleNameMap.get(pCycId) || "Previous Cycle",
+              isOverdue: true,
+              householdAmountCentavos: Number(exp.amountCents) || undefined,
+              shareCentavos: covered,
+            });
+          }
+
+          // 2. Fallback: any carried-over Arrears line items on active memberBill not already detailed above
+          if (budget > 0 && activeBillSnap.exists()) {
+            const bData = activeBillSnap.data();
+            const arrearsItems = (bData?.lineItems || []).filter(
+              (li: any) =>
+                (li.category === "Arrears" || li.isArrears) &&
+                li.status !== "PAID" &&
+                !li.isSettled &&
+                !li.isExempt,
+            );
+            for (const arr of arrearsItems) {
+              if (budget <= 0) break;
+              const pCycId = String(arr.priorCycleId || "");
+              const alreadyDetailed = pCycId
+                ? coveredPriorCycleAmounts.get(pCycId) || 0
+                : 0;
+              const remArrears = Math.max(
+                0,
+                (Number(arr.amountCentavos) || 0) - alreadyDetailed,
+              );
+              if (remArrears <= 0) continue;
+              const covered = Math.min(budget, remArrears);
+              budget -= covered;
+              computedBreakdown.push({
+                id: arr.itemId || `arrears_${pCycId || "prior"}`,
+                title: arr.description || "Previous Balance (Overdue)",
+                category: "Arrears",
+                cycleId: pCycId || undefined,
+                cycleName:
+                  (pCycId && cycleNameMap.get(pCycId)) || "Previous Cycle",
+                isOverdue: true,
+                shareCentavos: covered,
+              });
+            }
+          }
+
+          // 3. Current cycle expenses
+          for (const exp of activeExpenses) {
+            if (budget <= 0) break;
+            const share = getShareForUser(exp);
+            if (share <= 0) continue;
+            const covered = Math.min(budget, share);
+            budget -= covered;
+            computedBreakdown.push({
+              id: exp.id,
+              title:
+                cleanBillTitle(
+                  exp.title,
+                  exp.category,
+                  _cachedHousehold?.householdName || _cachedHousehold?.name,
+                ) ||
+                exp.category ||
+                "Bill",
+              category: exp.category || "General",
+              cycleId:
+                effectiveCycleId !== "general" ? effectiveCycleId : undefined,
+              cycleName: resolvedCycleName,
+              isOverdue: false,
+              householdAmountCentavos: Number(exp.amountCents) || undefined,
+              shareCentavos: covered,
+            });
+          }
+
+          if (computedBreakdown.length > 0) {
+            breakdownItems = computedBreakdown;
+          }
+        } catch (bdErr) {
+          console.warn("[submitPayment] breakdown snapshot warning:", bdErr);
+        }
+      }
+
       const paymentRecord: MobilePayment = sanitizeData({
         paymentId,
         householdId: payment.householdId,
         billingCycleId: effectiveCycleId,
+        billingCycleName: resolvedCycleName,
         userId: uid,
         userName,
         amountCentavos: payment.amountCentavos,
@@ -6401,6 +8707,7 @@ export const mobileDataService = {
         createdDate: nowIso,
         verifiedDate: nowIso,
         verifiedBy: isHost ? uid : undefined,
+        ...(breakdownItems ? { breakdownItems } : {}),
       });
 
       const paymentDocRef = doc(
@@ -6416,6 +8723,7 @@ export const mobileDataService = {
         effectiveCycleId,
         uid,
         payment.amountCentavos,
+        breakdownItems,
       );
       await this.applyPaymentToExpenses(
         payment.householdId,
@@ -6423,6 +8731,7 @@ export const mobileDataService = {
         payment.amountCentavos,
         paymentId,
         effectiveCycleId,
+        breakdownItems,
       );
 
       // Notify host or self

@@ -21,6 +21,8 @@ import {
   cleanBillTitle,
   isPayorMember,
   computeFairSplitShareCentavos,
+  matchesMemberUid,
+  evaluateHouseholdCycleSettlements,
 } from "../services/firebaseDataService";
 import { getCategoryMeta } from "../services/categoryService";
 import { UniversalSkeleton } from "../components/UniversalLoader";
@@ -222,16 +224,19 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
   }, [cycles]);
 
   useEffect(() => {
-    if (!householdId || !activeCycle?.billingCycleId) {
+    if (!householdId) {
       setMemberBills([]);
       return;
     }
-    return mobileDataService.listenToMemberBills(
-      householdId,
-      activeCycle.billingCycleId,
-      setMemberBills,
-    );
-  }, [householdId, activeCycle?.billingCycleId]);
+    return mobileDataService.listenToMemberBills(householdId, setMemberBills);
+  }, [householdId]);
+
+  useEffect(() => {
+    if (!householdId || cycles.length === 0) return;
+    mobileDataService
+      .reconcileStaleArrearsAndSettledCycles(householdId)
+      .catch(() => {});
+  }, [householdId, cycles.length, payments.length]);
 
   const activeMembersList = useMemo(() => {
     return members.filter(
@@ -267,67 +272,22 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     );
   }, [rawExpenses, activeCycle?.billingCycleId, cycles.length, oldestCycleId]);
 
-  // Check if all active payors have settled their shares for the active cycle
-  const allPayorsSettledForActiveCycle = useMemo(() => {
-    if (activePayorsList.length === 0 || activeCycleExpenses.length === 0) {
-      return false;
-    }
-    const cycleId = activeCycle?.billingCycleId;
-    const isSingleCycle = cycles.length <= 1;
-
-    return activePayorsList.every((p) => {
-      const uid = p.userId || p.memberId || (p as any).id;
-      const b = memberBills.find((mb) => mb.userId === uid);
-      const userPaidFromPmts = payments
-        .filter((pmt) => {
-          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
-          if (!cycleId) return true;
-          return (
-            pmt.billingCycleId === cycleId ||
-            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
-              isSingleCycle)
-          );
-        })
-        .reduce((sum, pmt) => sum + (Number(pmt.amountCentavos) || 0), 0);
-
-      let payorShareTotal = 0;
-      let allUserSplitsMarkedPaid = true;
-      activeCycleExpenses.forEach((exp) => {
-        const mySplit = Array.isArray(exp.splitDetails)
-          ? exp.splitDetails.find((s: any) => s.userId === uid)
-          : null;
-        if (mySplit?.isExempt) return;
-        const share =
-          mySplit && typeof mySplit.shareCentavos === "number"
-            ? mySplit.shareCentavos
-            : Math.round((exp.amountCents || 0) / payorCount);
-        payorShareTotal += share;
-        if (
-          !exp.isPaid &&
-          exp.status !== "PAID" &&
-          !mySplit?.isPaid &&
-          share > 0
-        ) {
-          allUserSplitsMarkedPaid = false;
-        }
-      });
-
-      if (payorShareTotal <= 0) return false;
-      const effectivePaid = Math.max(
-        b?.totalPaidCentavos || 0,
-        userPaidFromPmts,
-      );
-      return effectivePaid >= payorShareTotal || allUserSplitsMarkedPaid;
+  const cycleSettlement = useMemo(() => {
+    return evaluateHouseholdCycleSettlements({
+      cycles,
+      expenses: rawExpenses,
+      payments,
+      allMemberBills: memberBills,
+      members: activeMembersList,
     });
-  }, [
-    activePayorsList,
-    activeCycleExpenses,
-    activeCycle?.billingCycleId,
-    cycles.length,
-    memberBills,
-    payments,
-    payorCount,
-  ]);
+  }, [cycles, rawExpenses, payments, memberBills, activeMembersList]);
+
+  const allPayorsSettledForActiveCycle = useMemo(() => {
+    if (!activeCycle?.billingCycleId) return false;
+    return Boolean(
+      cycleSettlement.allPayorsSettledByCycle.get(activeCycle.billingCycleId),
+    );
+  }, [cycleSettlement, activeCycle?.billingCycleId]);
 
   // Build strictly PAID / SETTLED expenses with full group payor attribution & breakdown
   const paidExpenses: ExpenseItem[] = useMemo(() => {
@@ -344,6 +304,15 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         (!exp.billingCycleId &&
           (isSingleCycle || activeCycle.billingCycleId === oldestCycleId));
 
+      const resolvedExpCycleId =
+        exp.billingCycleId && exp.billingCycleId !== "general"
+          ? exp.billingCycleId
+          : oldestCycleId || activeCycle?.billingCycleId || "general";
+
+      const isExpCycleAllSettled = Boolean(
+        cycleSettlement.allPayorsSettledByCycle.get(resolvedExpCycleId),
+      );
+
       const allSplitsPaid =
         Array.isArray(exp.splitDetails) &&
         exp.splitDetails.length > 0 &&
@@ -353,6 +322,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
         exp.status === "PAID" ||
         exp.isPaid === true ||
         allSplitsPaid ||
+        isExpCycleAllSettled ||
         (belongsToActiveCycle && allPayorsSettledForActiveCycle);
 
       // Strictly include PAID bills only in Bill History
@@ -409,8 +379,8 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
       sourceMembers.forEach((m: any) => {
         const uid = m.userId || m.memberId || m.id;
         const isPayor = isPayorMember(m);
-        const splitEntry: any = rawSplits.find(
-          (s: any) => s.userId === uid || s.memberId === uid || s.id === uid,
+        const splitEntry: any = rawSplits.find((s: any) =>
+          matchesMemberUid(m, s.userId || s.memberId || s.id),
         );
         const isExempt = !isPayor || Boolean(splitEntry?.isExempt);
 
@@ -433,19 +403,36 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
             ? Math.round((shareCentavos / exp.amountCents) * 1000) / 10
             : Math.round((100 / effPayorCount) * 10) / 10;
 
-        // Match verified payment from this payor for this cycle
-        const matchedPayment = payments.find((pmt) => {
-          if (pmt.userId !== uid || pmt.status === "REJECTED") return false;
-          if (splitEntry?.paymentId && pmt.paymentId === splitEntry.paymentId) {
-            return true;
-          }
-          if (!exp.billingCycleId) return true;
-          return (
-            pmt.billingCycleId === exp.billingCycleId ||
-            ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
-              isSingleCycle)
-          );
-        });
+        // Match verified payment from this payor for this cycle (including cross-cycle rollover payments)
+        const matchedPayment =
+          cycleSettlement.getMatchedPaymentForExpense(exp, m) ||
+          payments.find((pmt) => {
+            if (!matchesMemberUid(m, pmt.userId) || pmt.status === "REJECTED") {
+              return false;
+            }
+            if (
+              splitEntry?.paymentId &&
+              pmt.paymentId === splitEntry.paymentId
+            ) {
+              return true;
+            }
+            if (
+              Array.isArray(pmt.breakdownItems) &&
+              pmt.breakdownItems.some(
+                (bi) =>
+                  bi.id === exp.id ||
+                  (exp.billingCycleId && bi.cycleId === exp.billingCycleId),
+              )
+            ) {
+              return true;
+            }
+            if (!exp.billingCycleId) return true;
+            return (
+              pmt.billingCycleId === exp.billingCycleId ||
+              ((!pmt.billingCycleId || pmt.billingCycleId === "general") &&
+                isSingleCycle)
+            );
+          });
 
         const memberName =
           m.displayName ||
@@ -469,6 +456,26 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
           ? "Exempted (Non-payor)"
           : `Fair share across ${effPayorCount} ${effPayorCount === 1 ? "payor" : "payors"} (${percentage}%)`;
 
+        const isRolloverSettlement = Boolean(
+          !isExempt &&
+          matchedPayment?.billingCycleId &&
+          exp.billingCycleId &&
+          matchedPayment.billingCycleId !== "general" &&
+          matchedPayment.billingCycleId !== exp.billingCycleId,
+        );
+        const rolloverCycleLabel = isRolloverSettlement
+          ? cycles.find(
+              (c) => c.billingCycleId === matchedPayment?.billingCycleId,
+            )?.name ||
+            matchedPayment?.billingCycleName ||
+            "subsequent cycle"
+          : "";
+        const baseNote = splitEntry?.note || defaultNote;
+        const resolvedNote =
+          isRolloverSettlement && rolloverCycleLabel
+            ? `${baseNote} · Settled with ${rolloverCycleLabel}`
+            : baseNote;
+
         breakdown.push({
           userId: uid,
           displayName: memberName,
@@ -486,8 +493,10 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
               : exp.date),
           paymentMethod: matchedPayment?.paymentMethod || undefined,
           referenceNumber: matchedPayment?.referenceNumber || undefined,
-          note: splitEntry?.note || defaultNote,
-          isCurrentUser: Boolean(currentUser?.uid && uid === currentUser.uid),
+          note: resolvedNote,
+          isCurrentUser: Boolean(
+            currentUser?.uid && matchesMemberUid(m, currentUser.uid),
+          ),
         });
       });
 
@@ -573,6 +582,7 @@ export const ExpenseHistoryScreen: React.FC<ExpenseHistoryScreenProps> = ({
     cycles,
     activeCycle,
     oldestCycleId,
+    cycleSettlement,
     allPayorsSettledForActiveCycle,
     activeMembersList,
     payments,
@@ -1255,7 +1265,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 12,
+    borderRadius: 100,
     marginHorizontal: 16,
     marginBottom: 8,
     paddingHorizontal: 12,
@@ -1270,7 +1280,7 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: "row",
     backgroundColor: "#F1F5F9",
-    borderRadius: 14,
+    borderRadius: 100,
     marginHorizontal: 20,
     marginVertical: 10,
     padding: 4,
@@ -1280,7 +1290,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 10,
+    borderRadius: 100,
   },
   tabBtnActive: {
     backgroundColor: "#2563EB",
