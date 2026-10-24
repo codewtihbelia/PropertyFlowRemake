@@ -708,12 +708,15 @@ export function WalletScreen({
     }
   }, [showScanQrModal, qrModalTab, qrScanStep, qrScanLaserAnim]);
 
+  const [householdMemberBills, setHouseholdMemberBills] = useState<any[]>([]);
+  const [activeCycles, setActiveCycles] = useState<any[]>([]);
+
   useEffect(() => {
     const cachedProfile = mobileDataService.getCachedProfile(currentUid);
     const householdId = cachedProfile?.householdId || "";
     if (!householdId) return;
 
-    const unsub = mobileDataService.listenToHouseholdMembers(
+    const unsubMem = mobileDataService.listenToHouseholdMembers(
       householdId,
       (data) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -721,8 +724,42 @@ export function WalletScreen({
         }
       },
     );
-    return unsub;
+    const unsubBills = mobileDataService.listenToMemberBills(
+      householdId,
+      setHouseholdMemberBills,
+    );
+    const unsubCycles = mobileDataService.listenToBillingCycles(
+      householdId,
+      setActiveCycles,
+    );
+    return () => {
+      unsubMem();
+      unsubBills();
+      unsubCycles();
+    };
   }, [currentUid]);
+
+  const activeCycle = useMemo(() => {
+    return activeCycles.find((c) => c.status === "ACTIVE") || activeCycles[0];
+  }, [activeCycles]);
+
+  const userPendingDuesCentavos = useMemo(() => {
+    const myBill = householdMemberBills.find(
+      (b) =>
+        (b.userId === currentUid || b.memberId === currentUid) &&
+        (!activeCycle?.billingCycleId ||
+          b.billingCycleId === activeCycle.billingCycleId),
+    );
+    if (!myBill) return 0;
+    const outstanding =
+      typeof myBill.outstandingCentavos === "number"
+        ? myBill.outstandingCentavos
+        : Math.max(
+            0,
+            (myBill.totalDueCentavos || 0) - (myBill.totalPaidCentavos || 0),
+          );
+    return Math.max(0, outstanding);
+  }, [householdMemberBills, activeCycle, currentUid]);
 
   const availableRoommates = useMemo(() => {
     const filtered = householdMembers.filter(
@@ -2373,7 +2410,23 @@ export function WalletScreen({
 
             <TouchableOpacity
               style={styles.heroBtnSecondary}
-              onPress={() => onNavigateToBills?.()}
+              onPress={() => {
+                if (userPendingDuesCentavos <= 0) {
+                  Alert.alert(
+                    "All Settled ✓",
+                    "You have no pending dues for this billing cycle. Everything is caught up!",
+                    [
+                      {
+                        text: "View Bills",
+                        onPress: () => onNavigateToBills?.(),
+                      },
+                      { text: "Dismiss", style: "cancel" },
+                    ],
+                  );
+                } else {
+                  onNavigateToBills?.();
+                }
+              }}
               activeOpacity={0.8}
             >
               <Ionicons name="receipt-outline" size={17} color="#FFFFFF" />
@@ -2382,7 +2435,23 @@ export function WalletScreen({
 
             <TouchableOpacity
               style={styles.heroBtnSecondary}
-              onPress={() => onNavigateToSettle?.()}
+              onPress={() => {
+                if (userPendingDuesCentavos <= 0) {
+                  Alert.alert(
+                    "All Settled ✓",
+                    "You have zero pending dues to settle. Everything is caught up!",
+                    [
+                      {
+                        text: "View Bills",
+                        onPress: () => onNavigateToBills?.(),
+                      },
+                      { text: "Dismiss", style: "cancel" },
+                    ],
+                  );
+                } else {
+                  onNavigateToSettle?.();
+                }
+              }}
               activeOpacity={0.8}
             >
               <Ionicons name="swap-horizontal" size={17} color="#FFFFFF" />

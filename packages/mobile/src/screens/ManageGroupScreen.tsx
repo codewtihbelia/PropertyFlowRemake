@@ -4539,7 +4539,21 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
                   ),
                 }
           }
-          onSaved={() => {}}
+          onSaved={async () => {
+            if (householdId && activeCycle?.billingCycleId) {
+              try {
+                await mobileDataService.syncCycleElectricityBill(
+                  householdId,
+                  activeCycle.billingCycleId,
+                );
+                await mobileDataService.recalculateUnpaidExpensesForHousehold(
+                  householdId,
+                );
+              } catch (e) {
+                console.warn("Error syncing electricity after modal save:", e);
+              }
+            }
+          }}
         />
       ) : null}
     </View>

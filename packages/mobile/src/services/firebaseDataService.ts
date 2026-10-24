@@ -3992,8 +3992,12 @@ export const mobileDataService = {
             paymentsByUser.get(uid) || 0,
           );
 
-          // Build line items for this member from active cycle expenses only
-          const lineItems = allExpenses.map((exp: any) => {
+          // Build line items for this member: preserve any Arrears carried forward from prior cycles
+          const arrearsLineItems = (existing?.lineItems || []).filter(
+            (li: any) => li.category === "Arrears" || li.isArrears,
+          );
+
+          const expenseLineItems = allExpenses.map((exp: any) => {
             const isWater = (exp.category || "")
               .toLowerCase()
               .includes("water");
@@ -4032,7 +4036,10 @@ export const mobileDataService = {
               category: exp.category,
               amountCentavos: share,
               createdDate:
-                exp.createdAt || exp.createdDate || new Date().toISOString(),
+                exp.createdAt ||
+                exp.date ||
+                exp.createdDate ||
+                new Date().toISOString(),
               status: isExpPaid ? "PAID" : "UNPAID",
               note:
                 split?.note ||
@@ -4045,7 +4052,8 @@ export const mobileDataService = {
             };
           });
 
-          const unpaidLineItems = lineItems.filter(
+          const allLineItems = [...arrearsLineItems, ...expenseLineItems];
+          const unpaidLineItems = allLineItems.filter(
             (li: any) => li.status === "UNPAID" && !li.isExempt,
           );
           const newTotalDue = unpaidLineItems.reduce(
@@ -4063,7 +4071,7 @@ export const mobileDataService = {
             totalDueCentavos: newTotalDue,
             outstandingCentavos: newOutstanding,
             totalPaidCentavos: prevPaid,
-            lineItems,
+            lineItems: allLineItems,
             status: newTotalDue > 0 && newOutstanding === 0 ? "PAID" : "UNPAID",
             updatedDate: new Date().toISOString(),
           });
@@ -4904,6 +4912,8 @@ export const mobileDataService = {
 
     // 1. Close any previously ACTIVE billing cycles and backfill any unscoped expenses to the closing cycle so previous cycle bills (e.g., Rent) never disappear
     let priorCycleId: string | undefined;
+    let priorCycleName = "Previous Cycle";
+    const priorBillsByUser = new Map<string, any>();
     try {
       const existingCyclesSnap = await getDocs(
         collection(db, `households/${householdId}/billingCycles`),
@@ -4917,13 +4927,29 @@ export const mobileDataService = {
       const knownIds = new Set(
         existingCycles.map((c: any) => c.billingCycleId).filter(Boolean),
       );
-      priorCycleId = existingCycles[0]?.billingCycleId;
+      const priorCycle =
+        existingCycles.find((c: any) => c.status === "ACTIVE") ||
+        existingCycles[0];
+      priorCycleId = priorCycle?.billingCycleId;
+      if (priorCycle?.name) {
+        priorCycleName = priorCycle.name;
+      }
 
       if (priorCycleId) {
         try {
-          const expSnap = await getDocs(
-            collection(db, `households/${householdId}/expenses`),
-          );
+          const [expSnap, priorMemberBillsSnap] = await Promise.all([
+            getDocs(collection(db, `households/${householdId}/expenses`)),
+            getDocs(collection(db, `households/${householdId}/memberBills`)),
+          ]);
+
+          priorMemberBillsSnap.docs.forEach((bd) => {
+            const bData = bd.data();
+            const bUser = bData.userId || bData.memberId;
+            if (bData.billingCycleId === priorCycleId && bUser) {
+              priorBillsByUser.set(bUser, bData);
+            }
+          });
+
           await Promise.all(
             expSnap.docs.map(async (ed) => {
               const eData = ed.data();
@@ -5050,7 +5076,7 @@ export const mobileDataService = {
       }).catch(() => {}),
     ]);
 
-    // 3. Reset all active payors' settlement status and initialize fresh UNPAID memberBills for the new cycle
+    // 3. Reset all active payors' settlement status and initialize fresh memberBills for the new cycle (carrying forward prior cycle Arrears)
     try {
       const membersSnap = await getDocs(
         collection(db, `households/${householdId}/members`),
@@ -5083,6 +5109,39 @@ export const mobileDataService = {
           }
 
           if (uid) {
+            const priorBill = priorBillsByUser.get(uid);
+            let priorOutstandingCentavos = 0;
+            if (priorBill) {
+              if (typeof priorBill.outstandingCentavos === "number") {
+                priorOutstandingCentavos = Math.max(
+                  0,
+                  priorBill.outstandingCentavos,
+                );
+              } else {
+                const due = Number(priorBill.totalDueCentavos || 0);
+                const paid = Number(
+                  priorBill.totalPaidCentavos || priorBill.paidCentavos || 0,
+                );
+                priorOutstandingCentavos = Math.max(0, due - paid);
+              }
+            }
+
+            const initialLineItems: any[] = [];
+            if (priorOutstandingCentavos > 0) {
+              initialLineItems.push({
+                itemId: `arrears_${priorCycleId}_${uid}`,
+                description: `Previous Balance (${priorCycleName})`,
+                category: "Arrears",
+                amountCentavos: priorOutstandingCentavos,
+                createdDate: nowIso,
+                status: "UNPAID",
+                note: `Unsettled dues carried over from ${priorCycleName}`,
+                isExempt: false,
+                isArrears: true,
+                priorCycleId,
+              });
+            }
+
             const billId = `bill_${billingCycleId}_${uid}`;
             const billRef = doc(
               db,
@@ -5097,11 +5156,11 @@ export const mobileDataService = {
                 billingCycleId,
                 userId: uid,
                 displayName: mData.displayName || "Roommate",
-                totalDueCentavos: 0,
-                outstandingCentavos: 0,
+                totalDueCentavos: priorOutstandingCentavos,
+                outstandingCentavos: priorOutstandingCentavos,
                 totalPaidCentavos: 0,
                 paidCentavos: 0,
-                lineItems: [],
+                lineItems: initialLineItems,
                 status: "UNPAID",
                 createdDate: nowIso,
                 updatedDate: nowIso,
@@ -5176,13 +5235,27 @@ export const mobileDataService = {
 
   listenToMemberBills(
     householdId: string,
-    cycleId: string,
-    callback: (bills: any[]) => void,
-  ) {
-    const q = query(
-      collection(db, `households/${householdId}/memberBills`),
-      where("billingCycleId", "==", cycleId),
-    );
+    cycleIdOrCallback: string | ((bills: any[]) => void),
+    maybeCallback?: (bills: any[]) => void,
+  ): () => void {
+    if (!householdId) {
+      return () => {};
+    }
+    const isCycleProvided = typeof cycleIdOrCallback === "string";
+    const cycleId = isCycleProvided ? cycleIdOrCallback : undefined;
+    const callback = (isCycleProvided ? maybeCallback : cycleIdOrCallback) as (
+      bills: any[],
+    ) => void;
+
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+
+    const colRef = collection(db, `households/${householdId}/memberBills`);
+    const q = cycleId
+      ? query(colRef, where("billingCycleId", "==", cycleId))
+      : colRef;
+
     return onSnapshot(
       q,
       (snap) => {
@@ -5190,9 +5263,10 @@ export const mobileDataService = {
         snap.forEach((d) => {
           const data = d.data();
           const uid = data.userId || d.id;
+          const key = cycleId ? uid : `${data.billingCycleId || ""}_${uid}`;
           // Prefer bill_{cycleId}_{userId} format over direct userId doc to avoid double counting
-          if (!map.has(uid) || d.id.startsWith("bill_")) {
-            map.set(uid, data);
+          if (!map.has(key) || d.id.startsWith("bill_")) {
+            map.set(key, data);
           }
         });
         callback(Array.from(map.values()));
@@ -5647,6 +5721,16 @@ export const mobileDataService = {
         updatedAt: nowIso,
       };
 
+      const elecSnap = await getDoc(ref);
+      const existingDoc = elecSnap.exists() ? elecSnap.data() : {};
+      const existingCycles =
+        existingDoc.cycles && typeof existingDoc.cycles === "object"
+          ? { ...existingDoc.cycles }
+          : {};
+      if (targetCycleId) {
+        existingCycles[targetCycleId] = cycleSnapshot;
+      }
+
       const cleanConfig = sanitizeData({
         previousReadingKwh: prev,
         currentReadingKwh: curr,
@@ -5654,19 +5738,13 @@ export const mobileDataService = {
         rateCentavosPerKwh: rate,
         consumedKwh,
         totalAmountCentavos,
-        ...(targetCycleId
-          ? {
-              billingCycleId: targetCycleId,
-              cycles: {
-                [targetCycleId]: cycleSnapshot,
-              },
-            }
-          : {}),
+        billingCycleId: targetCycleId || existingDoc.billingCycleId || "",
+        cycles: existingCycles,
         updatedAt: nowIso,
       });
       await setDoc(ref, cleanConfig, { merge: true });
 
-      if (!options?.skipExpenseSync && totalAmountCentavos > 0) {
+      if (!options?.skipExpenseSync) {
         await this.syncCycleElectricityBill(householdId, targetCycleId);
         await this.recalculateUnpaidExpensesForHousehold(householdId);
       }
@@ -5735,11 +5813,54 @@ export const mobileDataService = {
       const consumedKwh = Math.max(0, Math.round((curr - prev) * 100) / 100);
       const totalAmountCentavos = Math.round(consumedKwh * rateCentavos);
 
-      if (totalAmountCentavos <= 0) return null;
-
       const payorCount = Math.max(1, effectivePayors.length);
       const ratePesosStr = (rateCentavos / 100).toFixed(2);
       const meterSummaryNote = `Prev: ${prev} kWh → Curr: ${curr} kWh (${consumedKwh} kWh × ₱${ratePesosStr}/kWh)`;
+
+      const existingElecExp = expSnap.docs.find((ed) => {
+        const data = ed.data();
+        const cat = (data.category || "").toLowerCase();
+        const title = (data.title || "").toLowerCase();
+        return (
+          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
+          (cat.includes("electric") ||
+            title.includes("electric") ||
+            ed.id.startsWith("elec_"))
+        );
+      });
+
+      if (totalAmountCentavos <= 0) {
+        if (existingElecExp) {
+          const zeroSplits = activeMembers.map((m: any) => ({
+            userId: m.userId || m.memberId || m.id || "",
+            displayName: m.displayName || "Roommate",
+            shareCentavos: 0,
+            percentage: 0,
+            isPaid: true,
+            isExempt: !isPayorMember(m),
+            role: m.role || "PAYOR",
+            note: `${meterSummaryNote} (0 kWh)`,
+          }));
+          await setDoc(
+            doc(db, `households/${householdId}/expenses`, existingElecExp.id),
+            sanitizeData({
+              amountCents: 0,
+              previousReadingKwh: prev,
+              currentReadingKwh: curr,
+              consumedKwh: 0,
+              rateCentavosPerKwh: rateCentavos,
+              notes: meterSummaryNote,
+              splitDetails: zeroSplits,
+              status: "PAID",
+              isPaid: true,
+              updatedAt: new Date().toISOString(),
+            }),
+            { merge: true },
+          ).catch(() => {});
+          await this.recalculateUnpaidExpensesForHousehold(householdId);
+        }
+        return null;
+      }
 
       let splitDetails = activeMembers.map((m: any) => {
         const uid = m.userId || m.memberId || m.id || "";
@@ -5772,15 +5893,6 @@ export const mobileDataService = {
             note: "Exempted (Non-payor)",
           };
         }
-      });
-
-      const existingElecExp = expSnap.docs.find((ed) => {
-        const data = ed.data();
-        const cat = (data.category || "").toLowerCase();
-        return (
-          (data.billingCycleId === cycleId || ed.id.includes(cycleId)) &&
-          (cat.includes("electric") || ed.id.startsWith("elec_"))
-        );
       });
 
       const expenseId = existingElecExp
@@ -5870,7 +5982,7 @@ export const mobileDataService = {
         ),
       ]);
 
-      this.recalculateUnpaidExpensesForHousehold(householdId).catch(() => {});
+      await this.recalculateUnpaidExpensesForHousehold(householdId);
       return expenseId;
     } catch (err) {
       console.warn("[syncCycleElectricityBill] error:", err);
@@ -7322,29 +7434,198 @@ export const mobileDataService = {
     householdId?: string,
     userId?: string,
   ): Promise<void> {
-    const uid = userId || auth.currentUser?.uid;
-    if (!uid) return;
+    const rawUid = userId || auth.currentUser?.uid;
+    if (!rawUid) return;
+    const uid = String(rawUid).replace(/^mem_/, "").trim();
     const nowIso = new Date().toISOString();
+    const payload = {
+      lastActiveAt: nowIso,
+      lastActiveDate: nowIso,
+      isOnline: true,
+    };
     try {
-      await updateDoc(doc(db, "users", uid), {
-        lastActiveAt: nowIso,
-      }).catch(async () => {
-        await setDoc(
-          doc(db, "users", uid),
-          { lastActiveAt: nowIso },
-          { merge: true },
-        );
+      await updateDoc(doc(db, "users", uid), payload).catch(async () => {
+        await setDoc(doc(db, "users", uid), payload, { merge: true });
       });
 
       if (householdId) {
         // Also update member doc if it exists
         const memberRef = doc(db, `households/${householdId}/members`, uid);
-        await updateDoc(memberRef, {
-          lastActiveAt: nowIso,
-        }).catch(() => {});
+        await updateDoc(memberRef, payload).catch(async () => {
+          await updateDoc(
+            doc(db, `households/${householdId}/members`, `mem_${uid}`),
+            payload,
+          ).catch(() => {});
+        });
       }
     } catch (e) {
       // Quiet background failure
+    }
+  },
+
+  async setUserOffline(householdId?: string, userId?: string): Promise<void> {
+    const rawUid = userId || auth.currentUser?.uid;
+    if (!rawUid) return;
+    const uid = String(rawUid).replace(/^mem_/, "").trim();
+    const nowIso = new Date().toISOString();
+    const payload = {
+      isOnline: false,
+      lastActiveAt: nowIso,
+      lastActiveDate: nowIso,
+    };
+    try {
+      await updateDoc(doc(db, "users", uid), payload).catch(() => {});
+      if (householdId) {
+        await updateDoc(
+          doc(db, `households/${householdId}/members`, uid),
+          payload,
+        ).catch(async () => {
+          await updateDoc(
+            doc(db, `households/${householdId}/members`, `mem_${uid}`),
+            payload,
+          ).catch(() => {});
+        });
+      }
+    } catch (e) {
+      // Quiet background failure
+    }
+  },
+
+  listenToUsersPresence(
+    userIds: string[],
+    callback: (presenceMap: Record<string, any>) => void,
+  ): () => void {
+    const cleanIds = Array.from(
+      new Set(
+        (userIds || [])
+          .map((id) =>
+            String(id || "")
+              .replace(/^mem_/, "")
+              .trim(),
+          )
+          .filter(Boolean),
+      ),
+    );
+
+    if (cleanIds.length === 0) {
+      callback({});
+      return () => {};
+    }
+
+    const presenceState: Record<string, any> = {};
+    const unsubs: (() => void)[] = [];
+
+    cleanIds.forEach((uid) => {
+      try {
+        const userRef = doc(db, "users", uid);
+        const unsub = onSnapshot(
+          userRef,
+          (snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              presenceState[uid] = {
+                userId: uid,
+                lastActiveAt: data.lastActiveAt || data.lastActiveDate,
+                lastActiveDate: data.lastActiveDate || data.lastActiveAt,
+                isOnline: data.isOnline === true,
+                photoURL:
+                  data.photoURL ||
+                  data.profilePicture ||
+                  data.avatar ||
+                  undefined,
+                profilePicture:
+                  data.profilePicture ||
+                  data.photoURL ||
+                  data.avatar ||
+                  undefined,
+                displayName: data.displayName || data.name,
+                name: data.name || data.displayName,
+                thoughtNote: data.thoughtNote,
+                thoughtEmoji:
+                  data.thoughtEmoji !== undefined && data.thoughtEmoji !== null
+                    ? String(data.thoughtEmoji).trim()
+                    : "",
+                noteUpdatedAt: data.noteUpdatedAt,
+                noteExpiresAt: data.noteExpiresAt,
+              };
+            } else {
+              delete presenceState[uid];
+            }
+            callback({ ...presenceState });
+          },
+          (_err) => {
+            // Silently ignore permission/missing doc errors for individual user
+          },
+        );
+        unsubs.push(unsub);
+      } catch (e) {
+        // Safe catch
+      }
+    });
+
+    return () => {
+      unsubs.forEach((u) => {
+        try {
+          u();
+        } catch {}
+      });
+    };
+  },
+
+  listenToUserPresence(
+    rawUserId: string,
+    callback: (presence: any) => void,
+  ): () => void {
+    const uid = String(rawUserId || "")
+      .replace(/^mem_/, "")
+      .trim();
+    if (!uid) {
+      callback(null);
+      return () => {};
+    }
+    try {
+      const userRef = doc(db, "users", uid);
+      return onSnapshot(
+        userRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            callback({
+              userId: uid,
+              lastActiveAt: data.lastActiveAt || data.lastActiveDate,
+              lastActiveDate: data.lastActiveDate || data.lastActiveAt,
+              isOnline: data.isOnline === true,
+              photoURL:
+                data.photoURL ||
+                data.profilePicture ||
+                data.avatar ||
+                undefined,
+              profilePicture:
+                data.profilePicture ||
+                data.photoURL ||
+                data.avatar ||
+                undefined,
+              displayName: data.displayName || data.name,
+              name: data.name || data.displayName,
+              thoughtNote: data.thoughtNote,
+              thoughtEmoji:
+                data.thoughtEmoji !== undefined && data.thoughtEmoji !== null
+                  ? String(data.thoughtEmoji).trim()
+                  : "",
+              noteUpdatedAt: data.noteUpdatedAt,
+              noteExpiresAt: data.noteExpiresAt,
+            });
+          } else {
+            callback(null);
+          }
+        },
+        () => {
+          callback(null);
+        },
+      );
+    } catch {
+      callback(null);
+      return () => {};
     }
   },
 

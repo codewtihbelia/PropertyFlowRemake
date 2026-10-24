@@ -530,10 +530,10 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
                   <Text style={styles.timerText}>
                     {formatDuration(duration)}
                   </Text>
-                  <View style={styles.latencyBadge}>
+                  {/* <View style={styles.latencyBadge}>
                     <Ionicons name="flash" size={10} color="#10B981" />
                     <Text style={styles.latencyBadgeText}>Real-Time P2P</Text>
-                  </View>
+                  </View> */}
                 </>
               ) : (
                 <Text style={styles.ringingText}>Ringing...</Text>

@@ -1,8 +1,13 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut as firebaseSignOut, sendEmailVerification } from 'firebase/auth';
-import { UserProfile, UserRole } from '@propertyflow/shared';
-import { auth } from '../firebase/config';
-import { firebaseDataService } from '../services/firebaseDataService';
+import React, { createContext, useContext, useEffect, useState } from "react";
+import {
+  onAuthStateChanged,
+  signOut as firebaseSignOut,
+  sendEmailVerification,
+} from "firebase/auth";
+import { doc, updateDoc } from "firebase/firestore";
+import { UserProfile, UserRole } from "@propertyflow/shared";
+import { auth, db } from "../firebase/config";
+import { firebaseDataService } from "../services/firebaseDataService";
 
 export interface AuthContextType {
   currentUser: UserProfile;
@@ -23,19 +28,23 @@ export interface AuthContextType {
 }
 
 const emptyUser: UserProfile = {
-  uid: '',
-  fullName: '',
-  displayName: '',
-  email: '',
-  role: 'PAYOR',
-  accountStatus: 'ACTIVE',
-  createdDate: '',
-  updatedDate: '',
+  uid: "",
+  fullName: "",
+  displayName: "",
+  email: "",
+  role: "PAYOR",
+  accountStatus: "ACTIVE",
+  createdDate: "",
+  updatedDate: "",
 };
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined,
+);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [currentUser, setCurrentUser] = useState<UserProfile>(emptyUser);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [isEmailVerified, setIsEmailVerified] = useState<boolean>(true);
@@ -43,12 +52,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
+    let webHeartbeatInterval: any = null;
+    let handleVisibility: (() => void) | null = null;
+    let handleUnload: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (unsubProfile) {
         unsubProfile();
         unsubProfile = null;
       }
+      if (webHeartbeatInterval) {
+        clearInterval(webHeartbeatInterval);
+        webHeartbeatInterval = null;
+      }
+      if (handleVisibility) {
+        window.removeEventListener("visibilitychange", handleVisibility);
+        handleVisibility = null;
+      }
+      if (handleUnload) {
+        window.removeEventListener("beforeunload", handleUnload);
+        handleUnload = null;
+      }
+
       try {
         if (!firebaseUser) {
           setCurrentUser(emptyUser);
@@ -59,25 +84,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setIsEmailVerified(firebaseUser.emailVerified);
 
-        const existing = await firebaseDataService.getUserProfile(firebaseUser.uid);
+        const updatePresence = (online: boolean) => {
+          if (!firebaseUser?.uid) return;
+          const nowIso = new Date().toISOString();
+          updateDoc(doc(db, "users", firebaseUser.uid), {
+            isOnline: online,
+            lastActiveAt: nowIso,
+            lastActiveDate: nowIso,
+          }).catch(() => {});
+        };
+
+        // Immediate presence pulse + 45s interval
+        updatePresence(true);
+        webHeartbeatInterval = setInterval(() => {
+          updatePresence(true);
+        }, 45000);
+
+        handleVisibility = () => {
+          if (document.visibilityState === "visible") {
+            updatePresence(true);
+          } else {
+            updatePresence(false);
+          }
+        };
+        handleUnload = () => {
+          updatePresence(false);
+        };
+
+        window.addEventListener("visibilitychange", handleVisibility);
+        window.addEventListener("beforeunload", handleUnload);
+
+        const existing = await firebaseDataService.getUserProfile(
+          firebaseUser.uid,
+        );
         const now = new Date().toISOString();
         const role =
-          existing?.role === 'SUPER_ADMIN'
-            ? 'SUPER_ADMIN'
-            : existing?.role === 'HOST' || existing?.hostApplicationStatus === 'APPROVED'
-            ? 'HOST'
-            : existing?.role || 'PAYOR';
+          existing?.role === "SUPER_ADMIN"
+            ? "SUPER_ADMIN"
+            : existing?.role === "HOST" ||
+                existing?.hostApplicationStatus === "APPROVED"
+              ? "HOST"
+              : existing?.role || "PAYOR";
 
         const profile: UserProfile = {
           uid: firebaseUser.uid,
-          fullName: existing?.fullName || firebaseUser.displayName || firebaseUser.email || 'Resident',
-          displayName: existing?.displayName || firebaseUser.displayName || firebaseUser.email || 'Resident',
-          email: existing?.email || firebaseUser.email || '',
+          fullName:
+            existing?.fullName ||
+            firebaseUser.displayName ||
+            firebaseUser.email ||
+            "Resident",
+          displayName:
+            existing?.displayName ||
+            firebaseUser.displayName ||
+            firebaseUser.email ||
+            "Resident",
+          email: existing?.email || firebaseUser.email || "",
           role,
-          accountStatus: existing?.accountStatus || 'ACTIVE',
+          accountStatus: existing?.accountStatus || "ACTIVE",
           householdId: existing?.householdId,
           phoneNumber: existing?.phoneNumber,
-          profilePicture: existing?.profilePicture || firebaseUser.photoURL || undefined,
+          profilePicture:
+            existing?.profilePicture || firebaseUser.photoURL || undefined,
           hostApplicationStatus: existing?.hostApplicationStatus,
           hostApplicationId: existing?.hostApplicationId,
           createdDate: existing?.createdDate || now,
@@ -88,32 +155,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Non-blocking sync to cloud so auth state resolves immediately
         firebaseDataService.saveUserProfile(profile).catch((err) => {
-          console.warn('[Auth] Background saveUserProfile warning:', err);
+          console.warn("[Auth] Background saveUserProfile warning:", err);
         });
 
         setCurrentUser(profile);
         setAllUsers([profile]);
 
         // Real-time listener for user profile changes (role upgrade, household deletion, etc.)
-        unsubProfile = firebaseDataService.listenToUserProfile(firebaseUser.uid, (updated) => {
-          if (updated) {
-            setCurrentUser((prev) => ({
-              ...prev,
-              ...updated,
-              uid: firebaseUser.uid,
-            }));
-          }
-        });
+        unsubProfile = firebaseDataService.listenToUserProfile(
+          firebaseUser.uid,
+          (updated) => {
+            if (updated) {
+              setCurrentUser((prev) => ({
+                ...prev,
+                ...updated,
+                uid: firebaseUser.uid,
+              }));
+            }
+          },
+        );
       } catch (err) {
-        console.error('[Auth] Error setting up user profile:', err);
+        console.error("[Auth] Error setting up user profile:", err);
         if (firebaseUser) {
           const fallback: UserProfile = {
             uid: firebaseUser.uid,
-            fullName: firebaseUser.displayName || firebaseUser.email || 'Resident',
-            displayName: firebaseUser.displayName || firebaseUser.email || 'Resident',
-            email: firebaseUser.email || '',
-            role: 'PAYOR',
-            accountStatus: 'ACTIVE',
+            fullName:
+              firebaseUser.displayName || firebaseUser.email || "Resident",
+            displayName:
+              firebaseUser.displayName || firebaseUser.email || "Resident",
+            email: firebaseUser.email || "",
+            role: "PAYOR",
+            accountStatus: "ACTIVE",
             createdDate: new Date().toISOString(),
             updatedDate: new Date().toISOString(),
           };
@@ -127,12 +199,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       if (unsubProfile) unsubProfile();
+      if (webHeartbeatInterval) clearInterval(webHeartbeatInterval);
+      if (handleVisibility)
+        window.removeEventListener("visibilitychange", handleVisibility);
+      if (handleUnload)
+        window.removeEventListener("beforeunload", handleUnload);
       unsubscribe();
     };
   }, []);
 
   const switchUser = () => {
-    console.warn('[Auth] Demo user switching has been removed. Sign in with the intended Firebase account.');
+    console.warn(
+      "[Auth] Demo user switching has been removed. Sign in with the intended Firebase account.",
+    );
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
@@ -148,6 +227,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    if (currentUser?.uid) {
+      updateDoc(doc(db, "users", currentUser.uid), {
+        isOnline: false,
+        lastActiveAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
     await firebaseSignOut(auth);
     setCurrentUser(emptyUser);
     setAllUsers([]);
@@ -169,11 +254,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const u = auth.currentUser;
         const profile: UserProfile = {
           uid: u.uid,
-          fullName: u.displayName || u.email || 'Resident',
-          displayName: u.displayName || u.email || 'Resident',
-          email: u.email || '',
-          role: 'PAYOR',
-          accountStatus: 'ACTIVE',
+          fullName: u.displayName || u.email || "Resident",
+          displayName: u.displayName || u.email || "Resident",
+          email: u.email || "",
+          role: "PAYOR",
+          accountStatus: "ACTIVE",
           createdDate: new Date().toISOString(),
           updatedDate: new Date().toISOString(),
         };
@@ -186,10 +271,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAuthenticated = !loading && Boolean(currentUser.uid);
-  const isHost = currentUser.role === 'HOST' || currentUser.hostApplicationStatus === 'APPROVED';
-  const isPayor = currentUser.role === 'PAYOR';
-  const isNonPayor = currentUser.role === 'NON_PAYOR';
-  const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
+  const isHost =
+    currentUser.role === "HOST" ||
+    currentUser.hostApplicationStatus === "APPROVED";
+  const isPayor = currentUser.role === "PAYOR";
+  const isNonPayor = currentUser.role === "NON_PAYOR";
+  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
 
   return (
     <AuthContext.Provider
@@ -219,10 +306,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }
 
 export default useAuth;
-

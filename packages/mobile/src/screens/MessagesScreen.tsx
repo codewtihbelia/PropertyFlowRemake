@@ -17,6 +17,7 @@ import {
   Dimensions,
   useWindowDimensions,
   LayoutAnimation,
+  AppState,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -90,6 +91,8 @@ export interface ConversationItem {
   photoURL?: string;
   isOnline: boolean;
   onlineStatusLabel: string;
+  lastActiveAt?: string;
+  lastActiveDate?: string;
   timestamp: string;
   lastMessageTimestampMs: number;
   unreadCount?: number;
@@ -175,21 +178,39 @@ function formatMessageTime(isoString?: string): string {
   }
 }
 
-function computePresence(lastActiveIso?: string): {
+function computePresence(
+  lastActive?: any,
+  isOnlineFlag?: boolean,
+): {
   isOnline: boolean;
   statusLabel: string;
 } {
-  if (!lastActiveIso) {
-    return { isOnline: false, statusLabel: "Offline" };
+  let t = 0;
+  if (lastActive) {
+    if (typeof lastActive === "number") {
+      t = lastActive;
+    } else if (lastActive?.toDate && typeof lastActive.toDate === "function") {
+      t = lastActive.toDate().getTime();
+    } else if (
+      typeof lastActive === "object" &&
+      typeof lastActive.seconds === "number"
+    ) {
+      t = lastActive.seconds * 1000;
+    } else {
+      t = new Date(lastActive).getTime();
+    }
   }
-  try {
-    const t = new Date(lastActiveIso).getTime();
-    if (isNaN(t)) return { isOnline: false, statusLabel: "Offline" };
-    const diffMs = Date.now() - t;
-    // Legitimate 15-minute active presence window
-    if (diffMs >= 0 && diffMs < 15 * 60 * 1000) {
+
+  const now = Date.now();
+  const hasValidTime = !isNaN(t) && t > 0;
+  const diffMs = hasValidTime ? now - t : -1;
+
+  if (isOnlineFlag === true) {
+    // If flagged online and timestamp is within last 15 minutes or no timestamp, user is active now!
+    if (!hasValidTime || (diffMs >= 0 && diffMs < 15 * 60 * 1000)) {
       return { isOnline: true, statusLabel: "Active now" };
     }
+    // Stale isOnline flag (>15 mins ago)
     if (diffMs < 60 * 60 * 1000) {
       const mins = Math.max(1, Math.floor(diffMs / 60000));
       return { isOnline: false, statusLabel: `Active ${mins}m ago` };
@@ -199,9 +220,25 @@ function computePresence(lastActiveIso?: string): {
       return { isOnline: false, statusLabel: `Active ${hrs}h ago` };
     }
     return { isOnline: false, statusLabel: "Offline" };
-  } catch {
+  }
+
+  if (!hasValidTime) {
     return { isOnline: false, statusLabel: "Offline" };
   }
+
+  // Active window: within 10 minutes
+  if (diffMs >= 0 && diffMs < 10 * 60 * 1000) {
+    return { isOnline: true, statusLabel: "Active now" };
+  }
+  if (diffMs < 60 * 60 * 1000) {
+    const mins = Math.max(1, Math.floor(diffMs / 60000));
+    return { isOnline: false, statusLabel: `Active ${mins}m ago` };
+  }
+  if (diffMs < 24 * 60 * 60 * 1000) {
+    const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+    return { isOnline: false, statusLabel: `Active ${hrs}h ago` };
+  }
+  return { isOnline: false, statusLabel: "Offline" };
 }
 
 export function isNoteExpired(updatedAt?: string, expiresAt?: string): boolean {
@@ -249,6 +286,296 @@ export function formatNoteRemainingTime(
   }
   return "Expires in <1m";
 }
+
+interface GroupChatAvatarProps {
+  members: any[];
+  size?: number;
+  isDark?: boolean;
+}
+
+export const GroupChatAvatar: React.FC<GroupChatAvatarProps> = ({
+  members,
+  size = 56,
+  isDark = false,
+}) => {
+  const displayMembers = useMemo(() => {
+    return (members || []).filter((m) => Boolean(m)).slice(0, 4);
+  }, [members]);
+
+  const bgBorderColor = isDark ? "#111215" : "#FFFFFF";
+
+  if (displayMembers.length === 0) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: isDark ? "#1E293B" : "#DBEAFE",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons
+          name="people"
+          size={size * 0.48}
+          color={isDark ? "#93C5FD" : "#2563EB"}
+        />
+      </View>
+    );
+  }
+
+  if (displayMembers.length === 1) {
+    const m = displayMembers[0];
+    const photo = m.profilePicture || m.photoURL;
+    const name = m.displayName || m.name || "Member";
+    const initials = getInitials(name);
+    const palette =
+      AVATAR_PALETTES[
+        Math.abs(hashString(String(m.userId || m.memberId || "0"))) %
+          AVATAR_PALETTES.length
+      ];
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: palette.bg,
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+        }}
+      >
+        {photo ? (
+          <Image
+            source={{ uri: photo }}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ) : (
+          <Text
+            style={{
+              color: palette.text,
+              fontSize: size * 0.38,
+              fontWeight: "900",
+            }}
+          >
+            {initials}
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  if (displayMembers.length === 2) {
+    const subSize = Math.round(size * 0.62);
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          position: "relative",
+          borderRadius: size / 2,
+          overflow: "hidden",
+          backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+        }}
+      >
+        {displayMembers.map((m, idx) => {
+          const photo = m.profilePicture || m.photoURL;
+          const name = m.displayName || m.name || "Member";
+          const initials = getInitials(name);
+          const palette =
+            AVATAR_PALETTES[
+              Math.abs(hashString(String(m.userId || m.memberId || idx))) %
+                AVATAR_PALETTES.length
+            ];
+          const isTop = idx === 0;
+          return (
+            <View
+              key={m.userId || m.memberId || idx}
+              style={{
+                position: "absolute",
+                top: isTop ? 0 : size - subSize,
+                left: isTop ? 0 : size - subSize,
+                width: subSize,
+                height: subSize,
+                borderRadius: subSize / 2,
+                backgroundColor: palette.bg,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 2,
+                borderColor: bgBorderColor,
+                overflow: "hidden",
+                zIndex: isTop ? 1 : 2,
+              }}
+            >
+              {photo ? (
+                <Image
+                  source={{ uri: photo }}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <Text
+                  style={{
+                    color: palette.text,
+                    fontSize: subSize * 0.4,
+                    fontWeight: "800",
+                  }}
+                >
+                  {initials}
+                </Text>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  if (displayMembers.length === 3) {
+    const topSize = Math.round(size * 0.52);
+    const bottomSize = Math.round(size * 0.5);
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          position: "relative",
+          borderRadius: size / 2,
+          overflow: "hidden",
+          backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+        }}
+      >
+        {displayMembers.map((m, idx) => {
+          const photo = m.profilePicture || m.photoURL;
+          const name = m.displayName || m.name || "Member";
+          const initials = getInitials(name);
+          const palette =
+            AVATAR_PALETTES[
+              Math.abs(hashString(String(m.userId || m.memberId || idx))) %
+                AVATAR_PALETTES.length
+            ];
+
+          let stylePos: any = {};
+          let currentSize = bottomSize;
+          if (idx === 0) {
+            currentSize = topSize;
+            stylePos = { top: 1, left: (size - topSize) / 2, zIndex: 1 };
+          } else if (idx === 1) {
+            stylePos = { bottom: 1, left: 1, zIndex: 2 };
+          } else {
+            stylePos = { bottom: 1, right: 1, zIndex: 2 };
+          }
+
+          return (
+            <View
+              key={m.userId || m.memberId || idx}
+              style={[
+                {
+                  position: "absolute",
+                  width: currentSize,
+                  height: currentSize,
+                  borderRadius: currentSize / 2,
+                  backgroundColor: palette.bg,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderWidth: 1.5,
+                  borderColor: bgBorderColor,
+                  overflow: "hidden",
+                },
+                stylePos,
+              ]}
+            >
+              {photo ? (
+                <Image
+                  source={{ uri: photo }}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <Text
+                  style={{
+                    color: palette.text,
+                    fontSize: currentSize * 0.4,
+                    fontWeight: "800",
+                  }}
+                >
+                  {initials}
+                </Text>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  // 4 or more: 2x2 quadrant collage
+  const quadrantSize = Math.round(size * 0.48);
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        position: "relative",
+        borderRadius: size / 2,
+        overflow: "hidden",
+        backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+      }}
+    >
+      {displayMembers.slice(0, 4).map((m, idx) => {
+        const photo = m.profilePicture || m.photoURL;
+        const name = m.displayName || m.name || "Member";
+        const initials = getInitials(name);
+        const palette =
+          AVATAR_PALETTES[
+            Math.abs(hashString(String(m.userId || m.memberId || idx))) %
+              AVATAR_PALETTES.length
+          ];
+
+        const isLeft = idx % 2 === 0;
+        const isTop = idx < 2;
+
+        return (
+          <View
+            key={m.userId || m.memberId || idx}
+            style={{
+              position: "absolute",
+              top: isTop ? 1 : size - quadrantSize - 1,
+              left: isLeft ? 1 : size - quadrantSize - 1,
+              width: quadrantSize,
+              height: quadrantSize,
+              borderRadius: quadrantSize / 2,
+              backgroundColor: palette.bg,
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1.5,
+              borderColor: bgBorderColor,
+              overflow: "hidden",
+              zIndex: idx + 1,
+            }}
+          >
+            {photo ? (
+              <Image
+                source={{ uri: photo }}
+                style={{ width: "100%", height: "100%" }}
+              />
+            ) : (
+              <Text
+                style={{
+                  color: palette.text,
+                  fontSize: quadrantSize * 0.4,
+                  fontWeight: "800",
+                }}
+              >
+                {initials}
+              </Text>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+};
 
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   onBack,
@@ -315,6 +642,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     any[]
   >([]);
   const [directMessages, setDirectMessages] = useState<any[]>([]);
+  const [presenceMap, setPresenceMap] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
 
   // Strict helper: only active approved members belong in the group chat and direct messages
@@ -476,6 +804,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Modals
   const [showRequestSplitModal, setShowRequestSplitModal] = useState(false);
   const [showComposeModal, setShowComposeModal] = useState(false);
+  const [composeSearchQuery, setComposeSearchQuery] = useState("");
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showNoteActionMenu, setShowNoteActionMenu] = useState(false);
 
@@ -730,16 +1059,106 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     });
   }, [householdMembers, currentUid]);
 
+  // Collect all contact UIDs to subscribe to their live Firestore presence
+  const contactPresenceUids = useMemo(() => {
+    const ids = new Set<string>();
+    const cleanCurUid = String(currentUid || "")
+      .replace(/^mem_/, "")
+      .trim();
+
+    billsGroupMembers.forEach((m) => {
+      const u = String(m.userId || m.memberId || m.id || "")
+        .replace(/^mem_/, "")
+        .trim();
+      if (u && u !== cleanCurUid) ids.add(u);
+    });
+
+    acceptedCommunityFriends.forEach((f) => {
+      const u = String(f.userId || f.memberId || f.id || "")
+        .replace(/^mem_/, "")
+        .trim();
+      if (u && u !== cleanCurUid) ids.add(u);
+    });
+
+    directMessages.forEach((m) => {
+      const cleanSender = String(m.senderId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const cleanRecip = String(m.recipientId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const other = cleanSender === cleanCurUid ? cleanRecip : cleanSender;
+      if (other && other !== cleanCurUid) ids.add(other);
+    });
+
+    return Array.from(ids).sort();
+  }, [billsGroupMembers, acceptedCommunityFriends, directMessages, currentUid]);
+
+  // Subscribe to real-time presence for all contacts (outside friends, roommates, direct correspondents)
+  useEffect(() => {
+    if (contactPresenceUids.length === 0) {
+      setPresenceMap({});
+      return;
+    }
+    const unsub = mobileDataService.listenToUsersPresence(
+      contactPresenceUids,
+      (newMap) => {
+        setPresenceMap(newMap);
+      },
+    );
+    return () => unsub();
+  }, [JSON.stringify(contactPresenceUids)]);
+
   // Combine household members with accepted friends and incoming message request contacts
   const allDirectMembers = useMemo(() => {
-    const list: any[] = [...billsGroupMembers];
+    const list: any[] = [];
     const existingUids = new Set<string>();
 
     billsGroupMembers.forEach((m) => {
       const u = String(m.userId || m.memberId || m.id || "");
+      const cleanU = u.replace(/^mem_/, "");
       if (u) {
+        const livePres = presenceMap[cleanU] || {};
+        list.push({
+          ...m,
+          isOnline:
+            livePres.isOnline !== undefined
+              ? livePres.isOnline
+              : m.isOnline || m.online,
+          lastActiveAt:
+            livePres.lastActiveAt ||
+            livePres.lastActiveDate ||
+            m.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastSeen,
+          lastActiveDate:
+            livePres.lastActiveDate ||
+            livePres.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastActiveAt,
+          photoURL:
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            m.photoURL ||
+            m.profilePicture,
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            m.profilePicture ||
+            m.photoURL,
+          thoughtNote:
+            livePres.thoughtNote !== undefined
+              ? livePres.thoughtNote
+              : m.thoughtNote,
+          thoughtEmoji:
+            livePres.thoughtEmoji !== undefined
+              ? livePres.thoughtEmoji
+              : m.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt || m.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt || m.noteExpiresAt,
+        });
         existingUids.add(u);
-        existingUids.add(u.replace(/^mem_/, ""));
+        existingUids.add(cleanU);
       }
     });
 
@@ -755,7 +1174,55 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         !existingUids.has(friendUid) &&
         !existingUids.has(cleanUid)
       ) {
-        list.push(friend);
+        const livePres = presenceMap[cleanUid] || {};
+        list.push({
+          ...friend,
+          isOnline:
+            livePres.isOnline !== undefined
+              ? livePres.isOnline
+              : friend.isOnline || friend.online,
+          lastActiveAt:
+            livePres.lastActiveAt ||
+            livePres.lastActiveDate ||
+            friend.lastActiveAt ||
+            friend.lastActiveDate ||
+            friend.lastSeen,
+          lastActiveDate:
+            livePres.lastActiveDate ||
+            livePres.lastActiveAt ||
+            friend.lastActiveDate ||
+            friend.lastActiveAt,
+          photoURL:
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            friend.photoURL ||
+            friend.profilePicture,
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            friend.profilePicture ||
+            friend.photoURL,
+          displayName:
+            livePres.displayName ||
+            livePres.name ||
+            friend.displayName ||
+            friend.name,
+          name:
+            livePres.name ||
+            livePres.displayName ||
+            friend.name ||
+            friend.displayName,
+          thoughtNote:
+            livePres.thoughtNote !== undefined
+              ? livePres.thoughtNote
+              : friend.thoughtNote,
+          thoughtEmoji:
+            livePres.thoughtEmoji !== undefined
+              ? livePres.thoughtEmoji
+              : friend.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt || friend.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt || friend.noteExpiresAt,
+        });
         existingUids.add(friendUid);
         existingUids.add(cleanUid);
       }
@@ -777,23 +1244,41 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         !existingUids.has(otherUid) &&
         !existingUids.has(`mem_${otherUid}`)
       ) {
+        const livePres = presenceMap[otherUid] || {};
         list.push({
           userId: otherUid,
           memberId: otherUid,
           id: otherUid,
           displayName:
-            cleanSender === cleanMe
+            livePres.displayName ||
+            livePres.name ||
+            (cleanSender === cleanMe
               ? m.recipientName || "Splitzer"
-              : m.senderName || "Splitzer",
+              : m.senderName || "Splitzer"),
           name:
-            cleanSender === cleanMe
+            livePres.name ||
+            livePres.displayName ||
+            (cleanSender === cleanMe
               ? m.recipientName || "Splitzer"
-              : m.senderName || "Splitzer",
+              : m.senderName || "Splitzer"),
           photoURL:
-            cleanSender === cleanMe ? m.recipientAvatar : m.senderAvatar,
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            (cleanSender === cleanMe ? m.recipientAvatar : m.senderAvatar),
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            (cleanSender === cleanMe ? m.recipientAvatar : m.senderAvatar),
           role: "Member",
           isOutsideFriend: false,
           isNonFriendRequest: true,
+          isOnline: livePres.isOnline !== undefined ? livePres.isOnline : false,
+          lastActiveAt: livePres.lastActiveAt || livePres.lastActiveDate,
+          lastActiveDate: livePres.lastActiveDate || livePres.lastActiveAt,
+          thoughtNote: livePres.thoughtNote,
+          thoughtEmoji: livePres.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt,
         });
         existingUids.add(otherUid);
         existingUids.add(`mem_${otherUid}`);
@@ -801,7 +1286,298 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     });
 
     return list;
-  }, [billsGroupMembers, acceptedCommunityFriends, directMessages, currentUid]);
+  }, [
+    billsGroupMembers,
+    acceptedCommunityFriends,
+    directMessages,
+    currentUid,
+    presenceMap,
+  ]);
+
+  // Combined contacts for the Active Stories / Thought Notes tray:
+  // Includes roommates and accepted friends with actively online users sorted first
+  const activeTrayMembers = useMemo(() => {
+    const map = new Map<string, any>();
+
+    // 1. Bills group members (roommates)
+    billsGroupMembers.forEach((m) => {
+      const rawUid = String(m.userId || m.memberId || m.id || "");
+      const cleanUid = rawUid.replace(/^mem_/, "");
+      if (cleanUid && cleanUid !== currentUid) {
+        const livePres = presenceMap[cleanUid] || {};
+        map.set(cleanUid, {
+          ...m,
+          cleanUid,
+          isRoommate: true,
+          isOnline:
+            livePres.isOnline !== undefined
+              ? livePres.isOnline
+              : m.isOnline || m.online,
+          lastActiveAt:
+            livePres.lastActiveAt ||
+            livePres.lastActiveDate ||
+            m.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastSeen,
+          lastActiveDate:
+            livePres.lastActiveDate ||
+            livePres.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastActiveAt,
+          thoughtNote:
+            livePres.thoughtNote !== undefined
+              ? livePres.thoughtNote
+              : m.thoughtNote,
+          thoughtEmoji:
+            livePres.thoughtEmoji !== undefined
+              ? livePres.thoughtEmoji
+              : m.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt || m.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt || m.noteExpiresAt,
+          photoURL:
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            m.photoURL ||
+            m.profilePicture,
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            m.profilePicture ||
+            m.photoURL,
+        });
+      }
+    });
+
+    // 2. Accepted community friends
+    acceptedCommunityFriends.forEach((friend) => {
+      const rawUid = String(
+        friend.userId || friend.memberId || friend.id || "",
+      );
+      const cleanUid = rawUid.replace(/^mem_/, "");
+      if (cleanUid && cleanUid !== currentUid) {
+        const livePres = presenceMap[cleanUid] || {};
+        const friendWithPresence = {
+          ...friend,
+          cleanUid,
+          isFriend: true,
+          isOnline:
+            livePres.isOnline !== undefined
+              ? livePres.isOnline
+              : friend.isOnline || friend.online,
+          lastActiveAt:
+            livePres.lastActiveAt ||
+            livePres.lastActiveDate ||
+            friend.lastActiveAt ||
+            friend.lastActiveDate ||
+            friend.lastSeen,
+          lastActiveDate:
+            livePres.lastActiveDate ||
+            livePres.lastActiveAt ||
+            friend.lastActiveDate ||
+            friend.lastActiveAt,
+          thoughtNote:
+            livePres.thoughtNote !== undefined
+              ? livePres.thoughtNote
+              : friend.thoughtNote,
+          thoughtEmoji:
+            livePres.thoughtEmoji !== undefined
+              ? livePres.thoughtEmoji
+              : friend.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt || friend.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt || friend.noteExpiresAt,
+          photoURL:
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            friend.photoURL ||
+            friend.profilePicture,
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            friend.profilePicture ||
+            friend.photoURL,
+          displayName:
+            livePres.displayName ||
+            livePres.name ||
+            friend.displayName ||
+            friend.name,
+          name:
+            livePres.name ||
+            livePres.displayName ||
+            friend.name ||
+            friend.displayName,
+        };
+        if (map.has(cleanUid)) {
+          const existing = map.get(cleanUid);
+          map.set(cleanUid, {
+            ...existing,
+            ...friendWithPresence,
+          });
+        } else {
+          map.set(cleanUid, friendWithPresence);
+        }
+      }
+    });
+
+    // 3. Contacts from allDirectMembers
+    allDirectMembers.forEach((m) => {
+      const rawUid = String(m.userId || m.memberId || m.id || "");
+      const cleanUid = rawUid.replace(/^mem_/, "");
+      if (cleanUid && cleanUid !== currentUid && !map.has(cleanUid)) {
+        const livePres = presenceMap[cleanUid] || {};
+        map.set(cleanUid, {
+          ...m,
+          cleanUid,
+          isOnline:
+            livePres.isOnline !== undefined
+              ? livePres.isOnline
+              : m.isOnline || m.online,
+          lastActiveAt:
+            livePres.lastActiveAt ||
+            livePres.lastActiveDate ||
+            m.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastSeen,
+          lastActiveDate:
+            livePres.lastActiveDate ||
+            livePres.lastActiveAt ||
+            m.lastActiveDate ||
+            m.lastActiveAt,
+          thoughtNote:
+            livePres.thoughtNote !== undefined
+              ? livePres.thoughtNote
+              : m.thoughtNote,
+          thoughtEmoji:
+            livePres.thoughtEmoji !== undefined
+              ? livePres.thoughtEmoji
+              : m.thoughtEmoji,
+          noteUpdatedAt: livePres.noteUpdatedAt || m.noteUpdatedAt,
+          noteExpiresAt: livePres.noteExpiresAt || m.noteExpiresAt,
+          photoURL:
+            livePres.photoURL ||
+            livePres.profilePicture ||
+            m.photoURL ||
+            m.profilePicture,
+          profilePicture:
+            livePres.profilePicture ||
+            livePres.photoURL ||
+            m.profilePicture ||
+            m.photoURL,
+        });
+      }
+    });
+
+    const list = Array.from(map.values());
+
+    // Sort: Online first, then active thought note, then alphabetical
+    list.sort((a, b) => {
+      const aTime =
+        a.lastActiveAt ||
+        a.lastActiveDate ||
+        a.lastSeen ||
+        a.updatedAt ||
+        a.createdAt;
+      const bTime =
+        b.lastActiveAt ||
+        b.lastActiveDate ||
+        b.lastSeen ||
+        b.updatedAt ||
+        b.createdAt;
+      const aPres = computePresence(aTime, a.isOnline || a.online);
+      const bPres = computePresence(bTime, b.isOnline || b.online);
+
+      if (aPres.isOnline && !bPres.isOnline) return -1;
+      if (!aPres.isOnline && bPres.isOnline) return 1;
+
+      const aNote =
+        householdNotes[a.cleanUid] ||
+        (a.thoughtNote
+          ? {
+              note: a.thoughtNote,
+              emoji: a.thoughtEmoji,
+              expiresAt: a.noteExpiresAt,
+              updatedAt: a.noteUpdatedAt,
+            }
+          : null);
+      const bNote =
+        householdNotes[b.cleanUid] ||
+        (b.thoughtNote
+          ? {
+              note: b.thoughtNote,
+              emoji: b.thoughtEmoji,
+              expiresAt: b.noteExpiresAt,
+              updatedAt: b.noteUpdatedAt,
+            }
+          : null);
+
+      const aHasNote =
+        aNote && !isNoteExpired(aNote.updatedAt, aNote.expiresAt);
+      const bHasNote =
+        bNote && !isNoteExpired(bNote.updatedAt, bNote.expiresAt);
+
+      if (aHasNote && !bHasNote) return -1;
+      if (!aHasNote && bHasNote) return 1;
+
+      const nameA = String(
+        a.displayName || a.name || a.email || "",
+      ).toLowerCase();
+      const nameB = String(
+        b.displayName || b.name || b.email || "",
+      ).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    return list;
+  }, [
+    billsGroupMembers,
+    acceptedCommunityFriends,
+    allDirectMembers,
+    currentUid,
+    householdNotes,
+    presenceMap,
+  ]);
+
+  // Filtered members for the New Conversation Modal
+  const composeFilteredMembers = useMemo(() => {
+    let list = [...allDirectMembers];
+    if (composeSearchQuery.trim()) {
+      const q = composeSearchQuery.toLowerCase().trim();
+      list = list.filter((m) => {
+        const name = (m.displayName || m.name || m.email || "").toLowerCase();
+        return name.includes(q);
+      });
+    }
+
+    // Sort: Online first, then alphabetical
+    list.sort((a, b) => {
+      const aTime =
+        a.lastActiveAt ||
+        a.lastActiveDate ||
+        a.lastSeen ||
+        a.updatedAt ||
+        a.createdAt;
+      const bTime =
+        b.lastActiveAt ||
+        b.lastActiveDate ||
+        b.lastSeen ||
+        b.updatedAt ||
+        b.createdAt;
+      const aPres = computePresence(aTime, a.isOnline || a.online);
+      const bPres = computePresence(bTime, b.isOnline || b.online);
+
+      if (aPres.isOnline && !bPres.isOnline) return -1;
+      if (!aPres.isOnline && bPres.isOnline) return 1;
+
+      const nameA = String(
+        a.displayName || a.name || a.email || "",
+      ).toLowerCase();
+      const nameB = String(
+        b.displayName || b.name || b.email || "",
+      ).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    return list;
+  }, [allDirectMembers, composeSearchQuery]);
 
   const isHost =
     userProfile?.role === "HOST" ||
@@ -1051,11 +1827,26 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           ? "Friend"
           : isMessageRequest
             ? "Request"
-            : "Payor";
+            : undefined;
 
       // Legitimate presence calculation
+      const livePres = presenceMap[cleanMemberUid] || {};
+      const effectiveLastActive =
+        livePres.lastActiveAt ||
+        livePres.lastActiveDate ||
+        member.lastActiveAt ||
+        member.lastActiveDate ||
+        member.lastSeen ||
+        member.updatedAt ||
+        member.createdAt;
+      const effectiveIsOnline =
+        livePres.isOnline !== undefined
+          ? livePres.isOnline
+          : member.isOnline || member.online;
+
       const memberPresence = computePresence(
-        member.lastActiveAt || member.updatedAt || member.createdAt,
+        effectiveLastActive,
+        effectiveIsOnline,
       );
 
       const lastTimeIso =
@@ -1089,6 +1880,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         photoURL: member.profilePicture || member.photoURL,
         isOnline: memberPresence.isOnline,
         onlineStatusLabel: memberPresence.statusLabel,
+        lastActiveAt: effectiveLastActive,
         timestamp: lastTimeIso ? formatMessageTime(lastTimeIso) : "",
         lastMessageTimestampMs: isNaN(lastTimeMs) ? 0 : lastTimeMs,
         unreadCount,
@@ -1131,6 +1923,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     householdInfo,
     allDirectMembers,
     currentUid,
+    presenceMap,
   ]);
 
   // Keep activeThread synced with updated live messages
@@ -1569,7 +2362,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           Math.abs(hashString(memberUid)) % AVATAR_PALETTES.length
         ];
       const presence = computePresence(
-        member.lastActiveAt || member.updatedAt || member.createdAt,
+        member.lastActiveAt ||
+          member.lastActiveDate ||
+          member.lastSeen ||
+          member.updatedAt ||
+          member.createdAt,
+        member.isOnline || member.online,
       );
 
       const newThread: ConversationItem = {
@@ -1580,14 +2378,20 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         initials: getInitials(memberName),
         avatarBg: palette.bg,
         avatarColor: palette.text,
-        photoURL: member.profilePicture || member.photoURL,
+        photoURL:
+          member.profilePicture ||
+          member.photoURL ||
+          (typeof member.avatar === "string" && member.avatar.startsWith("http")
+            ? member.avatar
+            : undefined),
         isOnline: presence.isOnline,
         onlineStatusLabel: presence.statusLabel,
+        lastActiveAt: member.lastActiveAt || member.lastActiveDate,
         timestamp: "New",
         lastMessageTimestampMs: Date.now(),
         unreadCount: 0,
         pinned: false,
-        roleLabel: member.role === "HOST" ? "Host" : "Payor",
+        roleLabel: member.role === "HOST" ? "Host" : undefined,
         lastMessage: "Tap to start conversation",
         messages: [],
       };
@@ -1791,73 +2595,110 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           </TouchableOpacity>
 
           {/* User profile & presence center column */}
-          <View style={styles.chatHeaderCenter}>
-            <View style={styles.chatHeaderAvatarWrap}>
-              <View
-                style={[
-                  styles.chatHeaderAvatar,
-                  { backgroundColor: activeThread.avatarBg },
-                ]}
-              >
-                {activeThread.photoURL ? (
-                  <Image
-                    source={{ uri: activeThread.photoURL }}
-                    style={styles.avatarImage}
-                  />
-                ) : activeThread.type === "group" ? (
-                  <Ionicons name="home" size={20} color="#FFFFFF" />
-                ) : (
+          {(() => {
+            const cleanTargetUid =
+              activeThread.type !== "group" && activeThread.targetUserId
+                ? String(activeThread.targetUserId).replace(/^mem_/, "").trim()
+                : "";
+            const live = cleanTargetUid ? presenceMap[cleanTargetUid] : null;
+            const lastActive =
+              live?.lastActiveAt ||
+              live?.lastActiveDate ||
+              activeThread.lastActiveAt;
+            const isOnlineFlag =
+              live?.isOnline !== undefined
+                ? live.isOnline
+                : activeThread.isOnline;
+            const livePres = cleanTargetUid
+              ? computePresence(lastActive, isOnlineFlag)
+              : null;
+            const isThreadOnline = livePres
+              ? livePres.isOnline
+              : Boolean(activeThread.isOnline);
+            const threadStatusLabel = livePres
+              ? livePres.statusLabel
+              : activeThread.onlineStatusLabel || "Offline";
+            const threadPhoto =
+              live?.photoURL || live?.profilePicture || activeThread.photoURL;
+
+            return (
+              <View style={styles.chatHeaderCenter}>
+                <View style={styles.chatHeaderAvatarWrap}>
+                  {activeThread.type === "group" ? (
+                    <GroupChatAvatar
+                      members={householdMembers}
+                      size={40}
+                      isDark={isDark}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.chatHeaderAvatar,
+                        { backgroundColor: activeThread.avatarBg },
+                      ]}
+                    >
+                      {threadPhoto ? (
+                        <Image
+                          source={{ uri: threadPhoto }}
+                          style={styles.avatarImage}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.avatarText,
+                            { color: activeThread.avatarColor },
+                          ]}
+                        >
+                          {activeThread.initials}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                  {activeThread.type !== "group" && isThreadOnline && (
+                    <View
+                      style={[
+                        styles.chatHeaderOnlineDot,
+                        { borderColor: isDark ? "#181A20" : "#FFFFFF" },
+                      ]}
+                    />
+                  )}
+                </View>
+
+                <View style={styles.chatHeaderTitleColumn}>
                   <Text
                     style={[
-                      styles.avatarText,
-                      { color: activeThread.avatarColor },
+                      styles.chatHeaderName,
+                      { color: isDark ? "#FFFFFF" : "#0F172A" },
                     ]}
+                    numberOfLines={1}
                   >
-                    {activeThread.initials}
+                    {activeThread.name}
                   </Text>
-                )}
+                  <Text
+                    style={[
+                      styles.chatHeaderStatus,
+                      {
+                        color: isThreadOnline
+                          ? "#10B981"
+                          : isDark
+                            ? "#94A3B8"
+                            : "#64748B",
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {activeThread.type === "group"
+                      ? `${householdMembers.length || 1} members · Household group`
+                      : activeThread.roleLabel &&
+                          activeThread.roleLabel !== "Payor" &&
+                          activeThread.roleLabel !== "Non-payor"
+                        ? `${activeThread.roleLabel} · ${threadStatusLabel}`
+                        : threadStatusLabel}
+                  </Text>
+                </View>
               </View>
-              {activeThread.isOnline && (
-                <View
-                  style={[
-                    styles.chatHeaderOnlineDot,
-                    { borderColor: isDark ? "#181A20" : "#FFFFFF" },
-                  ]}
-                />
-              )}
-            </View>
-
-            <View style={styles.chatHeaderTitleColumn}>
-              <Text
-                style={[
-                  styles.chatHeaderName,
-                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                ]}
-                numberOfLines={1}
-              >
-                {activeThread.name}
-              </Text>
-              <Text
-                style={[
-                  styles.chatHeaderStatus,
-                  {
-                    color: activeThread.isOnline
-                      ? "#10B981"
-                      : isDark
-                        ? "#94A3B8"
-                        : "#64748B",
-                  },
-                ]}
-                numberOfLines={1}
-              >
-                {activeThread.type === "group"
-                  ? `${householdMembers.length || 1} members · Household group`
-                  : activeThread.roleLabel
-                    ? `${activeThread.roleLabel} · ${activeThread.onlineStatusLabel}`
-                    : activeThread.onlineStatusLabel}
-              </Text>
-            </View>
-          </View>
+            );
+          })()}
 
           {/* Header Action Buttons: Voice Call, Video Call, and Quick Split Request */}
           <View style={styles.chatHeaderActionsRow}>
@@ -3124,29 +3965,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             )} */}
           </TouchableOpacity>
 
-          {/* Cards 1..N: Real Bills Group Members with Presence and Notes */}
-          {billsGroupMembers.map((member) => {
-            const memberUid = member.userId || member.memberId;
+          {/* Cards 1..N: Real Friends & Roommates with Presence and Notes (Online First) */}
+          {activeTrayMembers.map((member) => {
+            const memberUid =
+              member.cleanUid || member.userId || member.memberId || member.id;
             const displayName =
               member.displayName ||
               member.name ||
               member.email?.split("@")[0] ||
-              "Roommate";
+              "Friend";
             const firstName = displayName.split(" ")[0] || displayName;
             const initials = getInitials(displayName);
             const palette =
               AVATAR_PALETTES[
-                Math.abs(hashString(memberUid)) % AVATAR_PALETTES.length
+                Math.abs(hashString(String(memberUid))) % AVATAR_PALETTES.length
               ];
             const isHost =
-              member.role === "HOST" || householdInfo?.hostId === memberUid;
+              member.role === "HOST" ||
+              householdInfo?.hostId === memberUid ||
+              householdInfo?.hostId === member.userId;
 
-            // Legitimate presence: active in last 15 minutes
+            // Presence: online users first
             const presence = computePresence(
-              member.lastActiveAt || member.updatedAt || member.createdAt,
+              member.lastActiveAt ||
+                member.lastActiveDate ||
+                member.lastSeen ||
+                member.updatedAt ||
+                member.createdAt,
+              member.isOnline || member.online,
             );
 
-            // Roommate's note
+            // Member's note
             const rawMemberNote =
               householdNotes[memberUid] ||
               (member.thoughtNote
@@ -3168,6 +4017,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 ? rawMemberNote
                 : undefined;
 
+            const photo =
+              member.profilePicture ||
+              member.photoURL ||
+              (typeof member.avatar === "string" &&
+              member.avatar.startsWith("http")
+                ? member.avatar
+                : null);
+
             return (
               <TouchableOpacity
                 key={memberUid}
@@ -3184,7 +4041,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   }
                 }}
               >
-                {/* Roommate's Thought Bubble if set */}
+                {/* Roommate / Friend Thought Bubble if set */}
                 {memberNote ? (
                   <View
                     style={[
@@ -3229,11 +4086,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       },
                     ]}
                   >
-                    {member.profilePicture || member.photoURL ? (
+                    {photo ? (
                       <Image
-                        source={{
-                          uri: member.profilePicture || member.photoURL,
-                        }}
+                        source={{ uri: photo }}
                         style={styles.storyAvatarImage}
                       />
                     ) : (
@@ -3248,7 +4103,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     )}
                   </View>
 
-                  {/* Legitimate Green Presence Indicator Dot (only when active < 15m) */}
+                  {/* Facebook Messenger Active Presence Indicator Dot */}
                   {presence.isOnline && (
                     <View
                       style={[
@@ -3272,7 +4127,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             );
           })}
 
-          {billsGroupMembers.length === 0 && !loading && (
+          {activeTrayMembers.length === 0 && !loading && (
             <View style={styles.noMembersHintWrap}>
               <Text
                 style={[
@@ -3281,10 +4136,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 ]}
               >
                 {householdId
-                  ? "No other roommates yet. Invite roommates from the Groups tab to chat!"
-                  : acceptedCommunityFriends.length > 0
-                    ? "Tap any friend below or explore Community to chat!"
-                    : "Connect with friends in Community to start chatting!"}
+                  ? "No roommates or friends yet. Invite contacts to start chatting!"
+                  : "Connect with friends in Community to start chatting!"}
               </Text>
             </View>
           )}
@@ -3501,55 +4354,45 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             >
               {/* Large 56px Messenger Avatar */}
               <View style={styles.messengerAvatarWrap}>
-                <View
-                  style={[
-                    styles.messengerAvatar,
-                    { backgroundColor: item.avatarBg },
-                  ]}
-                >
-                  {item.photoURL ? (
-                    <Image
-                      source={{ uri: item.photoURL }}
-                      style={styles.avatarImage}
-                    />
-                  ) : isGroup ? (
-                    <Ionicons name="home" size={24} color="#FFFFFF" />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.messengerAvatarText,
-                        { color: item.avatarColor },
-                      ]}
-                    >
-                      {item.initials}
-                    </Text>
-                  )}
-                </View>
-
-                {/* Group Member Count Badge or Legitimate Online Dot */}
                 {isGroup ? (
+                  <GroupChatAvatar
+                    members={householdMembers}
+                    size={56}
+                    isDark={isDark}
+                  />
+                ) : (
                   <View
                     style={[
-                      styles.messengerGroupBadge,
-                      {
-                        backgroundColor: isDark ? "#111215" : "#FFFFFF",
-                        borderColor: isDark ? "#2563EB" : "#2563EB",
-                      },
+                      styles.messengerAvatar,
+                      { backgroundColor: item.avatarBg },
                     ]}
                   >
-                    <Text style={styles.messengerGroupBadgeText}>
-                      {householdMembers.length || 1}
-                    </Text>
+                    {item.photoURL ? (
+                      <Image
+                        source={{ uri: item.photoURL }}
+                        style={styles.avatarImage}
+                      />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.messengerAvatarText,
+                          { color: item.avatarColor },
+                        ]}
+                      >
+                        {item.initials}
+                      </Text>
+                    )}
                   </View>
-                ) : (
-                  item.isOnline && (
-                    <View
-                      style={[
-                        styles.messengerOnlineDot,
-                        { borderColor: isDark ? "#111215" : "#FFFFFF" },
-                      ]}
-                    />
-                  )
+                )}
+
+                {/* Online Dot for direct chat */}
+                {!isGroup && item.isOnline && (
+                  <View
+                    style={[
+                      styles.messengerOnlineDot,
+                      { borderColor: isDark ? "#111215" : "#FFFFFF" },
+                    ]}
+                  />
                 )}
               </View>
 
@@ -3568,16 +4411,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     >
                       {item.name}
                     </Text>
-                    {item.roleLabel && !isGroup && (
-                      <Text
-                        style={[
-                          styles.messengerRoleText,
-                          { color: isDark ? "#94A3B8" : "#64748B" },
-                        ]}
-                      >
-                        · {item.roleLabel}
-                      </Text>
-                    )}
                   </View>
 
                   <Text
@@ -3861,33 +4694,18 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         <View style={{ height: 110 }} />
       </ScrollView>
 
-      {/* Floating Action Button */}
+      {/* Messenger-style Circular Floating Plus Action Button */}
       <View style={styles.fabWrapper} pointerEvents="box-none">
         <TouchableOpacity
-          style={styles.requestSplitFab}
-          activeOpacity={0.88}
+          style={styles.circularPlusFab}
+          activeOpacity={0.85}
           onPress={() => {
-            if (householdId) {
-              setSplitTargetId("ALL");
-              setShowRequestSplitModal(true);
-            } else if (onExploreCommunity) {
-              onExploreCommunity();
-            } else if (onCreateGroup) {
-              onCreateGroup();
-            }
+            setComposeSearchQuery("");
+            setShowComposeModal(true);
           }}
+          accessibilityLabel="Start a new conversation"
         >
-          {householdId ? (
-            <>
-              <Feather name="plus" size={18} color="#FFFFFF" />
-              <Text style={styles.requestSplitFabText}>Request Split</Text>
-            </>
-          ) : (
-            <>
-              <Feather name="compass" size={18} color="#FFFFFF" />
-              <Text style={styles.requestSplitFabText}>Explore Community</Text>
-            </>
-          )}
+          <Feather name="plus" size={26} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
@@ -4899,94 +5717,72 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       {/* MODAL 4: Compose New Chat Modal */}
       <SmoothBottomSheetModal
         visible={showComposeModal}
-        onClose={() => setShowComposeModal(false)}
+        onClose={() => {
+          setShowComposeModal(false);
+          setComposeSearchQuery("");
+        }}
         title="New Conversation"
-        subtitle="Select a roommate from your bills group to start a direct message."
+        subtitle="Start a direct chat with friends and roommates or message the group."
         icon={<Feather name="edit-3" size={20} color="#2563EB" />}
-        maxHeight="75%"
+        maxHeight="82%"
         showChipBar={true}
       >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            gap: 10,
-            paddingBottom: Math.max(40, insets.bottom + 24),
+        <View
+          style={{
+            gap: 12,
+            paddingBottom: Math.max(30, insets.bottom + 16),
           }}
         >
-          {/* Option: Group Chat */}
-          <TouchableOpacity
+          {/* Search Bar for friends & roommates */}
+          <View
             style={[
-              styles.composeRoommateRow,
+              styles.composeSearchBar,
               {
-                backgroundColor: isDark ? "#111215" : "#F8FAFC",
+                backgroundColor: isDark ? "#181A20" : "#F1F5F9",
                 borderColor: isDark ? "rgba(255,255,255,0.08)" : "#E2E8F0",
               },
             ]}
-            onPress={() => {
-              setShowComposeModal(false);
-              const grp = conversations.find((c) => c.type === "group");
-              if (grp) setActiveThread(grp);
-            }}
           >
-            <View
-              style={[
-                styles.avatarBox,
-                {
-                  backgroundColor: "#2563EB",
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                },
-              ]}
-            >
-              <Ionicons name="home" size={18} color="#FFFFFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontWeight: "700",
-                  color: isDark ? "#FFFFFF" : "#0F172A",
-                }}
-              >
-                {householdInfo?.householdName || "Bills Group Chat"}
-              </Text>
-              <Text
-                style={{
-                  fontSize: 11,
-                  color: isDark ? "#94A3B8" : "#64748B",
-                }}
-              >
-                Household · All {householdMembers.length || 1} members
-              </Text>
-            </View>
             <Feather
-              name="chevron-right"
-              size={18}
+              name="search"
+              size={16}
               color={isDark ? "#64748B" : "#94A3B8"}
+              style={{ marginRight: 8 }}
             />
-          </TouchableOpacity>
-
-          {/* Option: Real bills group members */}
-          {billsGroupMembers.map((member) => {
-            const memberUid = member.userId || member.memberId;
-            const name =
-              member.displayName ||
-              member.name ||
-              member.email?.split("@")[0] ||
-              "Roommate";
-            const initials = getInitials(name);
-            const palette =
-              AVATAR_PALETTES[
-                Math.abs(hashString(memberUid)) % AVATAR_PALETTES.length
-              ];
-            const isHost =
-              member.role === "HOST" || householdInfo?.hostId === memberUid;
-
-            return (
+            <TextInput
+              style={[
+                styles.composeSearchInput,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+              placeholder="Search friends & roommates..."
+              placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+              value={composeSearchQuery}
+              onChangeText={setComposeSearchQuery}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {composeSearchQuery.length > 0 && (
               <TouchableOpacity
-                key={memberUid}
+                onPress={() => setComposeSearchQuery("")}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Feather
+                  name="x-circle"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 10 }}
+          >
+            {/* Household Group Chat Card */}
+            {householdId && !composeSearchQuery.trim() && (
+              <TouchableOpacity
                 style={[
                   styles.composeRoommateRow,
                   {
@@ -4996,46 +5792,33 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 ]}
                 onPress={() => {
                   setShowComposeModal(false);
-                  handleOpenDirectChatWithMember(member);
+                  const grp = conversations.find((c) => c.type === "group");
+                  if (grp) setActiveThread(grp);
                 }}
               >
-                <View
-                  style={[
-                    styles.avatarBox,
-                    {
-                      backgroundColor: palette.bg,
-                      width: 38,
-                      height: 38,
-                      borderRadius: 19,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.avatarText,
-                      { color: palette.text, fontSize: 13 },
-                    ]}
-                  >
-                    {initials}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
+                <GroupChatAvatar
+                  members={householdMembers}
+                  size={44}
+                  isDark={isDark}
+                />
+                <View style={{ flex: 1, marginLeft: 2 }}>
                   <Text
                     style={{
-                      fontSize: 14,
+                      fontSize: 14.5,
                       fontWeight: "700",
                       color: isDark ? "#FFFFFF" : "#0F172A",
                     }}
                   >
-                    {name}
+                    {householdInfo?.householdName || "Household Bills Group"}
                   </Text>
                   <Text
                     style={{
-                      fontSize: 11,
+                      fontSize: 11.5,
                       color: isDark ? "#94A3B8" : "#64748B",
+                      marginTop: 1,
                     }}
                   >
-                    {isHost ? "Host" : "Payor"} · Direct Message
+                    Group · All {householdMembers.length || 1} members
                   </Text>
                 </View>
                 <Feather
@@ -5044,9 +5827,179 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   color={isDark ? "#64748B" : "#94A3B8"}
                 />
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+            )}
+
+            {/* Section Header */}
+            <View style={{ marginTop: 4, marginBottom: 2 }}>
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  color: isDark ? "#64748B" : "#94A3B8",
+                }}
+              >
+                Friends & Roommates ({composeFilteredMembers.length})
+              </Text>
+            </View>
+
+            {/* List of Friends and Roommates */}
+            {composeFilteredMembers.map((member) => {
+              const memberUid =
+                member.cleanUid ||
+                member.userId ||
+                member.memberId ||
+                member.id;
+              const name =
+                member.displayName ||
+                member.name ||
+                member.email?.split("@")[0] ||
+                "Friend";
+              const initials = getInitials(name);
+              const palette =
+                AVATAR_PALETTES[
+                  Math.abs(hashString(String(memberUid))) %
+                    AVATAR_PALETTES.length
+                ];
+              const photo =
+                member.profilePicture ||
+                member.photoURL ||
+                (typeof member.avatar === "string" &&
+                member.avatar.startsWith("http")
+                  ? member.avatar
+                  : null);
+              const presence = computePresence(
+                member.lastActiveAt ||
+                  member.lastActiveDate ||
+                  member.lastSeen ||
+                  member.updatedAt ||
+                  member.createdAt,
+                member.isOnline || member.online,
+              );
+              const isHost =
+                (member.role || "").toUpperCase() === "HOST" ||
+                householdInfo?.hostId === memberUid;
+
+              // Subtitle without Payor / Non-payor
+              let subtitle = presence.isOnline
+                ? "Active now"
+                : presence.statusLabel !== "Offline"
+                  ? presence.statusLabel
+                  : isHost
+                    ? "Host"
+                    : member.isOutsideFriend || member.isFriend
+                      ? "Friend"
+                      : "Roommate";
+
+              return (
+                <TouchableOpacity
+                  key={memberUid}
+                  style={[
+                    styles.composeRoommateRow,
+                    {
+                      backgroundColor: isDark ? "#111215" : "#F8FAFC",
+                      borderColor: isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "#E2E8F0",
+                    },
+                  ]}
+                  onPress={() => {
+                    setShowComposeModal(false);
+                    handleOpenDirectChatWithMember(member);
+                  }}
+                >
+                  <View style={styles.composeAvatarWrap}>
+                    <View
+                      style={[
+                        styles.avatarBox,
+                        {
+                          backgroundColor: palette.bg,
+                          width: 44,
+                          height: 44,
+                          borderRadius: 22,
+                        },
+                      ]}
+                    >
+                      {photo ? (
+                        <Image
+                          source={{ uri: photo }}
+                          style={{ width: "100%", height: "100%" }}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.avatarText,
+                            { color: palette.text, fontSize: 14 },
+                          ]}
+                        >
+                          {initials}
+                        </Text>
+                      )}
+                    </View>
+                    {presence.isOnline && (
+                      <View
+                        style={[
+                          styles.composeOnlineDot,
+                          { borderColor: isDark ? "#111215" : "#FFFFFF" },
+                        ]}
+                      />
+                    )}
+                  </View>
+
+                  <View style={{ flex: 1, marginLeft: 2 }}>
+                    <Text
+                      style={{
+                        fontSize: 14.5,
+                        fontWeight: "700",
+                        color: isDark ? "#FFFFFF" : "#0F172A",
+                      }}
+                      numberOfLines={1}
+                    >
+                      {name}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11.5,
+                        color: presence.isOnline
+                          ? "#10B981"
+                          : isDark
+                            ? "#94A3B8"
+                            : "#64748B",
+                        marginTop: 1,
+                        fontWeight: presence.isOnline ? "600" : "500",
+                      }}
+                      numberOfLines={1}
+                    >
+                      {subtitle}
+                    </Text>
+                  </View>
+
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={20}
+                    color={isDark ? "#60A5FA" : "#2563EB"}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+
+            {composeFilteredMembers.length === 0 && (
+              <View style={{ alignItems: "center", paddingVertical: 24 }}>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: isDark ? "#94A3B8" : "#64748B",
+                  }}
+                >
+                  {composeSearchQuery.trim()
+                    ? `No friends or roommates found matching "${composeSearchQuery}"`
+                    : "No friends or roommates found."}
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
       </SmoothBottomSheetModal>
 
       {/* Offline Call Confirmation Prompt Modal */}
@@ -5765,8 +6718,21 @@ const styles = StyleSheet.create({
   /* FAB & EMPTY WRAPS */
   fabWrapper: {
     position: "absolute",
-    bottom: 24,
+    bottom: 34,
     right: 20,
+  },
+  circularPlusFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
   },
   requestSplitFab: {
     flexDirection: "row",
@@ -5923,6 +6889,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+  },
+  composeSearchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  composeSearchInput: {
+    flex: 1,
+    height: "100%",
+    fontSize: 13,
+    paddingVertical: 0,
+    textAlignVertical: "center",
+  },
+  composeAvatarWrap: {
+    position: "relative",
+    width: 44,
+    height: 44,
+  },
+  composeOnlineDot: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    backgroundColor: "#22C55E",
+    borderWidth: 2,
   },
 
   /* =================================================== */

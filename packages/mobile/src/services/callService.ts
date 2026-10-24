@@ -634,26 +634,68 @@ class CallManager {
       if (snap.exists()) {
         const data = snap.data();
         const lastActive = data?.lastActiveAt || data?.lastActiveDate;
+        const isOnlineFlag = data?.isOnline === true;
+        let t = 0;
         if (lastActive) {
-          const t = new Date(lastActive).getTime();
-          if (!isNaN(t)) {
-            const diffMs = Date.now() - t;
-            // Within 5 minutes is considered actively online
-            const isOnline = diffMs >= 0 && diffMs < 5 * 60 * 1000;
-            let statusLabel = "Offline";
-            if (isOnline) {
-              statusLabel = "Active now";
-            } else if (diffMs < 60 * 60 * 1000) {
-              const mins = Math.max(1, Math.floor(diffMs / 60000));
-              statusLabel = `Active ${mins}m ago`;
-            } else if (diffMs < 24 * 60 * 60 * 1000) {
-              const hrs = Math.max(1, Math.floor(diffMs / 3600000));
-              statusLabel = `Active ${hrs}h ago`;
-            } else {
-              statusLabel = "Offline";
-            }
-            return { isOnline, lastActiveAt: lastActive, statusLabel };
+          t = new Date(lastActive).getTime();
+        }
+        const now = Date.now();
+        const hasValidTime = !isNaN(t) && t > 0;
+        const diffMs = hasValidTime ? now - t : -1;
+
+        if (isOnlineFlag) {
+          if (!hasValidTime || (diffMs >= 0 && diffMs < 15 * 60 * 1000)) {
+            return {
+              isOnline: true,
+              lastActiveAt: lastActive,
+              statusLabel: "Active now",
+            };
           }
+          if (diffMs < 60 * 60 * 1000) {
+            const mins = Math.max(1, Math.floor(diffMs / 60000));
+            return {
+              isOnline: false,
+              lastActiveAt: lastActive,
+              statusLabel: `Active ${mins}m ago`,
+            };
+          }
+          if (diffMs < 24 * 60 * 60 * 1000) {
+            const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+            return {
+              isOnline: false,
+              lastActiveAt: lastActive,
+              statusLabel: `Active ${hrs}h ago`,
+            };
+          }
+          return {
+            isOnline: false,
+            lastActiveAt: lastActive,
+            statusLabel: "Offline",
+          };
+        }
+
+        if (hasValidTime && diffMs >= 0 && diffMs < 10 * 60 * 1000) {
+          return {
+            isOnline: true,
+            lastActiveAt: lastActive,
+            statusLabel: "Active now",
+          };
+        }
+        if (hasValidTime && diffMs >= 0 && diffMs < 60 * 60 * 1000) {
+          const mins = Math.max(1, Math.floor(diffMs / 60000));
+          return {
+            isOnline: false,
+            lastActiveAt: lastActive,
+            statusLabel: `Active ${mins}m ago`,
+          };
+        }
+        if (hasValidTime && diffMs >= 0 && diffMs < 24 * 60 * 60 * 1000) {
+          const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+          return {
+            isOnline: false,
+            lastActiveAt: lastActive,
+            statusLabel: `Active ${hrs}h ago`,
+          };
         }
       }
     } catch (e) {

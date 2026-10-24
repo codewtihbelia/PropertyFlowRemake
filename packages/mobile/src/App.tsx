@@ -8,6 +8,7 @@ import {
   Animated,
   Platform,
   Alert,
+  AppState,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -507,13 +508,25 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       return;
     }
 
-    let heartbeatInterval: any = null;
-    if (householdId) {
-      mobileDataService.updateUserHeartbeat(householdId, currentUid);
-      heartbeatInterval = setInterval(() => {
-        mobileDataService.updateUserHeartbeat(householdId, currentUid);
-      }, 120000);
-    }
+    // Immediate presence heartbeat for any authenticated user (with or without a household)
+    mobileDataService.updateUserHeartbeat(householdId || undefined, currentUid);
+    const heartbeatInterval = setInterval(() => {
+      mobileDataService.updateUserHeartbeat(
+        householdId || undefined,
+        currentUid,
+      );
+    }, 45000);
+
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        mobileDataService.updateUserHeartbeat(
+          householdId || undefined,
+          currentUid,
+        );
+      } else if (nextState === "background" || nextState === "inactive") {
+        mobileDataService.setUserOffline(householdId || undefined, currentUid);
+      }
+    });
 
     let householdMsgsList: any[] = [];
     let directMsgsList: any[] = [];
@@ -624,6 +637,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       unsubDirect();
       if (unsubHousehold) unsubHousehold();
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (appStateSub && typeof appStateSub.remove === "function") {
+        appStateSub.remove();
+      }
     };
   }, [householdId, rootFlow]);
 
@@ -1434,7 +1450,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
             userId={userProfile?.uid || auth.currentUser?.uid || "guest"}
             currentUser={currentUser}
             onNavigateToBills={() => {
-              setBillsInitialSubView("pay");
+              setBillsInitialSubView("overview");
               setCurrentTab("bills");
             }}
             onNavigateToSettle={handleOpenSettleDues}

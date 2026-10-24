@@ -1070,12 +1070,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       }, 0)
     : 0;
 
+  const arrearsShareCents = useMemo(() => {
+    if (!myBill?.lineItems || !Array.isArray(myBill.lineItems)) return 0;
+    return myBill.lineItems
+      .filter(
+        (li: any) =>
+          (li.category === "Arrears" || li.isArrears) &&
+          li.status !== "PAID" &&
+          !li.isExempt,
+      )
+      .reduce((sum: number, li: any) => sum + (li.amountCentavos || 0), 0);
+  }, [myBill]);
+
   const paidCentavos =
     myBill && typeof myBill.totalPaidCentavos === "number"
       ? myBill.totalPaidCentavos
       : 0;
+  const totalUserShareCents = liveShareCents + arrearsShareCents;
   const outstandingCents = isCurrentUserPayor
-    ? Math.max(0, liveShareCents - paidCentavos)
+    ? Math.max(0, totalUserShareCents - paidCentavos)
     : 0;
   const outstandingAmount = !isCurrentUserPayor
     ? "₱0.00"
@@ -1271,8 +1284,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           color: "#2563EB",
         });
       } else {
-        const canSettleNow =
-          isCurrentUserPayor && (!isPaymentsLocked || isHost);
+        const hasDues = isCurrentUserPayor && outstandingCents > 0;
+        const canSettleNow = hasDues && (!isPaymentsLocked || isHost);
+        const actionLabel = canSettleNow
+          ? "Settle Now"
+          : isCurrentUserPayor && outstandingCents === 0
+            ? "All Settled ✓"
+            : "View Bill";
         list.push({
           id: `exp_new_${exp.id}`,
           type: "bill_added",
@@ -1282,16 +1300,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           desc: `Total: ${amtStr}${myShareStr ? ` · ${myShareStr}` : ""}${
             isCurrentUserPayor && isPaymentsLocked && !isHost
               ? " · Payments locked by host"
-              : ""
+              : isCurrentUserPayor && outstandingCents === 0
+                ? " · Paid & Settled"
+                : ""
           }.`,
           timestamp: exp.createdAt || exp.date || "",
           dateFormatted: exp.date || "Recent",
           amountFormatted: amtStr,
-          actionText: canSettleNow ? "Settle Now" : "View Bill",
-          onAction: () =>
-            canSettleNow && onOpenSettleDues
-              ? onOpenSettleDues()
-              : onNavigate("bills"),
+          actionText: actionLabel,
+          onAction: () => {
+            if (canSettleNow && onOpenSettleDues) {
+              onOpenSettleDues();
+            } else if (isCurrentUserPayor && outstandingCents === 0) {
+              Alert.alert(
+                "All Settled ✓",
+                "You have no pending dues for this billing cycle. Everything is caught up!",
+                [
+                  { text: "View Bills", onPress: () => onNavigate("bills") },
+                  { text: "Dismiss", style: "cancel" },
+                ],
+              );
+            } else {
+              onNavigate("bills");
+            }
+          },
           icon: "file-text",
           color: "#D97706",
         });
@@ -1312,6 +1344,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     isCurrentUserPayor,
     isPaymentsLocked,
     payorCount,
+    outstandingCents,
     onNavigate,
     onOpenExpenseHistory,
     onOpenSettleDues,
@@ -2470,6 +2503,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                           if (
                             !bill.mySharePaid &&
                             dueInfo.status === "pay_now" &&
+                            outstandingCents > 0 &&
                             (!isPaymentsLocked || isHost) &&
                             onOpenSettleDues
                           ) {
@@ -2587,6 +2621,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               if (
                                 !bill.mySharePaid &&
                                 dueInfo.status === "pay_now" &&
+                                outstandingCents > 0 &&
                                 (!isPaymentsLocked || isHost) &&
                                 onOpenSettleDues
                               ) {

@@ -349,7 +349,17 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       )
       .reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
 
-    return Math.max(0, liveShare - userPaidCentavos);
+    const myBill = memberBills.find((b) => b.userId === currentUser?.uid);
+    const arrearsCentavos = (myBill?.lineItems || [])
+      .filter(
+        (li: any) =>
+          (li.category === "Arrears" || li.isArrears) &&
+          li.status !== "PAID" &&
+          !li.isExempt,
+      )
+      .reduce((sum: number, li: any) => sum + (li.amountCentavos || 0), 0);
+
+    return Math.max(0, liveShare + arrearsCentavos - userPaidCentavos);
   }, [
     currentCycleExpenses,
     activePayors,
@@ -360,6 +370,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
     currentUser?.uid,
     payments,
     resolvedBillingCycleId,
+    memberBills,
   ]);
 
   useEffect(() => {
@@ -445,6 +456,11 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
 
   useEffect(() => {
     if (!resolvedHouseholdId || !resolvedBillingCycleId) return;
+    const unsubBills = mobileDataService.listenToMemberBills(
+      resolvedHouseholdId,
+      resolvedBillingCycleId,
+      setMemberBills,
+    );
     const unsubAtt = mobileDataService.listenToHouseholdCycleAttendance(
       resolvedHouseholdId,
       resolvedBillingCycleId,
@@ -456,6 +472,7 @@ export const PaymentsScreen: React.FC<PaymentsScreenProps> = ({
       setAttendanceSubmissions,
     );
     return () => {
+      unsubBills();
       unsubAtt();
       unsubSubs();
     };

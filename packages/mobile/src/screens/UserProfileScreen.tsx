@@ -15,7 +15,7 @@ import {
   TextInput,
   Dimensions,
 } from "react-native";
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "../context/ThemeContext";
@@ -32,7 +32,68 @@ import {
   formatViewCount,
 } from "../services/communityService";
 import { auth } from "../firebase/config";
+import { mobileDataService } from "../services/firebaseDataService";
 import { FullScreenImageViewerModal } from "../components/FullScreenImageViewerModal";
+
+function computePresence(
+  lastActive?: any,
+  isOnlineFlag?: boolean,
+): {
+  isOnline: boolean;
+  statusLabel: string;
+} {
+  let t = 0;
+  if (lastActive) {
+    if (typeof lastActive === "number") {
+      t = lastActive;
+    } else if (lastActive?.toDate && typeof lastActive.toDate === "function") {
+      t = lastActive.toDate().getTime();
+    } else if (
+      typeof lastActive === "object" &&
+      typeof lastActive.seconds === "number"
+    ) {
+      t = lastActive.seconds * 1000;
+    } else {
+      t = new Date(lastActive).getTime();
+    }
+  }
+
+  const now = Date.now();
+  const hasValidTime = !isNaN(t) && t > 0;
+  const diffMs = hasValidTime ? now - t : -1;
+
+  if (isOnlineFlag === true) {
+    if (!hasValidTime || (diffMs >= 0 && diffMs < 15 * 60 * 1000)) {
+      return { isOnline: true, statusLabel: "Active now" };
+    }
+    if (diffMs < 60 * 60 * 1000) {
+      const mins = Math.max(1, Math.floor(diffMs / 60000));
+      return { isOnline: false, statusLabel: `Active ${mins}m ago` };
+    }
+    if (diffMs < 24 * 60 * 60 * 1000) {
+      const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+      return { isOnline: false, statusLabel: `Active ${hrs}h ago` };
+    }
+    return { isOnline: false, statusLabel: "Offline" };
+  }
+
+  if (!hasValidTime) {
+    return { isOnline: false, statusLabel: "Offline" };
+  }
+
+  if (diffMs >= 0 && diffMs < 10 * 60 * 1000) {
+    return { isOnline: true, statusLabel: "Active now" };
+  }
+  if (diffMs < 60 * 60 * 1000) {
+    const mins = Math.max(1, Math.floor(diffMs / 60000));
+    return { isOnline: false, statusLabel: `Active ${mins}m ago` };
+  }
+  if (diffMs < 24 * 60 * 60 * 1000) {
+    const hrs = Math.max(1, Math.floor(diffMs / 3600000));
+    return { isOnline: false, statusLabel: `Active ${hrs}h ago` };
+  }
+  return { isOnline: false, statusLabel: "Offline" };
+}
 
 export interface UserProfileInfo {
   uid: string;
@@ -186,6 +247,29 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
     .replace(/^mem_/, "")
     .trim();
   const isSelf = cleanCurUid === cleanTargetUid;
+
+  const [targetPresence, setTargetPresence] = useState<{
+    isOnline: boolean;
+    statusLabel: string;
+  } | null>(null);
+
+  // Subscribe to target user's real-time Firestore presence
+  useEffect(() => {
+    if (!cleanTargetUid) return;
+    const unsub = mobileDataService.listenToUserPresence(
+      cleanTargetUid,
+      (data) => {
+        if (!data) {
+          setTargetPresence({ isOnline: false, statusLabel: "Offline" });
+          return;
+        }
+        const lastActive = data.lastActiveAt || data.lastActiveDate;
+        const isOnlineFlag = data.isOnline === true;
+        setTargetPresence(computePresence(lastActive, isOnlineFlag));
+      },
+    );
+    return () => unsub();
+  }, [cleanTargetUid]);
   const cleanName = formatAuthorDisplayName(
     profileDetails.name,
     profileDetails.email || user.email,
@@ -1007,7 +1091,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               >
                 <Feather name="camera" size={14} color="#FFFFFF" />
               </TouchableOpacity>
-            ) : (
+            ) : targetPresence?.isOnline ? (
               /* Online Green Indicator Dot */
               <View
                 style={[
@@ -1015,7 +1099,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   { borderColor: isDark ? "#1E293B" : "#FFFFFF" },
                 ]}
               />
-            )}
+            ) : null}
           </View>
         </View>
 
@@ -1038,8 +1122,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             >
               {cleanName}
             </Text>
-            <Ionicons
-              name="checkmark-circle"
+            <MaterialCommunityIcons
+              name="check-decagram"
               size={20}
               color="#2563EB"
               style={{ marginLeft: 6, marginTop: 4 }}
@@ -1057,6 +1141,34 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               ? `Member of ${profileDetails.householdName || user.householdName}`
               : profileDetails.role || user.role || "Splitzy Resident Member"}
           </Text>
+
+          {/* Active Status Badge */}
+          <View style={styles.presenceBadgeRow}>
+            <View
+              style={[
+                styles.presenceIndicatorDot,
+                {
+                  backgroundColor:
+                    isSelf || targetPresence?.isOnline ? "#10B981" : "#94A3B8",
+                },
+              ]}
+            />
+            <Text
+              style={[
+                styles.presenceStatusText,
+                {
+                  color:
+                    isSelf || targetPresence?.isOnline
+                      ? "#10B981"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                },
+              ]}
+            >
+              {isSelf ? "Active now" : targetPresence?.statusLabel || "Offline"}
+            </Text>
+          </View>
 
           {/* Bio */}
           <Text
@@ -3002,6 +3114,21 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginTop: 2,
   },
+  presenceBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    gap: 6,
+  },
+  presenceIndicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  presenceStatusText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
   profileBio: {
     fontSize: 14,
     lineHeight: 20,
@@ -3289,7 +3416,8 @@ const styles = StyleSheet.create({
   fbPostHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 4,
+    paddingHorizontal: 8,
+    paddingTop: 4,
   },
   fbPostAvatar: {
     width: 40,
@@ -3781,7 +3909,7 @@ const styles = StyleSheet.create({
   },
   profileQuickPostCard: {
     // marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 8,
     paddingVertical: 12,
     backgroundColor: "#333333",
   },

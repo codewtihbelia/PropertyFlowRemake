@@ -48,6 +48,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
   initialSubView = "overview",
 }) => {
   const { isDark, colors } = useTheme();
+  const { onScroll } = useNavVisibility();
   const [subView, setSubView] = useState<"overview" | "pay">(initialSubView);
   const [showMenu, setShowMenu] = useState(false);
   const currentUser = auth.currentUser;
@@ -375,10 +376,21 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     return userPayments.reduce((sum, p) => sum + (p.amountCentavos || 0), 0);
   }, [userPayments]);
 
-  const totalHouseholdCents = currentCycleExpenses.reduce(
-    (acc, cur) => acc + cur.amountCents,
-    0,
-  );
+  const arrearsShareCents = useMemo(() => {
+    if (!myBill?.lineItems || !Array.isArray(myBill.lineItems)) return 0;
+    return myBill.lineItems
+      .filter(
+        (li: any) =>
+          (li.category === "Arrears" || li.isArrears) &&
+          li.status !== "PAID" &&
+          !li.isExempt,
+      )
+      .reduce((sum: number, li: any) => sum + (li.amountCentavos || 0), 0);
+  }, [myBill]);
+
+  const totalHouseholdCents =
+    currentCycleExpenses.reduce((acc, cur) => acc + cur.amountCents, 0) +
+    arrearsShareCents;
   const paidCentavos =
     myBill && typeof myBill.totalPaidCentavos === "number"
       ? myBill.totalPaidCentavos
@@ -387,8 +399,9 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     paidCentavos,
     totalUserPaymentsCentavos,
   );
+  const totalUserShareCents = liveUnpaidShareCents + arrearsShareCents;
   const myShareCents = isCurrentUserPayor
-    ? Math.max(0, liveUnpaidShareCents - effectivePaidCentavos)
+    ? Math.max(0, totalUserShareCents - effectivePaidCentavos)
     : 0;
   const isMyCycleSettled =
     isCurrentUserPayor &&
@@ -552,9 +565,17 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
     myBill,
     liveUnpaidShareCents,
   ]);
-  const { onScroll } = useNavVisibility();
+  useEffect(() => {
+    if (subView === "pay" && myShareCents === 0) {
+      setSubView("overview");
+    }
+  }, [subView, myShareCents]);
 
-  if (subView === "pay" && (!isPaymentsLocked || isHostUser)) {
+  if (
+    subView === "pay" &&
+    (!isPaymentsLocked || isHostUser) &&
+    myShareCents > 0
+  ) {
     return (
       <PaymentsScreen
         householdId={resolvedHouseholdId}
@@ -1058,7 +1079,7 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                   household.
                 </Text>
               </View>
-            ) : currentCycleExpenses.length === 0 ? (
+            ) : currentCycleExpenses.length === 0 && arrearsShareCents === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>
                   No household bills logged yet.
@@ -1069,298 +1090,406 @@ export const BillsScreen: React.FC<BillsScreenProps> = ({
                 </Text>
               </View>
             ) : (
-              currentCycleExpenses.map((e) => {
-                const isExpensePaid =
-                  e.status === "PAID" || e.isPaid === true || allPayorsSettled;
-                const catMeta = getCategoryMeta(e.category);
-                const isWater = (e.category || "")
-                  .toLowerCase()
-                  .includes("water");
-                const payorCount = Math.max(1, activePayors.length);
-                const isPersonDayMode =
-                  waterConfig?.pricingModel === "PER_PERSON_DAY" ||
-                  !waterConfig?.pricingModel;
-
-                let waterMyShare = 0;
-                let waterTotalCentavos = e.amountCents;
-                if (isWater) {
-                  if (isPersonDayMode) {
-                    const rate = Number(
-                      waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-                    );
-                    const {
-                      getPayorShareCentavos,
-                      totalAmountCentavos: computedWaterTotal,
-                    } = computeCycleWaterBreakdown(
-                      activeMembers,
-                      cycleAttendance,
-                      attendanceSubmissions,
-                      rate,
-                      e.splitDetails,
-                    );
-                    if (isCurrentUserPayor) {
-                      waterMyShare = getPayorShareCentavos(currentUser?.uid);
-                    }
-                    if (computedWaterTotal > 0) {
-                      waterTotalCentavos = computedWaterTotal;
-                    }
-                  } else if (
-                    waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
-                  ) {
-                    if (isCurrentUserPayor) {
-                      waterMyShare =
-                        waterConfig.fixedPerPersonAmountCentavos || 0;
-                    }
-                    waterTotalCentavos =
-                      (waterConfig.fixedPerPersonAmountCentavos || 0) *
-                      payorCount;
-                  } else {
-                    if (isCurrentUserPayor) {
-                      waterMyShare = computeFairSplitShareCentavos(
-                        e.amountCents,
-                        activePayors,
-                        currentUser?.uid,
-                      );
-                    }
-                  }
-                }
-
-                const splitPayors = e.splitDetails
-                  ? e.splitDetails.filter(
-                      (s: any) => !s.isExempt && s.shareCentavos > 0,
-                    )
-                  : [];
-                const splitPayorsSum = splitPayors.reduce(
-                  (acc: number, s: any) => acc + (Number(s.shareCentavos) || 0),
-                  0,
-                );
-                const isSplitStale =
-                  !isWater &&
-                  splitPayors.length > 0 &&
-                  (splitPayors.length !== payorCount ||
-                    splitPayorsSum !== e.amountCents);
-                const mySplit = e.splitDetails?.find(
-                  (s: any) => s.userId === currentUser?.uid,
-                );
-                const myShareForExpense = !isCurrentUserPayor
-                  ? 0
-                  : isWater
-                    ? waterMyShare
-                    : !isSplitStale &&
-                        mySplit &&
-                        typeof mySplit.shareCentavos === "number"
-                      ? mySplit.shareCentavos
-                      : computeFairSplitShareCentavos(
-                          e.amountCents,
-                          activePayors,
-                          currentUser?.uid,
-                        );
-                const dueInfo = getBillDueStatus(
-                  e,
-                  activeCycle,
-                  cycles,
-                  isDark,
-                );
-
-                const mySharePaid =
-                  isCurrentUserPayor &&
-                  Boolean(
-                    isExpensePaid ||
-                    mySplit?.isPaid ||
-                    isMyCycleSettled ||
-                    (currentUser?.uid && settledPayorUids.has(currentUser.uid)),
-                  );
-
-                let paidPayorsCount = 0;
-                const waitingPayorNames: string[] = [];
-                activePayors.forEach((p) => {
-                  const pUid = p.userId || p.memberId || p.id;
-                  const pSplit = Array.isArray(e.splitDetails)
-                    ? e.splitDetails.find(
-                        (s: any) =>
-                          s.userId === pUid ||
-                          s.memberId === pUid ||
-                          s.id === pUid,
-                      )
-                    : null;
-                  const isPayorPaid = Boolean(
-                    isExpensePaid ||
-                    pSplit?.isPaid ||
-                    (pUid && settledPayorUids.has(pUid)),
-                  );
-                  if (isPayorPaid) {
-                    paidPayorsCount += 1;
-                  } else {
-                    const firstName = (
-                      p.displayName ||
-                      p.name ||
-                      "Roommate"
-                    ).split(" ")[0];
-                    waitingPayorNames.push(firstName);
-                  }
-                });
-
-                const waitingSummary =
-                  waitingPayorNames.length === 0
-                    ? ""
-                    : waitingPayorNames.length <= 2
-                      ? `Waiting on ${waitingPayorNames.join(", ")}`
-                      : `Waiting on ${waitingPayorNames.slice(0, 2).join(", ")} +${waitingPayorNames.length - 2}`;
-
-                return (
-                  <View
-                    key={e.id}
-                    style={[
-                      styles.billItem,
-                      isDark && { borderBottomColor: colors.border },
-                    ]}
-                  >
+              <>
+                {myBill?.lineItems
+                  ?.filter(
+                    (li: any) =>
+                      (li.category === "Arrears" || li.isArrears) &&
+                      li.status !== "PAID" &&
+                      !li.isExempt,
+                  )
+                  .map((arr: any) => (
                     <View
+                      key={arr.itemId}
                       style={[
-                        styles.billIconWrap,
-                        {
-                          backgroundColor: isDark
-                            ? "rgba(255, 255, 255, 0.06)"
-                            : catMeta.bgColor,
-                        },
+                        styles.billItem,
+                        isDark && { borderBottomColor: colors.border },
                       ]}
                     >
-                      <Feather
-                        name={catMeta.featherIcon as any}
-                        size={18}
-                        color={catMeta.color}
-                      />
-                    </View>
-                    <View style={{ flex: 1, paddingRight: 8 }}>
                       <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                          flexWrap: "wrap",
-                        }}
+                        style={[
+                          styles.billIconWrap,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(239, 68, 68, 0.16)"
+                              : "#FEE2E2",
+                          },
+                        ]}
                       >
-                        <Text
-                          style={[
-                            styles.billName,
-                            isDark && { color: colors.text },
-                          ]}
+                        <Feather
+                          name="clock"
+                          size={18}
+                          color={isDark ? "#F87171" : "#EF4444"}
+                        />
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
                         >
-                          {cleanBillTitle(e.title, e.category)}
-                        </Text>
-                        {isExpensePaid ? (
-                          <View
+                          <Text
                             style={[
-                              styles.statusBadgePaid,
-                              isDark && {
-                                backgroundColor: "rgba(16, 185, 129, 0.15)",
-                                borderColor: "rgba(16, 185, 129, 0.3)",
-                              },
+                              styles.billName,
+                              isDark && { color: colors.text },
                             ]}
                           >
-                            <Text
-                              style={[
-                                styles.statusBadgeTextPaid,
-                                isDark && { color: "#34D399" },
-                              ]}
-                            >
-                              ALL PAID
-                            </Text>
-                          </View>
-                        ) : mySharePaid ? (
-                          <View
-                            style={[
-                              styles.statusBadgePaid,
-                              isDark && {
-                                backgroundColor: "rgba(16, 185, 129, 0.15)",
-                                borderColor: "rgba(16, 185, 129, 0.35)",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.statusBadgeTextPaid,
-                                isDark && { color: "#34D399" },
-                              ]}
-                            >
-                              YOUR SHARE PAID ✓
-                            </Text>
-                          </View>
-                        ) : (
+                            {arr.description || "Previous Balance (Arrears)"}
+                          </Text>
                           <View
                             style={[
                               styles.dueBadge,
                               {
-                                backgroundColor: dueInfo.badgeBg,
-                                borderColor: dueInfo.badgeBorder,
+                                backgroundColor: isDark
+                                  ? "rgba(239, 68, 68, 0.2)"
+                                  : "#FEE2E2",
+                                borderColor: isDark
+                                  ? "rgba(239, 68, 68, 0.4)"
+                                  : "#FCA5A5",
                               },
                             ]}
                           >
                             <Text
                               style={[
                                 styles.dueBadgeText,
-                                { color: dueInfo.textColor },
+                                { color: isDark ? "#F87171" : "#DC2626" },
                               ]}
                             >
-                              {dueInfo.label}
+                              PRIOR DUES
                             </Text>
                           </View>
-                        )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.billPayer,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          {arr.note || "Carried forward from previous cycle"}
+                        </Text>
                       </View>
-                      <Text
-                        style={[
-                          styles.billPayer,
-                          isDark && { color: colors.textSecondary },
-                        ]}
-                      >
-                        {isExpensePaid
-                          ? `${e.date} · Settled by all ${payorCount} group ${payorCount === 1 ? "payor" : "payors"}`
-                          : paidPayorsCount > 0
-                            ? `${e.date} · ${paidPayorsCount}/${payorCount} payors settled${waitingSummary ? ` · ${waitingSummary}` : ""}`
-                            : `${e.date} · Added by ${e.payerName || "Host"} · 0/${payorCount} payors settled`}
-                      </Text>
+                      <View style={{ alignItems: "flex-end", marginTop: 2 }}>
+                        <Text
+                          style={[
+                            styles.billValue,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {formatPesos(arr.amountCentavos)}
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            color: isDark ? "#F87171" : "#DC2626",
+                            fontWeight: "700",
+                            marginTop: 2,
+                          }}
+                        >
+                          Your Arrears
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{ alignItems: "flex-end", marginTop: 2 }}>
-                      <Text
+                  ))}
+                {currentCycleExpenses.map((e) => {
+                  const isExpensePaid =
+                    e.status === "PAID" ||
+                    e.isPaid === true ||
+                    allPayorsSettled;
+                  const catMeta = getCategoryMeta(e.category);
+                  const isWater = (e.category || "")
+                    .toLowerCase()
+                    .includes("water");
+                  const payorCount = Math.max(1, activePayors.length);
+                  const isPersonDayMode =
+                    waterConfig?.pricingModel === "PER_PERSON_DAY" ||
+                    !waterConfig?.pricingModel;
+
+                  let waterMyShare = 0;
+                  let waterTotalCentavos = e.amountCents;
+                  if (isWater) {
+                    if (isPersonDayMode) {
+                      const rate = Number(
+                        waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+                      );
+                      const {
+                        getPayorShareCentavos,
+                        totalAmountCentavos: computedWaterTotal,
+                      } = computeCycleWaterBreakdown(
+                        activeMembers,
+                        cycleAttendance,
+                        attendanceSubmissions,
+                        rate,
+                        e.splitDetails,
+                      );
+                      if (isCurrentUserPayor) {
+                        waterMyShare = getPayorShareCentavos(currentUser?.uid);
+                      }
+                      if (computedWaterTotal > 0) {
+                        waterTotalCentavos = computedWaterTotal;
+                      }
+                    } else if (
+                      waterConfig?.pricingModel === "FIXED_PER_PERSON_MONTH"
+                    ) {
+                      if (isCurrentUserPayor) {
+                        waterMyShare =
+                          waterConfig.fixedPerPersonAmountCentavos || 0;
+                      }
+                      waterTotalCentavos =
+                        (waterConfig.fixedPerPersonAmountCentavos || 0) *
+                        payorCount;
+                    } else {
+                      if (isCurrentUserPayor) {
+                        waterMyShare = computeFairSplitShareCentavos(
+                          e.amountCents,
+                          activePayors,
+                          currentUser?.uid,
+                        );
+                      }
+                    }
+                  }
+
+                  const splitPayors = e.splitDetails
+                    ? e.splitDetails.filter(
+                        (s: any) => !s.isExempt && s.shareCentavos > 0,
+                      )
+                    : [];
+                  const splitPayorsSum = splitPayors.reduce(
+                    (acc: number, s: any) =>
+                      acc + (Number(s.shareCentavos) || 0),
+                    0,
+                  );
+                  const isSplitStale =
+                    !isWater &&
+                    splitPayors.length > 0 &&
+                    (splitPayors.length !== payorCount ||
+                      splitPayorsSum !== e.amountCents);
+                  const mySplit = e.splitDetails?.find(
+                    (s: any) => s.userId === currentUser?.uid,
+                  );
+                  const myShareForExpense = !isCurrentUserPayor
+                    ? 0
+                    : isWater
+                      ? waterMyShare
+                      : !isSplitStale &&
+                          mySplit &&
+                          typeof mySplit.shareCentavos === "number"
+                        ? mySplit.shareCentavos
+                        : computeFairSplitShareCentavos(
+                            e.amountCents,
+                            activePayors,
+                            currentUser?.uid,
+                          );
+                  const dueInfo = getBillDueStatus(
+                    e,
+                    activeCycle,
+                    cycles,
+                    isDark,
+                  );
+
+                  const mySharePaid =
+                    isCurrentUserPayor &&
+                    Boolean(
+                      isExpensePaid ||
+                      mySplit?.isPaid ||
+                      isMyCycleSettled ||
+                      (currentUser?.uid &&
+                        settledPayorUids.has(currentUser.uid)),
+                    );
+
+                  let paidPayorsCount = 0;
+                  const waitingPayorNames: string[] = [];
+                  activePayors.forEach((p) => {
+                    const pUid = p.userId || p.memberId || p.id;
+                    const pSplit = Array.isArray(e.splitDetails)
+                      ? e.splitDetails.find(
+                          (s: any) =>
+                            s.userId === pUid ||
+                            s.memberId === pUid ||
+                            s.id === pUid,
+                        )
+                      : null;
+                    const isPayorPaid = Boolean(
+                      isExpensePaid ||
+                      pSplit?.isPaid ||
+                      (pUid && settledPayorUids.has(pUid)),
+                    );
+                    if (isPayorPaid) {
+                      paidPayorsCount += 1;
+                    } else {
+                      const firstName = (
+                        p.displayName ||
+                        p.name ||
+                        "Roommate"
+                      ).split(" ")[0];
+                      waitingPayorNames.push(firstName);
+                    }
+                  });
+
+                  const waitingSummary =
+                    waitingPayorNames.length === 0
+                      ? ""
+                      : waitingPayorNames.length <= 2
+                        ? `Waiting on ${waitingPayorNames.join(", ")}`
+                        : `Waiting on ${waitingPayorNames.slice(0, 2).join(", ")} +${waitingPayorNames.length - 2}`;
+
+                  return (
+                    <View
+                      key={e.id}
+                      style={[
+                        styles.billItem,
+                        isDark && { borderBottomColor: colors.border },
+                      ]}
+                    >
+                      <View
                         style={[
-                          styles.billValue,
-                          isDark && { color: colors.text },
+                          styles.billIconWrap,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(255, 255, 255, 0.06)"
+                              : catMeta.bgColor,
+                          },
                         ]}
                       >
-                        {formatPesos(
-                          isWater && waterTotalCentavos > 0
-                            ? waterTotalCentavos
-                            : e.amountCents,
-                        )}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          color: !isCurrentUserPayor
-                            ? isDark
-                              ? colors.textMuted
-                              : "#94A3B8"
-                            : isExpensePaid || mySharePaid
+                        <Feather
+                          name={catMeta.featherIcon as any}
+                          size={18}
+                          color={catMeta.color}
+                        />
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.billName,
+                              isDark && { color: colors.text },
+                            ]}
+                          >
+                            {cleanBillTitle(e.title, e.category)}
+                          </Text>
+                          {isExpensePaid ? (
+                            <View
+                              style={[
+                                styles.statusBadgePaid,
+                                isDark && {
+                                  backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                  borderColor: "rgba(16, 185, 129, 0.3)",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.statusBadgeTextPaid,
+                                  isDark && { color: "#34D399" },
+                                ]}
+                              >
+                                ALL PAID
+                              </Text>
+                            </View>
+                          ) : mySharePaid ? (
+                            <View
+                              style={[
+                                styles.statusBadgePaid,
+                                isDark && {
+                                  backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                  borderColor: "rgba(16, 185, 129, 0.35)",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.statusBadgeTextPaid,
+                                  isDark && { color: "#34D399" },
+                                ]}
+                              >
+                                YOUR SHARE PAID ✓
+                              </Text>
+                            </View>
+                          ) : (
+                            <View
+                              style={[
+                                styles.dueBadge,
+                                {
+                                  backgroundColor: dueInfo.badgeBg,
+                                  borderColor: dueInfo.badgeBorder,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.dueBadgeText,
+                                  { color: dueInfo.textColor },
+                                ]}
+                              >
+                                {dueInfo.label}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.billPayer,
+                            isDark && { color: colors.textSecondary },
+                          ]}
+                        >
+                          {isExpensePaid
+                            ? `${e.date} · Settled by all ${payorCount} group ${payorCount === 1 ? "payor" : "payors"}`
+                            : paidPayorsCount > 0
+                              ? `${e.date} · ${paidPayorsCount}/${payorCount} payors settled${waitingSummary ? ` · ${waitingSummary}` : ""}`
+                              : `${e.date} · Added by ${e.payerName || "Host"} · 0/${payorCount} payors settled`}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end", marginTop: 2 }}>
+                        <Text
+                          style={[
+                            styles.billValue,
+                            isDark && { color: colors.text },
+                          ]}
+                        >
+                          {formatPesos(
+                            isWater && waterTotalCentavos > 0
+                              ? waterTotalCentavos
+                              : e.amountCents,
+                          )}
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            color: !isCurrentUserPayor
                               ? isDark
-                                ? "#34D399"
-                                : "#16A34A"
-                              : isDark
-                                ? colors.accent
-                                : "#2563EB",
-                          fontWeight: "700",
-                          marginTop: 2,
-                        }}
-                      >
-                        {!isCurrentUserPayor
-                          ? "Exempt"
-                          : isExpensePaid || mySharePaid
-                            ? `Your share: ${formatPesos(myShareForExpense)} (Paid ✓)`
-                            : `Your share: ${formatPesos(myShareForExpense)}`}
-                      </Text>
+                                ? colors.textMuted
+                                : "#94A3B8"
+                              : isExpensePaid || mySharePaid
+                                ? isDark
+                                  ? "#34D399"
+                                  : "#16A34A"
+                                : isDark
+                                  ? colors.accent
+                                  : "#2563EB",
+                            fontWeight: "700",
+                            marginTop: 2,
+                          }}
+                        >
+                          {!isCurrentUserPayor
+                            ? "Exempt"
+                            : isExpensePaid || mySharePaid
+                              ? `Your share: ${formatPesos(myShareForExpense)} (Paid ✓)`
+                              : `Your share: ${formatPesos(myShareForExpense)}`}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                );
-              })
+                  );
+                })}
+              </>
             )}
 
             {userPayments.length > 0 && (

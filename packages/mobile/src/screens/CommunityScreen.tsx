@@ -61,6 +61,7 @@ import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { CreateReelModal } from "../components/CreateReelModal";
 import { ReelCommentsModal } from "../components/ReelCommentsModal";
 import { SplitzyReelItem } from "../components/SplitzyReelItem";
+import { mobileDataService } from "../services/firebaseDataService";
 
 const safeCopyTextAsync = async (text: string): Promise<boolean> => {
   try {
@@ -470,6 +471,25 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
       f.senderId === currentUid ? f.receiverId : f.senderId,
     );
   }, [acceptedFriends, currentUid]);
+
+  const [friendsPresenceMap, setFriendsPresenceMap] = useState<
+    Record<string, any>
+  >({});
+
+  // Subscribe to real-time presence of accepted friends
+  useEffect(() => {
+    if (!acceptedFriendUids.length) {
+      setFriendsPresenceMap({});
+      return;
+    }
+    const unsub = mobileDataService.listenToUsersPresence(
+      acceptedFriendUids,
+      (newMap) => {
+        setFriendsPresenceMap(newMap);
+      },
+    );
+    return () => unsub();
+  }, [JSON.stringify(acceptedFriendUids)]);
 
   // 100% Real cloud-synced stories (Active within 24 hours only, with Friends-Only privacy)
   const displayStories = useMemo(() => {
@@ -3500,6 +3520,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                       friendUid || friendCleanName,
                       isDark,
                     );
+                    const cleanFriendUid = String(friendUid)
+                      .replace(/^mem_/, "")
+                      .trim();
+                    const livePres = friendsPresenceMap[cleanFriendUid];
+                    const isFriendOnline = livePres
+                      ? livePres.isOnline === true
+                      : false;
 
                     return (
                       <View
@@ -3557,6 +3584,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               </Text>
                             </View>
                           )}
+                          {isFriendOnline && (
+                            <View
+                              style={[
+                                styles.fbFriendRowOnlineDot,
+                                {
+                                  borderColor: isDark ? "#1E293B" : "#FFFFFF",
+                                },
+                              ]}
+                            />
+                          )}
                         </TouchableOpacity>
 
                         <View style={styles.fbFriendRowInfo}>
@@ -3582,14 +3619,35 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               {friendCleanName}
                             </Text>
                           </TouchableOpacity>
-                          <Text
-                            style={[
-                              styles.fbFriendRowSub,
-                              { color: isDark ? "#94A3B8" : "#64748B" },
-                            ]}
+                          {/* <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 5,
+                              marginTop: 2,
+                            }}
                           >
-                            {formatFriendSubtitle(friendUid)}
-                          </Text>
+                            {isFriendOnline && (
+                              <View style={styles.friendActiveBadgeDot} />
+                            )}
+                            <Text
+                              style={[
+                                styles.fbFriendRowSub,
+                                {
+                                  color: isFriendOnline
+                                    ? "#10B981"
+                                    : isDark
+                                      ? "#94A3B8"
+                                      : "#64748B",
+                                  fontWeight: isFriendOnline ? "600" : "400",
+                                },
+                              ]}
+                            >
+                              {isFriendOnline
+                                ? "Active now"
+                                : formatFriendSubtitle(friendUid)}
+                            </Text>
+                          </View> */}
 
                           <View style={styles.fbFriendRowActions}>
                             <TouchableOpacity
@@ -6432,6 +6490,23 @@ const styles = StyleSheet.create({
   },
   fbFriendRowAvatarWrap: {
     marginRight: 14,
+    position: "relative",
+  },
+  fbFriendRowOnlineDot: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
+    backgroundColor: "#10B981",
+    borderWidth: 2.5,
+  },
+  friendActiveBadgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: "#10B981",
   },
   fbFriendRowAvatar: {
     width: 60,
