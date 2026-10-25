@@ -18,13 +18,18 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { updateProfile as updateAuthProfile } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { formatPesos } from "@propertyflow/shared";
+import {
+  formatPesos,
+  resolveCycleWaterConfig,
+  type CycleWaterConfig,
+} from "@propertyflow/shared";
 import { db, auth, functions } from "../firebase/config";
 import { pushDispatchService } from "./pushDispatchService";
 export {
   uploadImageToCloudinaryMobile,
   uploadImageToCloudinary,
 } from "./cloudinaryService";
+export { resolveCycleWaterConfig, type CycleWaterConfig };
 
 export type NotificationCategory =
   | "reminder"
@@ -744,194 +749,7 @@ export interface ComputedWaterMemberBreakdown {
   shareCentavos: number;
   note: string;
 }
-
-export interface CycleWaterConfig {
-  pricingModel: "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH";
-  rateCentavosPerPersonPerDay: number;
-  fixedMonthlyAmountCentavos: number;
-  fixedPerPersonAmountCentavos: number;
-  billingCycleId?: string;
-  updatedAt?: string;
-}
-
-/**
- * Resolves the water billing configuration strictly for a specific billing cycle.
- * Returns `null` if the host has not configured water for this cycle yet, while
- * preserving backward compatibility for historical cycles that already have water bills
- * or attendance records.
- */
-export function resolveCycleWaterConfig(
-  waterConfig: any | null | undefined,
-  cycleId?: string | null,
-  options?: {
-    cycleWaterExpense?: any | null;
-    payorCount?: number;
-    hasCycleAttendance?: boolean;
-    totalCyclesCount?: number;
-  },
-): CycleWaterConfig | null {
-  const normalizeEntry = (raw: any, resolvedCid?: string): CycleWaterConfig => {
-    const pricingModel: CycleWaterConfig["pricingModel"] =
-      raw?.pricingModel === "FIXED_PER_PERSON_MONTH" ||
-      raw?.pricingModel === "FIXED_MONTHLY" ||
-      raw?.pricingModel === "PER_PERSON_DAY"
-        ? raw.pricingModel
-        : Number(raw?.fixedPerPersonAmountCentavos || 0) > 0
-          ? "FIXED_PER_PERSON_MONTH"
-          : Number(raw?.fixedMonthlyAmountCentavos || 0) > 0
-            ? "FIXED_MONTHLY"
-            : "PER_PERSON_DAY";
-    return {
-      pricingModel,
-      rateCentavosPerPersonPerDay:
-        Number(raw?.rateCentavosPerPersonPerDay ?? 500) > 0
-          ? Number(raw?.rateCentavosPerPersonPerDay ?? 500)
-          : 500,
-      fixedMonthlyAmountCentavos: Math.max(
-        0,
-        Number(raw?.fixedMonthlyAmountCentavos ?? 0),
-      ),
-      fixedPerPersonAmountCentavos: Math.max(
-        0,
-        Number(raw?.fixedPerPersonAmountCentavos ?? 0),
-      ),
-      billingCycleId: resolvedCid || raw?.billingCycleId,
-      updatedAt: raw?.updatedAt,
-    };
-  };
-
-  // 1. Explicit per-cycle snapshot saved under systemSettings/water.cycles[cycleId]
-  const cycleSaved =
-    cycleId && waterConfig?.cycles && typeof waterConfig.cycles === "object"
-      ? waterConfig.cycles[cycleId]
-      : null;
-  if (cycleSaved) {
-    return normalizeEntry(cycleSaved, cycleId || undefined);
-  }
-
-  // 2. Top-level billingCycleId explicitly stamped for this cycle
-  if (
-    cycleId &&
-    waterConfig?.billingCycleId &&
-    waterConfig.billingCycleId === cycleId
-  ) {
-    return normalizeEntry(waterConfig, cycleId);
-  }
-
-  // 3. Historical or existing water expense already posted on this cycle
-  const exp = options?.cycleWaterExpense;
-  if (exp) {
-    const splitMethod = String(exp.splitMethod || "").toLowerCase();
-    const titleLower = String(exp.title || "").toLowerCase();
-    const safePayors = Math.max(1, Number(options?.payorCount || 1));
-    const sampleNonExemptSplit = Array.isArray(exp.splitDetails)
-      ? exp.splitDetails.find((s: any) => !s?.isExempt)
-      : null;
-
-    if (
-      splitMethod.includes("flat per person") ||
-      titleLower.includes("flat per person")
-    ) {
-      const perPerson = Number(
-        sampleNonExemptSplit?.shareCentavos ??
-          waterConfig?.fixedPerPersonAmountCentavos ??
-          Math.round((Number(exp.amountCents) || 0) / safePayors),
-      );
-      return {
-        pricingModel: "FIXED_PER_PERSON_MONTH",
-        rateCentavosPerPersonPerDay: Number(
-          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-        ),
-        fixedMonthlyAmountCentavos: 0,
-        fixedPerPersonAmountCentavos: Math.max(0, perPerson),
-        billingCycleId: cycleId || exp.billingCycleId,
-      };
-    }
-
-    if (
-      splitMethod.includes("equal split") ||
-      titleLower.includes("fixed household")
-    ) {
-      return {
-        pricingModel: "FIXED_MONTHLY",
-        rateCentavosPerPersonPerDay: Number(
-          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
-        ),
-        fixedMonthlyAmountCentavos: Math.max(
-          0,
-          Number(
-            exp.amountCents ?? waterConfig?.fixedMonthlyAmountCentavos ?? 0,
-          ),
-        ),
-        fixedPerPersonAmountCentavos: 0,
-        billingCycleId: cycleId || exp.billingCycleId,
-      };
-    }
-
-    if (
-      splitMethod.includes("daily attendance") ||
-      titleLower.includes("attendance")
-    ) {
-      const splitRate = Number(
-        sampleNonExemptSplit?.rateCentavosPerDay ??
-          waterConfig?.rateCentavosPerPersonPerDay ??
-          500,
-      );
-      return {
-        pricingModel: "PER_PERSON_DAY",
-        rateCentavosPerPersonPerDay: splitRate > 0 ? splitRate : 500,
-        fixedMonthlyAmountCentavos: 0,
-        fixedPerPersonAmountCentavos: 0,
-        billingCycleId: cycleId || exp.billingCycleId,
-      };
-    }
-
-    // Custom/manual water bill fallback
-    if (waterConfig?.updatedAt) {
-      return normalizeEntry(waterConfig, cycleId || exp.billingCycleId);
-    }
-    return {
-      pricingModel: "FIXED_MONTHLY",
-      rateCentavosPerPersonPerDay: 500,
-      fixedMonthlyAmountCentavos: Math.max(0, Number(exp.amountCents || 0)),
-      fixedPerPersonAmountCentavos: 0,
-      billingCycleId: cycleId || exp.billingCycleId,
-    };
-  }
-
-  // 4. Legacy cycle that already has roommate attendance submissions/present days
-  if (options?.hasCycleAttendance) {
-    return {
-      pricingModel: "PER_PERSON_DAY",
-      rateCentavosPerPersonPerDay:
-        Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500) > 0
-          ? Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500)
-          : 500,
-      fixedMonthlyAmountCentavos: 0,
-      fixedPerPersonAmountCentavos: 0,
-      billingCycleId: cycleId || undefined,
-    };
-  }
-
-  // 5. Legacy single-cycle household configured prior to per-cycle water snapshots
-  const hasCyclesMap = Boolean(
-    waterConfig?.cycles && typeof waterConfig.cycles === "object",
-  );
-  const hasExplicitCycleField =
-    waterConfig !== null &&
-    waterConfig !== undefined &&
-    typeof waterConfig.billingCycleId === "string";
-  if (
-    !hasCyclesMap &&
-    !hasExplicitCycleField &&
-    Boolean(waterConfig?.updatedAt) &&
-    (options?.totalCyclesCount ?? 0) <= 1
-  ) {
-    return normalizeEntry(waterConfig, cycleId || undefined);
-  }
-
-  return null;
-}
+// CycleWaterConfig and resolveCycleWaterConfig are exported from @propertyflow/shared at top of module
 
 /**
  * Shared deterministic calculator for PER_PERSON_DAY water attendance shares.

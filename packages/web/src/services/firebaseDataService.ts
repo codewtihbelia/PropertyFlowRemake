@@ -1537,4 +1537,192 @@ export const firebaseDataService = {
     const ref = doc(db, "auditLogs", log.logId);
     await setDoc(ref, sanitizeData(log));
   },
+  resolveCycleWaterConfig(
+    waterConfig: any | null | undefined,
+    cycleId?: string | null,
+    options?: {
+      cycleWaterExpense?: any | null;
+      payorCount?: number;
+      hasCycleAttendance?: boolean;
+      totalCyclesCount?: number;
+    },
+  ): CycleWaterConfig | null {
+    return resolveCycleWaterConfig(waterConfig, cycleId, options);
+  },
 };
+
+export interface CycleWaterConfig {
+  pricingModel: "PER_PERSON_DAY" | "FIXED_MONTHLY" | "FIXED_PER_PERSON_MONTH";
+  rateCentavosPerPersonPerDay: number;
+  fixedMonthlyAmountCentavos: number;
+  fixedPerPersonAmountCentavos: number;
+  billingCycleId?: string;
+  updatedAt?: string;
+}
+
+export function resolveCycleWaterConfig(
+  waterConfig: any | null | undefined,
+  cycleId?: string | null,
+  options?: {
+    cycleWaterExpense?: any | null;
+    payorCount?: number;
+    hasCycleAttendance?: boolean;
+    totalCyclesCount?: number;
+  },
+): CycleWaterConfig | null {
+  const normalizeEntry = (raw: any, resolvedCid?: string): CycleWaterConfig => {
+    const pricingModel: CycleWaterConfig["pricingModel"] =
+      raw?.pricingModel === "FIXED_PER_PERSON_MONTH" ||
+      raw?.pricingModel === "FIXED_MONTHLY" ||
+      raw?.pricingModel === "PER_PERSON_DAY"
+        ? raw.pricingModel
+        : Number(raw?.fixedPerPersonAmountCentavos || 0) > 0
+          ? "FIXED_PER_PERSON_MONTH"
+          : Number(raw?.fixedMonthlyAmountCentavos || 0) > 0
+            ? "FIXED_MONTHLY"
+            : "PER_PERSON_DAY";
+    return {
+      pricingModel,
+      rateCentavosPerPersonPerDay:
+        Number(raw?.rateCentavosPerPersonPerDay ?? 500) > 0
+          ? Number(raw?.rateCentavosPerPersonPerDay ?? 500)
+          : 500,
+      fixedMonthlyAmountCentavos: Math.max(
+        0,
+        Number(raw?.fixedMonthlyAmountCentavos ?? 0),
+      ),
+      fixedPerPersonAmountCentavos: Math.max(
+        0,
+        Number(raw?.fixedPerPersonAmountCentavos ?? 0),
+      ),
+      billingCycleId: resolvedCid || raw?.billingCycleId,
+      updatedAt: raw?.updatedAt,
+    };
+  };
+
+  const cycleSaved =
+    cycleId && waterConfig?.cycles && typeof waterConfig.cycles === "object"
+      ? waterConfig.cycles[cycleId]
+      : null;
+  if (cycleSaved) {
+    return normalizeEntry(cycleSaved, cycleId || undefined);
+  }
+
+  if (
+    cycleId &&
+    waterConfig?.billingCycleId &&
+    waterConfig.billingCycleId === cycleId
+  ) {
+    return normalizeEntry(waterConfig, cycleId);
+  }
+
+  const exp = options?.cycleWaterExpense;
+  if (exp) {
+    const splitMethod = String(exp.splitMethod || "").toLowerCase();
+    const titleLower = String(exp.title || "").toLowerCase();
+    const safePayors = Math.max(1, Number(options?.payorCount || 1));
+    const sampleNonExemptSplit = Array.isArray(exp.splitDetails)
+      ? exp.splitDetails.find((s: any) => !s?.isExempt)
+      : null;
+
+    if (
+      splitMethod.includes("flat per person") ||
+      titleLower.includes("flat per person")
+    ) {
+      const perPerson = Number(
+        sampleNonExemptSplit?.shareCentavos ??
+          waterConfig?.fixedPerPersonAmountCentavos ??
+          Math.round((Number(exp.amountCents) || 0) / safePayors),
+      );
+      return {
+        pricingModel: "FIXED_PER_PERSON_MONTH",
+        rateCentavosPerPersonPerDay: Number(
+          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+        ),
+        fixedMonthlyAmountCentavos: 0,
+        fixedPerPersonAmountCentavos: Math.max(0, perPerson),
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    if (
+      splitMethod.includes("equal split") ||
+      titleLower.includes("fixed household")
+    ) {
+      return {
+        pricingModel: "FIXED_MONTHLY",
+        rateCentavosPerPersonPerDay: Number(
+          waterConfig?.rateCentavosPerPersonPerDay ?? 500,
+        ),
+        fixedMonthlyAmountCentavos: Math.max(
+          0,
+          Number(
+            exp.amountCents ?? waterConfig?.fixedMonthlyAmountCentavos ?? 0,
+          ),
+        ),
+        fixedPerPersonAmountCentavos: 0,
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    if (
+      splitMethod.includes("daily attendance") ||
+      titleLower.includes("attendance")
+    ) {
+      const splitRate = Number(
+        sampleNonExemptSplit?.rateCentavosPerDay ??
+          waterConfig?.rateCentavosPerPersonPerDay ??
+          500,
+      );
+      return {
+        pricingModel: "PER_PERSON_DAY",
+        rateCentavosPerPersonPerDay: splitRate > 0 ? splitRate : 500,
+        fixedMonthlyAmountCentavos: 0,
+        fixedPerPersonAmountCentavos: 0,
+        billingCycleId: cycleId || exp.billingCycleId,
+      };
+    }
+
+    if (waterConfig?.updatedAt) {
+      return normalizeEntry(waterConfig, cycleId || exp.billingCycleId);
+    }
+    return {
+      pricingModel: "FIXED_MONTHLY",
+      rateCentavosPerPersonPerDay: 500,
+      fixedMonthlyAmountCentavos: Math.max(0, Number(exp.amountCents || 0)),
+      fixedPerPersonAmountCentavos: 0,
+      billingCycleId: cycleId || exp.billingCycleId,
+    };
+  }
+
+  if (options?.hasCycleAttendance) {
+    return {
+      pricingModel: "PER_PERSON_DAY",
+      rateCentavosPerPersonPerDay:
+        Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500) > 0
+          ? Number(waterConfig?.rateCentavosPerPersonPerDay ?? 500)
+          : 500,
+      fixedMonthlyAmountCentavos: 0,
+      fixedPerPersonAmountCentavos: 0,
+      billingCycleId: cycleId || undefined,
+    };
+  }
+
+  const hasCyclesMap = Boolean(
+    waterConfig?.cycles && typeof waterConfig.cycles === "object",
+  );
+  const hasExplicitCycleField =
+    waterConfig !== null &&
+    waterConfig !== undefined &&
+    typeof waterConfig.billingCycleId === "string";
+  if (
+    !hasCyclesMap &&
+    !hasExplicitCycleField &&
+    Boolean(waterConfig?.updatedAt) &&
+    (options?.totalCyclesCount ?? 0) <= 1
+  ) {
+    return normalizeEntry(waterConfig, cycleId || undefined);
+  }
+
+  return null;
+}

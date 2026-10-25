@@ -423,7 +423,12 @@ export const AttendanceScreen: React.FC<{
   }, [allCycleAttendance, submissions]);
 
   const cycleWaterData = useMemo(() => {
-    return resolveCycleWaterConfig(waterConfig, resolvedBillingCycleId, {
+    const resolver =
+      typeof resolveCycleWaterConfig === "function"
+        ? resolveCycleWaterConfig
+        : mobileDataService?.resolveCycleWaterConfig;
+    if (typeof resolver !== "function") return null;
+    return resolver(waterConfig, resolvedBillingCycleId, {
       cycleWaterExpense,
       payorCount: payingRoommatesCount,
       hasCycleAttendance: hasCycleAttendanceActivity,
@@ -2035,14 +2040,14 @@ export const AttendanceScreen: React.FC<{
                       },
                     ]}
                   >
-                    <View
+                    {/* <View
                       style={[
                         styles.activeCycleDot,
                         isCycleClosedOrPaidOff && {
                           backgroundColor: "#34D399",
                         },
                       ]}
-                    />
+                    ></View> */}
                     <Text
                       style={[
                         styles.activeCyclePillText,
@@ -3343,14 +3348,8 @@ export const AttendanceScreen: React.FC<{
                             isDark && { color: colors.textSecondary },
                           ]}
                         >
-                          Cycle Settled · Attendance Reset (₱0.00)
+                          Cycle Settled (₱0.00)
                         </Text>
-                        <Feather
-                          name="check"
-                          size={18}
-                          color={isDark ? colors.textSecondary : "#FFFFFF"}
-                          style={{ marginLeft: 8 }}
-                        />
                       </View>
                     </TouchableOpacity>
                   ) : isLockedByCyclePayment ? (
@@ -3481,11 +3480,11 @@ export const AttendanceScreen: React.FC<{
                     ]}
                   >
                     {isCycleClosedOrPaidOff
-                      ? "✓ Cycle closed & settled · Ready for your host to start the next cycle"
+                      ? "Cycle closed & settled · Ready for your host to start the next cycle"
                       : isLockedByCyclePayment
-                        ? "🔒 Attendance locked for everyone once cycle bill payments begin"
+                        ? "Attendance locked for everyone once cycle bill payments begin"
                         : isCalendarLocked
-                          ? "🔒 Locked after submission to prevent accidental edits"
+                          ? "Locked after submission to prevent accidental edits"
                           : !isMyMemberPayor
                             ? "Tap Submit to choose which Payors cover your water share"
                             : "Tap Submit to confirm and lock your water attendance markings"}
@@ -4526,11 +4525,8 @@ const styles = StyleSheet.create({
     paddingBottom: 95,
   },
   emptyCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 32,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
     alignItems: "center",
     marginTop: 20,
   },
@@ -4639,7 +4635,7 @@ const styles = StyleSheet.create({
   /* Cycle Settled & Reset Banner */
   settledResetBanner: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     backgroundColor: "#ECFDF5",
     borderWidth: 1,
     borderColor: "#A7F3D0",
@@ -4679,11 +4675,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     marginBottom: 14,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
+    // shadowColor: "#0F172A",
+    // shadowOffset: { width: 0, height: 1 },
+    // shadowOpacity: 0.04,
+    // shadowRadius: 6,
+    // elevation: 2,
   },
   feeBarCardEditing: {
     borderColor: "#93C5FD",
@@ -5213,7 +5209,7 @@ const styles = StyleSheet.create({
   },
   submissionNoticeBox: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 10,
     borderRadius: 16,
     paddingHorizontal: 14,
@@ -5305,6 +5301,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   submissionFootnote: {
+    marginTop: 8,
     fontSize: 11,
     color: "#94A3B8",
     textAlign: "center",

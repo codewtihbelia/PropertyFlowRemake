@@ -789,7 +789,12 @@ export const ManageGroupScreen: React.FC<ManageGroupScreenProps> = ({
   }, [cycleAttendance, attendanceSubmissions]);
 
   const cycleWaterData = useMemo(() => {
-    return resolveCycleWaterConfig(waterConfig, activeCycle?.billingCycleId, {
+    const resolver =
+      typeof resolveCycleWaterConfig === "function"
+        ? resolveCycleWaterConfig
+        : mobileDataService?.resolveCycleWaterConfig;
+    if (typeof resolver !== "function") return null;
+    return resolver(waterConfig, activeCycle?.billingCycleId, {
       cycleWaterExpense,
       payorCount,
       hasCycleAttendance: hasCycleAttendanceActivity,
