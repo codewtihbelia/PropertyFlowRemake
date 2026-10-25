@@ -25,15 +25,31 @@ import {
 } from "@propertyflow/shared";
 import { db, auth, functions } from "../firebase/config";
 import { pushDispatchService } from "./pushDispatchService";
+import { encryptMessage, decryptMessage } from "../utils/cryptoUtils";
 export {
   uploadImageToCloudinaryMobile,
   uploadImageToCloudinary,
 } from "./cloudinaryService";
+export { encryptMessage, decryptMessage } from "../utils/cryptoUtils";
 export { resolveCycleWaterConfig, type CycleWaterConfig };
 
 // Quota exhaustion handling & rate limiting for free-tier sustainability
 let _lastHeartbeatTimestamps: Record<string, number> = {};
 const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes (saves 95% of background writes)
+
+export const PRESENCE_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes presence cache
+const _presenceCache = new Map<string, { data: any; timestamp: number }>();
+
+export function getCachedUserPresence(userId: string): any | null {
+  const clean = String(userId || "")
+    .replace(/^mem_/, "")
+    .trim();
+  const entry = _presenceCache.get(clean);
+  if (entry && Date.now() - entry.timestamp < PRESENCE_CACHE_TTL_MS) {
+    return entry.data;
+  }
+  return null;
+}
 
 let _markNotificationsReadTimer: any = null;
 let _pendingUserReadMapUpdates: Record<string, Record<string, boolean>> = {};
@@ -9348,14 +9364,37 @@ export const mobileDataService = {
       callback([]);
       return () => {};
     }
+    const currentUid = auth.currentUser?.uid;
     const colRef = collection(db, `households/${householdId}/messages`);
     return onSnapshot(
       colRef,
       (snapshot) => {
-        const msgs = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        }));
+        const msgs = snapshot.docs
+          .map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }))
+          .filter((m: any) => {
+            if (
+              currentUid &&
+              m.deletedFor &&
+              Array.isArray(m.deletedFor) &&
+              (m.deletedFor.includes(currentUid) ||
+                m.deletedFor.includes(`mem_${currentUid}`))
+            ) {
+              return false;
+            }
+            return true;
+          })
+          .map((m: any) => {
+            const plain = decryptMessage(
+              m.text,
+              m.conversationId || householdId,
+              [m.senderId, m.recipientId].filter(Boolean),
+            );
+            return { ...m, text: plain };
+          });
+
         // Sort in memory by createdAt or timestamp ascending
         msgs.sort((a: any, b: any) => {
           const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
@@ -9381,7 +9420,14 @@ export const mobileDataService = {
       senderName: string;
       text: string;
       recipientId?: string;
-      type?: "text" | "expense_split" | "payment_claim" | "receipt_review";
+      type?:
+        | "text"
+        | "expense_split"
+        | "payment_claim"
+        | "receipt_review"
+        | "image"
+        | "file"
+        | string;
       meta?: any;
     },
   ): Promise<string> {
@@ -9390,19 +9436,27 @@ export const mobileDataService = {
     }
     const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = new Date().toISOString();
+
+    const encryptedText = encryptMessage(
+      message.text,
+      message.conversationId || householdId,
+      [message.senderId, message.recipientId].filter(Boolean) as string[],
+    );
+
     const newDoc = {
       id: msgId,
       householdId,
       conversationId: message.conversationId,
       senderId: message.senderId,
       senderName: message.senderName,
-      text: message.text,
+      text: encryptedText,
       recipientId: message.recipientId || null,
       type: message.type || "text",
       meta: message.meta || {},
       readBy: [message.senderId],
       createdAt: nowIso,
       timestamp: nowIso,
+      isEncrypted: true,
     };
     await setDoc(
       doc(db, `households/${householdId}/messages`, msgId),
@@ -9416,7 +9470,12 @@ export const mobileDataService = {
         householdId,
         senderId: message.senderId,
         senderName: message.senderName || "Roommate",
-        text: message.text || "Sent a message",
+        text:
+          message.type === "image"
+            ? "📷 Sent an image"
+            : message.type === "file"
+              ? "📎 Sent a file"
+              : message.text || "Sent a message",
         messageId: msgId,
         recipientId: message.recipientId || null,
       })
@@ -9470,17 +9529,46 @@ export const mobileDataService = {
       callback([]);
       return () => {};
     }
+    const cleanUserId = String(userId).replace(/^mem_/, "").trim();
     const colRef = collection(db, "directMessages");
-    const qSent = query(colRef, where("senderId", "==", userId));
-    const qReceived = query(colRef, where("recipientId", "==", userId));
+    const qSent = query(colRef, where("senderId", "==", cleanUserId));
+    const qReceived = query(colRef, where("recipientId", "==", cleanUserId));
 
     let sentList: any[] = [];
     let receivedList: any[] = [];
 
     const notify = () => {
       const map = new Map<string, any>();
-      sentList.forEach((m) => map.set(m.id, m));
-      receivedList.forEach((m) => map.set(m.id, m));
+      sentList.forEach((m) => {
+        if (
+          !m.deletedFor ||
+          !Array.isArray(m.deletedFor) ||
+          (!m.deletedFor.includes(userId) &&
+            !m.deletedFor.includes(cleanUserId))
+        ) {
+          const plain = decryptMessage(
+            m.text,
+            m.conversationId,
+            [m.senderId, m.recipientId].filter(Boolean),
+          );
+          map.set(m.id, { ...m, text: plain });
+        }
+      });
+      receivedList.forEach((m) => {
+        if (
+          !m.deletedFor ||
+          !Array.isArray(m.deletedFor) ||
+          (!m.deletedFor.includes(userId) &&
+            !m.deletedFor.includes(cleanUserId))
+        ) {
+          const plain = decryptMessage(
+            m.text,
+            m.conversationId,
+            [m.senderId, m.recipientId].filter(Boolean),
+          );
+          map.set(m.id, { ...m, text: plain });
+        }
+      });
       const list = Array.from(map.values());
       list.sort((a, b) => {
         const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
@@ -9545,19 +9633,29 @@ export const mobileDataService = {
   }): Promise<string> {
     const msgId = `msg_dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = new Date().toISOString();
+
+    const cleanSenderId = message.senderId.replace(/^mem_/, "");
+    const cleanRecipientId = message.recipientId.replace(/^mem_/, "");
+
+    const encryptedText = encryptMessage(message.text, message.conversationId, [
+      cleanSenderId,
+      cleanRecipientId,
+    ]);
+
     const newDoc = {
       id: msgId,
       conversationId: message.conversationId,
       senderId: message.senderId,
       senderName: message.senderName,
       recipientId: message.recipientId,
-      text: message.text,
+      text: encryptedText,
       type: message.type || "text",
       meta: message.meta || {},
       readBy: [message.senderId],
       createdAt: nowIso,
       timestamp: nowIso,
       householdId: message.householdId || null,
+      isEncrypted: true,
     };
 
     await setDoc(doc(db, "directMessages", msgId), sanitizeData(newDoc));
@@ -9574,13 +9672,168 @@ export const mobileDataService = {
         householdId: message.householdId || "direct",
         senderId: message.senderId,
         senderName: message.senderName || "Friend",
-        text: message.text || "Sent a message",
+        text:
+          message.type === "image"
+            ? "📷 Sent an image"
+            : message.type === "file"
+              ? "📎 Sent a file"
+              : message.text || "Sent a message",
         messageId: msgId,
         recipientId: message.recipientId,
       })
       .catch(() => {});
 
     return msgId;
+  },
+
+  /**
+   * Updates an existing message's text (and encrypted payload) and marks it as edited.
+   */
+  async editMessage(options: {
+    messageId: string;
+    newText: string;
+    householdId?: string;
+    isDirect?: boolean;
+    conversationId?: string;
+    senderId?: string;
+    recipientId?: string;
+  }): Promise<void> {
+    const {
+      messageId,
+      newText,
+      householdId,
+      isDirect,
+      conversationId,
+      senderId,
+      recipientId,
+    } = options;
+    if (!messageId || typeof newText !== "string") return;
+
+    const cleanSenderId = senderId
+      ? String(senderId).replace(/^mem_/, "").trim()
+      : "";
+    const cleanRecipientId = recipientId
+      ? String(recipientId).replace(/^mem_/, "").trim()
+      : "";
+    const encryptedText = encryptMessage(
+      newText,
+      conversationId || householdId || "general",
+      [cleanSenderId, cleanRecipientId].filter(Boolean),
+    );
+
+    const updatePayload = sanitizeData({
+      text: encryptedText,
+      editedAt: new Date().toISOString(),
+      isEdited: true,
+    });
+
+    if (isDirect) {
+      await updateDoc(
+        doc(db, "directMessages", messageId),
+        updatePayload,
+      ).catch(() => {});
+    }
+    if (householdId) {
+      await updateDoc(
+        doc(db, `households/${householdId}/messages`, messageId),
+        updatePayload,
+      ).catch(() => {});
+    }
+    if (!isDirect && !householdId) {
+      await updateDoc(
+        doc(db, "directMessages", messageId),
+        updatePayload,
+      ).catch(() => {});
+    }
+  },
+
+  /**
+   * Deletes an individual message either for everyone (permanent deletion)
+   * or for the current user only (hidden via deletedFor array).
+   */
+  async deleteMessage(options: {
+    messageId: string;
+    householdId?: string;
+    isDirect?: boolean;
+    deleteForEveryone?: boolean;
+    currentUid: string;
+  }): Promise<void> {
+    const { messageId, householdId, deleteForEveryone, currentUid } = options;
+    if (!messageId) return;
+
+    const cleanUid = String(currentUid || "")
+      .replace(/^mem_/, "")
+      .trim();
+
+    if (deleteForEveryone) {
+      try {
+        await deleteDoc(doc(db, "directMessages", messageId)).catch(() => {});
+      } catch {}
+      if (householdId) {
+        try {
+          await deleteDoc(
+            doc(db, `households/${householdId}/messages`, messageId),
+          ).catch(() => {});
+        } catch {}
+      }
+    } else {
+      if (!cleanUid) return;
+      try {
+        await updateDoc(doc(db, "directMessages", messageId), {
+          deletedFor: arrayUnion(cleanUid, currentUid),
+        }).catch(() => {});
+      } catch {}
+      if (householdId) {
+        try {
+          await updateDoc(
+            doc(db, `households/${householdId}/messages`, messageId),
+            {
+              deletedFor: arrayUnion(cleanUid, currentUid),
+            },
+          ).catch(() => {});
+        } catch {}
+      }
+    }
+  },
+
+  /**
+   * Deletes an entire conversation and all its messages permanently.
+   */
+  async deleteConversation(options: {
+    conversationId: string;
+    householdId?: string;
+    currentUid: string;
+  }): Promise<void> {
+    const { conversationId, householdId } = options;
+    if (!conversationId) return;
+
+    try {
+      // 1. Delete all matching messages from directMessages
+      const colRef = collection(db, "directMessages");
+      const snapDirect = await getDocs(
+        query(colRef, where("conversationId", "==", conversationId)),
+      );
+      if (!snapDirect.empty) {
+        const batch = writeBatch(db);
+        snapDirect.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit().catch(() => {});
+      }
+
+      // 2. If in household messages
+      if (householdId) {
+        const hhCol = collection(db, `households/${householdId}/messages`);
+        const snapHh = await getDocs(
+          query(hhCol, where("conversationId", "==", conversationId)),
+        );
+        if (!snapHh.empty) {
+          const batchHh = writeBatch(db);
+          snapHh.docs.forEach((d) => batchHh.delete(d.ref));
+          await batchHh.commit().catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("[deleteConversation] Error:", e);
+    }
   },
 
   async seedHouseholdMessagesIfEmpty(
@@ -9682,17 +9935,40 @@ export const mobileDataService = {
     }
 
     const presenceState: Record<string, any> = {};
-    const unsubs: (() => void)[] = [];
 
+    // 1. Immediately seed from existing in-memory cache
     cleanIds.forEach((uid) => {
-      try {
-        const userRef = doc(db, "users", uid);
-        const unsub = onSnapshot(
-          userRef,
-          (snap) => {
+      const cached = _presenceCache.get(uid);
+      if (cached?.data) {
+        presenceState[uid] = cached.data;
+      }
+    });
+    if (Object.keys(presenceState).length > 0) {
+      callback({ ...presenceState });
+    }
+
+    let isSubscribed = true;
+
+    const fetchExpiredOrMissing = async () => {
+      if (!isSubscribed) return;
+      const now = Date.now();
+      const toFetch = cleanIds.filter((uid) => {
+        const entry = _presenceCache.get(uid);
+        return !entry || now - entry.timestamp >= PRESENCE_CACHE_TTL_MS;
+      });
+
+      if (toFetch.length === 0) return;
+
+      await Promise.all(
+        toFetch.map(async (uid) => {
+          if (!isSubscribed) return;
+          try {
+            const userRef = doc(db, "users", uid);
+            const snap = await getDoc(userRef);
+            if (!isSubscribed) return;
             if (snap.exists()) {
               const data = snap.data();
-              presenceState[uid] = {
+              const parsed = {
                 userId: uid,
                 lastActiveAt: data.lastActiveAt || data.lastActiveDate,
                 lastActiveDate: data.lastActiveDate || data.lastActiveAt,
@@ -9717,27 +9993,32 @@ export const mobileDataService = {
                 noteUpdatedAt: data.noteUpdatedAt,
                 noteExpiresAt: data.noteExpiresAt,
               };
+              _presenceCache.set(uid, { data: parsed, timestamp: now });
+              presenceState[uid] = parsed;
             } else {
+              _presenceCache.delete(uid);
               delete presenceState[uid];
             }
-            callback({ ...presenceState });
-          },
-          (_err) => {
-            // Silently ignore permission/missing doc errors for individual user
-          },
-        );
-        unsubs.push(unsub);
-      } catch (e) {
-        // Safe catch
+          } catch (e) {
+            // Safe catch
+          }
+        }),
+      );
+
+      if (isSubscribed) {
+        callback({ ...presenceState });
       }
-    });
+    };
+
+    fetchExpiredOrMissing();
+    const intervalTimer = setInterval(
+      fetchExpiredOrMissing,
+      PRESENCE_CACHE_TTL_MS,
+    );
 
     return () => {
-      unsubs.forEach((u) => {
-        try {
-          u();
-        } catch {}
-      });
+      isSubscribed = false;
+      clearInterval(intervalTimer);
     };
   },
 
@@ -9759,7 +10040,7 @@ export const mobileDataService = {
         (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            callback({
+            const parsed = {
               userId: uid,
               lastActiveAt: data.lastActiveAt || data.lastActiveDate,
               lastActiveDate: data.lastActiveDate || data.lastActiveAt,
@@ -9783,7 +10064,9 @@ export const mobileDataService = {
                   : "",
               noteUpdatedAt: data.noteUpdatedAt,
               noteExpiresAt: data.noteExpiresAt,
-            });
+            };
+            _presenceCache.set(uid, { data: parsed, timestamp: Date.now() });
+            callback(parsed);
           } else {
             callback(null);
           }

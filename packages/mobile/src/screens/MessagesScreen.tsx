@@ -33,6 +33,10 @@ import { communityService } from "../services/communityService";
 import { callService, CallType } from "../services/callService";
 import { auth } from "../firebase/config";
 import { playMessengerPopChime } from "../utils/soundEffects";
+import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
+import { uploadImageToCloudinaryMobile } from "../services/cloudinaryService";
+import { encryptMessage, decryptMessage } from "../utils/cryptoUtils";
 
 export interface MessagesScreenProps {
   onBack?: () => void;
@@ -64,12 +68,18 @@ export interface ChatMessage {
     | "payment_claim"
     | "receipt_review"
     | "expense_split"
-    | "call_log";
+    | "call_log"
+    | "image"
+    | "file";
   meta?: {
     amount?: string;
     share?: string;
     category?: string;
     attachmentName?: string;
+    attachmentUrl?: string;
+    fileName?: string;
+    fileSize?: string;
+    fileType?: string;
     status?: "pending" | "confirmed" | "settled";
     paymentMethod?: string;
     callType?: "voice" | "video";
@@ -78,6 +88,9 @@ export interface ChatMessage {
   };
   createdAt?: string;
   readBy?: string[];
+  deletedFor?: string[];
+  isEdited?: boolean;
+  editedAt?: string;
 }
 
 export interface ConversationItem {
@@ -595,6 +608,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   } = useNavVisibility();
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const topInset = Math.max(
     Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0,
     insets.top,
@@ -612,7 +626,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     currentUser?.avatar ||
     (currentUserName ? currentUserName[0].toUpperCase() : "U");
   const currentUserPhotoURL =
-    currentUser?.photoURL || auth.currentUser?.photoURL || undefined;
+    (currentUser as any)?.photoURL || auth.currentUser?.photoURL || undefined;
 
   const cachedProfile = mobileDataService.getCachedProfile(currentUid);
   const [userProfile, setUserProfile] = useState<any | null>(
@@ -711,6 +725,27 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     contextKeyboardHeight || 0,
   );
   const keyboardActive = isKeyboardOpen || isInputFocused || keyboardHeight > 0;
+
+  // Modals & Action Sheet state for Message and Conversation Deletion & Attachments
+  const [selectedMessageForAction, setSelectedMessageForAction] =
+    useState<ChatMessage | null>(null);
+  const [messageActionCoords, setMessageActionCoords] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [deleteMode, setDeleteMode] = useState<boolean>(false);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
+    null,
+  );
+  const [selectedConversationForDelete, setSelectedConversationForDelete] =
+    useState<ConversationItem | null>(null);
+  const [showAttachmentModal, setShowAttachmentModal] =
+    useState<boolean>(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] =
+    useState<boolean>(false);
+  const [isDeletingMessage, setIsDeletingMessage] = useState<boolean>(false);
+  const [isDeletingConversation, setIsDeletingConversation] =
+    useState<boolean>(false);
 
   // Auto-hide bottom floating navigation menu while inside full-screen chat thread
   useEffect(() => {
@@ -1108,6 +1143,28 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     );
     return () => unsub();
   }, [JSON.stringify(contactPresenceUids)]);
+
+  // Live real-time presence subscription strictly for the active 1-on-1 chat partner
+  useEffect(() => {
+    const targetUid = activeThread?.targetUserId;
+    if (!targetUid || activeThread?.type !== "direct") return;
+    const cleanTargetUid = targetUid.replace(/^mem_/, "").trim();
+    if (!cleanTargetUid) return;
+
+    const unsub = mobileDataService.listenToUserPresence(
+      cleanTargetUid,
+      (livePres) => {
+        if (livePres) {
+          setPresenceMap((prev) => ({
+            ...prev,
+            [cleanTargetUid]: livePres,
+          }));
+        }
+      },
+    );
+
+    return () => unsub();
+  }, [activeThread?.targetUserId, activeThread?.type]);
 
   // Combine household members with accepted friends and incoming message request contacts
   const allDirectMembers = useMemo(() => {
@@ -2165,10 +2222,68 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
-  // Send a new message inside active thread
+  // Send a new message or save edited message inside active thread
   const handleSendMessage = async () => {
     const trimmed = chatInputText.trim();
     if (!trimmed || !activeThread) return;
+
+    // Handle saving edited message
+    if (editingMessage) {
+      const targetMsgId = editingMessage.id;
+      const oldText = editingMessage.text;
+      if (trimmed === oldText) {
+        setEditingMessage(null);
+        setChatInputText("");
+        return;
+      }
+
+      setIsSending(true);
+      // Optimistic update locally
+      setActiveThread((prev) =>
+        prev
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === targetMsgId
+                  ? { ...m, text: trimmed, isEdited: true }
+                  : m,
+              ),
+            }
+          : prev,
+      );
+      setRawMessages((prev) =>
+        prev.map((m) =>
+          m.id === targetMsgId ? { ...m, text: trimmed, isEdited: true } : m,
+        ),
+      );
+      setDirectMessages((prev) =>
+        prev.map((m) =>
+          m.id === targetMsgId ? { ...m, text: trimmed, isEdited: true } : m,
+        ),
+      );
+
+      const targetMsg = editingMessage;
+      setEditingMessage(null);
+      setChatInputText("");
+
+      try {
+        await mobileDataService.editMessage({
+          messageId: targetMsgId,
+          newText: trimmed,
+          householdId: householdId || undefined,
+          isDirect: activeThread.type === "direct",
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          recipientId: activeThread.targetUserId,
+        });
+      } catch (err: any) {
+        console.warn("Error editing message:", err);
+        Alert.alert("Error", "Could not update message. Please try again.");
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
 
     setChatInputText("");
     setIsSending(true);
@@ -2203,6 +2318,349 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     } finally {
       setIsSending(false);
     }
+  };
+
+  // Handlers for Message Action Strip (Long Press) & Editing
+  const handleLongPressMessage = (msg: ChatMessage, eventOrCoords?: any) => {
+    setSelectedMessageForAction(msg);
+    setDeleteMode(false);
+    const nativeEv = eventOrCoords?.nativeEvent || eventOrCoords;
+    if (
+      nativeEv &&
+      typeof nativeEv.pageY === "number" &&
+      typeof nativeEv.pageX === "number"
+    ) {
+      setMessageActionCoords({ x: nativeEv.pageX, y: nativeEv.pageY });
+    } else {
+      setMessageActionCoords(null);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedMessageForAction) return;
+    setEditingMessage(selectedMessageForAction);
+    setChatInputText(selectedMessageForAction.text || "");
+    setSelectedMessageForAction(null);
+    setDeleteMode(false);
+    setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 120);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setChatInputText("");
+  };
+
+  const handleCopyMessageText = async () => {
+    if (!selectedMessageForAction) return;
+    if (selectedMessageForAction.text) {
+      await Clipboard.setStringAsync(selectedMessageForAction.text);
+      Alert.alert("Copied", "Message text copied to clipboard.");
+    }
+    setSelectedMessageForAction(null);
+    setDeleteMode(false);
+  };
+
+  const handleDeleteMessage = async (deleteForEveryone: boolean) => {
+    if (!selectedMessageForAction) return;
+    const msgId = selectedMessageForAction.id;
+    setIsDeletingMessage(true);
+    try {
+      await mobileDataService.deleteMessage({
+        messageId: msgId,
+        householdId: householdId || undefined,
+        isDirect: activeThread?.type === "direct",
+        deleteForEveryone,
+        currentUid,
+      });
+
+      // Instantly remove from local active thread state
+      if (activeThread) {
+        setActiveThread({
+          ...activeThread,
+          messages: activeThread.messages.filter((m) => m.id !== msgId),
+        });
+      }
+      setRawMessages((prev) => prev.filter((m) => m.id !== msgId));
+      setDirectMessages((prev) => prev.filter((m) => m.id !== msgId));
+      setSelectedMessageForAction(null);
+      setDeleteMode(false);
+    } catch (e) {
+      console.warn("Error deleting message:", e);
+      Alert.alert("Error", "Could not delete message. Please try again.");
+    } finally {
+      setIsDeletingMessage(false);
+    }
+  };
+
+  // Handlers for Conversation Deletion (Long Press)
+  const handleLongPressConversation = (item: ConversationItem) => {
+    setSelectedConversationForDelete(item);
+  };
+
+  const handleDeleteConversationConfirm = async () => {
+    if (!selectedConversationForDelete) return;
+    const convId = selectedConversationForDelete.id;
+    setIsDeletingConversation(true);
+    try {
+      await mobileDataService.deleteConversation({
+        conversationId: convId,
+        householdId: householdId || undefined,
+        currentUid,
+      });
+
+      if (activeThread?.id === convId) {
+        setActiveThread(null);
+      }
+      setRawMessages((prev) =>
+        prev.filter((m) => (m.conversationId || householdId) !== convId),
+      );
+      setDirectMessages((prev) =>
+        prev.filter((m) => m.conversationId !== convId),
+      );
+      setSelectedConversationForDelete(null);
+      Alert.alert(
+        "Conversation Deleted",
+        "The conversation was permanently removed.",
+      );
+    } catch (e) {
+      console.warn("Error deleting conversation:", e);
+      Alert.alert("Error", "Could not delete conversation. Please try again.");
+    } finally {
+      setIsDeletingConversation(false);
+    }
+  };
+
+  // Handlers for Attachments (+ Button Modal: Send Image / Send File)
+  const handlePickAndSendImage = async () => {
+    try {
+      setShowAttachmentModal(false);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Permission Required",
+          "Photo library permission is needed to share images.",
+        );
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.85,
+      });
+
+      if (res.canceled || !res.assets || res.assets.length === 0) return;
+
+      const asset = res.assets[0];
+      setIsUploadingAttachment(true);
+
+      const secureUrl = await uploadImageToCloudinaryMobile({
+        uri: asset.uri,
+        mimeType: asset.mimeType || undefined,
+      });
+
+      const isDirect = activeThread?.type === "direct";
+      if (isDirect && activeThread?.targetUserId) {
+        await mobileDataService.sendDirectMessage({
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          recipientId: activeThread.targetUserId,
+          text: "📷 Photo",
+          type: "image",
+          meta: {
+            attachmentUrl: secureUrl,
+            fileName: asset.fileName || "photo.jpg",
+            fileSize: asset.fileSize
+              ? `${Math.round(asset.fileSize / 1024)} KB`
+              : undefined,
+          },
+          householdId: householdId || undefined,
+        });
+      } else if (householdId && activeThread) {
+        await mobileDataService.sendHouseholdMessage(householdId, {
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          text: "📷 Photo",
+          type: "image",
+          meta: {
+            attachmentUrl: secureUrl,
+            fileName: asset.fileName || "photo.jpg",
+            fileSize: asset.fileSize
+              ? `${Math.round(asset.fileSize / 1024)} KB`
+              : undefined,
+          },
+        });
+      }
+
+      setTimeout(() => {
+        messageScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    } catch (e) {
+      console.warn("Error uploading/sending image:", e);
+      Alert.alert("Upload Failed", "Unable to upload image. Please try again.");
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
+
+  const handlePickAndSendFile = async () => {
+    try {
+      setShowAttachmentModal(false);
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Permission Required",
+          "File access permission is needed to share files.",
+        );
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 0.9,
+      });
+
+      if (res.canceled || !res.assets || res.assets.length === 0) return;
+
+      const asset = res.assets[0];
+      setIsUploadingAttachment(true);
+
+      const secureUrl = await uploadImageToCloudinaryMobile({
+        uri: asset.uri,
+        mimeType: asset.mimeType || undefined,
+      });
+
+      const fileName =
+        asset.fileName ||
+        (asset.type === "video" ? "video_file.mp4" : "document_file");
+      const isDirect = activeThread?.type === "direct";
+      if (isDirect && activeThread?.targetUserId) {
+        await mobileDataService.sendDirectMessage({
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          recipientId: activeThread.targetUserId,
+          text: `📎 ${fileName}`,
+          type: "file",
+          meta: {
+            attachmentUrl: secureUrl,
+            fileName: fileName,
+            fileSize: asset.fileSize
+              ? `${Math.round(asset.fileSize / 1024)} KB`
+              : undefined,
+            fileType: asset.type || "file",
+          },
+          householdId: householdId || undefined,
+        });
+      } else if (householdId && activeThread) {
+        await mobileDataService.sendHouseholdMessage(householdId, {
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          text: `📎 ${fileName}`,
+          type: "file",
+          meta: {
+            attachmentUrl: secureUrl,
+            fileName: fileName,
+            fileSize: asset.fileSize
+              ? `${Math.round(asset.fileSize / 1024)} KB`
+              : undefined,
+            fileType: asset.type || "file",
+          },
+        });
+      }
+
+      setTimeout(() => {
+        messageScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    } catch (e) {
+      console.warn("Error uploading/sending file:", e);
+      Alert.alert("Upload Failed", "Unable to upload file. Please try again.");
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
+
+  const handleSendLocation = async () => {
+    setShowAttachmentModal(false);
+    const placeName =
+      householdInfo?.householdName ||
+      householdInfo?.name ||
+      "Apartment Residence";
+    const address =
+      householdInfo?.address ||
+      householdInfo?.street ||
+      "Main Residence, Splitzy";
+    const locationText = `📍 Location: ${placeName} · ${address}`;
+
+    try {
+      const isDirect = activeThread?.type === "direct";
+      if (isDirect && activeThread?.targetUserId) {
+        await mobileDataService.sendDirectMessage({
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          recipientId: activeThread.targetUserId,
+          text: locationText,
+          type: "text",
+          householdId: householdId || undefined,
+        });
+      } else if (householdId && activeThread) {
+        await mobileDataService.sendHouseholdMessage(householdId, {
+          conversationId: activeThread.id,
+          senderId: currentUid,
+          senderName: currentUserName,
+          text: locationText,
+          type: "text",
+        });
+      }
+      setTimeout(() => {
+        messageScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    } catch (e) {
+      console.warn("Error sending location:", e);
+    }
+  };
+
+  const handleSendSaved = () => {
+    setShowAttachmentModal(false);
+    Alert.alert(
+      "Saved Quick Replies",
+      "Select a message template to insert into chat:",
+      [
+        {
+          text: "Paid my dues! Please verify receipt. 💸",
+          onPress: () => {
+            setChatInputText("Paid my dues! Please verify receipt. 💸");
+            setTimeout(() => chatInputRef.current?.focus(), 100);
+          },
+        },
+        {
+          text: "Friendly reminder: Bill deadline is coming up. 📅",
+          onPress: () => {
+            setChatInputText(
+              "Friendly reminder: Bill deadline is coming up! 📅",
+            );
+            setTimeout(() => chatInputRef.current?.focus(), 100);
+          },
+        },
+        {
+          text: "Can someone share the receipt photo? 🧾",
+          onPress: () => {
+            setChatInputText(
+              "Can someone share the receipt photo for this expense? 🧾",
+            );
+            setTimeout(() => chatInputRef.current?.focus(), 100);
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   };
 
   // Send a reaction to a roommate's note
@@ -2990,16 +3448,103 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     <TouchableOpacity
                       activeOpacity={0.85}
                       onPress={() => handleToggleMessage(msg.id)}
+                      onLongPress={(e) => handleLongPressMessage(msg, e)}
+                      delayLongPress={350}
                       style={[styles.speechBubble, styles.speechBubbleMe]}
                     >
-                      <Text
-                        style={[
-                          styles.speechBubbleText,
-                          styles.speechBubbleTextMe,
-                        ]}
-                      >
-                        {msg.text}
-                      </Text>
+                      {/* Image Attachment Preview */}
+                      {msg.type === "image" && msg.meta?.attachmentUrl && (
+                        <View
+                          style={{
+                            marginBottom: 6,
+                            borderRadius: 12,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Image
+                            source={{ uri: msg.meta.attachmentUrl }}
+                            style={{
+                              width: 220,
+                              height: 180,
+                              borderRadius: 12,
+                            }}
+                            resizeMode="cover"
+                          />
+                        </View>
+                      )}
+
+                      {/* File Attachment Preview */}
+                      {msg.type === "file" && msg.meta?.attachmentUrl && (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: 10,
+                            borderRadius: 12,
+                            backgroundColor: "rgba(255,255,255,0.18)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <Ionicons
+                            name="document-text"
+                            size={26}
+                            color="#FFFFFF"
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={{
+                                color: "#FFFFFF",
+                                fontSize: 13,
+                                fontWeight: "700",
+                              }}
+                              numberOfLines={1}
+                            >
+                              {msg.meta.fileName || msg.text}
+                            </Text>
+                            {msg.meta.fileSize && (
+                              <Text
+                                style={{
+                                  color: "rgba(255,255,255,0.75)",
+                                  fontSize: 11,
+                                  marginTop: 1,
+                                  fontWeight: "500",
+                                }}
+                              >
+                                {msg.meta.fileSize}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      )}
+
+                      {(!msg.type ||
+                        msg.type === "text" ||
+                        (msg.type !== "image" && msg.type !== "file") ||
+                        (msg.text &&
+                          msg.text !== "📷 Photo" &&
+                          !msg.text.startsWith("📎 "))) && (
+                        <Text
+                          style={[
+                            styles.speechBubbleText,
+                            styles.speechBubbleTextMe,
+                          ]}
+                        >
+                          {msg.text}
+                          {Boolean(msg.isEdited) && (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                opacity: 0.8,
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {" "}
+                              · edited
+                            </Text>
+                          )}
+                        </Text>
+                      )}
 
                       {/* Embedded Expense Split Card */}
                       {msg.type === "expense_split" && msg.meta && (
@@ -3207,6 +3752,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     <TouchableOpacity
                       activeOpacity={0.85}
                       onPress={() => handleToggleMessage(msg.id)}
+                      onLongPress={(e) => handleLongPressMessage(msg, e)}
+                      delayLongPress={350}
                       style={[
                         styles.speechBubble,
                         styles.speechBubbleThem,
@@ -3215,14 +3762,101 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                         },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.speechBubbleText,
-                          { color: isDark ? "#FFFFFF" : "#0F172A" },
-                        ]}
-                      >
-                        {msg.text}
-                      </Text>
+                      {/* Image Attachment Preview */}
+                      {msg.type === "image" && msg.meta?.attachmentUrl && (
+                        <View
+                          style={{
+                            marginBottom: 6,
+                            borderRadius: 12,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Image
+                            source={{ uri: msg.meta.attachmentUrl }}
+                            style={{
+                              width: 220,
+                              height: 180,
+                              borderRadius: 12,
+                            }}
+                            resizeMode="cover"
+                          />
+                        </View>
+                      )}
+
+                      {/* File Attachment Preview */}
+                      {msg.type === "file" && msg.meta?.attachmentUrl && (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: 10,
+                            borderRadius: 12,
+                            backgroundColor: isDark
+                              ? "rgba(255,255,255,0.08)"
+                              : "#E2E8F0",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <Ionicons
+                            name="document-text"
+                            size={26}
+                            color={isDark ? "#60A5FA" : "#2563EB"}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={{
+                                color: isDark ? "#FFFFFF" : "#0F172A",
+                                fontSize: 13,
+                                fontWeight: "700",
+                              }}
+                              numberOfLines={1}
+                            >
+                              {msg.meta.fileName || msg.text}
+                            </Text>
+                            {msg.meta.fileSize && (
+                              <Text
+                                style={{
+                                  color: isDark ? "#94A3B8" : "#64748B",
+                                  fontSize: 11,
+                                  marginTop: 1,
+                                  fontWeight: "500",
+                                }}
+                              >
+                                {msg.meta.fileSize}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      )}
+
+                      {(!msg.type ||
+                        msg.type === "text" ||
+                        (msg.type !== "image" && msg.type !== "file") ||
+                        (msg.text &&
+                          msg.text !== "📷 Photo" &&
+                          !msg.text.startsWith("📎 "))) && (
+                        <Text
+                          style={[
+                            styles.speechBubbleText,
+                            { color: isDark ? "#FFFFFF" : "#0F172A" },
+                          ]}
+                        >
+                          {msg.text}
+                          {Boolean(msg.isEdited) && (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                color: isDark ? "#94A3B8" : "#64748B",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {" "}
+                              · edited
+                            </Text>
+                          )}
+                        </Text>
+                      )}
 
                       {/* Embedded Expense Split Card */}
                       {msg.type === "expense_split" && msg.meta && (
@@ -3393,8 +4027,60 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             },
           ]}
         >
+          {/* Editing Message Banner Bar */}
+          {editingMessage && (
+            <View
+              style={[
+                styles.editingBanner,
+                {
+                  backgroundColor: isDark ? "#1E222B" : "#EFF6FF",
+                  borderBottomColor: isDark
+                    ? "rgba(255,255,255,0.08)"
+                    : "#DBEAFE",
+                },
+              ]}
+            >
+              <Feather
+                name="edit-2"
+                size={14}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+              <View style={{ flex: 1, marginHorizontal: 8 }}>
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: "700",
+                    color: isDark ? "#60A5FA" : "#2563EB",
+                  }}
+                >
+                  Editing message
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: isDark ? "#94A3B8" : "#64748B",
+                  }}
+                  numberOfLines={1}
+                >
+                  {editingMessage.text}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleCancelEdit}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ padding: 4 }}
+              >
+                <Feather
+                  name="x"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.capsuleInputInnerRow}>
-            {/* Quick Split trigger inside chat */}
+            {/* Attachment options trigger (+) */}
             <TouchableOpacity
               style={[
                 styles.capsuleActionIconBtn,
@@ -3403,23 +4089,24 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 },
               ]}
               onPress={() => {
-                if (
-                  activeThread.type === "direct" &&
-                  activeThread.targetUserId
-                ) {
-                  setSplitTargetId(activeThread.targetUserId);
-                } else {
-                  setSplitTargetId("ALL");
-                }
-                setShowRequestSplitModal(true);
+                Keyboard.dismiss();
+                setShowAttachmentModal(true);
               }}
-              accessibilityLabel="Quick split expense"
+              disabled={isUploadingAttachment}
+              accessibilityLabel="Add attachment"
             >
-              <Feather
-                name="plus"
-                size={19}
-                color={isDark ? "#60A5FA" : "#2563EB"}
-              />
+              {isUploadingAttachment ? (
+                <ActivityIndicator
+                  size="small"
+                  color={isDark ? "#60A5FA" : "#2563EB"}
+                />
+              ) : (
+                <Feather
+                  name="plus"
+                  size={19}
+                  color={isDark ? "#60A5FA" : "#2563EB"}
+                />
+              )}
             </TouchableOpacity>
 
             {/* Rounded capsule text input */}
@@ -3440,7 +4127,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   styles.capsuleTextInput,
                   { color: isDark ? "#FFFFFF" : "#0F172A" },
                 ]}
-                placeholder={`Message ${activeThread.name.split(" ")[0]}...`}
+                placeholder={
+                  editingMessage
+                    ? "Edit your message..."
+                    : `Message ${activeThread.name.split(" ")[0]}...`
+                }
                 placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
                 value={chatInputText}
                 onChangeText={setChatInputText}
@@ -3478,18 +4169,21 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               />
             </TouchableOpacity>
 
-            {/* Circular Send Button */}
+            {/* Circular Send / Save Edit Button */}
             <TouchableOpacity
               style={[
                 styles.capsuleSendButton,
+                editingMessage && { backgroundColor: "#10B981" },
                 (!chatInputText.trim() || isSending) && { opacity: 0.5 },
               ]}
               onPress={handleSendMessage}
               disabled={!chatInputText.trim() || isSending}
-              accessibilityLabel="Send message"
+              accessibilityLabel={editingMessage ? "Save edit" : "Send message"}
             >
               {isSending ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : editingMessage ? (
+                <Ionicons name="checkmark" size={19} color="#FFFFFF" />
               ) : (
                 <Ionicons name="send" size={17} color="#FFFFFF" />
               )}
@@ -3677,6 +4371,375 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             }, 150);
           }}
         />
+
+        {/* SMALL FLOATING MODAL ACTION STRIP (Delete / Edit / Copy) POPPING UP ABOVE TAPPED MESSAGE */}
+        <Modal
+          visible={Boolean(selectedMessageForAction)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            if (!isDeletingMessage) {
+              setSelectedMessageForAction(null);
+              setDeleteMode(false);
+            }
+          }}
+        >
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => {
+              if (!isDeletingMessage) {
+                setSelectedMessageForAction(null);
+                setDeleteMode(false);
+              }
+            }}
+          >
+            {selectedMessageForAction &&
+              (() => {
+                const isMe =
+                  selectedMessageForAction.isMe ||
+                  selectedMessageForAction.senderId === currentUid ||
+                  selectedMessageForAction.senderId ===
+                    currentUid.replace(/^mem_/, "");
+
+                const touchY = messageActionCoords?.y ?? windowHeight / 2;
+                const isAbove = touchY > topInset + 110;
+                const stripTop = isAbove
+                  ? Math.max(topInset + 50, touchY - 68)
+                  : Math.min(windowHeight - 120, touchY + 36);
+
+                const canEdit =
+                  isMe &&
+                  (selectedMessageForAction.type === "text" ||
+                    !selectedMessageForAction.type ||
+                    Boolean(selectedMessageForAction.text));
+
+                return (
+                  <View
+                    style={[
+                      styles.smallModalStripContainer,
+                      {
+                        top: stripTop,
+                        right: isMe ? 18 : undefined,
+                        left: !isMe ? 54 : undefined,
+                        backgroundColor: isDark ? "#1E222B" : "#FFFFFF",
+                        borderColor: isDark
+                          ? "rgba(255,255,255,0.12)"
+                          : "#E2E8F0",
+                      },
+                    ]}
+                    onStartShouldSetResponder={() => true}
+                  >
+                    {isDeletingMessage ? (
+                      <View style={styles.stripDeletingRow}>
+                        <ActivityIndicator size="small" color="#EF4444" />
+                        <Text
+                          style={[
+                            styles.stripDeletingText,
+                            { color: isDark ? "#F87171" : "#DC2626" },
+                          ]}
+                        >
+                          Deleting...
+                        </Text>
+                      </View>
+                    ) : deleteMode ? (
+                      <View style={styles.stripDeleteOptionsRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.stripActionBtn,
+                            styles.stripDeleteEveryoneBtn,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(239,68,68,0.25)"
+                                : "#FEF2F2",
+                            },
+                          ]}
+                          activeOpacity={0.7}
+                          onPress={() => handleDeleteMessage(true)}
+                        >
+                          <Feather name="trash-2" size={14} color="#EF4444" />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              { color: "#EF4444", fontWeight: "700" },
+                            ]}
+                          >
+                            Everyone
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View
+                          style={[
+                            styles.stripDivider,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        />
+
+                        <TouchableOpacity
+                          style={styles.stripActionBtn}
+                          activeOpacity={0.7}
+                          onPress={() => handleDeleteMessage(false)}
+                        >
+                          <Feather
+                            name="eye-off"
+                            size={14}
+                            color={isDark ? "#CBD5E1" : "#64748B"}
+                          />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              { color: isDark ? "#CBD5E1" : "#64748B" },
+                            ]}
+                          >
+                            For Me
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View
+                          style={[
+                            styles.stripDivider,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        />
+
+                        <TouchableOpacity
+                          style={styles.stripCloseBtn}
+                          activeOpacity={0.7}
+                          onPress={() => setDeleteMode(false)}
+                        >
+                          <Feather
+                            name="x"
+                            size={16}
+                            color={isDark ? "#94A3B8" : "#64748B"}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={styles.stripMainRow}>
+                        {/* Edit Button */}
+                        <TouchableOpacity
+                          style={styles.stripActionBtn}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            if (!isMe) {
+                              Alert.alert(
+                                "Cannot Edit",
+                                "You can only edit messages you sent.",
+                              );
+                              return;
+                            }
+                            if (!canEdit) {
+                              Alert.alert(
+                                "Cannot Edit",
+                                "Only text messages can be edited.",
+                              );
+                              return;
+                            }
+                            handleStartEdit();
+                          }}
+                        >
+                          <Feather
+                            name="edit-2"
+                            size={15}
+                            color={isDark ? "#60A5FA" : "#2563EB"}
+                          />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              {
+                                color: isDark ? "#FFFFFF" : "#0F172A",
+                              },
+                            ]}
+                          >
+                            Edit
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View
+                          style={[
+                            styles.stripDivider,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        />
+
+                        {/* Delete Button */}
+                        <TouchableOpacity
+                          style={styles.stripActionBtn}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            if (isMe) {
+                              setDeleteMode(true);
+                            } else {
+                              Alert.alert(
+                                "Delete Message",
+                                "Hide this message from your chat history?",
+                                [
+                                  { text: "Cancel", style: "cancel" },
+                                  {
+                                    text: "Delete for Me",
+                                    style: "destructive",
+                                    onPress: () => handleDeleteMessage(false),
+                                  },
+                                ],
+                              );
+                            }
+                          }}
+                        >
+                          <Feather name="trash-2" size={15} color="#EF4444" />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              { color: "#EF4444" },
+                            ]}
+                          >
+                            Delete
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Copy Button (if text available) */}
+                        {Boolean(selectedMessageForAction.text) && (
+                          <>
+                            <View
+                              style={[
+                                styles.stripDivider,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            />
+                            <TouchableOpacity
+                              style={styles.stripActionBtn}
+                              activeOpacity={0.7}
+                              onPress={handleCopyMessageText}
+                            >
+                              <Feather
+                                name="copy"
+                                size={15}
+                                color={isDark ? "#CBD5E1" : "#64748B"}
+                              />
+                              <Text
+                                style={[
+                                  styles.stripActionBtnText,
+                                  {
+                                    color: isDark ? "#CBD5E1" : "#64748B",
+                                  },
+                                ]}
+                              >
+                                Copy
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        )}
+                      </View>
+                    )}
+
+                    {/* Triangle pointer caret */}
+                    {isAbove ? (
+                      <View
+                        style={[
+                          styles.stripCaretDown,
+                          {
+                            borderTopColor: isDark ? "#1E222B" : "#FFFFFF",
+                            right: isMe ? 24 : undefined,
+                            left: !isMe ? 24 : undefined,
+                          },
+                        ]}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.stripCaretUp,
+                          {
+                            borderBottomColor: isDark ? "#1E222B" : "#FFFFFF",
+                            right: isMe ? 24 : undefined,
+                            left: !isMe ? 24 : undefined,
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
+                );
+              })()}
+          </TouchableOpacity>
+        </Modal>
+
+        {/* MESSENGER-STYLE FLOATING POPOVER MENU ABOVE THE "+" BUTTON */}
+        <Modal
+          visible={showAttachmentModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAttachmentModal(false)}
+        >
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowAttachmentModal(false)}
+          >
+            <View
+              style={[
+                styles.plusPopoverMenuContainer,
+                {
+                  bottom: Math.max(16, chatInputBottomPadding + 54),
+                  backgroundColor: isDark ? "#282B33" : "#FFFFFF",
+                  borderColor: isDark ? "rgba(255,255,255,0.12)" : "#E2E8F0",
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              {/* Option 1: Photos */}
+              <TouchableOpacity
+                style={styles.plusPopoverRow}
+                activeOpacity={0.7}
+                onPress={handlePickAndSendImage}
+              >
+                <View style={styles.plusPopoverIconWrap}>
+                  <Ionicons name="images" size={22} color="#3B82F6" />
+                </View>
+                <Text
+                  style={[
+                    styles.plusPopoverLabel,
+                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                  ]}
+                >
+                  Image
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 2: Files */}
+              <TouchableOpacity
+                style={styles.plusPopoverRow}
+                activeOpacity={0.7}
+                onPress={handlePickAndSendFile}
+              >
+                <View style={styles.plusPopoverIconWrap}>
+                  <Ionicons name="attach" size={24} color="#3B82F6" />
+                </View>
+                <Text
+                  style={[
+                    styles.plusPopoverLabel,
+                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                  ]}
+                >
+                  Files
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </KeyboardAvoidingView>
     );
   }
@@ -4351,6 +5414,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               ]}
               activeOpacity={0.7}
               onPress={() => setActiveThread(item)}
+              onLongPress={() => handleLongPressConversation(item)}
+              delayLongPress={400}
             >
               {/* Large 56px Messenger Avatar */}
               <View style={styles.messengerAvatarWrap}>
@@ -6058,6 +7123,101 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           }, 150);
         }}
       />
+
+      {/* MODAL: Delete Entire Conversation Confirmation */}
+      <SmoothBottomSheetModal
+        visible={Boolean(selectedConversationForDelete)}
+        onClose={() => {
+          if (!isDeletingConversation) setSelectedConversationForDelete(null);
+        }}
+        title="Delete Conversation?"
+        subtitle="This action cannot be undone."
+        icon={<Feather name="trash-2" size={20} color="#EF4444" />}
+        maxHeight="50%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            gap: 14,
+            paddingBottom: Math.max(20, insets.bottom + 12),
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14.5,
+              lineHeight: 21,
+              color: isDark ? "#CBD5E1" : "#475569",
+            }}
+          >
+            Are you sure you want to delete the entire conversation with{" "}
+            <Text
+              style={{
+                fontWeight: "700",
+                color: isDark ? "#FFFFFF" : "#0F172A",
+              }}
+            >
+              {selectedConversationForDelete?.name || "this contact"}
+            </Text>
+            ? All messages and attachments in this conversation will be
+            permanently removed.
+          </Text>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: "#EF4444",
+              paddingVertical: 14,
+              borderRadius: 14,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 8,
+              marginTop: 4,
+            }}
+            onPress={handleDeleteConversationConfirm}
+            disabled={isDeletingConversation}
+            activeOpacity={0.8}
+          >
+            {isDeletingConversation ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Feather name="trash-2" size={18} color="#FFFFFF" />
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontSize: 15,
+                    fontWeight: "700",
+                  }}
+                >
+                  Delete Entire Conversation
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+              paddingVertical: 13,
+              borderRadius: 14,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onPress={() => setSelectedConversationForDelete(null)}
+            disabled={isDeletingConversation}
+          >
+            <Text
+              style={{
+                fontSize: 14,
+                fontWeight: "600",
+                color: isDark ? "#94A3B8" : "#64748B",
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
     </View>
   );
 };
@@ -7186,5 +8346,125 @@ const styles = StyleSheet.create({
   requestDeclineBtnText: {
     fontSize: 14,
     fontWeight: "600",
+  },
+
+  /* SMALL MODAL ACTION STRIP */
+  smallModalStripContainer: {
+    position: "absolute",
+    borderRadius: 14,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 10,
+    zIndex: 99999,
+  },
+  stripMainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  stripDeleteOptionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  stripDeletingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  stripDeletingText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  stripActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  stripActionBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  stripDeleteEveryoneBtn: {
+    borderRadius: 10,
+    marginVertical: 3,
+    marginLeft: 3,
+  },
+  stripDivider: {
+    width: 1,
+    height: 20,
+  },
+  stripCloseBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stripCaretDown: {
+    position: "absolute",
+    bottom: -6,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 6,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  stripCaretUp: {
+    position: "absolute",
+    top: -6,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderBottomWidth: 6,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+  },
+  editingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  plusPopoverMenuContainer: {
+    position: "absolute",
+    left: 14,
+    width: 215,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    elevation: 16,
+    zIndex: 99999,
+  },
+  plusPopoverRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    gap: 14,
+  },
+  plusPopoverIconWrap: {
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  plusPopoverLabel: {
+    fontSize: 16.5,
+    fontWeight: "600",
+    letterSpacing: -0.2,
   },
 });

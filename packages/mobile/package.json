@@ -7,10 +7,12 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:apk": "cd android && ./gradlew assembleRelease",
+    "build:apk:release": "cd android && ./gradlew assembleRelease",
+    "build:apk:debug": "cd android && ./gradlew assembleDebug",
     "postinstall": "mkdir -p node_modules && ln -sfn ../../../node_modules/expo node_modules/expo || true"
   },
   "dependencies": {
-    "@config-plugins/react-native-webrtc": "^15.0.2",
     "@expo/vector-icons": "^15.1.1",
     "@propertyflow/shared": "file:../shared",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -27,10 +29,9 @@
     "expo-linear-gradient": "^57.0.2",
     "expo-media-library": "~57.0.5",
     "expo-navigation-bar": "~57.0.3",
-    "expo-notifications": "~57.0.24",
+    "expo-notifications": "~57.0.23",
     "expo-status-bar": "~57.0.1",
     "expo-updates": "~57.0.26",
-    "expo-video": "~57.0.5",
     "expo-web-browser": "~57.0.3",
     "firebase": "^11.0.2",
     "jpeg-js": "^0.4.4",
@@ -39,9 +40,10 @@
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4",
+    "@config-plugins/react-native-webrtc": "^12.0.0",
     "react-native-view-shot": "5.1.0",
     "react-native-webrtc": "^155.0.1",
-    "react-native-webview": "13.16.1"
+    "react-native-webview": "^14.0.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

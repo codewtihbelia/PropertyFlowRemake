@@ -3,6 +3,7 @@ import Constants, { ExecutionEnvironment } from "expo-constants";
 import { isRunningInExpoGo } from "expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { mobileDataService } from "./firebaseDataService";
+import { invalidatePushTokenCache } from "./pushDispatchService";
 import { doc, updateDoc, setDoc, arrayUnion } from "firebase/firestore";
 import { db } from "../firebase/config";
 
@@ -229,6 +230,7 @@ export async function registerForPushNotificationsAsync(
           "[PushNotification] Successfully saved push token to Firestore user document for uid:",
           userId,
         );
+        invalidatePushTokenCache(userId);
       } catch (docErr) {
         console.warn(
           "[PushNotification] User doc push token save notice:",

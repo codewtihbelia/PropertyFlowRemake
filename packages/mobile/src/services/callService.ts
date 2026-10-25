@@ -16,6 +16,7 @@ import {
 import { db } from "../firebase/config";
 import { Platform } from "react-native";
 import { setAudioModeAsync } from "expo-audio";
+import { getCachedUserPresence } from "./firebaseDataService";
 
 export type CallType = "voice" | "video";
 export type CallStatus =
@@ -619,6 +620,62 @@ class CallManager {
   private hasRemoteDescriptionSet: boolean = false;
   private remoteStreamListeners = new Set<(stream: any) => void>();
   private localStreamListeners = new Set<(stream: any) => void>();
+  private pendingOutgoingCandidates: any[] = [];
+  private candidateFlushTimer: any = null;
+  private candidateTargetField:
+    | "callerCandidates"
+    | "receiverCandidates"
+    | null = null;
+
+  /**
+   * Batches trickling ICE candidates within a 300ms window to reduce Firestore writes from ~50+ down to 1-2.
+   */
+  private queueCandidate(
+    callId: string,
+    cand: any,
+    field: "callerCandidates" | "receiverCandidates",
+  ) {
+    if (!cand || !cand.candidate || this.currentCallId !== callId) return;
+
+    this.candidateTargetField = field;
+    this.pendingOutgoingCandidates.push(cand);
+
+    if (!this.candidateFlushTimer) {
+      this.candidateFlushTimer = setTimeout(() => {
+        this.flushPendingCandidates(callId);
+      }, 300);
+    }
+  }
+
+  /**
+   * Flushes any pending aggregated ICE candidates to Firestore in a single arrayUnion write.
+   */
+  private flushPendingCandidates(callId?: string) {
+    if (this.candidateFlushTimer) {
+      clearTimeout(this.candidateFlushTimer);
+      this.candidateFlushTimer = null;
+    }
+
+    const targetCallId = callId || this.currentCallId;
+    const field = this.candidateTargetField;
+    if (
+      !targetCallId ||
+      !field ||
+      this.pendingOutgoingCandidates.length === 0
+    ) {
+      return;
+    }
+
+    const toSend = [...this.pendingOutgoingCandidates];
+    this.pendingOutgoingCandidates = [];
+    this.candidateTargetField = null;
+
+    updateDoc(doc(db, "calls", targetCallId), {
+      [field]: arrayUnion(...toSend),
+    }).catch((err) => {
+      console.warn(`[CallManager] Error writing batched ${field}:`, err);
+    });
+  }
 
   /**
    * Checks whether a contact is currently online or offline.
@@ -631,9 +688,15 @@ class CallManager {
     }
 
     try {
-      const snap = await getDoc(doc(db, "users", cleanUid));
-      if (snap.exists()) {
-        const data = snap.data();
+      const cached = getCachedUserPresence(cleanUid);
+      let data = cached;
+      if (!data) {
+        const snap = await getDoc(doc(db, "users", cleanUid));
+        if (snap.exists()) {
+          data = snap.data();
+        }
+      }
+      if (data) {
         const lastActive = data?.lastActiveAt || data?.lastActiveDate;
         const isOnlineFlag = data?.isOnline === true;
         let t = 0;
@@ -1168,9 +1231,7 @@ class CallManager {
               if (!isCallDocSaved) {
                 initialCandidates.push(cand);
               } else {
-                updateDoc(doc(db, "calls", callId), {
-                  callerCandidates: arrayUnion(cand),
-                }).catch(() => {});
+                this.queueCandidate(callId, cand, "callerCandidates");
               }
             }
           }
@@ -1180,6 +1241,12 @@ class CallManager {
           console.log(
             `[CallManager] Caller ICE state: ${pc.iceConnectionState}`,
           );
+          if (
+            pc.iceConnectionState === "connected" ||
+            pc.iceConnectionState === "completed"
+          ) {
+            this.flushPendingCandidates(callId);
+          }
         };
 
         const offer = await pc.createOffer({
@@ -1203,8 +1270,8 @@ class CallManager {
           sdp: lowLatencyOffer.sdp,
         };
 
-        // Brief delay (150ms) to allow initial host and STUN ICE candidates to gather
-        await new Promise((r) => setTimeout(r, 150));
+        // Brief delay (250ms) to allow initial host and STUN ICE candidates to gather directly into initialCandidates
+        await new Promise((r) => setTimeout(r, 250));
       } catch (err) {
         console.warn("[CallManager] WebRTC offer negotiation error:", err);
       }
@@ -1326,9 +1393,7 @@ class CallManager {
               if (!isAnswerSaved) {
                 initialReceiverCandidates.push(cand);
               } else {
-                updateDoc(doc(db, "calls", callSession.id), {
-                  receiverCandidates: arrayUnion(cand),
-                }).catch(() => {});
+                this.queueCandidate(callSession.id, cand, "receiverCandidates");
               }
             }
           }
@@ -1338,6 +1403,12 @@ class CallManager {
           console.log(
             `[CallManager] Receiver ICE state: ${pc.iceConnectionState}`,
           );
+          if (
+            pc.iceConnectionState === "connected" ||
+            pc.iceConnectionState === "completed"
+          ) {
+            this.flushPendingCandidates(callSession.id);
+          }
         };
 
         const mungedOfferSdp = mungeSDPForLowLatency(
@@ -1376,8 +1447,8 @@ class CallManager {
           sdp: lowLatencyAnswer.sdp,
         };
 
-        // Brief delay (150ms) to allow initial receiver candidates to gather
-        await new Promise((r) => setTimeout(r, 150));
+        // Brief delay (250ms) to allow initial receiver candidates to gather directly into initialReceiverCandidates
+        await new Promise((r) => setTimeout(r, 250));
       } catch (err) {
         console.warn("[CallManager] WebRTC answer error in acceptCall:", err);
       }
@@ -1614,6 +1685,13 @@ class CallManager {
       this.activeCallDocUnsub = null;
     }
 
+    if (this.candidateFlushTimer) {
+      clearTimeout(this.candidateFlushTimer);
+      this.candidateFlushTimer = null;
+    }
+    this.pendingOutgoingCandidates = [];
+    this.candidateTargetField = null;
+
     this.processedCandidates.clear();
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescriptionSet = false;
@@ -1663,7 +1741,7 @@ class CallManager {
     return unsub;
   }
 
-  // Global listener for incoming calls for the current user
+  // Global listener for incoming calls for the current user (scoped to active ringing state)
   subscribeToIncomingCalls(
     userId: string,
     onIncoming: (call: CallSession | null) => void,
@@ -1672,10 +1750,11 @@ class CallManager {
 
     const normalizedUid = userId.replace(/^mem_/, "");
 
-    // Using single equality filter so NO composite index is required in Firestore
+    // Scoped strictly to status == "ringing" so historical or active calls never trigger re-reads
     const q = query(
       collection(db, "calls"),
       where("receiverId", "==", normalizedUid),
+      where("status", "==", "ringing"),
     );
 
     return onSnapshot(
@@ -1686,7 +1765,7 @@ class CallManager {
           return;
         }
 
-        // Filter and sort active ringing calls in memory to avoid needing composite Firestore indexes
+        // Filter and sort active ringing calls in memory to ensure freshness
         const now = Date.now();
         const activeRingingCalls = snap.docs
           .map((d) => d.data() as CallSession)
@@ -1721,6 +1800,7 @@ class CallManager {
       const q = query(
         collection(db, "calls"),
         where("receiverId", "==", normalizedUid),
+        where("status", "==", "ringing"),
       );
       const snap = await getDocs(q);
       if (snap.empty) return null;

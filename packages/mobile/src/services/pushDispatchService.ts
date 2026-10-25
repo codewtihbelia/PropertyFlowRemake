@@ -41,10 +41,25 @@ export interface FriendRequestPushParams {
   receiverId: string;
 }
 
+const PUSH_TOKEN_CACHE_TTL_MS = 60 * 60 * 1000; // 1-hour cache as confirmed by user
+const _pushTokenCache = new Map<
+  string,
+  { tokens: string[]; timestamp: number }
+>();
+
+export function invalidatePushTokenCache(uid?: string) {
+  if (uid) {
+    const clean = uid.replace(/^mem_/, "").trim();
+    _pushTokenCache.delete(clean);
+  } else {
+    _pushTokenCache.clear();
+  }
+}
+
 export class PushDispatchService {
   /**
    * Fetches all registered active push tokens for a given list of user IDs.
-   * Checks both direct user document fields and the devices subcollection.
+   * Utilizes a 1-hour in-memory cache to prevent burning Firestore read quota on repeated events.
    */
   public async getPushTokensForUsers(userIds: string[]): Promise<string[]> {
     if (!userIds || userIds.length === 0) return [];
@@ -61,47 +76,69 @@ export class PushDispatchService {
       ),
     );
     const tokenSet = new Set<string>();
+    const uidsToFetch: string[] = [];
+    const now = Date.now();
 
-    await Promise.all(
-      uniqueUids.map(async (uid) => {
-        // 1. Check user document directly
-        try {
-          const userDoc = await getDoc(doc(db, "users", uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            if (isValidExpoPushToken(userData?.pushToken)) {
-              tokenSet.add(userData.pushToken);
-            }
-            if (Array.isArray(userData?.pushTokens)) {
-              for (const t of userData.pushTokens) {
-                if (isValidExpoPushToken(t)) {
-                  tokenSet.add(t);
+    for (const uid of uniqueUids) {
+      const cached = _pushTokenCache.get(uid);
+      if (cached && now - cached.timestamp < PUSH_TOKEN_CACHE_TTL_MS) {
+        cached.tokens.forEach((t) => tokenSet.add(t));
+      } else {
+        uidsToFetch.push(uid);
+      }
+    }
+
+    if (uidsToFetch.length > 0) {
+      await Promise.all(
+        uidsToFetch.map(async (uid) => {
+          const userTokens: string[] = [];
+          // 1. Check user document directly
+          try {
+            const userDoc = await getDoc(doc(db, "users", uid));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              if (isValidExpoPushToken(userData?.pushToken)) {
+                userTokens.push(userData.pushToken);
+              }
+              if (Array.isArray(userData?.pushTokens)) {
+                for (const t of userData.pushTokens) {
+                  if (isValidExpoPushToken(t) && !userTokens.includes(t)) {
+                    userTokens.push(t);
+                  }
                 }
               }
             }
+          } catch (err) {
+            // Direct user doc read error handled gracefully
           }
-        } catch (err) {
-          // Direct user doc read error handled gracefully
-        }
 
-        // 2. Check devices subcollection: users/{uid}/devices
-        try {
-          const devSnap = await getDocs(collection(db, `users/${uid}/devices`));
-          for (const d of devSnap.docs) {
-            const devData = d.data();
-            if (isValidExpoPushToken(devData?.pushToken)) {
-              tokenSet.add(devData.pushToken);
+          // 2. Check devices subcollection: users/{uid}/devices
+          try {
+            const devSnap = await getDocs(
+              collection(db, `users/${uid}/devices`),
+            );
+            for (const d of devSnap.docs) {
+              const devData = d.data();
+              if (
+                isValidExpoPushToken(devData?.pushToken) &&
+                !userTokens.includes(devData.pushToken)
+              ) {
+                userTokens.push(devData.pushToken);
+              }
             }
+          } catch (err) {
+            // Devices subcollection read error handled gracefully
           }
-        } catch (err) {
-          // Devices subcollection read error handled gracefully
-        }
-      }),
-    );
+
+          _pushTokenCache.set(uid, { tokens: userTokens, timestamp: now });
+          userTokens.forEach((t) => tokenSet.add(t));
+        }),
+      );
+    }
 
     const tokens = Array.from(tokenSet);
     console.log(
-      `[PushDispatch] Resolved ${tokens.length} token(s) for user(s) [${uniqueUids.join(", ")}]:`,
+      `[PushDispatch] Resolved ${tokens.length} token(s) for user(s) [${uniqueUids.join(", ")}] (${uidsToFetch.length} fetched, ${uniqueUids.length - uidsToFetch.length} from cache):`,
       tokens,
     );
     return tokens;
@@ -213,7 +250,9 @@ export class PushDispatchService {
       }
 
       const isVideo = params.callType === "video";
-      const title = isVideo ? "Incoming Video Call" : "Incoming Voice Call";
+      const title = isVideo
+        ? "🎦 Incoming Video Call"
+        : "📞 Incoming Voice Call";
       const body = `${params.callerName} is calling you on Splitzy...`;
 
       return await this.sendPushToTokens(tokens, {
@@ -281,7 +320,7 @@ export class PushDispatchService {
       const tokens = await this.getPushTokensForUsers(targetUserIds);
       if (tokens.length === 0) return;
 
-      const groupLabel = params.householdName || "Household";
+      const groupLabel = params.householdName || "New Message";
       const cleanBody =
         params.text.length > 120
           ? `${params.text.substring(0, 117)}...`
