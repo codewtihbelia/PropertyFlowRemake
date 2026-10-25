@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import { auth } from "../firebase/config";
 import {
   callService,
@@ -13,12 +13,15 @@ import { setupNotificationResponseListener } from "../services/pushNotificationS
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { IncomingCallModal } from "../components/IncomingCallModal";
+import { IncomingCallBanner } from "../components/IncomingCallBanner";
 import { ActiveCallModal } from "../components/ActiveCallModal";
 
 interface CallContextType {
   activeCall: CallSession | null;
   incomingCall: CallSession | null;
   isCaller: boolean;
+  isIncomingModalMinimized: boolean;
+  setIsIncomingModalMinimized: (minimized: boolean) => void;
   startCall: (
     target: { id: string; name: string; avatar?: string },
     callType: CallType,
@@ -35,6 +38,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
+  const [isIncomingModalMinimized, setIsIncomingModalMinimized] =
+    useState<boolean>(false);
   const [isCaller, setIsCaller] = useState<boolean>(false);
 
   const currentUid = auth.currentUser?.uid || "";
@@ -50,11 +55,41 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       (incoming) => {
         // Do not interrupt if currently in an active call
         if (activeCall && incoming) return;
+        if (incoming) {
+          setIsIncomingModalMinimized(false);
+        }
         setIncomingCall(incoming);
       },
     );
 
     return () => unsub();
+  }, [currentUid, activeCall?.id]);
+
+  // 1c. Immediate check whenever the app returns to foreground or is launched
+  useEffect(() => {
+    if (!currentUid) return;
+
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === "active") {
+        try {
+          const activeRinging =
+            await callService.checkActiveIncomingCall(currentUid);
+          if (activeRinging && !activeCall) {
+            setIsIncomingModalMinimized(false);
+            setIncomingCall(activeRinging);
+          }
+        } catch (e) {
+          console.warn("[CallContext] Foreground check error:", e);
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener("change", handleAppStateChange);
+    handleAppStateChange("active");
+
+    return () => {
+      sub.remove();
+    };
   }, [currentUid, activeCall?.id]);
 
   // 1b. Listen for taps on incoming call push notifications when app is launched/backgrounded
@@ -102,6 +137,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         ) {
           tonePlayer.stop();
           tonePlayer.playEnded();
+          callService.cleanup();
           setActiveCall(null);
         } else {
           if (updatedCall.status === "connected") {
@@ -192,6 +228,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (e: any) {
       console.warn("Failed to initiate call:", e);
       tonePlayer.stop();
+      callService.cleanup();
       setActiveCall(null);
       Alert.alert(
         "Call Failed",
@@ -206,11 +243,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     tonePlayer.resumeAudioContext();
     try {
       await callService.acceptCall(call);
+      setIsIncomingModalMinimized(false);
       setIncomingCall(null);
       setIsCaller(false);
       setActiveCall({ ...call, status: "connected" });
     } catch (e) {
       console.warn("Failed to accept call:", e);
+      callService.cleanup();
+      setIsIncomingModalMinimized(false);
+      setActiveCall(null);
       Alert.alert("Call Error", "Could not accept the incoming call.");
     }
   };
@@ -220,9 +261,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     tonePlayer.resumeAudioContext();
     try {
       await callService.declineCall(call.id);
+      setIsIncomingModalMinimized(false);
       setIncomingCall(null);
     } catch (e) {
       console.warn("Failed to decline call:", e);
+      callService.cleanup();
+      setIsIncomingModalMinimized(false);
+      setIncomingCall(null);
     }
   };
 
@@ -235,6 +280,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       await callService.endCall(callSnapshot.id, durationSeconds);
     } catch (e) {
       console.warn("Error ending call:", e);
+      callService.cleanup();
     }
 
     // Record call log message in the direct conversation
@@ -247,8 +293,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const text =
         durationSeconds > 0
-          ? `${isVideo ? "🎦 Video" : "📞 Voice"} Call · ${durationStr}`
-          : `${isVideo ? "🎦 Video" : "📞 Voice"} Call · Ended`;
+          ? `${isVideo ? "📹 Video" : "📞 Voice"} Call · ${durationStr}`
+          : `${isVideo ? "📹 Video" : "📞 Voice"} Call · Ended`;
 
       const otherUserId =
         callSnapshot.callerId === currentUid
@@ -273,6 +319,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       console.warn("Failed to post call log:", err);
     }
 
+    callService.cleanup();
     setActiveCall(null);
   };
 
@@ -282,6 +329,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         activeCall,
         incomingCall,
         isCaller,
+        isIncomingModalMinimized,
+        setIsIncomingModalMinimized,
         startCall,
         acceptCall,
         declineCall,
@@ -290,12 +339,25 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     >
       {children}
 
-      {/* Global Real-Time Calling Modals */}
-      <IncomingCallModal
-        call={incomingCall}
-        onAccept={acceptCall}
-        onDecline={declineCall}
-      />
+      {/* Persistent floating top banner across all screens when call is ringing */}
+      {incomingCall && (
+        <IncomingCallBanner
+          call={incomingCall}
+          onAccept={acceptCall}
+          onDecline={declineCall}
+          onExpand={() => setIsIncomingModalMinimized(false)}
+        />
+      )}
+
+      {/* Full-Screen Ringing Modal (shows automatically unless user minimized to top banner) */}
+      {!isIncomingModalMinimized && (
+        <IncomingCallModal
+          call={incomingCall}
+          onAccept={acceptCall}
+          onDecline={declineCall}
+          onMinimize={() => setIsIncomingModalMinimized(true)}
+        />
+      )}
 
       <ActiveCallModal
         call={activeCall}

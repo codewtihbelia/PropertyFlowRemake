@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   updateDoc,
   onSnapshot,
   query,
@@ -809,29 +810,52 @@ class CallManager {
       return null;
     }
 
+    // Preemptively purge any lingering local stream tracks before requesting fresh hardware
+    if (this.localStream) {
+      try {
+        this.localStream.getTracks().forEach((track: any) => {
+          try {
+            track.enabled = false;
+            track.stop();
+          } catch (e) {}
+        });
+        if (typeof (this.localStream as any).release === "function") {
+          (this.localStream as any).release();
+        }
+      } catch (e) {}
+      this.localStream = null;
+      this.notifyLocalStream(null);
+    }
+
     // Configure device audio session upfront
     await this.configureAudioSession(callType, callType === "video");
 
-    // Reuse existing live stream if it already satisfies the requested call type
-    if (this.localStream) {
-      const hasAudio = this.localStream
-        .getAudioTracks()
-        .some((t: any) => t.readyState === "live" || t.enabled);
-      const hasVideo = this.localStream
-        .getVideoTracks()
-        .some((t: any) => t.readyState === "live" || t.enabled);
-
-      if (hasAudio && (callType !== "video" || hasVideo)) {
-        this.notifyLocalStream(this.localStream);
-        return this.localStream;
+    // Resilient acquisition helper that handles transient device busy/cleanup latency
+    const acquireWithRetry = async (constraints: any): Promise<any> => {
+      try {
+        return await mediaDevices.getUserMedia(constraints);
+      } catch (err: any) {
+        if (
+          err?.name === "NotReadableError" ||
+          err?.name === "TrackStartError" ||
+          err?.name === "AbortError"
+        ) {
+          console.warn(
+            "[CallManager] Device busy/not readable, retrying after 150ms backoff...",
+            err,
+          );
+          await new Promise((r) => setTimeout(r, 150));
+          return await mediaDevices.getUserMedia(constraints);
+        }
+        throw err;
       }
-    }
+    };
 
     // VIDEO CALL: Standard multi-tier fallback strategy
     if (callType === "video") {
       // Tier 1: Hardware-native audio + mobile facingMode constraints optimized for low latency
       try {
-        const stream = await mediaDevices.getUserMedia({
+        const stream = await acquireWithRetry({
           audio: {
             echoCancellation: { ideal: true },
             noiseSuppression: { ideal: true },
@@ -858,7 +882,7 @@ class CallManager {
 
       // Tier 2: Universal basic video + audio with low latency constraints
       try {
-        const stream = await mediaDevices.getUserMedia({
+        const stream = await acquireWithRetry({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -884,7 +908,7 @@ class CallManager {
       let separateAudioTrack: any = null;
 
       try {
-        const vStream = await mediaDevices.getUserMedia({
+        const vStream = await acquireWithRetry({
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
@@ -897,7 +921,7 @@ class CallManager {
       }
 
       try {
-        const aStream = await mediaDevices.getUserMedia({
+        const aStream = await acquireWithRetry({
           audio: { echoCancellation: true, noiseSuppression: true },
         });
         separateAudioTrack = aStream.getAudioTracks()[0];
@@ -919,7 +943,7 @@ class CallManager {
 
     // VOICE CALL (or audio fallback if camera unavailable)
     try {
-      const audioStream = await mediaDevices.getUserMedia({
+      const audioStream = await acquireWithRetry({
         audio: {
           echoCancellation: { ideal: true },
           noiseSuppression: { ideal: true },
@@ -938,7 +962,7 @@ class CallManager {
         eVoiceOpt,
       );
       try {
-        const fallbackAudio = await mediaDevices.getUserMedia({
+        const fallbackAudio = await acquireWithRetry({
           audio: true,
           video: false,
         });
@@ -1062,6 +1086,9 @@ class CallManager {
     receiverAvatar?: string;
     callType: CallType;
   }): Promise<string> {
+    // Purge any lingering call state or hardware tracks upfront
+    this.cleanup();
+
     const normalizedCallerId = params.callerId.replace(/^mem_/, "");
     const normalizedReceiverId = params.receiverId.replace(/^mem_/, "");
     const callId =
@@ -1208,6 +1235,9 @@ class CallManager {
 
   // Accept incoming call
   async acceptCall(callSession: CallSession): Promise<void> {
+    // Purge any lingering call state or hardware tracks upfront
+    this.cleanup();
+
     tonePlayer.stop();
     tonePlayer.playConnected();
     this.currentCallId = callSession.id;
@@ -1519,32 +1549,77 @@ class CallManager {
   cleanup() {
     tonePlayer.stop();
     this.resetAudioSession().catch(() => {});
-    if (this.localStream) {
-      try {
-        this.localStream.getTracks().forEach((track: any) => track.stop());
-      } catch (e) {}
-      this.localStream = null;
-    }
-    if (this.remoteStream) {
-      try {
-        this.remoteStream.getTracks().forEach((track: any) => track.stop());
-      } catch (e) {}
-      this.remoteStream = null;
-    }
+
+    // 1. Release and detach senders from peer connection before closing
     if (this.peerConnection) {
       try {
+        if (typeof this.peerConnection.getSenders === "function") {
+          const senders = this.peerConnection.getSenders();
+          if (Array.isArray(senders)) {
+            senders.forEach((sender: any) => {
+              try {
+                if (sender.track) {
+                  sender.track.enabled = false;
+                  sender.track.stop();
+                }
+                if (typeof this.peerConnection.removeTrack === "function") {
+                  this.peerConnection.removeTrack(sender);
+                }
+              } catch (e) {}
+            });
+          }
+        }
         this.peerConnection.close();
       } catch (e) {}
       this.peerConnection = null;
     }
+
+    // 2. Stop and release local stream hardware tracks
+    if (this.localStream) {
+      try {
+        this.localStream.getTracks().forEach((track: any) => {
+          try {
+            track.enabled = false;
+            track.stop();
+          } catch (e) {}
+        });
+        if (typeof (this.localStream as any).release === "function") {
+          (this.localStream as any).release();
+        }
+      } catch (e) {}
+      this.localStream = null;
+    }
+
+    // 3. Stop and release remote stream tracks
+    if (this.remoteStream) {
+      try {
+        this.remoteStream.getTracks().forEach((track: any) => {
+          try {
+            track.enabled = false;
+            track.stop();
+          } catch (e) {}
+        });
+        if (typeof (this.remoteStream as any).release === "function") {
+          (this.remoteStream as any).release();
+        }
+      } catch (e) {}
+      this.remoteStream = null;
+    }
+
+    // 4. Detach active call document listener
     if (this.activeCallDocUnsub) {
-      this.activeCallDocUnsub();
+      try {
+        this.activeCallDocUnsub();
+      } catch (e) {}
       this.activeCallDocUnsub = null;
     }
+
     this.processedCandidates.clear();
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescriptionSet = false;
     this.currentCallId = null;
+
+    // 5. Notify stream subscribers that tracks are terminated
     this.notifyLocalStream(null);
     this.notifyRemoteStream(null);
   }
@@ -1556,9 +1631,12 @@ class CallManager {
     onUpdate: (call: CallSession | null) => void,
   ) {
     if (this.activeCallDocUnsub) {
-      this.activeCallDocUnsub();
+      try {
+        this.activeCallDocUnsub();
+      } catch (e) {}
+      this.activeCallDocUnsub = null;
     }
-    this.activeCallDocUnsub = onSnapshot(
+    const unsub = onSnapshot(
       doc(db, "calls", callId),
       (snap) => {
         if (!snap.exists()) {
@@ -1566,17 +1644,23 @@ class CallManager {
           return;
         }
         const data = snap.data() as CallSession;
-        // Synchronize WebRTC offer/answer and ICE candidate states automatically
-        this.syncSignalingState(data, isCaller).catch((err) => {
-          console.warn("syncSignalingState error in subscribeToCall:", err);
-        });
+        if (data.status === "declined" || data.status === "ended") {
+          this.cleanup();
+        } else {
+          // Synchronize WebRTC offer/answer and ICE candidate states automatically
+          this.syncSignalingState(data, isCaller).catch((err) => {
+            console.warn("syncSignalingState error in subscribeToCall:", err);
+          });
+        }
         onUpdate(data);
       },
       (err) => {
         console.warn("subscribeToCall error:", err);
+        onUpdate(null);
       },
     );
-    return this.activeCallDocUnsub;
+    this.activeCallDocUnsub = unsub;
+    return unsub;
   }
 
   // Global listener for incoming calls for the current user
@@ -1627,6 +1711,38 @@ class CallManager {
         console.warn("subscribeToIncomingCalls error:", err);
       },
     );
+  }
+
+  // One-shot check for an active incoming ringing call (e.g. on app foreground return)
+  async checkActiveIncomingCall(userId: string): Promise<CallSession | null> {
+    if (!userId) return null;
+    const normalizedUid = userId.replace(/^mem_/, "");
+    try {
+      const q = query(
+        collection(db, "calls"),
+        where("receiverId", "==", normalizedUid),
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) return null;
+
+      const now = Date.now();
+      const activeCalls = snap.docs
+        .map((d) => d.data() as CallSession)
+        .filter((c) => {
+          if (c.status !== "ringing") return false;
+          const ageMs = now - new Date(c.createdAt).getTime();
+          return ageMs < 60000;
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+
+      return activeCalls.length > 0 ? activeCalls[0] : null;
+    } catch (err) {
+      console.warn("checkActiveIncomingCall error:", err);
+      return null;
+    }
   }
 }
 

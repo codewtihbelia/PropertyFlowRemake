@@ -18,12 +18,14 @@ interface IncomingCallModalProps {
   call: CallSession | null;
   onAccept: (call: CallSession) => void;
   onDecline: (call: CallSession) => void;
+  onMinimize?: () => void;
 }
 
 export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
   call,
   onAccept,
   onDecline,
+  onMinimize,
 }) => {
   const insets = useSafeAreaInsets();
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -86,6 +88,19 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       >
         {/* Ambient background glow */}
         <View style={styles.ambientGlow} />
+
+        {/* Top Minimize Control */}
+        {onMinimize && (
+          <TouchableOpacity
+            style={[styles.minimizeBtn, { top: Math.max(insets.top, 16) + 12 }]}
+            onPress={onMinimize}
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+            <Text style={styles.minimizeText}>Banner</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Top Header Information */}
         <View style={styles.header}>
@@ -325,6 +340,25 @@ const styles = StyleSheet.create({
   actionLabel: {
     color: "#E2E8F0",
     fontSize: 13,
+    fontWeight: "600",
+  },
+  minimizeBtn: {
+    position: "absolute",
+    left: 20,
+    zIndex: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(30, 41, 59, 0.75)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
+  },
+  minimizeText: {
+    color: "#CBD5E1",
+    fontSize: 12,
     fontWeight: "600",
   },
 });

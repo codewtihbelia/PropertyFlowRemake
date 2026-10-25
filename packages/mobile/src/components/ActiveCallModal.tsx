@@ -222,6 +222,23 @@ export const ActiveCallModal: React.FC<ActiveCallModalProps> = ({
     return () => {
       unsubLocalStream();
       unsubRemoteStream();
+      if (Platform.OS === "web") {
+        if (localVideoRef.current) {
+          try {
+            localVideoRef.current.srcObject = null;
+          } catch (e) {}
+        }
+        if (remoteVideoRef.current) {
+          try {
+            remoteVideoRef.current.srcObject = null;
+          } catch (e) {}
+        }
+        if (remoteAudioRef.current) {
+          try {
+            remoteAudioRef.current.srcObject = null;
+          } catch (e) {}
+        }
+      }
     };
   }, []);
 
