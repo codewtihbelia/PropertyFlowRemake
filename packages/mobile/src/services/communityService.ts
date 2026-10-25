@@ -20,6 +20,10 @@ import {
   pushDispatchService,
   PushDispatchService,
 } from "./pushDispatchService";
+import {
+  isQuotaExceededError,
+  notifyQuotaExceeded,
+} from "./firebaseDataService";
 
 export type CommunityCategory =
   | "all"
@@ -846,6 +850,8 @@ class CommunityService {
     return newDocRef.id;
   }
 
+  private sessionViewedStories = new Set<string>();
+
   /**
    * Record a member viewing a story.
    */
@@ -859,6 +865,13 @@ class CommunityService {
     },
   ): Promise<void> {
     if (!viewer.uid || !storyId) return;
+
+    // In-memory session deduplication to eliminate repeated reads and writes
+    const sessionKey = `${storyId}_${viewer.uid}`;
+    if (this.sessionViewedStories.has(sessionKey)) {
+      return;
+    }
+    this.sessionViewedStories.add(sessionKey);
 
     try {
       const storyRef = doc(db, "communityStories", storyId);
@@ -908,7 +921,11 @@ class CommunityService {
         viewerDetails: updatedDetails,
       });
     } catch (err) {
-      console.warn("[CommunityService] Failed to record story view:", err);
+      if (isQuotaExceededError(err)) {
+        notifyQuotaExceeded();
+      } else {
+        console.warn("[CommunityService] Failed to record story view:", err);
+      }
     }
   }
 
@@ -2236,7 +2253,14 @@ class CommunityService {
       }
       await updateDoc(reelRef, updatePayload);
     } catch (e) {
-      console.warn("[CommunityService] recordReelView non-blocking notice:", e);
+      if (isQuotaExceededError(e)) {
+        notifyQuotaExceeded();
+      } else {
+        console.warn(
+          "[CommunityService] recordReelView non-blocking notice:",
+          e,
+        );
+      }
     }
   }
 

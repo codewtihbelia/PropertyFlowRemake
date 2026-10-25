@@ -31,6 +31,50 @@ export {
 } from "./cloudinaryService";
 export { resolveCycleWaterConfig, type CycleWaterConfig };
 
+// Quota exhaustion handling & rate limiting for free-tier sustainability
+let _lastHeartbeatTimestamps: Record<string, number> = {};
+const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes (saves 95% of background writes)
+
+let _markNotificationsReadTimer: any = null;
+let _pendingUserReadMapUpdates: Record<string, Record<string, boolean>> = {};
+
+let _isQuotaExceeded = false;
+type QuotaExceededListener = (exceeded: boolean) => void;
+const _quotaSubscribers = new Set<QuotaExceededListener>();
+
+export function isQuotaExceededError(error: any): boolean {
+  if (!error) return false;
+  const msg = String(
+    error?.message || error?.code || error || "",
+  ).toLowerCase();
+  return (
+    msg.includes("resource-exhausted") ||
+    msg.includes("quota limit exceeded") ||
+    msg.includes("quota exceeded")
+  );
+}
+
+export function notifyQuotaExceeded() {
+  if (!_isQuotaExceeded) {
+    _isQuotaExceeded = true;
+    _quotaSubscribers.forEach((cb) => {
+      try {
+        cb(true);
+      } catch {}
+    });
+  }
+}
+
+export function subscribeToQuotaExceeded(
+  cb: QuotaExceededListener,
+): () => void {
+  _quotaSubscribers.add(cb);
+  cb(_isQuotaExceeded);
+  return () => {
+    _quotaSubscribers.delete(cb);
+  };
+}
+
 export type NotificationCategory =
   | "reminder"
   | "expense_added"
@@ -3254,7 +3298,7 @@ export const mobileDataService = {
                 doc(db, "households", data.householdId),
               );
               if (!hhSnap.exists()) {
-                // Household was deleted in Firestore
+                // Household was deleted in Firestore - clean up in memory to prevent recursive snapshot loops
                 const isHost =
                   data.role === "HOST" ||
                   data.hostApplicationStatus === "APPROVED";
@@ -3264,14 +3308,6 @@ export const mobileDataService = {
                 if (isHost && data.role !== "SUPER_ADMIN") {
                   data.role = "HOST";
                 }
-                updateDoc(userRef, {
-                  householdId: deleteField(),
-                  householdName: deleteField(),
-                  apartmentName: deleteField(),
-                  ...(isHost && data.role !== "SUPER_ADMIN"
-                    ? { role: "HOST" }
-                    : {}),
-                }).catch(() => {});
               } else {
                 const hhData = hhSnap.data();
                 if (
@@ -9230,19 +9266,27 @@ export const mobileDataService = {
         item.cloudDocId && item.cloudDocId.startsWith(`notif_${effectiveUid}_`)
           ? item.cloudDocId
           : `notif_${effectiveUid}_${item.id}`;
+      let keyChanged = false;
       if (item.id) {
-        updatedReadMap[getScopedNotificationReadKey(effectiveUid, item.id)] =
-          true;
+        const k1 = getScopedNotificationReadKey(effectiveUid, item.id);
+        if (!updatedReadMap[k1]) {
+          updatedReadMap[k1] = true;
+          keyChanged = true;
+        }
       }
       if (perUserDocId) {
-        updatedReadMap[
-          getScopedNotificationReadKey(effectiveUid, perUserDocId)
-        ] = true;
+        const k2 = getScopedNotificationReadKey(effectiveUid, perUserDocId);
+        if (!updatedReadMap[k2]) {
+          updatedReadMap[k2] = true;
+          keyChanged = true;
+        }
       }
       if (item.cloudDocId) {
-        updatedReadMap[
-          getScopedNotificationReadKey(effectiveUid, item.cloudDocId)
-        ] = true;
+        const k3 = getScopedNotificationReadKey(effectiveUid, item.cloudDocId);
+        if (!updatedReadMap[k3]) {
+          updatedReadMap[k3] = true;
+          keyChanged = true;
+        }
       }
     });
 
@@ -9254,10 +9298,10 @@ export const mobileDataService = {
       };
     }
 
-    // Notify all active screens for this user immediately
+    // Notify all active screens for this user immediately in UI
     notifyReadSubscribers(effectiveUid);
 
-    // Persist locally under per-user storage key
+    // Persist locally under per-user storage key (instant & zero Firestore quota)
     try {
       await AsyncStorage.setItem(
         getReadNotificationsStorageKey(effectiveUid),
@@ -9265,45 +9309,35 @@ export const mobileDataService = {
       );
     } catch {}
 
-    // Persist to Firestore cloud (`users/{uid}` and `notifications/{perUserDocId}`)
-    try {
-      await setDoc(
-        doc(db, "users", effectiveUid),
-        sanitizeData({
-          readNotificationIdsV2: updatedReadMap,
-          updatedDate: nowIso,
-        }),
-        { merge: true },
-      );
-    } catch (err) {
-      console.warn("[Firestore Mobile] markNotificationsRead user sync:", err);
+    // Debounce cloud write to the single user document: exactly 1 write total, zero per-item writes
+    _pendingUserReadMapUpdates[effectiveUid] = updatedReadMap;
+    if (_markNotificationsReadTimer) {
+      clearTimeout(_markNotificationsReadTimer);
     }
-
-    try {
-      await Promise.all(
-        items.map((item) => {
-          const docId =
-            item.cloudDocId &&
-            item.cloudDocId.startsWith(`notif_${effectiveUid}_`)
-              ? item.cloudDocId
-              : `notif_${effectiveUid}_${item.id}`;
-          return setDoc(
-            doc(db, "notifications", docId),
-            sanitizeData({
-              notificationId: docId,
-              recipientId: effectiveUid,
-              relatedItemId: item.id,
-              readStatus: true,
-              readByRecipientId: effectiveUid,
-              readAt: nowIso,
-            }),
-            { merge: true },
-          ).catch(() => {});
-        }),
-      );
-    } catch (err) {
-      console.warn("[Firestore Mobile] markNotificationsRead docs sync:", err);
-    }
+    _markNotificationsReadTimer = setTimeout(async () => {
+      const pendingMap = _pendingUserReadMapUpdates[effectiveUid];
+      if (!pendingMap) return;
+      delete _pendingUserReadMapUpdates[effectiveUid];
+      try {
+        await setDoc(
+          doc(db, "users", effectiveUid),
+          sanitizeData({
+            readNotificationIdsV2: pendingMap,
+            updatedDate: new Date().toISOString(),
+          }),
+          { merge: true },
+        );
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          notifyQuotaExceeded();
+        } else {
+          console.warn(
+            "[Firestore Mobile] markNotificationsRead user sync notice:",
+            err,
+          );
+        }
+      }
+    }, 3000);
   },
 
   listenToHouseholdMessages(
@@ -9564,6 +9598,15 @@ export const mobileDataService = {
     const rawUid = userId || auth.currentUser?.uid;
     if (!rawUid) return;
     const uid = String(rawUid).replace(/^mem_/, "").trim();
+
+    // 10-minute cooldown per user to eliminate ~95% of background heartbeat writes
+    const now = Date.now();
+    const lastHeartbeat = _lastHeartbeatTimestamps[uid] || 0;
+    if (now - lastHeartbeat < HEARTBEAT_COOLDOWN_MS) {
+      return;
+    }
+    _lastHeartbeatTimestamps[uid] = now;
+
     const nowIso = new Date().toISOString();
     const payload = {
       lastActiveAt: nowIso,
@@ -9571,22 +9614,23 @@ export const mobileDataService = {
       isOnline: true,
     };
     try {
-      await updateDoc(doc(db, "users", uid), payload).catch(async () => {
-        await setDoc(doc(db, "users", uid), payload, { merge: true });
+      await updateDoc(doc(db, "users", uid), payload).catch(async (err) => {
+        if (isQuotaExceededError(err)) {
+          notifyQuotaExceeded();
+          return;
+        }
+        await setDoc(doc(db, "users", uid), payload, { merge: true }).catch(
+          (setErr) => {
+            if (isQuotaExceededError(setErr)) {
+              notifyQuotaExceeded();
+            }
+          },
+        );
       });
-
-      if (householdId) {
-        // Also update member doc if it exists
-        const memberRef = doc(db, `households/${householdId}/members`, uid);
-        await updateDoc(memberRef, payload).catch(async () => {
-          await updateDoc(
-            doc(db, `households/${householdId}/members`, `mem_${uid}`),
-            payload,
-          ).catch(() => {});
-        });
-      }
     } catch (e) {
-      // Quiet background failure
+      if (isQuotaExceededError(e)) {
+        notifyQuotaExceeded();
+      }
     }
   },
 
@@ -9594,6 +9638,9 @@ export const mobileDataService = {
     const rawUid = userId || auth.currentUser?.uid;
     if (!rawUid) return;
     const uid = String(rawUid).replace(/^mem_/, "").trim();
+    // Invalidate timestamp so next active session can immediately pulse online
+    delete _lastHeartbeatTimestamps[uid];
+
     const nowIso = new Date().toISOString();
     const payload = {
       isOnline: false,
@@ -9601,20 +9648,15 @@ export const mobileDataService = {
       lastActiveDate: nowIso,
     };
     try {
-      await updateDoc(doc(db, "users", uid), payload).catch(() => {});
-      if (householdId) {
-        await updateDoc(
-          doc(db, `households/${householdId}/members`, uid),
-          payload,
-        ).catch(async () => {
-          await updateDoc(
-            doc(db, `households/${householdId}/members`, `mem_${uid}`),
-            payload,
-          ).catch(() => {});
-        });
-      }
+      await updateDoc(doc(db, "users", uid), payload).catch((err) => {
+        if (isQuotaExceededError(err)) {
+          notifyQuotaExceeded();
+        }
+      });
     } catch (e) {
-      // Quiet background failure
+      if (isQuotaExceededError(e)) {
+        notifyQuotaExceeded();
+      }
     }
   },
 

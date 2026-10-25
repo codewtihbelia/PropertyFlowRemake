@@ -54,7 +54,10 @@ import {
   setupNotificationChannelsAsync,
   setupNotificationResponseListener,
 } from "./services/pushNotificationService";
-import { mobileDataService } from "./services/firebaseDataService";
+import {
+  mobileDataService,
+  subscribeToQuotaExceeded,
+} from "./services/firebaseDataService";
 import { auth } from "./firebase/config";
 import { alertService } from "./services/alertService";
 import { CustomAlertModal } from "./components/CustomAlertModal";
@@ -318,6 +321,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
     return cached?.householdId || "";
   });
 
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(false);
+  useEffect(() => {
+    return subscribeToQuotaExceeded((exceeded) => {
+      setIsQuotaExceeded(exceeded);
+    });
+  }, []);
+
   const [savedProfileUser, setSavedProfileUser] =
     useState<StoredPinUser | null>(null);
   const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">(
@@ -508,14 +518,19 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       return;
     }
 
-    // Immediate presence heartbeat for any authenticated user (with or without a household)
+    // Throttle presence heartbeat to 10 minutes and active focus only (saves 95% of background writes)
     mobileDataService.updateUserHeartbeat(householdId || undefined, currentUid);
-    const heartbeatInterval = setInterval(() => {
-      mobileDataService.updateUserHeartbeat(
-        householdId || undefined,
-        currentUid,
-      );
-    }, 45000);
+    const heartbeatInterval = setInterval(
+      () => {
+        if (AppState.currentState === "active") {
+          mobileDataService.updateUserHeartbeat(
+            householdId || undefined,
+            currentUid,
+          );
+        }
+      },
+      10 * 60 * 1000,
+    );
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
@@ -1621,6 +1636,39 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
       <View
         style={[styles.mainContent, { backgroundColor: colors.background }]}
       >
+        {isQuotaExceeded && overlayScreen === "none" && (
+          <View
+            style={{
+              backgroundColor: isDark ? "rgba(245, 158, 11, 0.12)" : "#FEF3C7",
+              borderColor: isDark ? "rgba(245, 158, 11, 0.3)" : "#F59E0B",
+              borderWidth: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 14,
+              borderRadius: 12,
+              marginHorizontal: 16,
+              marginTop: 8,
+              marginBottom: 4,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <Ionicons name="cloud-offline-outline" size={18} color="#D97706" />
+            <Text
+              style={{
+                flex: 1,
+                fontSize: 12,
+                fontWeight: "600",
+                color: isDark ? "#FCD34D" : "#92400E",
+                lineHeight: 16,
+              }}
+            >
+              Firestore free tier write limit reached (40K). Splitzy is safely
+              operating with local and cached data until quota resets at
+              midnight PST.
+            </Text>
+          </View>
+        )}
         {currentTab === "home" && overlayScreen === "none" && (
           <NotificationBanner />
         )}

@@ -1726,3 +1726,15 @@ export function resolveCycleWaterConfig(
 
   return null;
 }
+
+export function isQuotaExceededError(error: any): boolean {
+  if (!error) return false;
+  const msg = String(
+    error?.message || error?.code || error || "",
+  ).toLowerCase();
+  return (
+    msg.includes("resource-exhausted") ||
+    msg.includes("quota limit exceeded") ||
+    msg.includes("quota exceeded")
+  );
+}
