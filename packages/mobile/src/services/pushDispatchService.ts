@@ -16,6 +16,7 @@ export interface PushNotificationPayload {
   sound?: string;
   badge?: number;
   channelId?: string;
+  categoryId?: string;
 }
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
@@ -134,6 +135,7 @@ export class PushDispatchService {
       body: payload.body,
       data: payload.data || {},
       badge: payload.badge,
+      ...(payload.categoryId ? { categoryId: payload.categoryId } : {}),
     }));
 
     try {
@@ -211,15 +213,14 @@ export class PushDispatchService {
       }
 
       const isVideo = params.callType === "video";
-      const title = isVideo
-        ? "🎦 Incoming Video Call"
-        : "📞 Incoming Voice Call";
+      const title = isVideo ? "Incoming Video Call" : "Incoming Voice Call";
       const body = `${params.callerName} is calling you on Splitzy...`;
 
       return await this.sendPushToTokens(tokens, {
         title,
         body,
-        channelId: "high_priority",
+        channelId: "incoming_calls",
+        categoryId: "incoming_call",
         sound: "default",
         data: {
           type: "incoming_call",
@@ -280,7 +281,7 @@ export class PushDispatchService {
       const tokens = await this.getPushTokensForUsers(targetUserIds);
       if (tokens.length === 0) return;
 
-      const groupLabel = params.householdName || "New Message";
+      const groupLabel = params.householdName || "Household";
       const cleanBody =
         params.text.length > 120
           ? `${params.text.substring(0, 117)}...`

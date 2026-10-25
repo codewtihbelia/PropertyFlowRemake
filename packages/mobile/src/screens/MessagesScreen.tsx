@@ -2749,7 +2749,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             )}
 
             {/* Quick Split Request */}
-            {/* <TouchableOpacity
+            <TouchableOpacity
               style={[
                 styles.chatHeaderActionBtn,
                 {
@@ -2777,7 +2777,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 size={20}
                 color={isDark ? "#60A5FA" : "#2563EB"}
               />
-            </TouchableOpacity> */}
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -4430,20 +4430,46 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
                 {/* Bottom row: Message Snippet & Unread Dot */}
                 <View style={styles.messengerBottomRow}>
-                  <Text
-                    style={[
-                      styles.messengerSnippet,
-                      hasUnread
-                        ? [
-                            styles.messengerSnippetUnread,
-                            { color: isDark ? "#FFFFFF" : "#0F172A" },
-                          ]
-                        : { color: isDark ? "#94A3B8" : "#64748B" },
-                    ]}
-                    numberOfLines={1}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      flex: 1,
+                      minWidth: 0,
+                    }}
                   >
-                    {item.lastMessage}
-                  </Text>
+                    {item.lastMessage.includes("Video Call") && (
+                      <Ionicons
+                        name="videocam"
+                        size={13}
+                        color="#2563EB"
+                        style={{ marginRight: 4 }}
+                      />
+                    )}
+                    {item.lastMessage.includes("Voice Call") && (
+                      <Ionicons
+                        name="call"
+                        size={13}
+                        color="#2563EB"
+                        style={{ marginRight: 4 }}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.messengerSnippet,
+                        hasUnread
+                          ? [
+                              styles.messengerSnippetUnread,
+                              { color: isDark ? "#FFFFFF" : "#0F172A" },
+                            ]
+                          : { color: isDark ? "#94A3B8" : "#64748B" },
+                        { flex: 1 },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.lastMessage}
+                    </Text>
+                  </View>
 
                   {/* Status chips or unread indicator */}
                   {hasUnread && <View style={styles.messengerUnreadBlueDot} />}

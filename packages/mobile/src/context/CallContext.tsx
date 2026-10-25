@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+} from "react";
 import { Alert, AppState } from "react-native";
 import { auth } from "../firebase/config";
 import {
@@ -41,6 +47,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isIncomingModalMinimized, setIsIncomingModalMinimized] =
     useState<boolean>(false);
   const [isCaller, setIsCaller] = useState<boolean>(false);
+
+  const acceptCallRef = useRef<((call: CallSession) => Promise<void>) | null>(
+    null,
+  );
+  const declineCallRef = useRef<((call: CallSession) => Promise<void>) | null>(
+    null,
+  );
 
   const currentUid = auth.currentUser?.uid || "";
   const currentUserName = auth.currentUser?.displayName || "You";
@@ -92,17 +105,30 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [currentUid, activeCall?.id]);
 
-  // 1b. Listen for taps on incoming call push notifications when app is launched/backgrounded
+  // 1b. Listen for taps or action button presses on incoming call push notifications
   useEffect(() => {
     const unsubNotification = setupNotificationResponseListener(
-      async (data) => {
+      async (data, actionIdentifier) => {
         if (data?.type === "incoming_call" && data?.callId) {
           try {
             const callSnap = await getDoc(doc(db, "calls", data.callId));
             if (callSnap.exists()) {
               const callData = callSnap.data() as CallSession;
               if (callData.status === "ringing") {
-                setIncomingCall(callData);
+                if (
+                  actionIdentifier === "ACCEPT_CALL" &&
+                  acceptCallRef.current
+                ) {
+                  await acceptCallRef.current(callData);
+                } else if (
+                  actionIdentifier === "DECLINE_CALL" &&
+                  declineCallRef.current
+                ) {
+                  await declineCallRef.current(callData);
+                } else {
+                  setIncomingCall(callData);
+                  setIsIncomingModalMinimized(false);
+                }
               }
             }
           } catch (e) {
@@ -255,6 +281,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       Alert.alert("Call Error", "Could not accept the incoming call.");
     }
   };
+  acceptCallRef.current = acceptCall;
 
   // 5. Decline incoming call
   const declineCall = async (call: CallSession): Promise<void> => {
@@ -270,6 +297,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       setIncomingCall(null);
     }
   };
+  declineCallRef.current = declineCall;
 
   // 6. End active call
   const endCall = async (durationSeconds: number): Promise<void> => {
@@ -293,8 +321,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const text =
         durationSeconds > 0
-          ? `${isVideo ? "📹 Video" : "📞 Voice"} Call · ${durationStr}`
-          : `${isVideo ? "📹 Video" : "📞 Voice"} Call · Ended`;
+          ? `${isVideo ? "Video" : "Voice"} Call · ${durationStr}`
+          : `${isVideo ? "Video" : "Voice"} Call · Ended`;
 
       const otherUserId =
         callSnapshot.callerId === currentUid

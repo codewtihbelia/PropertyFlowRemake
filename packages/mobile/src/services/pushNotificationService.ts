@@ -81,6 +81,20 @@ export async function setupNotificationChannelsAsync(): Promise<void> {
     }
 
     if (Platform.OS === "android") {
+      // Dedicated high-priority channel for incoming voice & video calls
+      await Notifications.setNotificationChannelAsync("incoming_calls", {
+        name: "Incoming Calls",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+        lightColor: "#2563EB",
+        sound: "default",
+        enableVibrate: true,
+        showBadge: true,
+        lockscreenVisibility:
+          Notifications.AndroidNotificationVisibility.PUBLIC,
+        bypassDnd: true,
+      });
+
       // High-priority channel for messages, join approvals, and payment alerts
       await Notifications.setNotificationChannelAsync("high_priority", {
         name: "High Priority Alerts",
@@ -101,6 +115,31 @@ export async function setupNotificationChannelsAsync(): Promise<void> {
         enableVibrate: true,
         showBadge: true,
       });
+    }
+
+    // Register interactive notification action buttons (Accept / Decline)
+    if (typeof Notifications.setNotificationCategoryAsync === "function") {
+      try {
+        await Notifications.setNotificationCategoryAsync("incoming_call", [
+          {
+            identifier: "ACCEPT_CALL",
+            buttonTitle: "Accept",
+            options: {
+              opensAppToForeground: true,
+            },
+          },
+          {
+            identifier: "DECLINE_CALL",
+            buttonTitle: "Decline",
+            options: {
+              isDestructive: true,
+              opensAppToForeground: false,
+            },
+          },
+        ]);
+      } catch (catErr) {
+        console.warn("[PushNotification] Category setup notice:", catErr);
+      }
     }
   } catch (err: any) {
     const msg = String(err?.message || err);
@@ -215,7 +254,7 @@ export async function registerForPushNotificationsAsync(
  * Attaches a listener for when a user taps a push notification on their phone.
  */
 export function setupNotificationResponseListener(
-  onNotificationClick: (data: any) => void,
+  onNotificationClick: (data: any, actionIdentifier?: string) => void,
 ): () => void {
   // If running inside Expo Go on Android, skip remote response listener setup
   if (isExpoGoEnvironment() && Platform.OS === "android") {
@@ -232,8 +271,9 @@ export function setupNotificationResponseListener(
         Notifications.addNotificationResponseReceivedListener(
           (response: any) => {
             const data = response?.notification?.request?.content?.data;
+            const actionIdentifier = response?.actionIdentifier;
             if (data) {
-              onNotificationClick(data);
+              onNotificationClick(data, actionIdentifier);
             }
           },
         );
