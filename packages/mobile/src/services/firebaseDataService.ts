@@ -37,7 +37,7 @@ export { resolveCycleWaterConfig, type CycleWaterConfig };
 let _lastHeartbeatTimestamps: Record<string, number> = {};
 const HEARTBEAT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes (saves 95% of background writes)
 
-export const PRESENCE_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes presence cache
+export const PRESENCE_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes presence cache (reduces reads)
 const _presenceCache = new Map<string, { data: any; timestamp: number }>();
 
 export function getCachedUserPresence(userId: string): any | null {
@@ -9508,14 +9508,15 @@ export const mobileDataService = {
   ): Promise<void> {
     if (!householdId || !userId || !messageIds.length) return;
     try {
-      await Promise.all(
-        messageIds.map(async (msgId) => {
-          const docRef = doc(db, `households/${householdId}/messages`, msgId);
-          await updateDoc(docRef, {
-            readBy: arrayUnion(userId),
-          }).catch(() => {});
-        }),
-      );
+      const cleanIds = Array.from(new Set(messageIds)).slice(0, 25);
+      const batch = writeBatch(db);
+      cleanIds.forEach((msgId) => {
+        const docRef = doc(db, `households/${householdId}/messages`, msgId);
+        batch.update(docRef, {
+          readBy: arrayUnion(userId),
+        });
+      });
+      await batch.commit().catch(() => {});
     } catch (e) {
       console.warn("[Firestore Mobile] markHouseholdMessagesRead:", e);
     }
@@ -9608,14 +9609,15 @@ export const mobileDataService = {
   ): Promise<void> {
     if (!userId || !messageIds.length) return;
     try {
-      await Promise.all(
-        messageIds.map(async (msgId) => {
-          const docRef = doc(db, "directMessages", msgId);
-          await updateDoc(docRef, {
-            readBy: arrayUnion(userId),
-          }).catch(() => {});
-        }),
-      );
+      const cleanIds = Array.from(new Set(messageIds)).slice(0, 25);
+      const batch = writeBatch(db);
+      cleanIds.forEach((msgId) => {
+        const docRef = doc(db, "directMessages", msgId);
+        batch.update(docRef, {
+          readBy: arrayUnion(userId),
+        });
+      });
+      await batch.commit().catch(() => {});
     } catch (e) {
       console.warn("[Firestore Mobile] markDirectMessagesRead:", e);
     }
@@ -10011,14 +10013,9 @@ export const mobileDataService = {
     };
 
     fetchExpiredOrMissing();
-    const intervalTimer = setInterval(
-      fetchExpiredOrMissing,
-      PRESENCE_CACHE_TTL_MS,
-    );
 
     return () => {
       isSubscribed = false;
-      clearInterval(intervalTimer);
     };
   },
 

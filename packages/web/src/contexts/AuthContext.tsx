@@ -84,8 +84,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         setIsEmailVerified(firebaseUser.emailVerified);
 
-        const updatePresence = (online: boolean) => {
+        let lastPresenceWrite = 0;
+        const PRESENCE_COOLDOWN_MS = 10 * 60 * 1000; // 10-minute throttle for online updates
+
+        const updatePresence = (online: boolean, force = false) => {
           if (!firebaseUser?.uid) return;
+          const now = Date.now();
+          if (
+            online &&
+            !force &&
+            now - lastPresenceWrite < PRESENCE_COOLDOWN_MS
+          ) {
+            return; // Throttled to conserve Firestore write quota
+          }
+          lastPresenceWrite = now;
           const nowIso = new Date().toISOString();
           updateDoc(doc(db, "users", firebaseUser.uid), {
             isOnline: online,
@@ -94,21 +106,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           }).catch(() => {});
         };
 
-        // Immediate presence pulse + 45s interval
+        // Initial presence update on session start
         updatePresence(true);
-        webHeartbeatInterval = setInterval(() => {
-          updatePresence(true);
-        }, 45000);
 
         handleVisibility = () => {
           if (document.visibilityState === "visible") {
             updatePresence(true);
           } else {
-            updatePresence(false);
+            updatePresence(false, true);
           }
         };
         handleUnload = () => {
-          updatePresence(false);
+          updatePresence(false, true);
         };
 
         window.addEventListener("visibilitychange", handleVisibility);
@@ -153,10 +162,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           notificationPreferences: existing?.notificationPreferences,
         };
 
-        // Non-blocking sync to cloud so auth state resolves immediately
-        firebaseDataService.saveUserProfile(profile).catch((err) => {
-          console.warn("[Auth] Background saveUserProfile warning:", err);
-        });
+        // Only persist profile to cloud if it does not exist yet to save writes
+        if (!existing) {
+          firebaseDataService.saveUserProfile(profile).catch((err) => {
+            console.warn("[Auth] Background saveUserProfile warning:", err);
+          });
+        }
 
         setCurrentUser(profile);
         setAllUsers([profile]);

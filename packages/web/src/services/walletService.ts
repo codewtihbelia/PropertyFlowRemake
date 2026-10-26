@@ -820,25 +820,6 @@ export class WebWalletService {
                 );
               } catch {}
               callback(synchronized);
-
-              // Detect if Firebase had transactions manually deleted or balance altered
-              const cardBalancesDiffer = (data.cards || []).some((c: any) => {
-                const match = synchronized.cards.find((sc) => sc.id === c.id);
-                return match && match.balance !== c.balance;
-              });
-              const pocketsDiffer = (data.pockets || []).some((p: any) => {
-                const match = synchronized.pockets.find((sp) => sp.id === p.id);
-                return match && match.currentAmount !== p.currentAmount;
-              });
-              if (
-                cardBalancesDiffer ||
-                pocketsDiffer ||
-                synchronized.balance !== data.balance ||
-                (data.transactions || []).length !==
-                  synchronized.transactions.length
-              ) {
-                this.persist(targetUid, synchronized).catch(() => {});
-              }
             }
           } else {
             // When document is deleted in Firestore cloud, seamlessly sync empty wallet state
@@ -882,24 +863,6 @@ export class WebWalletService {
                 );
               } catch {}
               callback(synchronized);
-
-              const cardBalancesDiffer = (remote.cards || []).some((c: any) => {
-                const match = synchronized.cards.find((sc) => sc.id === c.id);
-                return match && match.balance !== c.balance;
-              });
-              const pocketsDiffer = (remote.pockets || []).some((p: any) => {
-                const match = synchronized.pockets.find((sp) => sp.id === p.id);
-                return match && match.currentAmount !== p.currentAmount;
-              });
-              if (
-                cardBalancesDiffer ||
-                pocketsDiffer ||
-                synchronized.balance !== remote.balance ||
-                (remote.transactions || []).length !==
-                  synchronized.transactions.length
-              ) {
-                this.persist(targetUid, synchronized).catch(() => {});
-              }
             } else if (
               data &&
               (data.walletState === null || data.walletState === undefined)

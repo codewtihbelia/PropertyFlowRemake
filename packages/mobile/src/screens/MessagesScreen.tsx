@@ -2050,25 +2050,46 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   }, [initialTargetUserId, conversations, activeThread, currentUid]);
 
-  // Mark messages in active thread as read
+  // Track message IDs marked read in memory to prevent repetitive Firestore writes
+  const markedReadMessageIdsRef = useRef<Set<string>>(new Set());
+
+  // Mark messages in active thread as read with per-conversation routing & debouncing
   useEffect(() => {
     if (!activeThread || !currentUid) return;
+    const threadId = activeThread.id;
+    const isGroup =
+      activeThread.type === "group" || threadId === "household_group";
+
     const unreadIds = activeThread.messages
-      .filter((m) => !m.isMe && !(m.readBy || []).includes(currentUid))
+      .filter(
+        (m) =>
+          !m.isMe &&
+          !(m.readBy || []).includes(currentUid) &&
+          !markedReadMessageIdsRef.current.has(m.id),
+      )
       .map((m) => m.id);
 
-    if (unreadIds.length > 0) {
-      if (householdId) {
+    if (unreadIds.length === 0) return;
+
+    // Immediately cache to prevent duplicate writes during renders
+    unreadIds.forEach((id) => markedReadMessageIdsRef.current.add(id));
+
+    const timer = setTimeout(() => {
+      if (isGroup && householdId) {
         mobileDataService.markHouseholdMessagesRead(
           householdId,
           unreadIds,
           currentUid,
         );
+      } else {
+        mobileDataService.markDirectMessagesRead(unreadIds, currentUid);
       }
-      mobileDataService.markDirectMessagesRead(unreadIds, currentUid);
-    }
+    }, 600);
+
+    return () => clearTimeout(timer);
   }, [
     activeThread?.id,
+    activeThread?.type,
     activeThread?.messages.length,
     householdId,
     currentUid,
@@ -4700,7 +4721,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               ]}
               onStartShouldSetResponder={() => true}
             >
-              {/* Option 1: Photos */}
+              {/* Option 1: Image / Photo */}
               <TouchableOpacity
                 style={styles.plusPopoverRow}
                 activeOpacity={0.7}
@@ -4715,7 +4736,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     { color: isDark ? "#FFFFFF" : "#0F172A" },
                   ]}
                 >
-                  Image
+                  AI images
                 </Text>
               </TouchableOpacity>
 
