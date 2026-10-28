@@ -228,6 +228,56 @@ export class PushDispatchService {
   }
 
   /**
+   * Dispatches high-priority reminder push notification for upcoming subscriptions and debts.
+   */
+  public async dispatchDueReminderNotification(
+    userId: string,
+    title: string,
+    body: string,
+    data?: Record<string, any>,
+  ): Promise<boolean> {
+    try {
+      const cleanUid = String(userId || "")
+        .replace(/^mem_/, "")
+        .trim();
+      const tokens = await this.getPushTokensForUsers([cleanUid]);
+      if (tokens.length > 0) {
+        await this.sendPushToTokens(tokens, {
+          title,
+          body,
+          data: data || {},
+          sound: "default",
+          channelId: "high_priority",
+        });
+      }
+
+      // Also schedule a local notification if on native mobile
+      try {
+        const Notifications = require("expo-notifications");
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title,
+            body,
+            data: data || {},
+            sound: "default",
+            priority: Notifications.AndroidNotificationPriority?.MAX || "max",
+            channelId: "high_priority",
+          },
+          trigger: null,
+        });
+      } catch {}
+
+      return true;
+    } catch (err) {
+      console.warn(
+        "[PushDispatch] dispatchDueReminderNotification error:",
+        err,
+      );
+      return false;
+    }
+  }
+
+  /**
    * Dispatches high-priority push notification when an incoming voice or video call is placed.
    * Rings recipient's phone with heads-up alert and opens call on tap even if app is backgrounded or closed.
    */

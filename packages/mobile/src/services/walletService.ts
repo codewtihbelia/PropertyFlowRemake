@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db, auth } from "../firebase/config";
+import { pushDispatchService } from "./pushDispatchService";
 
 export type CardProviderType =
   | "cash"
@@ -262,13 +263,447 @@ export interface WalletTransaction {
   source?: string;
 }
 
+export interface WalletSubscription {
+  id: string;
+  name: string;
+  platformKey: string;
+  amount: number;
+  billingCycle: "monthly" | "yearly";
+  nextRenewalDate: string;
+  cardId?: string;
+  paymentMethodName?: string;
+  category:
+    | "streaming"
+    | "music"
+    | "ai"
+    | "cloud"
+    | "entertainment"
+    | "utilities"
+    | "other";
+  status: "active" | "paused" | "cancelled";
+  color?: string;
+  customColor?: string;
+  isActive?: boolean;
+  notes?: string;
+  createdAt: string;
+}
+
+export type DebtCategory =
+  | "personal"
+  | "fintech_loan"
+  | "bnpl"
+  | "bank_loan"
+  | "other";
+
+export interface LoanPlatformPreset {
+  platformKey: string;
+  key?: string;
+  name: string;
+  defaultName?: string;
+  category: DebtCategory;
+  color: string;
+  accentBg: string;
+  description: string;
+  defaultProviderName: string;
+}
+
+export const LOAN_PLATFORM_PRESETS: LoanPlatformPreset[] = [
+  {
+    platformKey: "billease",
+    key: "billease",
+    name: "BillEase",
+    defaultName: "BillEase",
+    category: "fintech_loan",
+    color: "#00A389",
+    accentBg: "#00A3891A",
+    description: "Buy now pay later & cash installments",
+    defaultProviderName: "BillEase Loan",
+  },
+  {
+    platformKey: "tala",
+    key: "tala",
+    name: "Tala",
+    defaultName: "Tala",
+    category: "fintech_loan",
+    color: "#00A389",
+    accentBg: "#00A3891A",
+    description: "Instant mobile cash loans",
+    defaultProviderName: "Tala Loan",
+  },
+  {
+    platformKey: "home_credit",
+    key: "home_credit",
+    name: "Home Credit",
+    defaultName: "Home Credit",
+    category: "fintech_loan",
+    color: "#E20613",
+    accentBg: "#E206131A",
+    description: "Product financing & cash installment",
+    defaultProviderName: "Home Credit",
+  },
+  {
+    platformKey: "gloan",
+    key: "gloan",
+    name: "GLoan (GCash)",
+    defaultName: "GLoan",
+    category: "fintech_loan",
+    color: "#005CE6",
+    accentBg: "#005CE61A",
+    description: "GCash instant cash loan",
+    defaultProviderName: "GLoan",
+  },
+  {
+    platformKey: "maya_credit",
+    key: "maya_credit",
+    name: "Maya Credit",
+    defaultName: "Maya Credit",
+    category: "fintech_loan",
+    color: "#059669",
+    accentBg: "#0596691A",
+    description: "Maya flexible credit line",
+    defaultProviderName: "Maya Credit",
+  },
+  {
+    platformKey: "spaylater",
+    key: "spaylater",
+    name: "Shopee SPayLater",
+    defaultName: "SPayLater",
+    category: "bnpl",
+    color: "#EE4D2D",
+    accentBg: "#EE4D2D1A",
+    description: "Shopee installment plan",
+    defaultProviderName: "SPayLater",
+  },
+  {
+    platformKey: "lazpaylater",
+    key: "lazpaylater",
+    name: "Lazada LazPayLater",
+    defaultName: "LazPayLater",
+    category: "bnpl",
+    color: "#F51480",
+    accentBg: "#F514801A",
+    description: "Lazada monthly bill",
+    defaultProviderName: "LazPayLater",
+  },
+  {
+    platformKey: "cashalo",
+    key: "cashalo",
+    name: "Cashalo",
+    defaultName: "Cashalo",
+    category: "fintech_loan",
+    color: "#009EE0",
+    accentBg: "#009EE01A",
+    description: "Fast installment cash loan",
+    defaultProviderName: "Cashalo Loan",
+  },
+  {
+    platformKey: "juanhand",
+    key: "juanhand",
+    name: "JuanHand",
+    defaultName: "JuanHand",
+    category: "fintech_loan",
+    color: "#2563EB",
+    accentBg: "#2563EB1A",
+    description: "Quick mobile emergency loan",
+    defaultProviderName: "JuanHand",
+  },
+  {
+    platformKey: "bank_loan",
+    key: "bank_loan",
+    name: "Bank Personal Loan",
+    defaultName: "Bank Loan",
+    category: "bank_loan",
+    color: "#1E293B",
+    accentBg: "#1E293B1A",
+    description: "BPI / BDO / UBP bank financing",
+    defaultProviderName: "Bank Personal Loan",
+  },
+  {
+    platformKey: "person",
+    key: "person",
+    name: "Peer / Friend",
+    defaultName: "Personal Loan",
+    category: "personal",
+    color: "#64748B",
+    accentBg: "#64748B1A",
+    description: "Personal loan from a friend or roommate",
+    defaultProviderName: "Personal Loan",
+  },
+];
+
+export interface WalletDebt {
+  id: string;
+  type: "i_owe" | "owed_to_me";
+  personName: string;
+  platformKey?: string;
+  loanReferenceNo?: string;
+  lenderType?: "fintech" | "personal";
+  personAvatar?: string;
+  personUid?: string;
+  amount: number;
+  settledAmount: number;
+  dueDate?: string;
+  description: string;
+  category?: DebtCategory | string;
+  status: "unpaid" | "partially_paid" | "settled" | "pending";
+  settledAt?: string;
+  settlementMethod?: string;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface SubscriptionPreset {
+  platformKey: string;
+  key?: string;
+  name: string;
+  defaultName?: string;
+  category:
+    | "streaming"
+    | "music"
+    | "ai"
+    | "cloud"
+    | "entertainment"
+    | "utilities"
+    | "other";
+  defaultAmount: number;
+  color: string;
+  accentBg: string;
+  billingCycle: "monthly" | "yearly";
+}
+
+export const SUBSCRIPTION_PLATFORM_PRESETS: SubscriptionPreset[] = [
+  {
+    platformKey: "netflix",
+    key: "netflix",
+    name: "Netflix Standard",
+    defaultName: "Netflix Standard",
+    category: "streaming",
+    defaultAmount: 399,
+    color: "#E50914",
+    accentBg: "#E509141A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "spotify",
+    key: "spotify",
+    name: "Spotify Premium",
+    defaultName: "Spotify Premium",
+    category: "music",
+    defaultAmount: 149,
+    color: "#1DB954",
+    accentBg: "#1DB9541A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "youtube",
+    key: "youtube",
+    name: "YouTube Premium",
+    defaultName: "YouTube Premium",
+    category: "streaming",
+    defaultAmount: 159,
+    color: "#FF0000",
+    accentBg: "#FF00001A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "disney",
+    key: "disney",
+    name: "Disney+",
+    defaultName: "Disney+",
+    category: "streaming",
+    defaultAmount: 249,
+    color: "#113CCF",
+    accentBg: "#113CCF1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "apple_music",
+    key: "apple_music",
+    name: "Apple Music",
+    defaultName: "Apple Music",
+    category: "music",
+    defaultAmount: 139,
+    color: "#FA243C",
+    accentBg: "#FA243C1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "chatgpt",
+    key: "chatgpt",
+    name: "ChatGPT Plus",
+    defaultName: "ChatGPT Plus",
+    category: "ai",
+    defaultAmount: 1150,
+    color: "#10A37F",
+    accentBg: "#10A37F1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "claude",
+    key: "claude",
+    name: "Claude Pro",
+    defaultName: "Claude Pro",
+    category: "ai",
+    defaultAmount: 1150,
+    color: "#D97706",
+    accentBg: "#D977061A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "google_one",
+    key: "google_one",
+    name: "Google One (100GB)",
+    defaultName: "Google One (100GB)",
+    category: "cloud",
+    defaultAmount: 89,
+    color: "#4285F4",
+    accentBg: "#4285F41A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "icloud",
+    key: "icloud",
+    name: "iCloud+ (50GB)",
+    defaultName: "iCloud+ (50GB)",
+    category: "cloud",
+    defaultAmount: 49,
+    color: "#007AFF",
+    accentBg: "#007AFF1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "prime_video",
+    key: "prime_video",
+    name: "Prime Video",
+    defaultName: "Prime Video",
+    category: "streaming",
+    defaultAmount: 149,
+    color: "#00A8E1",
+    accentBg: "#00A8E11A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "crunchyroll",
+    key: "crunchyroll",
+    name: "Crunchyroll Mega Fan",
+    defaultName: "Crunchyroll Mega Fan",
+    category: "streaming",
+    defaultAmount: 99,
+    color: "#F47521",
+    accentBg: "#F475211A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "github_copilot",
+    key: "github_copilot",
+    name: "GitHub Copilot",
+    defaultName: "GitHub Copilot",
+    category: "ai",
+    defaultAmount: 580,
+    color: "#24292F",
+    accentBg: "#24292F1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "canva",
+    key: "canva",
+    name: "Canva Pro",
+    defaultName: "Canva Pro",
+    category: "cloud",
+    defaultAmount: 299,
+    color: "#7D2AE8",
+    accentBg: "#7D2AE81A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "midjourney",
+    key: "midjourney",
+    name: "Midjourney Basic",
+    defaultName: "Midjourney Basic",
+    category: "ai",
+    defaultAmount: 580,
+    color: "#1E293B",
+    accentBg: "#1E293B1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "playstation",
+    key: "playstation",
+    name: "PlayStation Plus",
+    defaultName: "PlayStation Plus",
+    category: "entertainment",
+    defaultAmount: 450,
+    color: "#003791",
+    accentBg: "#0037911A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "steam",
+    key: "steam",
+    name: "Steam / Gaming Sub",
+    defaultName: "Steam / Gaming Sub",
+    category: "entertainment",
+    defaultAmount: 300,
+    color: "#171A21",
+    accentBg: "#171A211A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "nintendo",
+    key: "nintendo",
+    name: "Nintendo Switch Online",
+    defaultName: "Nintendo Switch Online",
+    category: "entertainment",
+    defaultAmount: 200,
+    color: "#E60012",
+    accentBg: "#E600121A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "meralco",
+    key: "meralco",
+    name: "Meralco / Power",
+    defaultName: "Meralco / Power",
+    category: "utilities",
+    defaultAmount: 2500,
+    color: "#EA580C",
+    accentBg: "#EA580C1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "internet",
+    key: "internet",
+    name: "Fiber Internet (PLDT/Globe)",
+    defaultName: "Fiber Internet (PLDT/Globe)",
+    category: "utilities",
+    defaultAmount: 1699,
+    color: "#2563EB",
+    accentBg: "#2563EB1A",
+    billingCycle: "monthly",
+  },
+  {
+    platformKey: "custom",
+    key: "custom",
+    name: "Custom Subscription",
+    defaultName: "Custom Subscription",
+    category: "other",
+    defaultAmount: 199,
+    color: "#64748B",
+    accentBg: "#64748B1A",
+    billingCycle: "monthly",
+  },
+];
+
 export interface WalletState {
   userId: string;
   balance: number;
   currency: "PHP";
   cards: PaymentCard[];
   pockets: SavingsPocket[];
+  savingsPockets?: SavingsPocket[];
   transactions: WalletTransaction[];
+  subscriptions?: WalletSubscription[];
+  debts?: WalletDebt[];
   updatedAt: string;
 }
 
@@ -287,6 +722,8 @@ function buildDefaultWallet(userId: string): WalletState {
     cards: [],
     pockets: [],
     transactions: [],
+    subscriptions: [],
+    debts: [],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -673,11 +1110,24 @@ export function reconcileWalletState(
           return acc;
         }, 0);
 
+  const rawSubs = Array.isArray(state.subscriptions)
+    ? state.subscriptions
+    : Array.isArray(previousState?.subscriptions)
+      ? previousState!.subscriptions
+      : [];
+  const rawDebts = Array.isArray(state.debts)
+    ? state.debts
+    : Array.isArray(previousState?.debts)
+      ? previousState!.debts
+      : [];
+
   return {
     ...state,
     cards: updatedCards,
     pockets: updatedPockets,
     transactions: rawTransactions,
+    subscriptions: rawSubs,
+    debts: rawDebts,
     balance: totalBalance,
     updatedAt: state.updatedAt || new Date().toISOString(),
   };
@@ -2121,6 +2571,505 @@ class WalletService {
       updatedState: updatedSenderWallet,
       message: `₱${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })} transferred successfully to ${recipientName || "recipient"} via ${sourceLabel}!`,
       referenceNumber: refNumber,
+    };
+  }
+
+  // --- Subscriptions Management ---
+  async addSubscription(
+    userId: string,
+    sub: Omit<WalletSubscription, "id" | "createdAt">,
+  ): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const newSub: WalletSubscription = {
+      ...sub,
+      id: "sub_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      createdAt: new Date().toISOString(),
+    };
+    const updated: WalletState = {
+      ...current,
+      subscriptions: [newSub, ...(current.subscriptions || [])],
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async updateSubscription(
+    userId: string,
+    subId: string,
+    updates: Partial<WalletSubscription>,
+  ): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const updatedSubs = (current.subscriptions || []).map((s) =>
+      s.id === subId ? { ...s, ...updates } : s,
+    );
+    const updated: WalletState = {
+      ...current,
+      subscriptions: updatedSubs,
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async deleteSubscription(
+    userId: string,
+    subId: string,
+  ): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const updatedSubs = (current.subscriptions || []).filter(
+      (s) => s.id !== subId,
+    );
+    const updated: WalletState = {
+      ...current,
+      subscriptions: updatedSubs,
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async paySubscription(
+    userId: string,
+    subId: string,
+    paymentMethod: string = "Splitzy Wallet",
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const targetSub = (current.subscriptions || []).find((s) => s.id === subId);
+    if (!targetSub) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Subscription record not found.",
+      };
+    }
+
+    const amountToPay = targetSub.amount;
+    if (amountToPay <= 0) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Invalid subscription amount.",
+      };
+    }
+
+    let updatedCards = [...current.cards];
+    let newBalance = current.balance;
+    const nowIso = new Date().toISOString();
+
+    if (paymentMethod === "Splitzy Wallet") {
+      if (current.balance < amountToPay) {
+        return {
+          success: false,
+          updatedState: current,
+          message: `Insufficient wallet balance (₱${current.balance.toLocaleString()} available). Please top up or select a linked card.`,
+        };
+      }
+      updatedCards = this.deductFromCards(current.cards, amountToPay);
+      newBalance =
+        updatedCards.length > 0
+          ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
+          : Math.max(0, current.balance - amountToPay);
+    } else {
+      const matchedCardIdx = updatedCards.findIndex(
+        (c) => c.name === paymentMethod || c.id === paymentMethod,
+      );
+      if (matchedCardIdx >= 0) {
+        const c = updatedCards[matchedCardIdx];
+        if ((c.balance || 0) < amountToPay) {
+          return {
+            success: false,
+            updatedState: current,
+            message: `Insufficient balance on ${c.name}.`,
+          };
+        }
+        updatedCards[matchedCardIdx] = {
+          ...c,
+          balance: Math.max(0, (c.balance || 0) - amountToPay),
+        };
+        newBalance = updatedCards.reduce(
+          (acc, cd) => acc + (cd.balance || 0),
+          0,
+        );
+      }
+    }
+
+    // Safely advance next renewal date by 1 month or 1 year
+    let nextDate: Date;
+    if (
+      targetSub.nextRenewalDate &&
+      !isNaN(new Date(targetSub.nextRenewalDate).getTime())
+    ) {
+      nextDate = new Date(targetSub.nextRenewalDate);
+    } else {
+      nextDate = new Date();
+    }
+    if (targetSub.billingCycle === "yearly") {
+      nextDate.setFullYear(nextDate.getFullYear() + 1);
+    } else {
+      nextDate.setMonth(nextDate.getMonth() + 1);
+    }
+    const nextRenewalIso = nextDate.toISOString().split("T")[0];
+
+    const tx: WalletTransaction = {
+      id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      type: "bill_payment",
+      amount: amountToPay,
+      title: `Renewed: ${targetSub.name}`,
+      description: `Subscription renewal (${targetSub.billingCycle === "yearly" ? "1 Year" : "1 Month"}) via ${paymentMethod}`,
+      paymentMethodUsed: paymentMethod,
+      referenceId: targetSub.id,
+      timestamp: nowIso,
+      status: "completed",
+      note: `Next renewal scheduled for ${nextRenewalIso}`,
+      category: targetSub.category || "streaming",
+      icon: targetSub.platformKey,
+    };
+
+    const updatedSubs = (current.subscriptions || []).map((s) =>
+      s.id === subId
+        ? {
+            ...s,
+            nextRenewalDate: nextRenewalIso,
+            status: "active" as const,
+          }
+        : s,
+    );
+
+    const updated: WalletState = {
+      ...current,
+      balance: newBalance,
+      cards: updatedCards,
+      subscriptions: updatedSubs,
+      transactions: [tx, ...(current.transactions || [])],
+      updatedAt: nowIso,
+    };
+
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return {
+      success: true,
+      updatedState: reconciled,
+      message: `Successfully renewed ${targetSub.name}! Next renewal: ${nextRenewalIso}`,
+    };
+  }
+
+  async checkAndDispatchDueReminders(
+    userId: string,
+    state: WalletState,
+  ): Promise<void> {
+    if (!userId || !state) return;
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayKey = today.toISOString().split("T")[0];
+
+      // 1. Check Subscriptions
+      for (const sub of state.subscriptions || []) {
+        if (sub.status === "cancelled" || !sub.nextRenewalDate) continue;
+        const dueDate = new Date(sub.nextRenewalDate);
+        dueDate.setHours(0, 0, 0, 0);
+        if (isNaN(dueDate.getTime())) continue;
+
+        const diffDays = Math.round(
+          (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        if (diffDays === 0 || diffDays === 3) {
+          const sentKey = `@splitzy_reminded_sub_${sub.id}_${diffDays}_${todayKey}`;
+          const alreadySent = await AsyncStorage.getItem(sentKey);
+          if (!alreadySent) {
+            await AsyncStorage.setItem(sentKey, "sent");
+            const title =
+              diffDays === 0
+                ? `Subscription Due Today: ${sub.name}`
+                : `Upcoming Subscription: ${sub.name}`;
+            const body =
+              diffDays === 0
+                ? `${sub.name} (₱${(sub.amount || 0).toLocaleString()}) is due today! Tap to pay with your Splitzy balance.`
+                : `${sub.name} (₱${(sub.amount || 0).toLocaleString()}) will renew in 3 days on ${sub.nextRenewalDate}.`;
+
+            await pushDispatchService.dispatchDueReminderNotification(
+              userId,
+              title,
+              body,
+              {
+                type: "subscription_reminder",
+                subscriptionId: sub.id,
+                diffDays,
+              },
+            );
+          }
+        }
+      }
+
+      // 2. Check Debts & Loans
+      for (const debt of state.debts || []) {
+        if (debt.status === "settled" || !debt.dueDate) continue;
+        const dueDate = new Date(debt.dueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        if (isNaN(dueDate.getTime())) continue;
+
+        const diffDays = Math.round(
+          (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        if (diffDays === 0 || diffDays === 3) {
+          const sentKey = `@splitzy_reminded_debt_${debt.id}_${diffDays}_${todayKey}`;
+          const alreadySent = await AsyncStorage.getItem(sentKey);
+          if (!alreadySent) {
+            await AsyncStorage.setItem(sentKey, "sent");
+            const remaining = Math.max(
+              0,
+              (debt.amount || 0) - (debt.settledAmount || 0),
+            );
+            const lenderLabel = debt.personName || "Lender";
+            const title =
+              diffDays === 0
+                ? `Loan Due Today: ${lenderLabel}`
+                : `Upcoming Loan Due: ${lenderLabel}`;
+            const body =
+              diffDays === 0
+                ? `Your loan installment for ${lenderLabel} (₱${remaining.toLocaleString()}) is due today! Tap to settle.`
+                : `Reminder: Your installment of ₱${remaining.toLocaleString()} to ${lenderLabel} is due in 3 days.`;
+
+            await pushDispatchService.dispatchDueReminderNotification(
+              userId,
+              title,
+              body,
+              {
+                type: "debt_reminder",
+                debtId: debt.id,
+                diffDays,
+              },
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[WalletService] checkAndDispatchDueReminders error:", err);
+    }
+  }
+
+  // --- Debts Management ---
+  async addDebt(
+    userId: string,
+    debt: Omit<WalletDebt, "id" | "createdAt" | "settledAmount" | "status">,
+  ): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const newDebt: WalletDebt = {
+      ...debt,
+      id: "debt_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+      settledAmount: 0,
+      status: "unpaid",
+      createdAt: new Date().toISOString(),
+    };
+    const updated: WalletState = {
+      ...current,
+      debts: [newDebt, ...(current.debts || [])],
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async updateDebt(
+    userId: string,
+    debtId: string,
+    updates: Partial<WalletDebt>,
+  ): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const updatedDebts = (current.debts || []).map((d) =>
+      d.id === debtId ? { ...d, ...updates } : d,
+    );
+    const updated: WalletState = {
+      ...current,
+      debts: updatedDebts,
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async deleteDebt(userId: string, debtId: string): Promise<WalletState> {
+    const current = await this.getWallet(userId);
+    const updatedDebts = (current.debts || []).filter((d) => d.id !== debtId);
+    const updated: WalletState = {
+      ...current,
+      debts: updatedDebts,
+      updatedAt: new Date().toISOString(),
+    };
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+    return reconciled;
+  }
+
+  async settleDebt(
+    userId: string,
+    debtId: string,
+    paymentMethod: string = "Splitzy Wallet",
+    settleAmount?: number,
+  ): Promise<{ success: boolean; updatedState: WalletState; message: string }> {
+    const current = await this.getWallet(userId);
+    const targetDebt = (current.debts || []).find((d) => d.id === debtId);
+    if (!targetDebt) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Debt record not found.",
+      };
+    }
+
+    const remaining = Math.max(
+      0,
+      targetDebt.amount - (targetDebt.settledAmount || 0),
+    );
+    const amountToPay = Math.min(
+      remaining,
+      settleAmount && settleAmount > 0 ? settleAmount : remaining,
+    );
+
+    if (amountToPay <= 0) {
+      return {
+        success: false,
+        updatedState: current,
+        message: "Debt is already fully settled.",
+      };
+    }
+
+    let updatedCards = [...current.cards];
+    let newBalance = current.balance;
+    const nowIso = new Date().toISOString();
+    let tx: WalletTransaction | null = null;
+
+    if (targetDebt.type === "i_owe") {
+      if (paymentMethod === "Splitzy Wallet") {
+        if (current.balance < amountToPay) {
+          return {
+            success: false,
+            updatedState: current,
+            message: `Insufficient wallet balance (₱${current.balance.toLocaleString()} available). Please top up or choose a card.`,
+          };
+        }
+        updatedCards = this.deductFromCards(current.cards, amountToPay);
+        newBalance =
+          updatedCards.length > 0
+            ? updatedCards.reduce((acc, c) => acc + (c.balance || 0), 0)
+            : Math.max(0, current.balance - amountToPay);
+      } else {
+        const matchedCardIdx = updatedCards.findIndex(
+          (c) => c.name === paymentMethod || c.id === paymentMethod,
+        );
+        if (matchedCardIdx >= 0) {
+          const c = updatedCards[matchedCardIdx];
+          if ((c.balance || 0) < amountToPay) {
+            return {
+              success: false,
+              updatedState: current,
+              message: `Insufficient balance on ${c.name}.`,
+            };
+          }
+          updatedCards[matchedCardIdx] = {
+            ...c,
+            balance: Math.max(0, (c.balance || 0) - amountToPay),
+          };
+          newBalance = updatedCards.reduce(
+            (acc, cd) => acc + (cd.balance || 0),
+            0,
+          );
+        }
+      }
+
+      tx = {
+        id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        type: "debt_settlement",
+        amount: amountToPay,
+        title: `Settled Debt to ${targetDebt.personName}`,
+        description:
+          targetDebt.description ||
+          `Paid back ₱${amountToPay.toLocaleString()}`,
+        paymentMethodUsed: paymentMethod,
+        referenceId: targetDebt.id,
+        timestamp: nowIso,
+        status: "completed",
+        note: `Debt settled: ${targetDebt.description || targetDebt.personName}`,
+      };
+    } else {
+      if (paymentMethod === "Splitzy Wallet") {
+        const defaultCard =
+          updatedCards.find((c) => c.isDefault) || updatedCards[0];
+        if (defaultCard) {
+          updatedCards = updatedCards.map((c) =>
+            c.id === defaultCard.id
+              ? { ...c, balance: (c.balance || 0) + amountToPay }
+              : c,
+          );
+          newBalance = updatedCards.reduce(
+            (acc, c) => acc + (c.balance || 0),
+            0,
+          );
+        } else {
+          newBalance = current.balance + amountToPay;
+        }
+
+        tx = {
+          id:
+            "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+          type: "cash_in",
+          amount: amountToPay,
+          title: `Debt Collected from ${targetDebt.personName}`,
+          description: `Received ₱${amountToPay.toLocaleString()} debt payment into wallet`,
+          paymentMethodUsed: paymentMethod,
+          referenceId: targetDebt.id,
+          timestamp: nowIso,
+          status: "completed",
+          note: `Received from ${targetDebt.personName}`,
+        };
+      }
+    }
+
+    const newSettledAmount = (targetDebt.settledAmount || 0) + amountToPay;
+    const isFullySettled = newSettledAmount >= targetDebt.amount - 0.01;
+
+    const updatedDebts = (current.debts || []).map((d) => {
+      if (d.id !== debtId) return d;
+      return {
+        ...d,
+        settledAmount: newSettledAmount,
+        status: isFullySettled
+          ? ("settled" as const)
+          : ("partially_paid" as const),
+        settledAt: isFullySettled ? nowIso : d.settledAt,
+        settlementMethod: paymentMethod,
+      };
+    });
+
+    const updatedTransactions = tx
+      ? [tx, ...current.transactions]
+      : current.transactions;
+
+    const updated: WalletState = {
+      ...current,
+      balance: newBalance,
+      cards: updatedCards,
+      debts: updatedDebts,
+      transactions: updatedTransactions,
+      updatedAt: nowIso,
+    };
+
+    const reconciled = reconcileWalletState(updated);
+    await this.persist(userId, reconciled);
+
+    return {
+      success: true,
+      updatedState: reconciled,
+      message:
+        targetDebt.type === "i_owe"
+          ? `₱${amountToPay.toLocaleString()} settled successfully with ${targetDebt.personName}!`
+          : `Marked ₱${amountToPay.toLocaleString()} as collected from ${targetDebt.personName}!`,
     };
   }
 

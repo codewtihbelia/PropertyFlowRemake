@@ -35,7 +35,17 @@ import {
   PHILIPPINE_CARD_PRESETS,
   CashAutomationRule,
   DEFAULT_CASH_RULES,
+  WalletSubscription,
+  WalletDebt,
+  SubscriptionPreset,
+  SUBSCRIPTION_PLATFORM_PRESETS,
+  LoanPlatformPreset,
+  LOAN_PLATFORM_PRESETS,
+  DebtCategory,
 } from "../services/walletService";
+import { PlatformLogo } from "../components/PlatformLogo";
+import { ActivityLedgerScreen } from "./ActivityLedgerScreen";
+import { WalletAnalyticsScreen } from "./WalletAnalyticsScreen";
 import { auth } from "../firebase/config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -107,6 +117,87 @@ function decodePixelsFromBytes(rawBytes: Uint8Array): {
     } catch (_) {}
   }
   return null;
+}
+
+// Calculates due status for subscriptions and debts (due today, due in X days, or overdue)
+export function getDueStatus(dateStr?: string): {
+  isDueToday: boolean;
+  isDueSoon: boolean;
+  isOverdue: boolean;
+  daysDiff: number;
+  label: string;
+  badgeBg: string;
+  badgeTextColor: string;
+} {
+  if (!dateStr) {
+    return {
+      isDueToday: false,
+      isDueSoon: false,
+      isOverdue: false,
+      daysDiff: 999,
+      label: "",
+      badgeBg: "#F1F5F9",
+      badgeTextColor: "#64748B",
+    };
+  }
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (isNaN(target.getTime())) {
+    return {
+      isDueToday: false,
+      isDueSoon: false,
+      isOverdue: false,
+      daysDiff: 999,
+      label: "",
+      badgeBg: "#F1F5F9",
+      badgeTextColor: "#64748B",
+    };
+  }
+  const diffDays = Math.round(
+    (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+  );
+  if (diffDays < 0) {
+    return {
+      isDueToday: false,
+      isDueSoon: true,
+      isOverdue: true,
+      daysDiff: diffDays,
+      label: `${Math.abs(diffDays)}d Overdue`,
+      badgeBg: "#FEE2E2",
+      badgeTextColor: "#DC2626",
+    };
+  } else if (diffDays === 0) {
+    return {
+      isDueToday: true,
+      isDueSoon: true,
+      isOverdue: false,
+      daysDiff: 0,
+      label: "Due Today!",
+      badgeBg: "#FEF2F2",
+      badgeTextColor: "#EF4444",
+    };
+  } else if (diffDays <= 3) {
+    return {
+      isDueToday: false,
+      isDueSoon: true,
+      isOverdue: false,
+      daysDiff: diffDays,
+      label: `Due in ${diffDays}d`,
+      badgeBg: "#FEF3C7",
+      badgeTextColor: "#D97706",
+    };
+  }
+  return {
+    isDueToday: false,
+    isDueSoon: false,
+    isOverdue: false,
+    daysDiff: diffDays,
+    label: `Due in ${diffDays}d`,
+    badgeBg: "#F1F5F9",
+    badgeTextColor: "#64748B",
+  };
 }
 
 // Resilient currency & number formatters that never throw on undefined, null, or NaN
@@ -210,292 +301,18 @@ export const QUICK_EXPENSE_PRESETS: QuickExpensePreset[] = [
   },
 ];
 
-export interface SemanticExpenseInput {
-  title?: string;
-  note?: string;
-  description?: string;
-  category?: string;
-  icon?: string;
-  type?: string;
-  amount?: number;
-  [key: string]: any;
-}
-
-export type AppWalletTransaction = WalletTransaction & {
-  note?: string;
-  icon?: string;
-  category?: string;
-};
-
-// Intersection ensures note, category, icon, title, and description are ALWAYS recognized by TypeScript
-// on unions of SemanticExpenseInput | Partial<WalletTransaction> | WalletTransaction
-export type SemanticTxInput = (
-  | SemanticExpenseInput
-  | Partial<WalletTransaction>
-  | Partial<AppWalletTransaction>
-  | Record<string, any>
-) & {
-  note?: string;
-  category?: string;
-  icon?: string;
-  title?: string;
-  description?: string;
-};
-
-export function getExpenseSemanticIconMobile(tx?: SemanticTxInput | null): {
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  bg: string;
-} {
-  const presetIconMap: Record<
-    string,
-    { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }
-  > = {
-    coffee: { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" },
-    cafe: { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" },
-    lunch: { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" },
-    restaurant: { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" },
-    commute: { icon: "bus", color: "#38BDF8", bg: "#38BDF818" },
-    bus: { icon: "bus", color: "#38BDF8", bg: "#38BDF818" },
-    grocery: { icon: "basket", color: "#34D399", bg: "#34D39918" },
-    basket: { icon: "basket", color: "#34D399", bg: "#34D39918" },
-    cart: { icon: "basket", color: "#34D399", bg: "#34D39918" },
-    merienda: { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" },
-    "fast-food": { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" },
-    utility: { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" },
-    flash: { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" },
-    pharmacy: { icon: "medkit", color: "#FB7185", bg: "#FB718518" },
-    medkit: { icon: "medkit", color: "#FB7185", bg: "#FB718518" },
-    cash: { icon: "cash", color: "#10B981", bg: "#10B98118" },
-  };
-
-  const safeTx = (tx || {}) as SemanticTxInput;
-  const rawTitle = safeTx.title || "";
-  const rawNote = safeTx.note || "";
-  const rawDescription = safeTx.description || "";
-  const rawCategory = safeTx.category || "";
-  const rawText =
-    `${rawTitle} ${rawNote} ${rawDescription} ${rawCategory}`.toLowerCase();
-
-  // 1. Drinks, Coffee, Milk Tea & Beverages
-  if (
-    /(coffee|cafe|espresso|latte|cappuccino|americano|mocha|tea|boba|milktea|milk tea|starbucks|dunkin|drink|beverage|juice|smoothie|frap|chatime|coco|macao|gong cha|tiger sugar|matcha)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "cafe", color: "#F59E0B", bg: "#F59E0B18" };
-  }
-  // 2. Meals, Fast Food & Dining Out
-  if (
-    /(lunch|dinner|breakfast|meal|food|restaurant|karinderya|carinderia|jollibee|mcdo|mcdonald|burger|ramen|kfc|inasal|chowking|pares|silog|tapsilog|sinigang|adobo|eat|dining|resto|buffet|kbbq|samgyup|bbq|shawarma|chooks|mang inasal)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "restaurant", color: "#FB923C", bg: "#FB923C18" };
-  }
-  // 3. Pizza & Italian
-  if (/(pizza|yellow cab|shakey|domino|pizza hut)/.test(rawText)) {
-    return { icon: "pizza", color: "#EA580C", bg: "#EA580C18" };
-  }
-  // 4. Merienda & Bakery Snacks
-  if (
-    /(merienda|snack|bakery|bread|pan de sal|pandesal|pastry|donut|cake|dessert|cookie|chips|ice cream|candy|waffle|goldilocks|red ribbon)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "fast-food", color: "#FBBF24", bg: "#FBBF2418" };
-  }
-  // 5. Ridesharing, Fuel & Personal Vehicle
-  if (
-    /(grab|taxi|cab|angkas|joyride|maxim|car|gas|fuel|petrol|toll|parking|diesel|drive|petron|shell|caltex)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "car", color: "#0284C7", bg: "#0284C718" };
-  }
-  // 6. Commute & Public Transit
-  if (
-    /(commute|fare|jeep|jeepney|trike|tricycle|bus|mrt|lrt|train|transit|subway|ride|travel)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "bus", color: "#38BDF8", bg: "#38BDF818" };
-  }
-  // 7. Flights & Vacation Travel
-  if (
-    /(flight|airplane|travel|vacation|airline|airport|cebu pacific|philippine airlines|airasia|hotel|airbnb|resort)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "airplane", color: "#3B82F6", bg: "#3B82F618" };
-  }
-  // 8. Supermarket, Fresh Market & Pantry
-  if (
-    /(grocery|groceries|market|palengke|supermarket|puregold|robinsons|sm market|sari-sari|convenience|7-eleven|ministop|alfamart|store|pantry|supplies|soap|shampoo|landers|snr|s&r)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "basket", color: "#34D399", bg: "#34D39918" };
-  }
-  // 9. Laundry & Fabric Care
-  if (
-    /(laundry|labada|wash|dry clean|dryclean|detergent|downy|ariel|surf|tide|cleaners)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "shirt", color: "#0EA5E9", bg: "#0EA5E918" };
-  }
-  // 10. Pharmacy, Health & Medical
-  if (
-    /(pharmacy|meds|medicine|drug|mercury|watsons|generics|doctor|clinic|hospital|dental|dentist|health|vitamin|pill|bandage|biogesic|neozep|paracetamol|theraflu)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "medkit", color: "#FB7185", bg: "#FB718518" };
-  }
-  // 11. Power, Electricity & Prepaid Load
-  if (
-    /(utility|utilities|bill|load|data|electric|meralco|power|prepaid|postpaid)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "flash", color: "#A78BFA", bg: "#A78BFA18" };
-  }
-  // 12. Water Services
-  if (/(water|maynilad|manila water|prime water)/.test(rawText)) {
-    return { icon: "water", color: "#06B6D4", bg: "#06B6D418" };
-  }
-  // 13. Internet & Telecom
-  if (
-    /(internet|wifi|fiber|pldt|globe|smart|converge|dito|telco)/.test(rawText)
-  ) {
-    return { icon: "wifi", color: "#8B5CF6", bg: "#8B5CF618" };
-  }
-  // 14. Cinema & Streaming
-  if (/(movie|cinema|netflix|theater|film|disney|hbo|youtube)/.test(rawText)) {
-    return { icon: "film", color: "#E11D48", bg: "#E11D4818" };
-  }
-  // 15. Gaming & Digital Entertainment
-  if (
-    /(game|gaming|steam|playstation|xbox|nintendo|esports|valorant|genshin|mlbb|mobile legends)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "game-controller", color: "#6366F1", bg: "#6366F118" };
-  }
-  // 16. Music & Audio Streaming
-  if (/(spotify|music|concert|song|audio|apple music)/.test(rawText)) {
-    return { icon: "musical-notes", color: "#10B981", bg: "#10B98118" };
-  }
-  // 17. Gym, Sports & Fitness
-  if (
-    /(gym|workout|fitness|crossfit|boxing|yoga|anytime fitness|gold gym|pilates|sports|badminton|basketball)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "fitness", color: "#F43F5E", bg: "#F43F5E18" };
-  }
-  // 18. Grooming, Salon & Personal Care
-  if (
-    /(haircut|salon|barber|barbershop|beauty|spa|wax|massage|nails)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "cut", color: "#EC4899", bg: "#EC489918" };
-  }
-  // 19. School, Books & Education
-  if (
-    /(school|book|tuition|course|study|exam|stationery|pen|paper|class|supplies|national bookstore)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "book", color: "#3B82F6", bg: "#3B82F618" };
-  }
-  // 20. Tech, Gadgets & Hardware
-  if (
-    /(tech|gadget|phone|iphone|android|laptop|macbook|ipad|tablet|charger|cable|earbuds|airpods|headphone|mouse|keyboard|monitor|electronics)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "hardware-chip", color: "#6366F1", bg: "#6366F118" };
-  }
-  // 21. Celebrations & Gifts
-  if (
-    /(gift|regalo|present|party|birthday|anniversary|celebration|christmas|balloon)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "gift", color: "#EC4899", bg: "#EC489918" };
-  }
-  // 22. Tools & Repair
-  if (
-    /(tool|tools|repair|hardware|hammer|drill|plumbing|paint|screws|fix|maintenance)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "construct", color: "#F59E0B", bg: "#F59E0B18" };
-  }
-  // 23. Subscriptions & Association Dues
-  if (
-    /(subscription|sub|hoa|dues|condo dues|association|membership|fee|insurance)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "card", color: "#8B5CF6", bg: "#8B5CF618" };
-  }
-  // 24. Apparel & Lifestyle Shopping
-  if (
-    /(shopping|clothes|shirt|pants|shoes|sneakers|shopee|lazada|shein|tiktok|apparel|fashion|zara|uniqlo|h&m)/.test(
-      rawText,
-    )
-  ) {
-    return { icon: "pricetag", color: "#F472B6", bg: "#F472B618" };
-  }
-  // 25. Pets & Veterinary Care
-  if (/(pet|vet|dog|cat|animal|puppy|kitten)/.test(rawText)) {
-    return { icon: "paw", color: "#F59E0B", bg: "#F59E0B18" };
-  }
-  // 26. Rent, Home & Accommodation
-  if (/(rent|room|apartment|condo|house|home|stay|dorm)/.test(rawText)) {
-    return { icon: "home", color: "#14B8A6", bg: "#14B8A618" };
-  }
-  // 27. Cash & Allowances
-  if (/(cash|allowance|petty|tender|atm|change|withdrawal)/.test(rawText)) {
-    return { icon: "cash", color: "#10B981", bg: "#10B98118" };
-  }
-
-  // Preset key fallback (ignoring generic 'cart', 'custom', 'add-circle' so title takes precedence)
-  const txIcon = safeTx.icon;
-  if (
-    txIcon &&
-    !["cart", "custom", "add-circle"].includes(txIcon) &&
-    presetIconMap[txIcon]
-  ) {
-    return presetIconMap[txIcon];
-  }
-
-  // Diversified lifestyle fallbacks (NEVER defaulting to cart or bag)
-  const fallbacks: {
-    icon: keyof typeof Ionicons.glyphMap;
-    color: string;
-    bg: string;
-  }[] = [
-    { icon: "sparkles", color: "#EC4899", bg: "#EC489918" },
-    { icon: "pricetag", color: "#8B5CF6", bg: "#8B5CF618" },
-    { icon: "compass", color: "#14B8A6", bg: "#14B8A618" },
-    { icon: "bookmark", color: "#06B6D4", bg: "#06B6D418" },
-    { icon: "wallet", color: "#10B981", bg: "#10B98118" },
-    { icon: "heart", color: "#F43F5E", bg: "#F43F5E18" },
-    { icon: "gift", color: "#F59E0B", bg: "#F59E0B18" },
-    { icon: "cube", color: "#3B82F6", bg: "#3B82F618" },
-    { icon: "ribbon", color: "#8B5CF6", bg: "#8B5CF618" },
-    { icon: "shield-checkmark", color: "#0284C7", bg: "#0284C718" },
-  ];
-  const charCodeSum = (tx?.title || "expense")
-    .split("")
-    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return fallbacks[charCodeSum % fallbacks.length];
-}
+export {
+  SemanticExpenseInput,
+  AppWalletTransaction,
+  SemanticTxInput,
+  getExpenseSemanticIconMobile,
+} from "../utils/WalletSemanticIcons";
+import {
+  getExpenseSemanticIconMobile,
+  type AppWalletTransaction,
+  type SemanticTxInput,
+  type SemanticExpenseInput,
+} from "../utils/WalletSemanticIcons";
 
 interface WalletScreenProps {
   userId?: string;
@@ -586,6 +403,62 @@ export function WalletScreen({
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [hideBalance, setHideBalance] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Dedicated Screen Navigation State
+  const [activeWalletView, setActiveWalletView] = useState<
+    "main" | "activity_ledger" | "analytics"
+  >("main");
+
+  // Subscriptions & Payment State
+  const [showAddSubModal, setShowAddSubModal] = useState<boolean>(false);
+  const [showSubDetailModal, setShowSubDetailModal] = useState<boolean>(false);
+  const [showPaySubModal, setShowPaySubModal] = useState<boolean>(false);
+  const [selectedSubDetail, setSelectedSubDetail] =
+    useState<WalletSubscription | null>(null);
+  const [selectedSubForPay, setSelectedSubForPay] =
+    useState<WalletSubscription | null>(null);
+  const [subPayPaymentMethod, setSubPayPaymentMethod] =
+    useState<string>("Splitzy Wallet");
+  const [isPayingSub, setIsPayingSub] = useState<boolean>(false);
+  const [subPlatformKey, setSubPlatformKey] = useState<string>("netflix");
+  const [subName, setSubName] = useState<string>("Netflix Standard");
+  const [subAmount, setSubAmount] = useState<string>("399");
+  const [subBillingCycle, setSubBillingCycle] = useState<"monthly" | "yearly">(
+    "monthly",
+  );
+  const [subNextRenewalDate, setSubNextRenewalDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().split("T")[0];
+  });
+  const [subSelectedCardId, setSubSelectedCardId] = useState<string>("");
+  const [subCategory, setSubCategory] = useState<string>("streaming");
+  const [isAddingSub, setIsAddingSub] = useState<boolean>(false);
+
+  // Debts State
+  const [debtsTab, setDebtsTab] = useState<"i_owe" | "owed_to_me">("i_owe");
+  const [debtLenderType, setDebtLenderType] = useState<"fintech" | "personal">(
+    "fintech",
+  );
+  const [debtPlatformKey, setDebtPlatformKey] = useState<string>("billease");
+  const [debtLoanRefNo, setDebtLoanRefNo] = useState<string>("");
+  const [showAddDebtModal, setShowAddDebtModal] = useState<boolean>(false);
+  const [showSettleDebtModal, setShowSettleDebtModal] =
+    useState<boolean>(false);
+  const [selectedDebtForSettle, setSelectedDebtForSettle] =
+    useState<WalletDebt | null>(null);
+  const [debtType, setDebtType] = useState<"i_owe" | "owed_to_me">("i_owe");
+  const [debtPersonName, setDebtPersonName] = useState<string>("BillEase");
+  const [debtAmount, setDebtAmount] = useState<string>("");
+  const [debtDueDate, setDebtDueDate] = useState<string>("");
+  const [debtDescription, setDebtDescription] = useState<string>(
+    "Buy now pay later & cash installments",
+  );
+  const [settlePaymentMethod, setSettlePaymentMethod] =
+    useState<string>("Splitzy Wallet");
+  const [settleCustomAmount, setSettleCustomAmount] = useState<string>("");
+  const [isSavingDebt, setIsSavingDebt] = useState<boolean>(false);
+  const [isSettlingDebt, setIsSettlingDebt] = useState<boolean>(false);
 
   // Modals state
   const [showCashInModal, setShowCashInModal] = useState<boolean>(false);
@@ -1492,6 +1365,9 @@ export function WalletScreen({
     const unsubscribe = walletService.listenToWallet(currentUid, (state) => {
       setWallet(state);
       setLoading(false);
+      if (state) {
+        walletService.checkAndDispatchDueReminders(currentUid, state);
+      }
     });
     return unsubscribe;
   }, [currentUid]);
@@ -2232,6 +2108,193 @@ export function WalletScreen({
     }
   };
 
+  const handleAddSubscription = async () => {
+    const amt = parseFloat(subAmount);
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid subscription price.");
+      return;
+    }
+    if (!subName.trim()) {
+      Alert.alert(
+        "Missing Name",
+        "Please enter a platform or subscription name.",
+      );
+      return;
+    }
+
+    try {
+      setIsAddingSub(true);
+      const updated = await walletService.addSubscription(currentUid, {
+        platformKey: subPlatformKey,
+        name: subName.trim(),
+        amount: amt,
+        billingCycle: subBillingCycle,
+        nextRenewalDate: subNextRenewalDate,
+        cardId: subSelectedCardId || undefined,
+        category: (subCategory as any) || "streaming",
+        status: "active",
+      });
+
+      setWallet(updated);
+      setShowAddSubModal(false);
+      Alert.alert("Subscription Added", `${subName.trim()} has been saved.`);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not add subscription.");
+    } finally {
+      setIsAddingSub(false);
+    }
+  };
+
+  const handleDeleteSubscription = async (subId: string) => {
+    try {
+      const updated = await walletService.deleteSubscription(currentUid, subId);
+      setWallet(updated);
+      setShowSubDetailModal(false);
+      setSelectedSubDetail(null);
+      Alert.alert("Removed", "Subscription has been removed.");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not delete subscription.");
+    }
+  };
+
+  const handleOpenPaySubModal = (sub: WalletSubscription) => {
+    setSelectedSubForPay(sub);
+    setSubPayPaymentMethod("Splitzy Wallet");
+    setShowPaySubModal(true);
+  };
+
+  const handleExecutePaySub = async () => {
+    if (!selectedSubForPay) return;
+    try {
+      setIsPayingSub(true);
+      const res = await walletService.paySubscription(
+        currentUid,
+        selectedSubForPay.id,
+        subPayPaymentMethod,
+      );
+      if (res.success && res.updatedState) {
+        setWallet(res.updatedState);
+        setShowPaySubModal(false);
+        setShowSubDetailModal(false);
+        setSelectedSubForPay(null);
+        Alert.alert("Subscription Renewed", res.message);
+      } else {
+        Alert.alert("Payment Failed", res.message);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not process payment.");
+    } finally {
+      setIsPayingSub(false);
+    }
+  };
+
+  const handleAddDebt = async () => {
+    const amt = parseFloat(debtAmount);
+    if (isNaN(amt) || amt <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid amount.");
+      return;
+    }
+    if (!debtPersonName.trim()) {
+      Alert.alert(
+        "Missing Name",
+        "Please enter the lender, app, or person name.",
+      );
+      return;
+    }
+
+    try {
+      setIsSavingDebt(true);
+      const matchedLoanPreset = LOAN_PLATFORM_PRESETS.find(
+        (p) => p.platformKey === debtPlatformKey,
+      );
+      const effectiveCategory: DebtCategory =
+        debtLenderType === "fintech"
+          ? matchedLoanPreset?.category || "fintech_loan"
+          : "personal";
+
+      const updated = await walletService.addDebt(currentUid, {
+        type: debtType,
+        personName: debtPersonName.trim(),
+        platformKey: debtLenderType === "fintech" ? debtPlatformKey : undefined,
+        loanReferenceNo: debtLoanRefNo.trim() || undefined,
+        lenderType: debtLenderType,
+        category: effectiveCategory,
+        amount: amt,
+        dueDate: debtDueDate || undefined,
+        description:
+          debtDescription.trim() ||
+          (debtLenderType === "fintech"
+            ? `${debtPersonName} Loan Installment`
+            : "Personal Loan"),
+      });
+
+      setWallet(updated);
+      setShowAddDebtModal(false);
+      setDebtPersonName(LOAN_PLATFORM_PRESETS[0].name);
+      setDebtPlatformKey(LOAN_PLATFORM_PRESETS[0].platformKey);
+      setDebtLoanRefNo("");
+      setDebtAmount("");
+      setDebtDueDate("");
+      setDebtDescription(LOAN_PLATFORM_PRESETS[0].description);
+      Alert.alert("Loan/Debt Saved", "Record has been successfully saved.");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not save debt.");
+    } finally {
+      setIsSavingDebt(false);
+    }
+  };
+
+  const handleOpenSettleDebtModal = (debt: WalletDebt) => {
+    setSelectedDebtForSettle(debt);
+    setSettlePaymentMethod("Splitzy Wallet");
+    setSettleCustomAmount(String(debt.amount));
+    setShowSettleDebtModal(true);
+  };
+
+  const handleExecuteSettleDebt = async () => {
+    if (!selectedDebtForSettle) return;
+    const settleAmt =
+      parseFloat(settleCustomAmount) || selectedDebtForSettle.amount;
+    if (isNaN(settleAmt) || settleAmt <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid settlement amount.");
+      return;
+    }
+
+    try {
+      setIsSettlingDebt(true);
+      const res = await walletService.settleDebt(
+        currentUid,
+        selectedDebtForSettle.id,
+        settlePaymentMethod,
+        settleAmt,
+      );
+
+      if (res.success && res.updatedState) {
+        setWallet(res.updatedState);
+        setShowSettleDebtModal(false);
+        setSelectedDebtForSettle(null);
+        Alert.alert("Settled Successfully", res.message);
+      } else {
+        Alert.alert("Settlement Failed", res.message);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not settle debt.");
+    } finally {
+      setIsSettlingDebt(false);
+    }
+  };
+
+  const handleDeleteDebt = async (debtId: string) => {
+    try {
+      const updated = await walletService.deleteDebt(currentUid, debtId);
+      setWallet(updated);
+      setShowSettleDebtModal(false);
+      setSelectedDebtForSettle(null);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not delete debt.");
+    }
+  };
+
   const filteredTransactions = (wallet?.transactions || []).filter((tx) => {
     if (txFilter === "all") return true;
     if (txFilter === "cash_in") return tx.type === "cash_in";
@@ -2247,6 +2310,19 @@ export function WalletScreen({
       return tx.type === "savings_deposit" || tx.type === "savings_withdrawal";
     return true;
   });
+
+  const displayedTransactions = useMemo(() => {
+    return filteredTransactions.slice(0, 20);
+  }, [filteredTransactions]);
+
+  const totalMonthlyBurn = useMemo(() => {
+    return (wallet?.subscriptions || [])
+      .filter((s) => s.status === "active")
+      .reduce((acc, s) => {
+        const amt = s.amount || 0;
+        return acc + (s.billingCycle === "yearly" ? amt / 12 : amt);
+      }, 0);
+  }, [wallet?.subscriptions]);
 
   if (loading && !wallet) {
     return (
@@ -2273,6 +2349,30 @@ export function WalletScreen({
     (wallet?.cards || []).length > 0
       ? (wallet?.cards || []).reduce((sum, c) => sum + (c.balance || 0), 0)
       : (wallet?.balance ?? 0);
+
+  if (activeWalletView === "activity_ledger") {
+    return (
+      <ActivityLedgerScreen
+        transactions={wallet?.transactions || []}
+        onBack={() => setActiveWalletView("main")}
+        onSelectTransaction={(tx) => setSelectedTx(tx)}
+      />
+    );
+  }
+
+  if (activeWalletView === "analytics") {
+    return (
+      <WalletAnalyticsScreen
+        balance={balance}
+        transactions={wallet?.transactions || []}
+        cards={wallet?.cards || []}
+        pockets={wallet?.pockets || wallet?.savingsPockets || []}
+        subscriptions={wallet?.subscriptions || []}
+        debts={wallet?.debts || []}
+        onBack={() => setActiveWalletView("main")}
+      />
+    );
+  }
 
   return (
     <View
@@ -2610,7 +2710,7 @@ export function WalletScreen({
 
             <TouchableOpacity
               style={styles.quickCircleItem}
-              onPress={() => setShowAnalyticsModal(true)}
+              onPress={() => setActiveWalletView("analytics")}
               activeOpacity={0.7}
             >
               <View
@@ -3671,26 +3771,825 @@ export function WalletScreen({
           </ScrollView>
         )}
 
-        {/* 4. Activity & Transaction Ledger */}
+        {/* 4. Subscriptions & Recurring */}
         <View style={styles.sectionHeaderRow}>
-          <View>
+          <View style={styles.titleAddRow}>
+            <View>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Subscriptions
+              </Text>
+            </View>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+            >
+              {totalMonthlyBurn > 0 && (
+                <View
+                  style={[
+                    styles.subBurnBadge,
+                    {
+                      backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.subBurnBadgeText,
+                      { color: isDark ? "#93C5FD" : "#2563EB" },
+                    ]}
+                  >
+                    ₱{Math.round(totalMonthlyBurn).toLocaleString()}/mo
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={styles.addSectionBtn}
+                onPress={() => {
+                  setSubPlatformKey("netflix");
+                  setSubName("Netflix Standard");
+                  setSubAmount("399");
+                  setSubCategory("streaming");
+                  setShowAddSubModal(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={16} color="#2563EB" />
+                <Text style={styles.addSectionBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text
+            style={[
+              styles.sectionSubtitle,
+              { color: isDark ? colors.textMuted : "#64748B" },
+            ]}
+          >
+            Streaming, cloud, utilities & memberships
+          </Text>
+        </View>
+
+        {(wallet?.subscriptions || []).length === 0 ? (
+          <View
+            style={[
+              styles.emptySubCard,
+              {
+                backgroundColor: isDark ? colors.card : "#FFFFFF",
+                borderColor: isDark ? colors.border : "#E2E8F0",
+              },
+            ]}
+          >
+            <View style={styles.emptySubIconRow}>
+              <PlatformLogo platformKey="netflix" size={24} />
+              <PlatformLogo platformKey="spotify" size={24} />
+              <PlatformLogo platformKey="chatgpt" size={24} />
+              <PlatformLogo platformKey="google_one" size={24} />
+              <PlatformLogo platformKey="youtube" size={24} />
+            </View>
             <Text
               style={[
-                styles.sectionTitle,
-                { color: isDark ? colors.text : "#0F172A" },
+                styles.emptyTxTitle,
+                { color: isDark ? colors.text : "#0F172A", marginTop: 8 },
               ]}
             >
-              Activity & Ledger
+              No tracked subscriptions
             </Text>
             <Text
               style={[
-                styles.sectionSubtitle,
+                styles.emptyTxSubtitle,
                 { color: isDark ? colors.textMuted : "#64748B" },
               ]}
             >
-              Real-time records of payments, deposits & top-ups
+              Track Netflix, Spotify, ChatGPT, internet, and cloud services in
+              one place.
             </Text>
+            <TouchableOpacity
+              style={[styles.emptySubActionBtn, { backgroundColor: "#2563EB" }]}
+              onPress={() => {
+                setSubPlatformKey("netflix");
+                setSubName("Netflix Standard");
+                setSubAmount("399");
+                setSubCategory("streaming");
+                setShowAddSubModal(true);
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={16} color="#FFFFFF" />
+              <Text style={styles.emptySubActionBtnText}>
+                Add First Subscription
+              </Text>
+            </TouchableOpacity>
           </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.subsHorizontalScroll}
+            contentContainerStyle={styles.subsHorizontalContent}
+          >
+            {(wallet?.subscriptions || []).map((sub) => {
+              const matchedPreset = SUBSCRIPTION_PLATFORM_PRESETS.find(
+                (p) => (p.key || p.platformKey) === sub.platformKey,
+              );
+              const dueInfo = getDueStatus(sub.nextRenewalDate);
+
+              return (
+                <TouchableOpacity
+                  key={sub.id}
+                  style={[
+                    styles.subCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "#FFFFFF",
+                      borderColor: dueInfo.isDueToday
+                        ? "#EF4444"
+                        : dueInfo.isDueSoon
+                          ? "#F59E0B"
+                          : isDark
+                            ? colors.border
+                            : "#E2E8F0",
+                    },
+                  ]}
+                  onPress={() => {
+                    setSelectedSubDetail(sub);
+                    setShowSubDetailModal(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.subCardTop}>
+                    <PlatformLogo
+                      platformKey={sub.platformKey}
+                      size={36}
+                      customColor={sub.color}
+                    />
+                    <View
+                      style={[
+                        styles.subStatusPill,
+                        {
+                          backgroundColor:
+                            sub.status === "active"
+                              ? isDark
+                                ? "#064E3B"
+                                : "#ECFDF5"
+                              : isDark
+                                ? "#78350F"
+                                : "#FFFBEB",
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.subStatusDot,
+                          {
+                            backgroundColor:
+                              sub.status === "active" ? "#10B981" : "#F59E0B",
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.subStatusText,
+                          {
+                            color:
+                              sub.status === "active"
+                                ? "#10B981"
+                                : isDark
+                                  ? "#FCD34D"
+                                  : "#D97706",
+                          },
+                        ]}
+                      >
+                        {sub.status === "active" ? "Active" : "Paused"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ marginTop: 8 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.subCardName,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                    >
+                      {sub.name}
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.subCardCategory,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        {matchedPreset?.category?.toUpperCase() ||
+                          "SUBSCRIPTION"}
+                      </Text>
+                      {dueInfo.label ? (
+                        <View
+                          style={[
+                            styles.subDuePill,
+                            { backgroundColor: dueInfo.badgeBg },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.subDuePillText,
+                              { color: dueInfo.badgeTextColor },
+                            ]}
+                          >
+                            {dueInfo.label}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  <View style={styles.subCardBottom}>
+                    <Text
+                      style={[
+                        styles.subCardPrice,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                    >
+                      ₱{(sub.amount || 0).toLocaleString()}
+                      <Text
+                        style={[
+                          styles.subCardCycle,
+                          { color: isDark ? colors.textMuted : "#94A3B8" },
+                        ]}
+                      >
+                        /{sub.billingCycle === "yearly" ? "yr" : "mo"}
+                      </Text>
+                    </Text>
+                    {dueInfo.isDueSoon ? (
+                      <TouchableOpacity
+                        style={styles.subPayQuickBtn}
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          handleOpenPaySubModal(sub);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="flash" size={11} color="#FFFFFF" />
+                        <Text style={styles.subPayQuickBtnText}>Pay Now</Text>
+                      </TouchableOpacity>
+                    ) : sub.nextRenewalDate ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.subCardRenewal,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Renews {sub.nextRenewalDate}
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Quick Add Card at End */}
+            <TouchableOpacity
+              style={[
+                styles.addSubShortcutCard,
+                {
+                  borderColor: isDark ? colors.border : "#CBD5E1",
+                  backgroundColor: isDark ? colors.surfaceInset : "#F1F5F966",
+                },
+              ]}
+              onPress={() => {
+                setSubPlatformKey("netflix");
+                setSubName("Netflix Standard");
+                setSubAmount("399");
+                setSubCategory("streaming");
+                setShowAddSubModal(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.addSubIconCircle}>
+                <Ionicons name="add" size={24} color="#2563EB" />
+              </View>
+              <Text
+                style={[
+                  styles.addCardPlaceholderText,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Add Sub
+              </Text>
+              <Text
+                style={[
+                  styles.addCardPlaceholderSub,
+                  { color: isDark ? colors.textMuted : "#64748B" },
+                ]}
+              >
+                Preset or custom
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+
+        {/* 5. Debts & IOUs Tracker */}
+        <View style={styles.sectionHeaderRow}>
+          <View style={styles.titleAddRow}>
+            <View>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Debts & IOUs
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.addSectionBtn}
+              onPress={() => {
+                setDebtType(debtsTab);
+                setDebtPersonName("");
+                setDebtAmount("");
+                setDebtDueDate("");
+                setDebtDescription("");
+                setShowAddDebtModal(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add" size={16} color="#2563EB" />
+              <Text style={styles.addSectionBtnText}>Add IOU</Text>
+            </TouchableOpacity>
+          </View>
+          <Text
+            style={[
+              styles.sectionSubtitle,
+              { color: isDark ? colors.textMuted : "#64748B" },
+            ]}
+          >
+            Track personal money you owe & money owed to you with 1-tap
+            settlement
+          </Text>
+        </View>
+
+        {/* Debt Direction Tabs */}
+        <View style={styles.debtsTabRow}>
+          {(() => {
+            const iOweList = (wallet?.debts || []).filter(
+              (d) => d.type === "i_owe" && d.status !== "settled",
+            );
+            const owedToMeList = (wallet?.debts || []).filter(
+              (d) => d.type === "owed_to_me" && d.status !== "settled",
+            );
+            const iOweTotal = iOweList.reduce(
+              (acc, d) => acc + (d.amount || 0),
+              0,
+            );
+            const owedToMeTotal = owedToMeList.reduce(
+              (acc, d) => acc + (d.amount || 0),
+              0,
+            );
+
+            return (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.debtsTabBtn,
+                    debtsTab === "i_owe"
+                      ? {
+                          backgroundColor: isDark ? "#450A0A" : "#FEF2F2",
+                          borderColor: "#EF4444",
+                        }
+                      : {
+                          backgroundColor: isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                          borderColor: isDark ? colors.border : "#E2E8F0",
+                        },
+                  ]}
+                  onPress={() => setDebtsTab("i_owe")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Ionicons
+                      name="arrow-up-circle"
+                      size={16}
+                      color="#EF4444"
+                    />
+                    <Text
+                      style={[
+                        styles.debtsTabText,
+                        {
+                          color:
+                            debtsTab === "i_owe"
+                              ? "#EF4444"
+                              : isDark
+                                ? colors.textSecondary
+                                : "#64748B",
+                          fontWeight: debtsTab === "i_owe" ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      I Owe ({iOweList.length})
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.debtsTabAmount,
+                      {
+                        color:
+                          debtsTab === "i_owe"
+                            ? "#EF4444"
+                            : isDark
+                              ? colors.textMuted
+                              : "#94A3B8",
+                      },
+                    ]}
+                  >
+                    ₱{iOweTotal.toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.debtsTabBtn,
+                    debtsTab === "owed_to_me"
+                      ? {
+                          backgroundColor: isDark ? "#064E3B" : "#ECFDF5",
+                          borderColor: "#10B981",
+                        }
+                      : {
+                          backgroundColor: isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                          borderColor: isDark ? colors.border : "#E2E8F0",
+                        },
+                  ]}
+                  onPress={() => setDebtsTab("owed_to_me")}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Ionicons
+                      name="arrow-down-circle"
+                      size={16}
+                      color="#10B981"
+                    />
+                    <Text
+                      style={[
+                        styles.debtsTabText,
+                        {
+                          color:
+                            debtsTab === "owed_to_me"
+                              ? "#10B981"
+                              : isDark
+                                ? colors.textSecondary
+                                : "#64748B",
+                          fontWeight: debtsTab === "owed_to_me" ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      Owed to Me ({owedToMeList.length})
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.debtsTabAmount,
+                      {
+                        color:
+                          debtsTab === "owed_to_me"
+                            ? "#10B981"
+                            : isDark
+                              ? colors.textMuted
+                              : "#94A3B8",
+                      },
+                    ]}
+                  >
+                    ₱{owedToMeTotal.toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            );
+          })()}
+        </View>
+
+        {/* Debts List */}
+        {(() => {
+          const displayedDebts = (wallet?.debts || []).filter(
+            (d) => d.type === debtsTab,
+          );
+
+          if (displayedDebts.length === 0) {
+            return (
+              <View
+                style={[
+                  styles.emptyTxBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#FFFFFF",
+                    borderColor: isDark ? colors.border : "#E2E8F0",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    debtsTab === "i_owe"
+                      ? "checkmark-circle-outline"
+                      : "hand-left-outline"
+                  }
+                  size={36}
+                  color={debtsTab === "i_owe" ? "#10B981" : "#3B82F6"}
+                />
+                <Text
+                  style={[
+                    styles.emptyTxTitle,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                >
+                  {debtsTab === "i_owe"
+                    ? "You don't owe anyone!"
+                    : "Nobody owes you right now."}
+                </Text>
+                <Text
+                  style={[
+                    styles.emptyTxSubtitle,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  {debtsTab === "i_owe"
+                    ? "All clear! Record any informal loans or shared purchases you need to pay back."
+                    : "Add friends who borrowed funds or split an expense with you."}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.emptySubActionBtn,
+                    {
+                      backgroundColor:
+                        debtsTab === "i_owe" ? "#EF4444" : "#10B981",
+                    },
+                  ]}
+                  onPress={() => {
+                    setDebtType(debtsTab);
+                    setDebtPersonName("");
+                    setDebtAmount("");
+                    setDebtDueDate("");
+                    setDebtDescription("");
+                    setShowAddDebtModal(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                  <Text style={styles.emptySubActionBtnText}>
+                    {debtsTab === "i_owe"
+                      ? "Record What I Owe"
+                      : "Record What is Owed"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }
+
+          return (
+            <View
+              style={[
+                styles.txListContainer,
+                {
+                  backgroundColor: isDark ? colors.card : "#FFFFFF",
+                  borderColor: isDark ? colors.border : "#E2E8F0",
+                },
+              ]}
+            >
+              {displayedDebts.map((debt, idx) => {
+                const isLast = idx === displayedDebts.length - 1;
+                const isPending = debt.status !== "settled";
+                const dueInfo = getDueStatus(debt.dueDate);
+
+                return (
+                  <View
+                    key={debt.id}
+                    style={[
+                      styles.debtRow,
+                      !isLast && {
+                        borderBottomWidth: 1,
+                        borderBottomColor: isDark ? colors.border : "#F1F5F9",
+                      },
+                    ]}
+                  >
+                    <View style={styles.debtLeft}>
+                      {debt.platformKey ? (
+                        <PlatformLogo
+                          platformKey={debt.platformKey}
+                          size={38}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.debtAvatar,
+                            {
+                              backgroundColor:
+                                debt.type === "i_owe"
+                                  ? isDark
+                                    ? "#450A0A"
+                                    : "#FEE2E2"
+                                  : isDark
+                                    ? "#064E3B"
+                                    : "#DCFCE7",
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="person"
+                            size={16}
+                            color={
+                              debt.type === "i_owe" ? "#EF4444" : "#10B981"
+                            }
+                          />
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.debtPersonName,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {debt.personName}
+                          </Text>
+                          <View
+                            style={[
+                              styles.debtStatusBadge,
+                              {
+                                backgroundColor: isPending
+                                  ? isDark
+                                    ? "#78350F"
+                                    : "#FEF3C7"
+                                  : isDark
+                                    ? "#14532D"
+                                    : "#DCFCE7",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.debtStatusBadgeText,
+                                {
+                                  color: isPending
+                                    ? isDark
+                                      ? "#FCD34D"
+                                      : "#B45309"
+                                    : "#10B981",
+                                },
+                              ]}
+                            >
+                              {isPending ? "Pending" : "Settled"}
+                            </Text>
+                          </View>
+                        </View>
+                        {debt.loanReferenceNo ? (
+                          <Text style={styles.debtRefNoText}>
+                            Ref: {debt.loanReferenceNo}
+                          </Text>
+                        ) : null}
+                        {debt.description ? (
+                          <Text
+                            style={[
+                              styles.debtDescription,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            {debt.description}
+                          </Text>
+                        ) : null}
+                        {debt.dueDate && (
+                          <Text
+                            style={[
+                              styles.debtDueDate,
+                              {
+                                color: dueInfo.isDueToday
+                                  ? "#EF4444"
+                                  : dueInfo.isDueSoon
+                                    ? "#D97706"
+                                    : isDark
+                                      ? colors.textMuted
+                                      : "#64748B",
+                                fontWeight:
+                                  dueInfo.isDueSoon || dueInfo.isDueToday
+                                    ? "700"
+                                    : "500",
+                              },
+                            ]}
+                          >
+                            Due {debt.dueDate}{" "}
+                            {dueInfo.label ? `· ${dueInfo.label}` : ""}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+
+                    <View style={styles.debtRight}>
+                      <Text
+                        style={[
+                          styles.debtAmount,
+                          {
+                            color:
+                              debt.type === "i_owe" ? "#EF4444" : "#10B981",
+                          },
+                        ]}
+                      >
+                        {debt.type === "i_owe" ? "-₱" : "+₱"}
+                        {(debt.amount || 0).toLocaleString()}
+                      </Text>
+
+                      {isPending ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.debtSettleBtn,
+                            {
+                              backgroundColor:
+                                debt.type === "i_owe" ? "#EF4444" : "#10B981",
+                            },
+                          ]}
+                          onPress={() => handleOpenSettleDebtModal(debt)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.debtSettleBtnText}>
+                            {debt.type === "i_owe" ? "Settle" : "Collect"}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <Text
+                          style={[
+                            styles.debtSettledOn,
+                            { color: isDark ? colors.textMuted : "#94A3B8" },
+                          ]}
+                        >
+                          Settled
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })()}
+
+        {/* 6. Activity & Transaction Ledger */}
+        <View style={styles.sectionHeaderRow}>
+          <View style={styles.titleAddRow}>
+            <View>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Activity & Ledger
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.addSectionBtn}
+              onPress={() => setActiveWalletView("activity_ledger")}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.addSectionBtnText}>
+                View All ({wallet?.transactions?.length || 0})
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text
+            style={[
+              styles.sectionSubtitle,
+              { color: isDark ? colors.textMuted : "#64748B" },
+            ]}
+          >
+            Showing recent 20 activities
+          </Text>
         </View>
 
         {/* Filter Tabs */}
@@ -3781,7 +4680,7 @@ export function WalletScreen({
               },
             ]}
           >
-            {filteredTransactions.map((tx, idx) => {
+            {displayedTransactions.map((tx, idx) => {
               const isPositive =
                 tx.type === "cash_in" || tx.type === "savings_withdrawal";
               const isLast = idx === filteredTransactions.length - 1;
@@ -3919,6 +4818,25 @@ export function WalletScreen({
                 </TouchableOpacity>
               );
             })}
+
+            {filteredTransactions.length > 20 && (
+              <TouchableOpacity
+                style={[
+                  styles.viewMoreTxBtn,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderTopWidth: 1,
+                    borderTopColor: isDark ? colors.border : "#F1F5F9",
+                  },
+                ]}
+                onPress={() => setActiveWalletView("activity_ledger")}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.viewMoreTxText, { color: "#2563EB" }]}>
+                  View All {filteredTransactions.length} Transactions →
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -11813,6 +12731,1702 @@ export function WalletScreen({
           </View>
         </View>
       </Modal>
+
+      {/* MODAL: Add Subscription */}
+      <Modal
+        visible={showAddSubModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAddSubModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={dynamicModalOverlayStyle}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowAddSubModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                maxHeight: modalAdaptiveMaxHeight,
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+              },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <View>
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                >
+                  Add Subscription
+                </Text>
+                <Text
+                  style={[
+                    styles.modalSubtitle,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Streaming, cloud services, entertainment & utilities
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowAddSubModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name="close"
+                  size={24}
+                  color={isDark ? colors.textMuted : "#64748B"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
+              <Text
+                style={[
+                  styles.formSectionLabel,
+                  { color: isDark ? colors.textMuted : "#64748B" },
+                ]}
+              >
+                SELECT POPULAR PLATFORM PRESET
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginHorizontal: -20, marginBottom: 16 }}
+                contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
+              >
+                {SUBSCRIPTION_PLATFORM_PRESETS.map((p) => {
+                  const isSelected = subPlatformKey === p.platformKey;
+                  return (
+                    <TouchableOpacity
+                      key={p.platformKey}
+                      style={[
+                        styles.presetChip,
+                        {
+                          backgroundColor: isSelected
+                            ? isDark
+                              ? "#1E3A8A"
+                              : "#EFF6FF"
+                            : isDark
+                              ? colors.surfaceInset
+                              : "#F8FAFC",
+                          borderColor: isSelected
+                            ? "#2563EB"
+                            : isDark
+                              ? colors.border
+                              : "#E2E8F0",
+                        },
+                      ]}
+                      onPress={() => {
+                        setSubPlatformKey(p.platformKey);
+                        setSubName(p.name);
+                        setSubAmount(String(p.defaultAmount));
+                        setSubCategory(p.category);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <PlatformLogo platformKey={p.platformKey} size={20} />
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          {
+                            color: isSelected
+                              ? "#2563EB"
+                              : isDark
+                                ? colors.text
+                                : "#0F172A",
+                            fontWeight: isSelected ? "700" : "500",
+                          },
+                        ]}
+                      >
+                        {p.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Service / Plan Name
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. Netflix Standard, Spotify Premium"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={subName}
+                onChangeText={setSubName}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Cost (PHP ₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. 399"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                keyboardType="numeric"
+                value={subAmount}
+                onChangeText={setSubAmount}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Billing Frequency
+              </Text>
+              <View style={styles.cycleToggleRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    subBillingCycle === "monthly" &&
+                      styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        subBillingCycle === "monthly"
+                          ? "#2563EB"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        subBillingCycle === "monthly"
+                          ? "#2563EB"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => setSubBillingCycle("monthly")}
+                >
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          subBillingCycle === "monthly"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    Monthly
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    subBillingCycle === "yearly" && styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        subBillingCycle === "yearly"
+                          ? "#2563EB"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        subBillingCycle === "yearly"
+                          ? "#2563EB"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => setSubBillingCycle("yearly")}
+                >
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          subBillingCycle === "yearly"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    Yearly (Annual)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Next Renewal Date (YYYY-MM-DD)
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="2026-11-15"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={subNextRenewalDate}
+                onChangeText={setSubNextRenewalDate}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.modalPrimaryBtn,
+                  { backgroundColor: "#2563EB", marginTop: 20 },
+                ]}
+                onPress={handleAddSubscription}
+                disabled={isAddingSub}
+                activeOpacity={0.8}
+              >
+                {isAddingSub ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="add-circle" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalPrimaryBtnText}>
+                      Save Subscription
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Subscription Detail / Delete */}
+      <Modal
+        visible={showSubDetailModal && !!selectedSubDetail}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSubDetailModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={dynamicModalOverlayStyle}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowSubDetailModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                maxHeight: modalAdaptiveMaxHeight,
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+              },
+            ]}
+          >
+            {selectedSubDetail && (
+              <>
+                <View style={styles.modalHeader}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <PlatformLogo
+                      platformKey={selectedSubDetail.platformKey}
+                      size={40}
+                      customColor={selectedSubDetail.color}
+                    />
+                    <View>
+                      <Text
+                        style={[
+                          styles.modalTitle,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {selectedSubDetail.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.modalSubtitle,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        {selectedSubDetail.billingCycle.toUpperCase()} BILLING
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setShowSubDetailModal(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={24}
+                      color={isDark ? colors.textMuted : "#64748B"}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ paddingVertical: 16, gap: 12 }}>
+                  <View
+                    style={[
+                      styles.qrReceiptCard,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Price Rate
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        ₱{(selectedSubDetail.amount || 0).toLocaleString()} /{" "}
+                        {selectedSubDetail.billingCycle === "yearly"
+                          ? "yr"
+                          : "mo"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Next Renewal
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {selectedSubDetail.nextRenewalDate || "Not set"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Status
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          {
+                            color:
+                              selectedSubDetail.status === "active"
+                                ? "#10B981"
+                                : "#F59E0B",
+                          },
+                        ]}
+                      >
+                        {selectedSubDetail.status === "active"
+                          ? "Active Plan"
+                          : "Paused"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {selectedSubDetail.nextRenewalDate
+                    ? (() => {
+                        const dueInfo = getDueStatus(
+                          selectedSubDetail.nextRenewalDate,
+                        );
+                        if (!dueInfo.label) return null;
+                        return (
+                          <View
+                            style={[
+                              styles.dueWarningCard,
+                              { backgroundColor: dueInfo.badgeBg },
+                            ]}
+                          >
+                            <Ionicons
+                              name={
+                                dueInfo.isDueToday
+                                  ? "alert-circle"
+                                  : "time-outline"
+                              }
+                              size={18}
+                              color={dueInfo.badgeTextColor}
+                            />
+                            <Text
+                              style={[
+                                styles.dueWarningCardText,
+                                { color: dueInfo.badgeTextColor },
+                              ]}
+                            >
+                              {dueInfo.isDueToday
+                                ? "This subscription is due today! Pay now to keep it active."
+                                : `Upcoming payment: ${dueInfo.label}`}
+                            </Text>
+                          </View>
+                        );
+                      })()
+                    : null}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      { backgroundColor: "#2563EB", marginTop: 4 },
+                    ]}
+                    onPress={() => {
+                      setShowSubDetailModal(false);
+                      handleOpenPaySubModal(selectedSubDetail);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="card" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalPrimaryBtnText}>
+                      Pay / Renew with Wallet Balance
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSecondaryBtn,
+                      {
+                        borderColor: "#EF4444",
+                        backgroundColor: isDark ? "#450A0A" : "#FEF2F2",
+                        marginTop: 10,
+                      },
+                    ]}
+                    onPress={() =>
+                      handleDeleteSubscription(selectedSubDetail.id)
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    <Text
+                      style={[
+                        styles.modalSecondaryBtnText,
+                        { color: "#EF4444", fontWeight: "700" },
+                      ]}
+                    >
+                      Delete Subscription
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Pay / Renew Subscription */}
+      <Modal
+        visible={showPaySubModal && !!selectedSubForPay}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPaySubModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={dynamicModalOverlayStyle}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowPaySubModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                maxHeight: modalAdaptiveMaxHeight,
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+              },
+            ]}
+          >
+            {selectedSubForPay && (
+              <>
+                <View style={styles.modalHeader}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <PlatformLogo
+                      platformKey={selectedSubForPay.platformKey}
+                      size={40}
+                      customColor={selectedSubForPay.color}
+                    />
+                    <View>
+                      <Text
+                        style={[
+                          styles.modalTitle,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        Renew {selectedSubForPay.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.modalSubtitle,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        1-Tap Subscription Settlement
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setShowPaySubModal(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={24}
+                      color={isDark ? colors.textMuted : "#64748B"}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={{ flexShrink: 1 }}
+                  contentContainerStyle={{ paddingBottom: 24 }}
+                >
+                  <View
+                    style={[
+                      styles.qrReceiptCard,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                        marginBottom: 16,
+                      },
+                    ]}
+                  >
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Amount to Pay
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: "#2563EB", fontWeight: "800", fontSize: 18 },
+                        ]}
+                      >
+                        ₱{(selectedSubForPay.amount || 0).toLocaleString()}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Billing Cycle
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {selectedSubForPay.billingCycle === "yearly"
+                          ? "1 Year Renewal"
+                          : "1 Month Renewal"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Current Due
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {selectedSubForPay.nextRenewalDate || "Today"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.formSectionLabel,
+                      {
+                        color: isDark ? colors.textMuted : "#64748B",
+                        marginBottom: 8,
+                      },
+                    ]}
+                  >
+                    SELECT PAYMENT SOURCE
+                  </Text>
+
+                  {/* Payment Source Options */}
+                  <TouchableOpacity
+                    style={[
+                      styles.qrFundingOption,
+                      {
+                        borderColor:
+                          subPayPaymentMethod === "Splitzy Wallet"
+                            ? "#2563EB"
+                            : isDark
+                              ? colors.border
+                              : "#E2E8F0",
+                        backgroundColor:
+                          subPayPaymentMethod === "Splitzy Wallet"
+                            ? isDark
+                              ? "#1E3A8A22"
+                              : "#EFF6FF"
+                            : isDark
+                              ? colors.surfaceInset
+                              : "#FFFFFF",
+                      },
+                    ]}
+                    onPress={() => setSubPayPaymentMethod("Splitzy Wallet")}
+                  >
+                    <View style={styles.qrFundingRadio}>
+                      {subPayPaymentMethod === "Splitzy Wallet" && (
+                        <View style={styles.qrFundingRadioInner} />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.qrFundingName,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        Available Wallet Balance
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrFundingBal,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        ₱{(wallet?.balance || 0).toLocaleString()} available
+                      </Text>
+                    </View>
+                    <Ionicons name="wallet" size={20} color="#2563EB" />
+                  </TouchableOpacity>
+
+                  {(wallet?.cards || []).map((card) => {
+                    const isSelected =
+                      subPayPaymentMethod === card.name ||
+                      subPayPaymentMethod === card.id;
+                    return (
+                      <TouchableOpacity
+                        key={card.id}
+                        style={[
+                          styles.qrFundingOption,
+                          {
+                            borderColor: isSelected
+                              ? "#2563EB"
+                              : isDark
+                                ? colors.border
+                                : "#E2E8F0",
+                            backgroundColor: isSelected
+                              ? isDark
+                                ? "#1E3A8A22"
+                                : "#EFF6FF"
+                              : isDark
+                                ? colors.surfaceInset
+                                : "#FFFFFF",
+                          },
+                        ]}
+                        onPress={() => setSubPayPaymentMethod(card.name)}
+                      >
+                        <View style={styles.qrFundingRadio}>
+                          {isSelected && (
+                            <View style={styles.qrFundingRadioInner} />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.qrFundingName,
+                              { color: isDark ? colors.text : "#0F172A" },
+                            ]}
+                          >
+                            {card.name}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.qrFundingBal,
+                              { color: isDark ? colors.textMuted : "#64748B" },
+                            ]}
+                          >
+                            ₱{(card.balance || 0).toLocaleString()} available
+                          </Text>
+                        </View>
+                        <Ionicons name="card" size={20} color="#64748B" />
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      {
+                        backgroundColor: "#2563EB",
+                        marginTop: 18,
+                        opacity: isPayingSub ? 0.7 : 1,
+                      },
+                    ]}
+                    onPress={handleExecutePaySub}
+                    disabled={isPayingSub}
+                    activeOpacity={0.8}
+                  >
+                    {isPayingSub ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.modalPrimaryBtnText}>
+                          Confirm Payment (₱
+                          {(selectedSubForPay.amount || 0).toLocaleString()})
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </ScrollView>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Add Debt / IOU */}
+      <Modal
+        visible={showAddDebtModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAddDebtModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={dynamicModalOverlayStyle}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowAddDebtModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                maxHeight: modalAdaptiveMaxHeight,
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+              },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <View>
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    { color: isDark ? colors.text : "#0F172A" },
+                  ]}
+                >
+                  Record Debt / IOU
+                </Text>
+                <Text
+                  style={[
+                    styles.modalSubtitle,
+                    { color: isDark ? colors.textMuted : "#64748B" },
+                  ]}
+                >
+                  Track what you owe or what someone owes you
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowAddDebtModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name="close"
+                  size={24}
+                  color={isDark ? colors.textMuted : "#64748B"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ flexShrink: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A" },
+                ]}
+              >
+                Debt Direction
+              </Text>
+              <View style={styles.cycleToggleRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    debtType === "i_owe" && styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        debtType === "i_owe"
+                          ? "#EF4444"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        debtType === "i_owe"
+                          ? "#EF4444"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => setDebtType("i_owe")}
+                >
+                  <Ionicons
+                    name="arrow-up-circle"
+                    size={16}
+                    color={debtType === "i_owe" ? "#FFFFFF" : "#EF4444"}
+                  />
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          debtType === "i_owe"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    I Owe Someone
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    debtType === "owed_to_me" && styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        debtType === "owed_to_me"
+                          ? "#10B981"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        debtType === "owed_to_me"
+                          ? "#10B981"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => setDebtType("owed_to_me")}
+                >
+                  <Ionicons
+                    name="arrow-down-circle"
+                    size={16}
+                    color={debtType === "owed_to_me" ? "#FFFFFF" : "#10B981"}
+                  />
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          debtType === "owed_to_me"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    Someone Owes Me
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 14 },
+                ]}
+              >
+                Lender / Loan Type
+              </Text>
+              <View style={styles.cycleToggleRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    debtLenderType === "fintech" && styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        debtLenderType === "fintech"
+                          ? "#3B82F6"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        debtLenderType === "fintech"
+                          ? "#3B82F6"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => {
+                    setDebtLenderType("fintech");
+                    setDebtPersonName(LOAN_PLATFORM_PRESETS[0].name);
+                    setDebtPlatformKey(LOAN_PLATFORM_PRESETS[0].platformKey);
+                    setDebtDescription(LOAN_PLATFORM_PRESETS[0].description);
+                  }}
+                >
+                  <Ionicons
+                    name="business"
+                    size={15}
+                    color={debtLenderType === "fintech" ? "#FFFFFF" : "#3B82F6"}
+                  />
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          debtLenderType === "fintech"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    Loan App / BNPL
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cycleToggleBtn,
+                    debtLenderType === "personal" &&
+                      styles.cycleToggleBtnActive,
+                    {
+                      borderColor:
+                        debtLenderType === "personal"
+                          ? "#3B82F6"
+                          : isDark
+                            ? colors.border
+                            : "#CBD5E1",
+                      backgroundColor:
+                        debtLenderType === "personal"
+                          ? "#3B82F6"
+                          : isDark
+                            ? colors.surfaceInset
+                            : "#F8FAFC",
+                    },
+                  ]}
+                  onPress={() => {
+                    setDebtLenderType("personal");
+                    setDebtPlatformKey("");
+                    setDebtPersonName("");
+                    setDebtDescription("");
+                  }}
+                >
+                  <Ionicons
+                    name="people"
+                    size={15}
+                    color={
+                      debtLenderType === "personal" ? "#FFFFFF" : "#3B82F6"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.cycleToggleText,
+                      {
+                        color:
+                          debtLenderType === "personal"
+                            ? "#FFFFFF"
+                            : isDark
+                              ? colors.text
+                              : "#0F172A",
+                      },
+                    ]}
+                  >
+                    Personal / Peer
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {debtLenderType === "fintech" && (
+                <View style={{ marginTop: 14 }}>
+                  <Text
+                    style={[
+                      styles.formSectionLabel,
+                      { color: isDark ? colors.textMuted : "#64748B" },
+                    ]}
+                  >
+                    CHOOSE POPULAR LENDER / APP
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+                  >
+                    {LOAN_PLATFORM_PRESETS.map((preset) => {
+                      const isSelected = debtPlatformKey === preset.platformKey;
+                      return (
+                        <TouchableOpacity
+                          key={preset.platformKey}
+                          style={[
+                            styles.presetChip,
+                            {
+                              borderColor: isSelected
+                                ? "#3B82F6"
+                                : isDark
+                                  ? colors.border
+                                  : "#CBD5E1",
+                              backgroundColor: isSelected
+                                ? isDark
+                                  ? "#1E293B"
+                                  : "#EFF6FF"
+                                : isDark
+                                  ? colors.surfaceInset
+                                  : "#F8FAFC",
+                            },
+                          ]}
+                          onPress={() => {
+                            setDebtPlatformKey(preset.platformKey);
+                            setDebtPersonName(preset.name);
+                            setDebtDescription(preset.description);
+                          }}
+                        >
+                          <PlatformLogo
+                            platformKey={preset.platformKey}
+                            name={preset.name}
+                            size={26}
+                          />
+                          <View>
+                            <Text
+                              style={[
+                                styles.presetChipText,
+                                {
+                                  color: isDark ? colors.text : "#0F172A",
+                                  fontWeight: isSelected ? "700" : "500",
+                                },
+                              ]}
+                            >
+                              {preset.name}
+                            </Text>
+                            <Text
+                              style={{
+                                fontSize: 9,
+                                color: isDark ? colors.textMuted : "#64748B",
+                                textTransform: "uppercase",
+                                fontWeight: "600",
+                              }}
+                            >
+                              {preset.category === "bnpl"
+                                ? "BNPL"
+                                : preset.category === "bank_loan"
+                                  ? "Bank"
+                                  : "Fintech"}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                {debtLenderType === "fintech"
+                  ? "Lender / Platform Name"
+                  : "Person / Roommate Name"}
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder={
+                  debtLenderType === "fintech"
+                    ? "e.g. BillEase, Tala, Home Credit"
+                    : "e.g. Maria Santos, Alex Rivera"
+                }
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={debtPersonName}
+                onChangeText={setDebtPersonName}
+              />
+
+              {debtLenderType === "fintech" && (
+                <>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: isDark ? colors.text : "#0F172A",
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    Loan Reference / Contract ID (Optional)
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.textInput,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                        color: isDark ? colors.text : "#0F172A",
+                      },
+                    ]}
+                    placeholder="e.g. BL-2026-9812 or CR-88319"
+                    placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                    value={debtLoanRefNo}
+                    onChangeText={setDebtLoanRefNo}
+                  />
+                </>
+              )}
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Amount (PHP ₱)
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. 750"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                keyboardType="numeric"
+                value={debtAmount}
+                onChangeText={setDebtAmount}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Due Date (Optional - e.g. 2026-11-30)
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={debtDueDate}
+                onChangeText={setDebtDueDate}
+              />
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.text : "#0F172A", marginTop: 12 },
+                ]}
+              >
+                Purpose / Description
+              </Text>
+              <TextInput
+                style={[
+                  styles.textInput,
+                  {
+                    backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                    borderColor: isDark ? colors.border : "#CBD5E1",
+                    color: isDark ? colors.text : "#0F172A",
+                  },
+                ]}
+                placeholder="e.g. Electricity bill split, Dinner share"
+                placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
+                value={debtDescription}
+                onChangeText={setDebtDescription}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.modalPrimaryBtn,
+                  {
+                    backgroundColor:
+                      debtType === "i_owe" ? "#EF4444" : "#10B981",
+                    marginTop: 20,
+                  },
+                ]}
+                onPress={handleAddDebt}
+                disabled={isSavingDebt}
+                activeOpacity={0.8}
+              >
+                {isSavingDebt ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.modalPrimaryBtnText}>
+                      Save Debt Record
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Settle Debt */}
+      <Modal
+        visible={showSettleDebtModal && !!selectedDebtForSettle}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSettleDebtModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={dynamicModalOverlayStyle}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowSettleDebtModal(false)}
+          />
+          <View
+            style={[
+              styles.modalSheet,
+              {
+                maxHeight: modalAdaptiveMaxHeight,
+                backgroundColor: isDark ? colors.cardElevated : "#FFFFFF",
+              },
+            ]}
+          >
+            {selectedDebtForSettle && (
+              <>
+                <View style={styles.modalHeader}>
+                  <View>
+                    <Text
+                      style={[
+                        styles.modalTitle,
+                        { color: isDark ? colors.text : "#0F172A" },
+                      ]}
+                    >
+                      {selectedDebtForSettle.type === "i_owe"
+                        ? "Settle Debt"
+                        : "Collect Debt"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.modalSubtitle,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      {selectedDebtForSettle.type === "i_owe"
+                        ? `Pay back ${selectedDebtForSettle.personName}`
+                        : `Mark collected from ${selectedDebtForSettle.personName}`}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setShowSettleDebtModal(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons
+                      name="close"
+                      size={24}
+                      color={isDark ? colors.textMuted : "#64748B"}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={{ flexShrink: 1 }}
+                  contentContainerStyle={{ paddingBottom: 24 }}
+                >
+                  <View
+                    style={[
+                      styles.qrReceiptCard,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Party
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          { color: isDark ? colors.text : "#0F172A" },
+                        ]}
+                      >
+                        {selectedDebtForSettle.personName}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrReceiptRow}>
+                      <Text
+                        style={[
+                          styles.qrReceiptLabel,
+                          { color: isDark ? colors.textMuted : "#64748B" },
+                        ]}
+                      >
+                        Recorded Amount
+                      </Text>
+                      <Text
+                        style={[
+                          styles.qrReceiptValue,
+                          {
+                            color:
+                              selectedDebtForSettle.type === "i_owe"
+                                ? "#EF4444"
+                                : "#10B981",
+                          },
+                        ]}
+                      >
+                        ₱{(selectedDebtForSettle.amount || 0).toLocaleString()}
+                      </Text>
+                    </View>
+
+                    {selectedDebtForSettle.description ? (
+                      <View style={styles.qrReceiptRow}>
+                        <Text
+                          style={[
+                            styles.qrReceiptLabel,
+                            { color: isDark ? colors.textMuted : "#64748B" },
+                          ]}
+                        >
+                          Notes
+                        </Text>
+                        <Text
+                          style={[
+                            styles.qrReceiptValue,
+                            { color: isDark ? colors.text : "#0F172A" },
+                          ]}
+                        >
+                          {selectedDebtForSettle.description}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      {
+                        color: isDark ? colors.text : "#0F172A",
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    Settlement Amount (PHP ₱)
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.textInput,
+                      {
+                        backgroundColor: isDark
+                          ? colors.surfaceInset
+                          : "#F8FAFC",
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                        color: isDark ? colors.text : "#0F172A",
+                      },
+                    ]}
+                    keyboardType="numeric"
+                    value={settleCustomAmount}
+                    onChangeText={setSettleCustomAmount}
+                  />
+
+                  {selectedDebtForSettle.type === "i_owe" && (
+                    <>
+                      <Text
+                        style={[
+                          styles.inputLabel,
+                          {
+                            color: isDark ? colors.text : "#0F172A",
+                            marginTop: 12,
+                          },
+                        ]}
+                      >
+                        Funding Method
+                      </Text>
+                      <View style={{ gap: 8 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.qrFundingOption,
+                            {
+                              borderColor:
+                                settlePaymentMethod === "Splitzy Wallet"
+                                  ? "#2563EB"
+                                  : isDark
+                                    ? colors.border
+                                    : "#E2E8F0",
+                              backgroundColor:
+                                settlePaymentMethod === "Splitzy Wallet"
+                                  ? isDark
+                                    ? "#1E3A8A"
+                                    : "#EFF6FF"
+                                  : isDark
+                                    ? colors.surfaceInset
+                                    : "#FFFFFF",
+                            },
+                          ]}
+                          onPress={() =>
+                            setSettlePaymentMethod("Splitzy Wallet")
+                          }
+                        >
+                          <View style={styles.qrFundingRadio}>
+                            {settlePaymentMethod === "Splitzy Wallet" && (
+                              <View style={styles.qrFundingRadioInner} />
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={{
+                                fontWeight: "700",
+                                color: isDark ? colors.text : "#0F172A",
+                              }}
+                            >
+                              Splitzy Wallet Balance
+                            </Text>
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                color: isDark ? colors.textMuted : "#64748B",
+                              }}
+                            >
+                              Avail: ₱{(wallet?.balance ?? 0).toLocaleString()}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+
+                        {(wallet?.cards || []).map((c) => (
+                          <TouchableOpacity
+                            key={c.id}
+                            style={[
+                              styles.qrFundingOption,
+                              {
+                                borderColor:
+                                  settlePaymentMethod === c.name
+                                    ? "#2563EB"
+                                    : isDark
+                                      ? colors.border
+                                      : "#E2E8F0",
+                                backgroundColor:
+                                  settlePaymentMethod === c.name
+                                    ? isDark
+                                      ? "#1E3A8A"
+                                      : "#EFF6FF"
+                                    : isDark
+                                      ? colors.surfaceInset
+                                      : "#FFFFFF",
+                              },
+                            ]}
+                            onPress={() => setSettlePaymentMethod(c.name)}
+                          >
+                            <View style={styles.qrFundingRadio}>
+                              {settlePaymentMethod === c.name && (
+                                <View style={styles.qrFundingRadioInner} />
+                              )}
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={{
+                                  fontWeight: "700",
+                                  color: isDark ? colors.text : "#0F172A",
+                                }}
+                              >
+                                {c.name}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  color: isDark ? colors.textMuted : "#64748B",
+                                }}
+                              >
+                                Avail: ₱{(c.balance || 0).toLocaleString()}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalPrimaryBtn,
+                      {
+                        backgroundColor:
+                          selectedDebtForSettle.type === "i_owe"
+                            ? "#EF4444"
+                            : "#10B981",
+                        marginTop: 20,
+                      },
+                    ]}
+                    onPress={handleExecuteSettleDebt}
+                    disabled={isSettlingDebt}
+                    activeOpacity={0.8}
+                  >
+                    {isSettlingDebt ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="checkmark-done"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.modalPrimaryBtnText}>
+                          {selectedDebtForSettle.type === "i_owe"
+                            ? "Confirm Payment & Settle"
+                            : "Mark as Collected"}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSecondaryBtn,
+                      {
+                        borderColor: isDark ? colors.border : "#CBD5E1",
+                        marginTop: 10,
+                      },
+                    ]}
+                    onPress={() => handleDeleteDebt(selectedDebtForSettle.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name="trash-outline"
+                      size={16}
+                      color={isDark ? colors.textMuted : "#64748B"}
+                    />
+                    <Text
+                      style={[
+                        styles.modalSecondaryBtnText,
+                        { color: isDark ? colors.textMuted : "#64748B" },
+                      ]}
+                    >
+                      Delete Record
+                    </Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -12351,6 +14965,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
+    marginBottom: 12,
   },
   emptyTxTitle: {
     fontSize: 15,
@@ -12366,6 +14981,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     overflow: "hidden",
+    marginBottom: 12,
   },
   txRow: {
     flexDirection: "row",
@@ -13773,6 +16389,14 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: "#2563EB",
   },
+  qrFundingName: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  qrFundingBal: {
+    fontSize: 11,
+    marginTop: 2,
+  },
   qrReceiptCard: {
     borderRadius: 18,
     borderWidth: 1,
@@ -13791,5 +16415,326 @@ const styles = StyleSheet.create({
   qrReceiptValue: {
     fontSize: 12,
     fontWeight: "700",
+  },
+  subBurnBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  subBurnBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  emptySubCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  emptySubIconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 4,
+  },
+  emptySubActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 14,
+  },
+  emptySubActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  subsHorizontalScroll: {
+    marginHorizontal: -20,
+    marginBottom: 16,
+  },
+  subsHorizontalContent: {
+    paddingHorizontal: 20,
+    gap: 12,
+    paddingBottom: 4,
+  },
+  subCard: {
+    width: 190,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    justifyContent: "space-between",
+  },
+  subCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  subStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  subStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  subStatusText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  subCardName: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  subCardCategory: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  subCardBottom: {
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(150, 150, 150, 0.15)",
+  },
+  subCardPrice: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  subCardCycle: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  subCardRenewal: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  addSubShortcutCard: {
+    width: 110,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  addSubIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#2563EB15",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  debtsTabRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  debtsTabBtn: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    justifyContent: "space-between",
+  },
+  debtsTabText: {
+    fontSize: 12,
+  },
+  debtsTabAmount: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  debtRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  debtLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  debtAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  debtPersonName: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  debtStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  debtStatusBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  debtDescription: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  debtDueDate: {
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  debtRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  debtAmount: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  debtSettleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  debtSettleBtnText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  debtSettledOn: {
+    fontSize: 11,
+    fontWeight: "500",
+  },
+  viewMoreTxBtn: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewMoreTxText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  presetChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  presetChipText: {
+    fontSize: 12,
+  },
+  cycleToggleRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  cycleToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  cycleToggleBtnActive: {},
+  cycleToggleText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  formSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  textInput: {
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    fontSize: 14,
+    marginTop: 6,
+  },
+  modalSecondaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  modalSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  subDuePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  subDuePillText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  subPayQuickBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  subPayQuickBtnText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  dueWarningCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  dueWarningCardText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  debtRefNoText: {
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
   },
 });
