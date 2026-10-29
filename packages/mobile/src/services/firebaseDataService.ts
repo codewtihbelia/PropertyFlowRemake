@@ -3109,6 +3109,9 @@ export const mobileDataService = {
     uid: string;
     displayName: string;
     email: string;
+    phoneNumber?: string;
+    formattedPhone?: string;
+    authMethod?: string;
     role?: string;
     householdId?: string;
     photoURL?: string;
@@ -3139,6 +3142,9 @@ export const mobileDataService = {
         fullName: existing.fullName || user.displayName,
         displayName: user.displayName,
         email: user.email,
+        phoneNumber: user.phoneNumber || existing.phoneNumber,
+        formattedPhone: user.formattedPhone || existing.formattedPhone,
+        authMethod: user.authMethod || existing.authMethod,
         role: preservedRole,
         accountStatus: existing.accountStatus || "ACTIVE",
         householdId: resolvedHouseholdId,
@@ -3268,6 +3274,25 @@ export const mobileDataService = {
       }
     } catch (err) {
       console.warn("[saveUserProfile Mobile] Error:", err);
+    }
+  },
+
+  async deleteUserProfile(uid: string): Promise<boolean> {
+    if (!uid) return false;
+    try {
+      const cleanUid = String(uid).replace(/^mem_/, "").trim();
+      const userRef = doc(db, "users", cleanUid);
+      await deleteDoc(userRef);
+      if (
+        _cachedUserProfile &&
+        (_cachedUserProfile.uid === cleanUid || _cachedUserProfile.uid === uid)
+      ) {
+        _cachedUserProfile = null;
+      }
+      return true;
+    } catch (err) {
+      console.warn("[deleteUserProfile Mobile] Error:", err);
+      return false;
     }
   },
 

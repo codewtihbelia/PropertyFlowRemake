@@ -22,8 +22,10 @@ import { useTheme } from "../context/ThemeContext";
 
 interface OtpVerificationScreenProps {
   email: string;
+  phoneNumber?: string;
   userName: string;
   expectedCode?: string;
+  onVerifyCode?: (code: string) => Promise<boolean | void>;
   onVerified: () => void;
   onResendCode?: () => Promise<string | void>;
   onBack: () => void;
@@ -31,14 +33,22 @@ interface OtpVerificationScreenProps {
 
 export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
   email,
+  phoneNumber,
   userName,
-  expectedCode = "849201",
+  expectedCode = "",
+  onVerifyCode,
   onVerified,
   onResendCode,
   onBack,
 }) => {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const isPhone = Boolean(
+    phoneNumber ||
+    (email && !email.includes("@")) ||
+    (email && (email.startsWith("+") || email.startsWith("09"))),
+  );
+  const displayTarget = phoneNumber || email;
   const [currentExpectedCode, setCurrentExpectedCode] = useState(expectedCode);
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
@@ -99,27 +109,41 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
     if (enteredCode.length < 6) {
       Alert.alert(
         "Incomplete Code",
-        "Please enter all 6 digits of your confirmation code.",
+        "Please enter all 6 digits of your SMS confirmation code.",
       );
       return;
     }
 
     setLoading(true);
-    // Simulate verification delay
-    setTimeout(() => {
-      setLoading(false);
-      if (enteredCode === currentExpectedCode || enteredCode === "123456") {
-        setIsSuccess(true);
-        setTimeout(() => {
-          onVerified();
-        }, 1200);
-      } else {
-        Alert.alert(
-          "Invalid Code",
-          "The code you entered does not match. Please verify and try again.",
-        );
+    try {
+      if (onVerifyCode) {
+        const isValid = await onVerifyCode(enteredCode);
+        if (isValid === false) {
+          throw new Error(
+            "The verification code you entered is invalid. Please check the SMS sent to your phone and try again.",
+          );
+        }
+      } else if (currentExpectedCode) {
+        if (enteredCode !== currentExpectedCode) {
+          throw new Error(
+            "The code you entered does not match the verification code sent to your phone. Please verify and try again.",
+          );
+        }
       }
-    }, 600);
+
+      setIsSuccess(true);
+      setTimeout(() => {
+        onVerified();
+      }, 1000);
+    } catch (err: any) {
+      Alert.alert(
+        "Verification Failed",
+        err?.message ||
+          "Invalid verification code. Please check your SMS messages and try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleResend = async () => {
@@ -131,29 +155,22 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
         if (newCode) {
           setCurrentExpectedCode(newCode);
         }
-      } else {
-        // Generate new 6-digit code
-        const fresh = Math.floor(100000 + Math.random() * 900000).toString();
-        setCurrentExpectedCode(fresh);
       }
       setDigits(["", "", "", "", "", ""]);
-      setCountdown(45);
+      setCountdown(60);
       inputRefs.current[0]?.focus();
       Alert.alert(
         "Code Resent",
-        `A new confirmation code has been dispatched to ${email}.`,
+        `A new 6-digit confirmation code has been dispatched via SMS to ${displayTarget}.`,
       );
-    } catch {
-      Alert.alert("Resend Failed", "Could not resend code. Please try again.");
+    } catch (err: any) {
+      Alert.alert(
+        "Resend Failed",
+        err?.message || "Could not resend SMS code. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleAutoFill = () => {
-    const chars = currentExpectedCode.split("");
-    setDigits(chars);
-    inputRefs.current[5]?.focus();
   };
 
   return (
@@ -223,19 +240,19 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                 ]}
               >
                 <Feather
-                  name="arrow-left"
-                  size={18}
+                  name="chevron-left"
+                  size={24}
                   color={isDark ? colors.text : "#0F172A"}
                 />
               </View>
-              <Text
+              {/* <Text
                 style={[
                   styles.backButtonText,
                   isDark && { color: colors.text },
                 ]}
               >
                 Edit Details
-              </Text>
+              </Text> */}
             </TouchableOpacity>
 
             {/* Logo Badge */}
@@ -307,7 +324,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                 <Text
                   style={[styles.mainTitle, isDark && { color: colors.text }]}
                 >
-                  Verify Your Email
+                  {isPhone ? "Verify Your Phone" : "Verify Your Email"}
                 </Text>
                 <Text
                   style={[
@@ -315,63 +332,18 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                     isDark && { color: colors.textSecondary },
                   ]}
                 >
-                  We've sent a 6-digit confirmation code to:{"\n"}
+                  {isPhone
+                    ? "We've sent a 6-digit SMS confirmation code to:\n"
+                    : "We've sent a 6-digit confirmation code to:\n"}
                   <Text
                     style={[
                       styles.emailHighlight,
                       isDark && { color: colors.text },
                     ]}
                   >
-                    {email}
+                    {displayTarget}
                   </Text>
                 </Text>
-
-                {/* Demo Helper Banner for easy testing in mobile preview */}
-                <View
-                  style={[
-                    styles.demoHelperBox,
-                    isDark && {
-                      backgroundColor: "rgba(59, 130, 246, 0.14)",
-                      borderColor: "rgba(59, 130, 246, 0.3)",
-                    },
-                  ]}
-                >
-                  <View style={styles.demoHelperLeft}>
-                    <Ionicons
-                      name="shield-checkmark"
-                      size={20}
-                      color={isDark ? colors.accent : "#2563EB"}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.demoHelperLabel,
-                          isDark && { color: colors.accent },
-                        ]}
-                      >
-                        Verification Code
-                      </Text>
-                      <Text
-                        style={[
-                          styles.demoHelperCode,
-                          isDark && { color: "#FFFFFF" },
-                        ]}
-                      >
-                        {currentExpectedCode}
-                      </Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={[
-                      styles.autoFillButton,
-                      isDark && { backgroundColor: colors.primary },
-                    ]}
-                    onPress={handleAutoFill}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.autoFillButtonText}>Fill Code</Text>
-                  </TouchableOpacity>
-                </View>
 
                 {/* 6 Digit Input Boxes */}
                 <View style={styles.otpBoxesRow}>
@@ -536,7 +508,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
                   isDark && { color: "rgba(255, 255, 255, 0.7)" },
                 ]}
               >
-                Protecting apartment financial data & roommate bill allocations.
+                Protecting splitzy financial data & roommate bill allocations.
               </Text>
             </View>
           </View>
@@ -629,14 +601,13 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: "#2563EB",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   logoImage: {
-    width: 28,
-    height: 28,
+    width: 44,
+    height: 44,
   },
   brandTitleRow: {
     flexDirection: "row",
@@ -664,52 +635,10 @@ const styles = StyleSheet.create({
     color: "#64748B",
     textAlign: "center",
     lineHeight: 19,
-    marginBottom: 20,
+    marginBottom: 28,
   },
   emailHighlight: {
     color: "#0F172A",
-    fontWeight: "800",
-  },
-  demoHelperBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1.5,
-    borderColor: "#BFDBFE",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 24,
-  },
-  demoHelperLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  demoHelperLabel: {
-    fontSize: 11,
-    color: "#3B82F6",
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  demoHelperCode: {
-    fontSize: 17,
-    fontWeight: "900",
-    color: "#1E3A8A",
-    letterSpacing: 2,
-  },
-  autoFillButton: {
-    backgroundColor: "#2563EB",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  autoFillButtonText: {
-    color: "#FFFFFF",
-    fontSize: 12,
     fontWeight: "800",
   },
   otpBoxesRow: {

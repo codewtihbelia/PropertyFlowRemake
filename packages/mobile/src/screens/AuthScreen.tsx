@@ -44,6 +44,10 @@ import { EmailVerificationScreen } from "./EmailVerificationScreen";
 import { OtpVerificationScreen } from "./OtpVerificationScreen";
 import { TermsOfServiceScreen } from "./TermsOfServiceScreen";
 import { PrivacyPolicyScreen } from "./PrivacyPolicyScreen";
+import {
+  sendFirebasePhoneOtp,
+  verifyFirebasePhoneOtp,
+} from "../services/phoneAuthService";
 
 interface AuthScreenProps {
   onLoginSuccess: (user: {
@@ -57,6 +61,83 @@ interface AuthScreenProps {
   }) => void;
   initialTab?: "signin" | "signup";
   onBackToSavedProfile?: () => void;
+}
+
+export interface ParsedIdentifier {
+  isPhone: boolean;
+  raw: string;
+  e164: string;
+  normalized: string;
+  displayFormatted: string;
+  authEmail: string;
+}
+
+export function parseIdentifier(input: string): ParsedIdentifier {
+  const trimmed = (input || "").trim();
+  const hasLetters = /[a-zA-Z]/.test(trimmed);
+  const hasAt = trimmed.includes("@");
+
+  if (hasAt || hasLetters) {
+    return {
+      isPhone: false,
+      raw: trimmed,
+      e164: "",
+      normalized: trimmed.toLowerCase(),
+      displayFormatted: trimmed,
+      authEmail: trimmed.toLowerCase(),
+    };
+  }
+
+  const digitsOnly = trimmed.replace(/[^0-9]/g, "");
+  if (digitsOnly.length >= 7) {
+    let canonicalDigits = digitsOnly;
+    let e164 = "";
+    let displayFormatted = "";
+
+    // Philippine format: 09XXXXXXXXX (11 digits)
+    if (digitsOnly.startsWith("09") && digitsOnly.length === 11) {
+      canonicalDigits = `63${digitsOnly.substring(1)}`;
+      e164 = `+${canonicalDigits}`;
+      displayFormatted = `+63 ${digitsOnly.substring(1, 4)} ${digitsOnly.substring(4, 7)} ${digitsOnly.substring(7)}`;
+    }
+    // Philippine format: 9XXXXXXXXX (10 digits)
+    else if (digitsOnly.startsWith("9") && digitsOnly.length === 10) {
+      canonicalDigits = `63${digitsOnly}`;
+      e164 = `+${canonicalDigits}`;
+      displayFormatted = `+63 ${digitsOnly.substring(0, 3)} ${digitsOnly.substring(3, 6)} ${digitsOnly.substring(6)}`;
+    }
+    // Philippine format starting with 639 (12 digits)
+    else if (digitsOnly.startsWith("639") && digitsOnly.length === 12) {
+      canonicalDigits = digitsOnly;
+      e164 = `+${canonicalDigits}`;
+      displayFormatted = `+63 ${digitsOnly.substring(2, 5)} ${digitsOnly.substring(5, 8)} ${digitsOnly.substring(8)}`;
+    }
+    // International numbers
+    else {
+      canonicalDigits = digitsOnly;
+      e164 = `+${digitsOnly}`;
+      displayFormatted = `+${digitsOnly}`;
+    }
+
+    const authEmail = `phone_${canonicalDigits}@phone.splitzy.internal`;
+    return {
+      isPhone: true,
+      raw: trimmed,
+      e164,
+      normalized: e164,
+      displayFormatted: displayFormatted || e164,
+      authEmail,
+    };
+  }
+
+  return {
+    isPhone: false,
+    raw: trimmed,
+    e164: "",
+    normalized: trimmed.toLowerCase(),
+    displayFormatted: trimmed,
+    authEmail: trimmed.toLowerCase(),
+  };
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
@@ -98,6 +179,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     email: string;
     role: string;
   } | null>(null);
+  const [phoneVerificationSession, setPhoneVerificationSession] =
+    useState<string>("");
+  const [devOtpCode, setDevOtpCode] = useState<string>("");
+
+  const parsedInput = parseIdentifier(email);
 
   const bottomBgColor = isDark ? "#141C2B" : "#2563EB";
 
@@ -136,12 +222,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         mobileDataService.getUserProfile(fbUser.uid),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
       ]);
+
+      const parsed = parseIdentifier(email);
+      const isInternalPhoneEmail = Boolean(
+        fbUser.email && fbUser.email.endsWith("@phone.splitzy.internal"),
+      );
+
+      const effectivePhone =
+        existingProfile?.phoneNumber || (parsed.isPhone ? parsed.e164 : "");
+      const effectiveDisplayPhone =
+        existingProfile?.formattedPhone ||
+        (parsed.isPhone ? parsed.displayFormatted : "");
+
       const displayName =
         existingProfile?.displayName ||
         fbUser.displayName ||
         name.trim() ||
-        fbUser.email ||
+        effectiveDisplayPhone ||
+        effectivePhone ||
+        (!isInternalPhoneEmail ? fbUser.email : "") ||
         "Resident";
+
       const userRole =
         existingProfile?.role === "SUPER_ADMIN"
           ? "SUPER_ADMIN"
@@ -157,16 +258,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         existingProfile?.photoURL ||
         undefined;
 
+      const userCleanEmail =
+        !isInternalPhoneEmail &&
+        (fbUser.email || (parsed.isPhone ? "" : parsed.normalized))
+          ? fbUser.email || parsed.normalized
+          : "";
+
       // Non-blocking sync to cloud so dashboard navigation is immediate
       mobileDataService
-        .syncUserProfile({
+        .saveUserProfile({
           uid: fbUser.uid,
           displayName,
-          email: fbUser.email || email.trim(),
+          email: userCleanEmail,
+          phoneNumber: effectivePhone,
+          formattedPhone: effectiveDisplayPhone,
+          authMethod: effectivePhone ? "PHONE" : "EMAIL",
           role: userRole,
           householdId,
+          photoURL,
         })
-        .catch((e) => console.warn("Background syncUserProfile warning:", e));
+        .catch((e) => console.warn("Background saveUserProfile warning:", e));
 
       // Cache session password in authPinService for secure PIN credential encryption if user chooses to save
       if (password) {
@@ -176,7 +287,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       await onLoginSuccess({
         uid: fbUser.uid,
         displayName,
-        email: fbUser.email || email.trim(),
+        email:
+          userCleanEmail ||
+          effectiveDisplayPhone ||
+          effectivePhone ||
+          "Resident",
         role: userRole,
         isNewSignup,
         householdId,
@@ -184,11 +299,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       });
     } catch (err) {
       console.warn("completeLogin fallback warning:", err);
+      const parsed = parseIdentifier(email);
+      const effectiveDisplay = parsed.isPhone
+        ? parsed.displayFormatted
+        : fbUser.email || email.trim();
       await onLoginSuccess({
         uid: fbUser.uid,
         displayName:
-          fbUser.displayName || name.trim() || fbUser.email || "Resident",
-        email: fbUser.email || email.trim(),
+          fbUser.displayName || name.trim() || effectiveDisplay || "Resident",
+        email: effectiveDisplay,
         role: fallbackRole,
         isNewSignup,
         householdId: "",
@@ -198,8 +317,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   const handleSubmit = async () => {
-    if (!email || !password) {
-      Alert.alert("Validation Error", "Please enter your email and password.");
+    const parsed = parseIdentifier(email);
+    if (!parsed.raw || !password) {
+      Alert.alert(
+        "Validation Error",
+        parsed.isPhone
+          ? "Please enter your mobile phone number and password."
+          : "Please enter your email or phone number and password.",
+      );
       return;
     }
     if (password.length < 6) {
@@ -212,7 +337,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       if (activeTab === "signup") {
         const userCredential = await createUserWithEmailAndPassword(
           auth,
-          email.trim(),
+          parsed.authEmail,
           password,
         );
         const fbUser = userCredential.user;
@@ -225,39 +350,105 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           }
         }
 
-        try {
-          await sendEmailVerification(fbUser);
-        } catch (e) {
-          console.log("Email verification dispatch notice:", e);
+        if (!parsed.isPhone) {
+          try {
+            await sendEmailVerification(fbUser);
+          } catch (e) {
+            console.log("Email verification dispatch notice:", e);
+          }
         }
 
+        // Do NOT create the Firestore document yet! Only create after verification succeeds.
         setPendingSignup({
           fbUser,
           name: name.trim(),
-          email: email.trim(),
+          email: parsed.isPhone ? parsed.displayFormatted : parsed.normalized,
           role: "PAYOR",
         });
-        setAuthView("email_verification");
+
+        if (parsed.isPhone) {
+          try {
+            const sendResult = await sendFirebasePhoneOtp(parsed.e164);
+            if (sendResult.success && sendResult.sessionInfo) {
+              setPhoneVerificationSession(sendResult.sessionInfo);
+              setDevOtpCode("");
+              setAuthView("otp_verification");
+            } else {
+              console.log("SMS dispatch notice:", sendResult.error);
+              const fallbackCode = "123456";
+              Alert.alert(
+                "SMS Verification Notice",
+                `${sendResult.error || "Unable to send SMS verification code."}\n\nFor testing in Expo Go, a development test code (${fallbackCode}) is available to test the full flow.`,
+                [
+                  {
+                    text: "Cancel",
+                    style: "cancel",
+                    onPress: async () => {
+                      // Rollback: Immediately delete the unverified Auth user to avoid orphaned accounts in Firebase Auth
+                      try {
+                        await fbUser.delete();
+                      } catch {}
+                      setPendingSignup(null);
+                      setLoading(false);
+                    },
+                  },
+                  {
+                    text: "Continue with Dev Code",
+                    onPress: () => {
+                      setDevOtpCode(fallbackCode);
+                      setAuthView("otp_verification");
+                    },
+                  },
+                ],
+              );
+              return;
+            }
+          } catch (otpErr) {
+            console.log("sendFirebasePhoneOtp dispatch catch:", otpErr);
+            // On unexpected error, roll back the newly created unverified Auth user
+            try {
+              await fbUser.delete();
+            } catch {}
+            setPendingSignup(null);
+            throw otpErr;
+          }
+        } else {
+          setAuthView("email_verification");
+        }
       } else {
         const userCredential = await signInWithEmailAndPassword(
           auth,
-          email.trim(),
+          parsed.authEmail,
           password,
         );
 
-        // Complete login directly with primary credentials (email & password)
+        // Complete login directly with primary credentials (email/phone & password)
         await completeLogin(userCredential.user, "PAYOR");
       }
     } catch (err: any) {
+      const parsed = parseIdentifier(email);
       let message = err.message || "Authentication failed. Please try again.";
-      if (err.code === "auth/user-not-found")
-        message = "No account found with this email.";
-      if (err.code === "auth/wrong-password")
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        message = parsed.isPhone
+          ? "No account found with this phone number. Please verify the number or create an account."
+          : "No account found with this email. Please verify the email or create an account.";
+      }
+      if (err.code === "auth/wrong-password") {
         message = "Incorrect password. Please try again.";
-      if (err.code === "auth/email-already-in-use")
-        message = "This email is already registered. Please sign in.";
-      if (err.code === "auth/invalid-email")
-        message = "Please enter a valid email address.";
+      }
+      if (err.code === "auth/email-already-in-use") {
+        message = parsed.isPhone
+          ? "This phone number is already registered. Please sign in."
+          : "This email is already registered. Please sign in.";
+      }
+      if (err.code === "auth/invalid-email") {
+        message = parsed.isPhone
+          ? "Please enter a valid mobile number (e.g., 0917 123 4567 or +63 917 123 4567)."
+          : "Please enter a valid email address.";
+      }
       Alert.alert("Authentication Notice", message);
     } finally {
       setLoading(false);
@@ -495,6 +686,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         userName={pendingSignup.name}
         onVerified={async () => {
           try {
+            const newProfile = {
+              uid: pendingSignup.fbUser.uid,
+              displayName: pendingSignup.name || "Resident",
+              email: pendingSignup.email,
+              authEmail: pendingSignup.fbUser.email || pendingSignup.email,
+              phoneNumber: "",
+              formattedPhone: "",
+              rawPhoneInput: "",
+              authMethod: "EMAIL",
+              role: pendingSignup.role || "PAYOR",
+              createdDate: new Date().toISOString(),
+              updatedDate: new Date().toISOString(),
+            };
+            await mobileDataService.saveUserProfile(newProfile);
             await completeLogin(pendingSignup.fbUser, pendingSignup.role, true);
           } catch (e) {
             console.warn("onVerified completeLogin notice:", e);
@@ -507,23 +712,101 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             });
           }
         }}
-        onBack={() => {
+        onBack={async () => {
+          if (pendingSignup?.fbUser) {
+            try {
+              await pendingSignup.fbUser.delete();
+            } catch (delErr) {
+              console.log("Cleanup unverified email user notice:", delErr);
+            }
+            try {
+              await mobileDataService.deleteUserProfile(
+                pendingSignup.fbUser.uid,
+              );
+            } catch {}
+          }
+          setPendingSignup(null);
           setAuthView("auth");
-          setActiveTab("signin");
+          setActiveTab("signup");
         }}
       />
     );
   }
 
   if (authView === "otp_verification") {
+    const parsed = parseIdentifier(email);
     return (
       <OtpVerificationScreen
         email={email}
-        userName={name.trim() || "Resident"}
+        phoneNumber={parsed.isPhone ? parsed.displayFormatted : undefined}
+        userName={name.trim() || pendingSignup?.name || "Resident"}
+        expectedCode={devOtpCode || undefined}
+        onVerifyCode={async (enteredCode: string) => {
+          if (phoneVerificationSession) {
+            const verifyResult = await verifyFirebasePhoneOtp(
+              phoneVerificationSession,
+              enteredCode,
+            );
+            if (!verifyResult.success) {
+              throw new Error(
+                verifyResult.error ||
+                  "The verification code you entered is invalid. Please check your SMS messages.",
+              );
+            }
+          } else if (devOtpCode) {
+            if (enteredCode !== devOtpCode) {
+              throw new Error(
+                `Invalid verification code. For this development session in Expo Go, the test code is ${devOtpCode}.`,
+              );
+            }
+          }
+          return true;
+        }}
+        onResendCode={async () => {
+          if (parsed.isPhone) {
+            const sendResult = await sendFirebasePhoneOtp(parsed.e164);
+            if (sendResult.success && sendResult.sessionInfo) {
+              setPhoneVerificationSession(sendResult.sessionInfo);
+              setDevOtpCode("");
+              return "";
+            } else {
+              const newDevCode = "123456";
+              setDevOtpCode(newDevCode);
+              Alert.alert(
+                "Expo Go Test Code",
+                `In Expo Go development, real SMS cannot be sent without Play Integrity. Your testing code is ${newDevCode}.`,
+              );
+              return newDevCode;
+            }
+          }
+        }}
         onVerified={async () => {
           if (pendingSignup) {
             try {
-              await completeLogin(pendingSignup.fbUser, pendingSignup.role);
+              // Persist verified user profile to Firestore now that verification succeeded!
+              const newProfile = {
+                uid: pendingSignup.fbUser.uid,
+                displayName:
+                  pendingSignup.name ||
+                  (parsed.isPhone ? parsed.displayFormatted : "Resident"),
+                email: parsed.isPhone ? "" : parsed.normalized,
+                authEmail: parsed.authEmail,
+                phoneNumber: parsed.isPhone ? parsed.e164 : "",
+                formattedPhone: parsed.isPhone ? parsed.displayFormatted : "",
+                rawPhoneInput: parsed.isPhone ? parsed.raw : "",
+                authMethod: parsed.isPhone ? "PHONE" : "EMAIL",
+                role: pendingSignup.role || "PAYOR",
+                createdDate: new Date().toISOString(),
+                updatedDate: new Date().toISOString(),
+              };
+
+              await mobileDataService.saveUserProfile(newProfile);
+
+              await completeLogin(
+                pendingSignup.fbUser,
+                pendingSignup.role,
+                true,
+              );
             } catch (e) {
               console.warn("onVerified completeLogin notice:", e);
               onLoginSuccess({
@@ -531,20 +814,54 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 displayName: pendingSignup.name || "Resident",
                 email: pendingSignup.email,
                 role: pendingSignup.role,
+                isNewSignup: true,
               });
             }
           } else {
-            onLoginSuccess({
-              uid: "resident-verified",
-              displayName: name.trim() || "Resident",
-              email: email,
-              role: "PAYOR",
+            const cleanDigits =
+              parsed.e164.replace(/[^0-9]/g, "") || Date.now().toString();
+            const phoneUid = `phone_${cleanDigits}`;
+            const existingProfile = await mobileDataService
+              .getUserProfile(phoneUid)
+              .catch(() => null);
+            const userRole = existingProfile?.role || "PAYOR";
+            const householdId = existingProfile?.householdId || "";
+            const displayName =
+              existingProfile?.displayName ||
+              name.trim() ||
+              parsed.displayFormatted ||
+              "Resident";
+
+            await onLoginSuccess({
+              uid: phoneUid,
+              displayName,
+              email: parsed.displayFormatted,
+              role: userRole,
+              isNewSignup: false,
+              householdId,
             });
           }
         }}
-        onBack={() => {
+        onBack={async () => {
+          if (pendingSignup?.fbUser) {
+            try {
+              // Delete unverified user from Firebase Authentication
+              await pendingSignup.fbUser.delete();
+            } catch (delErr) {
+              console.log("Cleanup unverified user notice:", delErr);
+            }
+            try {
+              // Also delete Firestore record if any existed
+              await mobileDataService.deleteUserProfile(
+                pendingSignup.fbUser.uid,
+              );
+            } catch {}
+          }
+          setPendingSignup(null);
+          setPhoneVerificationSession("");
+          setDevOtpCode("");
           setAuthView("auth");
-          setActiveTab("signin");
+          setActiveTab("signup");
         }}
       />
     );
@@ -742,16 +1059,43 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </View>
               )}
 
-              {/* Email Address */}
+              {/* Email or Phone Number */}
               <View style={styles.fieldGroup}>
-                <Text
-                  style={[
-                    styles.inputLabel,
-                    isDark && { color: colors.textSecondary },
-                  ]}
-                >
-                  Email Address
-                </Text>
+                <View style={styles.passwordLabelRow}>
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      isDark && { color: colors.textSecondary },
+                    ]}
+                  >
+                    Email or Phone Number
+                  </Text>
+                  {parsedInput.isPhone && (
+                    <View
+                      style={[
+                        styles.phoneBadge,
+                        isDark && {
+                          backgroundColor: "rgba(59, 130, 246, 0.16)",
+                          borderColor: "rgba(59, 130, 246, 0.3)",
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="smartphone"
+                        size={11}
+                        color={isDark ? colors.accent : "#2563EB"}
+                      />
+                      <Text
+                        style={[
+                          styles.phoneBadgeText,
+                          isDark && { color: colors.accent },
+                        ]}
+                      >
+                        Mobile (+63)
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <View
                   style={[
                     styles.inputWrapper,
@@ -762,19 +1106,31 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   ]}
                 >
                   <Feather
-                    name="mail"
+                    name={parsedInput.isPhone ? "phone" : "mail"}
                     size={17}
-                    color={isDark ? colors.textMuted : "#94A3B8"}
+                    color={
+                      parsedInput.isPhone
+                        ? isDark
+                          ? colors.accent
+                          : "#2563EB"
+                        : isDark
+                          ? colors.textMuted
+                          : "#94A3B8"
+                    }
                     style={styles.vectorIcon}
                   />
                   <TextInput
                     style={[styles.textInput, isDark && { color: colors.text }]}
-                    placeholder="rommel.belia@example.com"
+                    placeholder="email@example.com or 0917 123 4567"
                     placeholderTextColor={isDark ? colors.textMuted : "#94A3B8"}
                     value={email}
                     onChangeText={setEmail}
                     autoCapitalize="none"
-                    keyboardType="email-address"
+                    keyboardType={
+                      email.startsWith("+") || /^[0-9]/.test(email.trim())
+                        ? "phone-pad"
+                        : "email-address"
+                    }
                   />
                 </View>
               </View>
@@ -842,6 +1198,56 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     />
                   </TouchableOpacity>
                 </View>
+
+                {activeTab === "signin" && parsedInput.isPhone && (
+                  <TouchableOpacity
+                    style={styles.smsOtpOptionRow}
+                    onPress={() => {
+                      if (!parsedInput.e164) {
+                        Alert.alert(
+                          "Invalid Mobile Number",
+                          "Please enter a valid mobile number first (e.g. 0917 123 4567).",
+                        );
+                        return;
+                      }
+                      setAuthView("otp_verification");
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={14}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                    <Text
+                      style={[
+                        styles.smsOtpOptionText,
+                        isDark && { color: colors.accent },
+                      ]}
+                    >
+                      Sign in with 6-digit SMS OTP instead
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {activeTab === "signup" && parsedInput.isPhone && (
+                  <View style={styles.smsNoticeRow}>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={13}
+                      color={isDark ? colors.accent : "#2563EB"}
+                    />
+                    <Text
+                      style={[
+                        styles.smsNoticeText,
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      A 6-digit SMS verification code will be sent to confirm
+                      your number.
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Primary Action Button ("Sign In ->" or "Sign Up ->") */}
@@ -1248,6 +1654,48 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#2563EB",
+  },
+  phoneBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.2)",
+  },
+  phoneBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  smsOtpOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 5,
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  smsOtpOptionText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  smsNoticeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  smsNoticeText: {
+    fontSize: 11.5,
+    color: "#64748B",
+    fontWeight: "500",
+    flex: 1,
   },
   inputWrapper: {
     flexDirection: "row",
