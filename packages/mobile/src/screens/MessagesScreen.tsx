@@ -18,6 +18,8 @@ import {
   useWindowDimensions,
   LayoutAnimation,
   AppState,
+  Animated,
+  PanResponder,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -85,6 +87,17 @@ export interface ChatMessage {
     callType?: "voice" | "video";
     durationSeconds?: number;
     callStatus?: "completed" | "missed" | "declined";
+    replyTo?: {
+      id: string;
+      senderName: string;
+      text: string;
+    };
+  };
+  reactions?: Record<string, string[]>;
+  replyTo?: {
+    id: string;
+    senderName: string;
+    text: string;
   };
   createdAt?: string;
   readBy?: string[];
@@ -148,6 +161,110 @@ const QUICK_NOTE_EMOJIS = [
   "🏠",
 ];
 const NOTE_REACTION_PILLS = ["😂", "🔥", "😭", "👏", "🥰", "❤️"];
+const REACTION_EMOJIS = ["❤️", "😆", "😮", "😢", "😡", "👍"];
+
+interface SwipeableMessageRowProps {
+  children: React.ReactNode;
+  onReply: () => void;
+  isMe: boolean;
+  isDark: boolean;
+}
+
+const SwipeableMessageRow: React.FC<SwipeableMessageRowProps> = ({
+  children,
+  onReply,
+  isMe,
+  isDark,
+}) => {
+  const panX = useRef(new Animated.Value(0)).current;
+  const triggered = useRef(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return (
+          gestureState.dx > 12 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5
+        );
+      },
+      onPanResponderGrant: () => {
+        triggered.current = false;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx > 0) {
+          const drag = Math.min(65, gestureState.dx * 0.72);
+          panX.setValue(drag);
+          if (drag >= 42 && !triggered.current) {
+            triggered.current = true;
+          }
+        }
+      },
+      onPanResponderRelease: () => {
+        if (triggered.current) {
+          onReply();
+        }
+        Animated.spring(panX, {
+          toValue: 0,
+          useNativeDriver: true,
+          bounciness: 12,
+          speed: 20,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(panX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      },
+    }),
+  ).current;
+
+  const iconOpacity = panX.interpolate({
+    inputRange: [0, 15, 42],
+    outputRange: [0, 0.4, 1],
+    extrapolate: "clamp",
+  });
+
+  const iconScale = panX.interpolate({
+    inputRange: [0, 18, 42],
+    outputRange: [0.5, 0.8, 1.15],
+    extrapolate: "clamp",
+  });
+
+  return (
+    <View style={styles.swipeRowWrapper} {...panResponder.panHandlers}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.swipeReplyIconContainer,
+          {
+            left: isMe ? 24 : 6,
+            opacity: iconOpacity,
+            transform: [{ scale: iconScale }],
+            backgroundColor: isDark
+              ? "rgba(37,99,235,0.25)"
+              : "rgba(37,99,235,0.12)",
+          },
+        ]}
+      >
+        <Ionicons
+          name="arrow-undo"
+          size={16}
+          color={isDark ? "#60A5FA" : "#2563EB"}
+        />
+      </Animated.View>
+      <Animated.View
+        style={{
+          width: "100%",
+          transform: [{ translateX: panX }],
+        }}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+};
 
 function hashString(str: string): number {
   let hash = 0;
@@ -737,6 +854,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
     null,
   );
+  const [replyingToMessage, setReplyingToMessage] =
+    useState<ChatMessage | null>(null);
   const [selectedConversationForDelete, setSelectedConversationForDelete] =
     useState<ConversationItem | null>(null);
   const [showAttachmentModal, setShowAttachmentModal] =
@@ -1766,6 +1885,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       meta: m.meta,
       createdAt: m.createdAt || m.timestamp,
       readBy: m.readBy || [],
+      reactions: m.reactions || {},
+      replyTo: m.replyTo || m.meta?.replyTo,
+      isEdited: m.isEdited,
+      editedAt: m.editedAt,
+      deletedFor: m.deletedFor || [],
     };
   };
 
@@ -2306,6 +2430,23 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       return;
     }
 
+    const replyMeta = replyingToMessage
+      ? {
+          id: replyingToMessage.id,
+          senderName: replyingToMessage.isMe
+            ? currentUserName || "You"
+            : replyingToMessage.sender,
+          text:
+            replyingToMessage.text ||
+            (replyingToMessage.type === "image"
+              ? "📷 Photo"
+              : replyingToMessage.type === "file"
+                ? "📎 Attachment"
+                : "Message"),
+        }
+      : undefined;
+
+    setReplyingToMessage(null);
     setChatInputText("");
     setIsSending(true);
 
@@ -2319,6 +2460,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           recipientId: activeThread.targetUserId,
           text: trimmed,
           type: "text",
+          meta: replyMeta ? { replyTo: replyMeta } : undefined,
           householdId: householdId || undefined,
         });
       } else if (householdId) {
@@ -2328,6 +2470,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           senderName: currentUserName,
           text: trimmed,
           type: "text",
+          meta: replyMeta ? { replyTo: replyMeta } : undefined,
         });
       }
       setTimeout(() => {
@@ -2338,6 +2481,63 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       Alert.alert("Failed to send", "Please check your network connection.");
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleStartReply = (msg: ChatMessage) => {
+    setReplyingToMessage(msg);
+    setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 100);
+  };
+
+  const handleCancelReply = () => {
+    setReplyingToMessage(null);
+  };
+
+  const handleToggleReaction = async (msg: ChatMessage, emoji: string) => {
+    const cleanUid = String(currentUid || "")
+      .replace(/^mem_/, "")
+      .trim();
+    const currentList = Array.isArray(msg.reactions?.[emoji])
+      ? [...msg.reactions[emoji]]
+      : [];
+    const exists = currentList.includes(cleanUid);
+    const updatedList = exists
+      ? currentList.filter((u) => u !== cleanUid)
+      : [...currentList, cleanUid];
+
+    const updatedReactions: Record<string, string[]> = {
+      ...(msg.reactions || {}),
+    };
+    if (updatedList.length === 0) {
+      delete updatedReactions[emoji];
+    } else {
+      updatedReactions[emoji] = updatedList;
+    }
+
+    const updateMsg = (m: ChatMessage) =>
+      m.id === msg.id ? { ...m, reactions: updatedReactions } : m;
+
+    setActiveThread((prev) =>
+      prev ? { ...prev, messages: prev.messages.map(updateMsg) } : prev,
+    );
+    setRawMessages((prev) => prev.map(updateMsg));
+    setDirectMessages((prev) => prev.map(updateMsg));
+
+    setSelectedMessageForAction(null);
+    setDeleteMode(false);
+
+    try {
+      await mobileDataService.toggleMessageReaction({
+        messageId: msg.id,
+        householdId: householdId || undefined,
+        isDirect: activeThread?.type === "direct",
+        emoji,
+        userId: currentUid,
+      });
+    } catch (err) {
+      console.warn("Error toggling reaction:", err);
     }
   };
 
@@ -3228,7 +3428,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             )}
 
             {/* Quick Split Request */}
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={[
                 styles.chatHeaderActionBtn,
                 {
@@ -3256,7 +3456,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 size={20}
                 color={isDark ? "#60A5FA" : "#2563EB"}
               />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </View>
 
@@ -3460,578 +3660,740 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   }
                 }
 
-                return (
-                  <View
-                    key={msg.id}
-                    style={[styles.msgBubbleRow, styles.msgRowMe]}
-                  >
-                    {/* Speech bubble */}
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => handleToggleMessage(msg.id)}
-                      onLongPress={(e) => handleLongPressMessage(msg, e)}
-                      delayLongPress={350}
-                      style={[styles.speechBubble, styles.speechBubbleMe]}
-                    >
-                      {/* Image Attachment Preview */}
-                      {msg.type === "image" && msg.meta?.attachmentUrl && (
-                        <View
-                          style={{
-                            marginBottom: 6,
-                            borderRadius: 12,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <Image
-                            source={{ uri: msg.meta.attachmentUrl }}
-                            style={{
-                              width: 220,
-                              height: 180,
-                              borderRadius: 12,
-                            }}
-                            resizeMode="cover"
-                          />
-                        </View>
-                      )}
+                const hasReactions = Boolean(
+                  msg.reactions &&
+                  Object.keys(msg.reactions).some(
+                    (k) => msg.reactions![k]?.length > 0,
+                  ),
+                );
 
-                      {/* File Attachment Preview */}
-                      {msg.type === "file" && msg.meta?.attachmentUrl && (
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: 10,
-                            borderRadius: 12,
-                            backgroundColor: "rgba(255,255,255,0.18)",
-                            marginBottom: 6,
-                          }}
-                        >
-                          <Ionicons
-                            name="document-text"
-                            size={26}
-                            color="#FFFFFF"
-                          />
-                          <View style={{ flex: 1 }}>
+                return (
+                  <SwipeableMessageRow
+                    key={msg.id}
+                    onReply={() => handleStartReply(msg)}
+                    isMe={true}
+                    isDark={isDark}
+                  >
+                    <View
+                      style={[
+                        styles.msgBubbleRow,
+                        styles.msgRowMe,
+                        hasReactions && { marginBottom: 12 },
+                      ]}
+                    >
+                      {/* Speech bubble */}
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => handleToggleMessage(msg.id)}
+                        onLongPress={(e) => handleLongPressMessage(msg, e)}
+                        delayLongPress={350}
+                        style={[
+                          styles.speechBubble,
+                          styles.speechBubbleMe,
+                          { position: "relative" },
+                        ]}
+                      >
+                        {/* Quoted Reply Preview */}
+                        {(msg.replyTo || msg.meta?.replyTo) && (
+                          <View
+                            style={[
+                              styles.msgReplySnippetBox,
+                              styles.msgReplySnippetBoxMe,
+                            ]}
+                          >
                             <Text
-                              style={{
-                                color: "#FFFFFF",
-                                fontSize: 13,
-                                fontWeight: "700",
-                              }}
+                              style={styles.msgReplySnippetSenderMe}
                               numberOfLines={1}
                             >
-                              {msg.meta.fileName || msg.text}
+                              {(msg.replyTo || msg.meta?.replyTo)?.senderName ||
+                                "Replied"}
                             </Text>
-                            {msg.meta.fileSize && (
+                            <Text
+                              style={styles.msgReplySnippetTextMe}
+                              numberOfLines={1}
+                            >
+                              {(msg.replyTo || msg.meta?.replyTo)?.text}
+                            </Text>
+                          </View>
+                        )}
+
+                        {/* Image Attachment Preview */}
+                        {msg.type === "image" && msg.meta?.attachmentUrl && (
+                          <View
+                            style={{
+                              marginBottom: 6,
+                              borderRadius: 12,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <Image
+                              source={{ uri: msg.meta.attachmentUrl }}
+                              style={{
+                                width: 220,
+                                height: 180,
+                                borderRadius: 12,
+                              }}
+                              resizeMode="cover"
+                            />
+                          </View>
+                        )}
+
+                        {/* File Attachment Preview */}
+                        {msg.type === "file" && msg.meta?.attachmentUrl && (
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 10,
+                              padding: 10,
+                              borderRadius: 12,
+                              backgroundColor: "rgba(255,255,255,0.18)",
+                              marginBottom: 6,
+                            }}
+                          >
+                            <Ionicons
+                              name="document-text"
+                              size={26}
+                              color="#FFFFFF"
+                            />
+                            <View style={{ flex: 1 }}>
                               <Text
                                 style={{
-                                  color: "rgba(255,255,255,0.75)",
-                                  fontSize: 11,
-                                  marginTop: 1,
-                                  fontWeight: "500",
+                                  color: "#FFFFFF",
+                                  fontSize: 13,
+                                  fontWeight: "700",
+                                }}
+                                numberOfLines={1}
+                              >
+                                {msg.meta.fileName || msg.text}
+                              </Text>
+                              {msg.meta.fileSize && (
+                                <Text
+                                  style={{
+                                    color: "rgba(255,255,255,0.75)",
+                                    fontSize: 11,
+                                    marginTop: 1,
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  {msg.meta.fileSize}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        )}
+
+                        {(!msg.type ||
+                          msg.type === "text" ||
+                          (msg.type !== "image" && msg.type !== "file") ||
+                          (msg.text &&
+                            msg.text !== "📷 Photo" &&
+                            !msg.text.startsWith("📎 "))) && (
+                          <Text
+                            style={[
+                              styles.speechBubbleText,
+                              styles.speechBubbleTextMe,
+                            ]}
+                          >
+                            {msg.text}
+                            {Boolean(msg.isEdited) && (
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  opacity: 0.8,
+                                  fontStyle: "italic",
                                 }}
                               >
-                                {msg.meta.fileSize}
+                                {" "}
+                                · edited
+                              </Text>
+                            )}
+                          </Text>
+                        )}
+
+                        {/* Embedded Expense Split Card */}
+                        {msg.type === "expense_split" && msg.meta && (
+                          <View
+                            style={[
+                              styles.msgEmbedCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            <View style={styles.msgEmbedHeaderRow}>
+                              <Text
+                                style={[
+                                  styles.msgEmbedCategory,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                🛒 {msg.meta.category}
+                              </Text>
+                              <Text style={styles.msgEmbedAmount}>
+                                {msg.meta.amount}
+                              </Text>
+                            </View>
+                            {msg.meta.share && (
+                              <Text
+                                style={[
+                                  styles.msgEmbedShare,
+                                  { color: isDark ? "#94A3B8" : "#64748B" },
+                                ]}
+                              >
+                                Calculated split share: {msg.meta.share}
                               </Text>
                             )}
                           </View>
-                        </View>
-                      )}
+                        )}
 
-                      {(!msg.type ||
-                        msg.type === "text" ||
-                        (msg.type !== "image" && msg.type !== "file") ||
-                        (msg.text &&
-                          msg.text !== "📷 Photo" &&
-                          !msg.text.startsWith("📎 "))) && (
-                        <Text
-                          style={[
-                            styles.speechBubbleText,
-                            styles.speechBubbleTextMe,
-                          ]}
-                        >
-                          {msg.text}
-                          {Boolean(msg.isEdited) && (
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                opacity: 0.8,
-                                fontStyle: "italic",
-                              }}
-                            >
-                              {" "}
-                              · edited
-                            </Text>
-                          )}
-                        </Text>
-                      )}
-
-                      {/* Embedded Expense Split Card */}
-                      {msg.type === "expense_split" && msg.meta && (
-                        <View
-                          style={[
-                            styles.msgEmbedCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <View style={styles.msgEmbedHeaderRow}>
+                        {/* Embedded Payment Claim Card */}
+                        {msg.type === "payment_claim" && msg.meta && (
+                          <View
+                            style={[
+                              styles.msgEmbedCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
                             <Text
                               style={[
                                 styles.msgEmbedCategory,
                                 { color: isDark ? "#FFFFFF" : "#0F172A" },
                               ]}
                             >
-                              🛒 {msg.meta.category}
+                              💳 {msg.meta.paymentMethod || "Payment Settle"}
                             </Text>
                             <Text style={styles.msgEmbedAmount}>
-                              {msg.meta.amount}
+                              Amount: {msg.meta.amount}
                             </Text>
                           </View>
-                          {msg.meta.share && (
-                            <Text
-                              style={[
-                                styles.msgEmbedShare,
-                                { color: isDark ? "#94A3B8" : "#64748B" },
-                              ]}
-                            >
-                              Calculated split share: {msg.meta.share}
-                            </Text>
-                          )}
-                        </View>
-                      )}
+                        )}
 
-                      {/* Embedded Payment Claim Card */}
-                      {msg.type === "payment_claim" && msg.meta && (
-                        <View
-                          style={[
-                            styles.msgEmbedCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
+                        {/* Embedded Call Log Card */}
+                        {msg.type === "call_log" && (
+                          <View
+                            style={[
+                              styles.callLogCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            <View style={styles.callLogIconWrap}>
+                              <Ionicons
+                                name={
+                                  msg.meta?.callType === "video"
+                                    ? "videocam"
+                                    : "call"
+                                }
+                                size={16}
+                                color={
+                                  msg.meta?.callStatus === "missed"
+                                    ? "#EF4444"
+                                    : "#2563EB"
+                                }
+                              />
+                            </View>
+                            <View style={styles.callLogDetails}>
+                              <Text
+                                style={[
+                                  styles.callLogTitle,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                {msg.meta?.callType === "video"
+                                  ? "Video Call"
+                                  : "Voice Call"}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.callLogSubtitle,
+                                  { color: isDark ? "#94A3B8" : "#64748B" },
+                                ]}
+                              >
+                                {msg.text.split("·")[1]?.trim() || "Completed"}
+                              </Text>
+                            </View>
+                            {activeThread.type === "direct" && (
+                              <TouchableOpacity
+                                style={styles.callBackBtn}
+                                onPress={() =>
+                                  handleStartCall(
+                                    msg.meta?.callType === "video"
+                                      ? "video"
+                                      : "voice",
+                                  )
+                                }
+                              >
+                                <Text style={styles.callBackBtnText}>Call</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        )}
+
+                        {/* Reaction Badges Pill */}
+                        {hasReactions && (
+                          <View
+                            style={[
+                              styles.bubbleReactionsPill,
+                              styles.bubbleReactionsPillMe,
+                              {
+                                backgroundColor: isDark ? "#1E222B" : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            {Object.entries(msg.reactions!)
+                              .filter(
+                                ([_, uids]) =>
+                                  Array.isArray(uids) && uids.length > 0,
+                              )
+                              .map(([em, uids]) => (
+                                <Text
+                                  key={em}
+                                  style={styles.bubbleReactionItemText}
+                                >
+                                  {em}
+                                  {uids.length > 1 ? ` ${uids.length}` : ""}
+                                </Text>
+                              ))}
+                          </View>
+                        )}
+                      </TouchableOpacity>
+
+                      {/* Messenger-style tapped Time & Seen indicator */}
+                      {isExpanded && (
+                        <View style={styles.msgStatusRowMe}>
                           <Text
                             style={[
-                              styles.msgEmbedCategory,
+                              styles.msgStatusText,
+                              isDark && { color: "#94A3B8" },
+                            ]}
+                          >
+                            {msg.time}{" "}
+                            <Text
+                              style={[
+                                styles.msgStatusSeenBadge,
+                                isSeen && { color: "#2563EB" },
+                              ]}
+                            >
+                              {seenLabel}
+                            </Text>
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </SwipeableMessageRow>
+                );
+              }
+
+              // Incoming message: Facebook Messenger style layout with avatar on the left
+              const hasIncomingReactions = Boolean(
+                msg.reactions &&
+                Object.keys(msg.reactions).some(
+                  (k) => msg.reactions![k]?.length > 0,
+                ),
+              );
+
+              return (
+                <SwipeableMessageRow
+                  key={msg.id}
+                  onReply={() => handleStartReply(msg)}
+                  isMe={false}
+                  isDark={isDark}
+                >
+                  <View
+                    style={[
+                      styles.msgThemContainer,
+                      hasIncomingReactions && { marginBottom: 12 },
+                    ]}
+                  >
+                    {showSenderName && activeThread.type === "group" && (
+                      <Text
+                        style={[
+                          styles.msgSenderName,
+                          { color: isDark ? "#64748B" : "#94A3B8" },
+                        ]}
+                      >
+                        {msg.sender}
+                      </Text>
+                    )}
+
+                    <View style={styles.msgThemRowWithAvatar}>
+                      {/* 30x30 Circular Avatar on every incoming message line */}
+                      <View
+                        style={[
+                          styles.msgAvatarWrap,
+                          { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
+                        ]}
+                      >
+                        {senderAvatar?.photoURL ? (
+                          <Image
+                            source={{ uri: senderAvatar.photoURL }}
+                            style={styles.msgAvatarImage}
+                          />
+                        ) : (
+                          <Text
+                            style={[
+                              styles.msgAvatarInitials,
+                              { color: senderAvatar?.text || "#2563EB" },
+                            ]}
+                          >
+                            {senderAvatar?.initials || "R"}
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Speech bubble */}
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => handleToggleMessage(msg.id)}
+                        onLongPress={(e) => handleLongPressMessage(msg, e)}
+                        delayLongPress={350}
+                        style={[
+                          styles.speechBubble,
+                          styles.speechBubbleThem,
+                          {
+                            backgroundColor: isDark ? "#242731" : "#F1F5F9",
+                            position: "relative",
+                          },
+                        ]}
+                      >
+                        {/* Quoted Reply Preview */}
+                        {(msg.replyTo || msg.meta?.replyTo) && (
+                          <View
+                            style={[
+                              styles.msgReplySnippetBox,
+                              styles.msgReplySnippetBoxThem,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(255,255,255,0.08)"
+                                  : "rgba(0,0,0,0.06)",
+                                borderLeftColor: isDark ? "#60A5FA" : "#2563EB",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.msgReplySnippetSenderThem,
+                                { color: isDark ? "#60A5FA" : "#2563EB" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {(msg.replyTo || msg.meta?.replyTo)?.senderName ||
+                                "Replied"}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.msgReplySnippetTextThem,
+                                { color: isDark ? "#CBD5E1" : "#475569" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {(msg.replyTo || msg.meta?.replyTo)?.text}
+                            </Text>
+                          </View>
+                        )}
+                        {/* Image Attachment Preview */}
+                        {msg.type === "image" && msg.meta?.attachmentUrl && (
+                          <View
+                            style={{
+                              marginBottom: 6,
+                              borderRadius: 12,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <Image
+                              source={{ uri: msg.meta.attachmentUrl }}
+                              style={{
+                                width: 220,
+                                height: 180,
+                                borderRadius: 12,
+                              }}
+                              resizeMode="cover"
+                            />
+                          </View>
+                        )}
+
+                        {/* File Attachment Preview */}
+                        {msg.type === "file" && msg.meta?.attachmentUrl && (
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 10,
+                              padding: 10,
+                              borderRadius: 12,
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.08)"
+                                : "#E2E8F0",
+                              marginBottom: 6,
+                            }}
+                          >
+                            <Ionicons
+                              name="document-text"
+                              size={26}
+                              color={isDark ? "#60A5FA" : "#2563EB"}
+                            />
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={{
+                                  color: isDark ? "#FFFFFF" : "#0F172A",
+                                  fontSize: 13,
+                                  fontWeight: "700",
+                                }}
+                                numberOfLines={1}
+                              >
+                                {msg.meta.fileName || msg.text}
+                              </Text>
+                              {msg.meta.fileSize && (
+                                <Text
+                                  style={{
+                                    color: isDark ? "#94A3B8" : "#64748B",
+                                    fontSize: 11,
+                                    marginTop: 1,
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  {msg.meta.fileSize}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        )}
+
+                        {(!msg.type ||
+                          msg.type === "text" ||
+                          (msg.type !== "image" && msg.type !== "file") ||
+                          (msg.text &&
+                            msg.text !== "📷 Photo" &&
+                            !msg.text.startsWith("📎 "))) && (
+                          <Text
+                            style={[
+                              styles.speechBubbleText,
                               { color: isDark ? "#FFFFFF" : "#0F172A" },
                             ]}
                           >
-                            💳 {msg.meta.paymentMethod || "Payment Settle"}
+                            {msg.text}
+                            {Boolean(msg.isEdited) && (
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  color: isDark ? "#94A3B8" : "#64748B",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {" "}
+                                · edited
+                              </Text>
+                            )}
                           </Text>
-                          <Text style={styles.msgEmbedAmount}>
-                            Amount: {msg.meta.amount}
-                          </Text>
-                        </View>
-                      )}
+                        )}
 
-                      {/* Embedded Call Log Card */}
-                      {msg.type === "call_log" && (
-                        <View
-                          style={[
-                            styles.callLogCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <View style={styles.callLogIconWrap}>
-                            <Ionicons
-                              name={
-                                msg.meta?.callType === "video"
-                                  ? "videocam"
-                                  : "call"
-                              }
-                              size={16}
-                              color={
-                                msg.meta?.callStatus === "missed"
-                                  ? "#EF4444"
-                                  : "#2563EB"
-                              }
-                            />
+                        {/* Embedded Expense Split Card */}
+                        {msg.type === "expense_split" && msg.meta && (
+                          <View
+                            style={[
+                              styles.msgEmbedCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            <View style={styles.msgEmbedHeaderRow}>
+                              <Text
+                                style={[
+                                  styles.msgEmbedCategory,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                🛒 {msg.meta.category}
+                              </Text>
+                              <Text style={styles.msgEmbedAmount}>
+                                {msg.meta.amount}
+                              </Text>
+                            </View>
+                            {msg.meta.share && (
+                              <Text
+                                style={[
+                                  styles.msgEmbedShare,
+                                  { color: isDark ? "#94A3B8" : "#64748B" },
+                                ]}
+                              >
+                                Calculated split share: {msg.meta.share}
+                              </Text>
+                            )}
                           </View>
-                          <View style={styles.callLogDetails}>
+                        )}
+
+                        {/* Embedded Payment Claim Card */}
+                        {msg.type === "payment_claim" && msg.meta && (
+                          <View
+                            style={[
+                              styles.msgEmbedCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
                             <Text
                               style={[
-                                styles.callLogTitle,
+                                styles.msgEmbedCategory,
                                 { color: isDark ? "#FFFFFF" : "#0F172A" },
                               ]}
                             >
-                              {msg.meta?.callType === "video"
-                                ? "Video Call"
-                                : "Voice Call"}
+                              💳 {msg.meta.paymentMethod || "Payment Settle"}
                             </Text>
-                            <Text
-                              style={[
-                                styles.callLogSubtitle,
-                                { color: isDark ? "#94A3B8" : "#64748B" },
-                              ]}
-                            >
-                              {msg.text.split("·")[1]?.trim() || "Completed"}
+                            <Text style={styles.msgEmbedAmount}>
+                              Amount: {msg.meta.amount}
                             </Text>
                           </View>
-                          {activeThread.type === "direct" && (
-                            <TouchableOpacity
-                              style={styles.callBackBtn}
-                              onPress={() =>
-                                handleStartCall(
-                                  msg.meta?.callType === "video"
-                                    ? "video"
-                                    : "voice",
-                                )
-                              }
-                            >
-                              <Text style={styles.callBackBtnText}>Call</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      )}
-                    </TouchableOpacity>
+                        )}
 
-                    {/* Messenger-style tapped Time & Seen indicator */}
+                        {/* Embedded Call Log Card */}
+                        {msg.type === "call_log" && (
+                          <View
+                            style={[
+                              styles.callLogCard,
+                              {
+                                backgroundColor: isDark
+                                  ? "rgba(0,0,0,0.3)"
+                                  : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            <View style={styles.callLogIconWrap}>
+                              <Ionicons
+                                name={
+                                  msg.meta?.callType === "video"
+                                    ? "videocam"
+                                    : "call"
+                                }
+                                size={16}
+                                color={
+                                  msg.meta?.callStatus === "missed"
+                                    ? "#EF4444"
+                                    : "#2563EB"
+                                }
+                              />
+                            </View>
+                            <View style={styles.callLogDetails}>
+                              <Text
+                                style={[
+                                  styles.callLogTitle,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                {msg.meta?.callType === "video"
+                                  ? "Video Call"
+                                  : "Voice Call"}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.callLogSubtitle,
+                                  { color: isDark ? "#94A3B8" : "#64748B" },
+                                ]}
+                              >
+                                {msg.text.split("·")[1]?.trim() || "Completed"}
+                              </Text>
+                            </View>
+                            {activeThread.type === "direct" && (
+                              <TouchableOpacity
+                                style={styles.callBackBtn}
+                                onPress={() =>
+                                  handleStartCall(
+                                    msg.meta?.callType === "video"
+                                      ? "video"
+                                      : "voice",
+                                  )
+                                }
+                              >
+                                <Text style={styles.callBackBtnText}>Call</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        )}
+
+                        {/* Reaction Badges Pill */}
+                        {hasIncomingReactions && (
+                          <View
+                            style={[
+                              styles.bubbleReactionsPill,
+                              styles.bubbleReactionsPillThem,
+                              {
+                                backgroundColor: isDark ? "#1E222B" : "#FFFFFF",
+                                borderColor: isDark
+                                  ? "rgba(255,255,255,0.12)"
+                                  : "#E2E8F0",
+                              },
+                            ]}
+                          >
+                            {Object.entries(msg.reactions!)
+                              .filter(
+                                ([_, uids]) =>
+                                  Array.isArray(uids) && uids.length > 0,
+                              )
+                              .map(([em, uids]) => (
+                                <Text
+                                  key={em}
+                                  style={styles.bubbleReactionItemText}
+                                >
+                                  {em}
+                                  {uids.length > 1 ? ` ${uids.length}` : ""}
+                                </Text>
+                              ))}
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Messenger-style tapped Time indicator for incoming message */}
                     {isExpanded && (
-                      <View style={styles.msgStatusRowMe}>
+                      <View style={styles.msgStatusRowThem}>
                         <Text
                           style={[
                             styles.msgStatusText,
                             isDark && { color: "#94A3B8" },
                           ]}
                         >
-                          {msg.time}{" "}
-                          <Text
-                            style={[
-                              styles.msgStatusSeenBadge,
-                              isSeen && { color: "#2563EB" },
-                            ]}
-                          >
-                            {seenLabel}
-                          </Text>
+                          {msg.time}
                         </Text>
                       </View>
                     )}
                   </View>
-                );
-              }
-
-              // Incoming message: Facebook Messenger style layout with avatar on the left
-              return (
-                <View key={msg.id} style={styles.msgThemContainer}>
-                  {showSenderName && activeThread.type === "group" && (
-                    <Text
-                      style={[
-                        styles.msgSenderName,
-                        { color: isDark ? "#64748B" : "#94A3B8" },
-                      ]}
-                    >
-                      {msg.sender}
-                    </Text>
-                  )}
-
-                  <View style={styles.msgThemRowWithAvatar}>
-                    {/* 30x30 Circular Avatar on every incoming message line */}
-                    <View
-                      style={[
-                        styles.msgAvatarWrap,
-                        { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
-                      ]}
-                    >
-                      {senderAvatar?.photoURL ? (
-                        <Image
-                          source={{ uri: senderAvatar.photoURL }}
-                          style={styles.msgAvatarImage}
-                        />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.msgAvatarInitials,
-                            { color: senderAvatar?.text || "#2563EB" },
-                          ]}
-                        >
-                          {senderAvatar?.initials || "R"}
-                        </Text>
-                      )}
-                    </View>
-
-                    {/* Speech bubble */}
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => handleToggleMessage(msg.id)}
-                      onLongPress={(e) => handleLongPressMessage(msg, e)}
-                      delayLongPress={350}
-                      style={[
-                        styles.speechBubble,
-                        styles.speechBubbleThem,
-                        {
-                          backgroundColor: isDark ? "#242731" : "#F1F5F9",
-                        },
-                      ]}
-                    >
-                      {/* Image Attachment Preview */}
-                      {msg.type === "image" && msg.meta?.attachmentUrl && (
-                        <View
-                          style={{
-                            marginBottom: 6,
-                            borderRadius: 12,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <Image
-                            source={{ uri: msg.meta.attachmentUrl }}
-                            style={{
-                              width: 220,
-                              height: 180,
-                              borderRadius: 12,
-                            }}
-                            resizeMode="cover"
-                          />
-                        </View>
-                      )}
-
-                      {/* File Attachment Preview */}
-                      {msg.type === "file" && msg.meta?.attachmentUrl && (
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: 10,
-                            borderRadius: 12,
-                            backgroundColor: isDark
-                              ? "rgba(255,255,255,0.08)"
-                              : "#E2E8F0",
-                            marginBottom: 6,
-                          }}
-                        >
-                          <Ionicons
-                            name="document-text"
-                            size={26}
-                            color={isDark ? "#60A5FA" : "#2563EB"}
-                          />
-                          <View style={{ flex: 1 }}>
-                            <Text
-                              style={{
-                                color: isDark ? "#FFFFFF" : "#0F172A",
-                                fontSize: 13,
-                                fontWeight: "700",
-                              }}
-                              numberOfLines={1}
-                            >
-                              {msg.meta.fileName || msg.text}
-                            </Text>
-                            {msg.meta.fileSize && (
-                              <Text
-                                style={{
-                                  color: isDark ? "#94A3B8" : "#64748B",
-                                  fontSize: 11,
-                                  marginTop: 1,
-                                  fontWeight: "500",
-                                }}
-                              >
-                                {msg.meta.fileSize}
-                              </Text>
-                            )}
-                          </View>
-                        </View>
-                      )}
-
-                      {(!msg.type ||
-                        msg.type === "text" ||
-                        (msg.type !== "image" && msg.type !== "file") ||
-                        (msg.text &&
-                          msg.text !== "📷 Photo" &&
-                          !msg.text.startsWith("📎 "))) && (
-                        <Text
-                          style={[
-                            styles.speechBubbleText,
-                            { color: isDark ? "#FFFFFF" : "#0F172A" },
-                          ]}
-                        >
-                          {msg.text}
-                          {Boolean(msg.isEdited) && (
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                color: isDark ? "#94A3B8" : "#64748B",
-                                fontStyle: "italic",
-                              }}
-                            >
-                              {" "}
-                              · edited
-                            </Text>
-                          )}
-                        </Text>
-                      )}
-
-                      {/* Embedded Expense Split Card */}
-                      {msg.type === "expense_split" && msg.meta && (
-                        <View
-                          style={[
-                            styles.msgEmbedCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <View style={styles.msgEmbedHeaderRow}>
-                            <Text
-                              style={[
-                                styles.msgEmbedCategory,
-                                { color: isDark ? "#FFFFFF" : "#0F172A" },
-                              ]}
-                            >
-                              🛒 {msg.meta.category}
-                            </Text>
-                            <Text style={styles.msgEmbedAmount}>
-                              {msg.meta.amount}
-                            </Text>
-                          </View>
-                          {msg.meta.share && (
-                            <Text
-                              style={[
-                                styles.msgEmbedShare,
-                                { color: isDark ? "#94A3B8" : "#64748B" },
-                              ]}
-                            >
-                              Calculated split share: {msg.meta.share}
-                            </Text>
-                          )}
-                        </View>
-                      )}
-
-                      {/* Embedded Payment Claim Card */}
-                      {msg.type === "payment_claim" && msg.meta && (
-                        <View
-                          style={[
-                            styles.msgEmbedCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.msgEmbedCategory,
-                              { color: isDark ? "#FFFFFF" : "#0F172A" },
-                            ]}
-                          >
-                            💳 {msg.meta.paymentMethod || "Payment Settle"}
-                          </Text>
-                          <Text style={styles.msgEmbedAmount}>
-                            Amount: {msg.meta.amount}
-                          </Text>
-                        </View>
-                      )}
-
-                      {/* Embedded Call Log Card */}
-                      {msg.type === "call_log" && (
-                        <View
-                          style={[
-                            styles.callLogCard,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(0,0,0,0.3)"
-                                : "#FFFFFF",
-                              borderColor: isDark
-                                ? "rgba(255,255,255,0.12)"
-                                : "#E2E8F0",
-                            },
-                          ]}
-                        >
-                          <View style={styles.callLogIconWrap}>
-                            <Ionicons
-                              name={
-                                msg.meta?.callType === "video"
-                                  ? "videocam"
-                                  : "call"
-                              }
-                              size={16}
-                              color={
-                                msg.meta?.callStatus === "missed"
-                                  ? "#EF4444"
-                                  : "#2563EB"
-                              }
-                            />
-                          </View>
-                          <View style={styles.callLogDetails}>
-                            <Text
-                              style={[
-                                styles.callLogTitle,
-                                { color: isDark ? "#FFFFFF" : "#0F172A" },
-                              ]}
-                            >
-                              {msg.meta?.callType === "video"
-                                ? "Video Call"
-                                : "Voice Call"}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.callLogSubtitle,
-                                { color: isDark ? "#94A3B8" : "#64748B" },
-                              ]}
-                            >
-                              {msg.text.split("·")[1]?.trim() || "Completed"}
-                            </Text>
-                          </View>
-                          {activeThread.type === "direct" && (
-                            <TouchableOpacity
-                              style={styles.callBackBtn}
-                              onPress={() =>
-                                handleStartCall(
-                                  msg.meta?.callType === "video"
-                                    ? "video"
-                                    : "voice",
-                                )
-                              }
-                            >
-                              <Text style={styles.callBackBtnText}>Call</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Messenger-style tapped Time indicator for incoming message */}
-                  {isExpanded && (
-                    <View style={styles.msgStatusRowThem}>
-                      <Text
-                        style={[
-                          styles.msgStatusText,
-                          isDark && { color: "#94A3B8" },
-                        ]}
-                      >
-                        {msg.time}
-                      </Text>
-                    </View>
-                  )}
-                </View>
+                </SwipeableMessageRow>
               );
             })
           )}
@@ -4055,9 +4417,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 styles.editingBanner,
                 {
                   backgroundColor: isDark ? "#1E222B" : "#EFF6FF",
-                  borderBottomColor: isDark
-                    ? "rgba(255,255,255,0.08)"
-                    : "#DBEAFE",
+                  // borderBottomColor: isDark
+                  //   ? "rgba(255,255,255,0.08)"
+                  //   : "#DBEAFE",
                 },
               ]}
             >
@@ -4088,6 +4450,65 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               </View>
               <TouchableOpacity
                 onPress={handleCancelEdit}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ padding: 4 }}
+              >
+                <Feather
+                  name="x"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Replying Message Banner Bar */}
+          {replyingToMessage && !editingMessage && (
+            <View
+              style={[
+                styles.editingBanner,
+                {
+                  backgroundColor: isDark ? "#1E222B" : "#EFF6FF",
+                  borderLeftWidth: 3.5,
+                  borderLeftColor: isDark ? "#60A5FA" : "#2563EB",
+                },
+              ]}
+            >
+              <Ionicons
+                name="arrow-undo"
+                size={14}
+                color={isDark ? "#60A5FA" : "#2563EB"}
+              />
+              <View style={{ flex: 1, marginHorizontal: 8 }}>
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: "700",
+                    color: isDark ? "#60A5FA" : "#2563EB",
+                  }}
+                >
+                  Replying to{" "}
+                  {replyingToMessage.isMe
+                    ? "yourself"
+                    : replyingToMessage.sender}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: isDark ? "#94A3B8" : "#64748B",
+                  }}
+                  numberOfLines={1}
+                >
+                  {replyingToMessage.text ||
+                    (replyingToMessage.type === "image"
+                      ? "📷 Photo"
+                      : replyingToMessage.type === "file"
+                        ? "📎 Attachment"
+                        : "Message")}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleCancelReply}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={{ padding: 4 }}
               >
@@ -4151,7 +4572,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 placeholder={
                   editingMessage
                     ? "Edit your message..."
-                    : `Message ${activeThread.name.split(" ")[0]}...`
+                    : replyingToMessage
+                      ? `Reply to ${
+                          replyingToMessage.isMe
+                            ? "yourself"
+                            : replyingToMessage.sender.split(" ")[0]
+                        }...`
+                      : `Message ${activeThread.name.split(" ")[0]}...`
                 }
                 placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
                 value={chatInputText}
@@ -4424,10 +4851,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     currentUid.replace(/^mem_/, "");
 
                 const touchY = messageActionCoords?.y ?? windowHeight / 2;
-                const isAbove = touchY > topInset + 110;
+                const isAbove = touchY > topInset + 130;
                 const stripTop = isAbove
-                  ? Math.max(topInset + 50, touchY - 68)
-                  : Math.min(windowHeight - 120, touchY + 36);
+                  ? Math.max(topInset + 50, touchY - 110)
+                  : Math.min(windowHeight - 160, touchY + 36);
 
                 const canEdit =
                   isMe &&
@@ -4451,6 +4878,58 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     ]}
                     onStartShouldSetResponder={() => true}
                   >
+                    {/* Floating Emoji Reactions Bar */}
+                    {!isDeletingMessage && !deleteMode && (
+                      <View
+                        style={[
+                          styles.reactionBarContainer,
+                          {
+                            borderBottomColor: isDark
+                              ? "rgba(255,255,255,0.08)"
+                              : "#F1F5F9",
+                          },
+                        ]}
+                      >
+                        {REACTION_EMOJIS.map((emoji) => {
+                          const cleanUid = String(currentUid || "")
+                            .replace(/^mem_/, "")
+                            .trim();
+                          const userReacted =
+                            Array.isArray(
+                              selectedMessageForAction.reactions?.[emoji],
+                            ) &&
+                            selectedMessageForAction.reactions[emoji].includes(
+                              cleanUid,
+                            );
+                          return (
+                            <TouchableOpacity
+                              key={emoji}
+                              activeOpacity={0.65}
+                              onPress={() =>
+                                handleToggleReaction(
+                                  selectedMessageForAction,
+                                  emoji,
+                                )
+                              }
+                              style={[
+                                styles.reactionEmojiBtn,
+                                userReacted && {
+                                  backgroundColor: isDark
+                                    ? "rgba(37,99,235,0.3)"
+                                    : "rgba(37,99,235,0.15)",
+                                  borderColor: isDark ? "#60A5FA" : "#2563EB",
+                                },
+                              ]}
+                            >
+                              <Text style={styles.reactionEmojiText}>
+                                {emoji}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+
                     {isDeletingMessage ? (
                       <View style={styles.stripDeletingRow}>
                         <ActivityIndicator size="small" color="#EF4444" />
@@ -4545,6 +5024,46 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       </View>
                     ) : (
                       <View style={styles.stripMainRow}>
+                        {/* Reply Button */}
+                        <TouchableOpacity
+                          style={styles.stripActionBtn}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            const msg = selectedMessageForAction;
+                            setSelectedMessageForAction(null);
+                            setDeleteMode(false);
+                            handleStartReply(msg);
+                          }}
+                        >
+                          <Ionicons
+                            name="arrow-undo"
+                            size={15}
+                            color={isDark ? "#60A5FA" : "#2563EB"}
+                          />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              {
+                                color: isDark ? "#60A5FA" : "#2563EB",
+                                fontWeight: "700",
+                              },
+                            ]}
+                          >
+                            Reply
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View
+                          style={[
+                            styles.stripDivider,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        />
+
                         {/* Edit Button */}
                         <TouchableOpacity
                           style={styles.stripActionBtn}
@@ -4736,12 +5255,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     { color: isDark ? "#FFFFFF" : "#0F172A" },
                   ]}
                 >
-                  AI images
+                  Images
                 </Text>
               </TouchableOpacity>
 
               {/* Option 2: Files */}
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={styles.plusPopoverRow}
                 activeOpacity={0.7}
                 onPress={handlePickAndSendFile}
@@ -4757,7 +5276,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 >
                   Files
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
           </TouchableOpacity>
         </Modal>
@@ -7244,6 +7763,102 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
+  swipeRowWrapper: {
+    position: "relative",
+    width: "100%",
+    justifyContent: "center",
+  },
+  swipeReplyIconContainer: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  reactionBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    gap: 4,
+  },
+  reactionEmojiBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  reactionEmojiText: {
+    fontSize: 20,
+  },
+  msgReplySnippetBox: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    marginBottom: 6,
+  },
+  msgReplySnippetBoxMe: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderLeftColor: "#FFFFFF",
+  },
+  msgReplySnippetBoxThem: {
+    borderLeftWidth: 3,
+  },
+  msgReplySnippetSenderMe: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 1,
+  },
+  msgReplySnippetTextMe: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.85)",
+  },
+  msgReplySnippetSenderThem: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    marginBottom: 1,
+  },
+  msgReplySnippetTextThem: {
+    fontSize: 11,
+  },
+  bubbleReactionsPill: {
+    position: "absolute",
+    bottom: -9,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+    gap: 2,
+    zIndex: 3,
+  },
+  bubbleReactionsPillMe: {
+    right: 6,
+  },
+  bubbleReactionsPillThem: {
+    left: 6,
+  },
+  bubbleReactionItemText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
   chatHeaderActionsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -8453,7 +9068,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderBottomWidth: 1,
+    marginBottom: 8,
+    borderRadius: 4,
   },
   plusPopoverMenuContainer: {
     position: "absolute",

@@ -9799,6 +9799,75 @@ export const mobileDataService = {
   },
 
   /**
+   * Toggles an emoji reaction from the current user on a message.
+   * If the user already reacted with this emoji, removes it. Otherwise, adds it.
+   */
+  async toggleMessageReaction(options: {
+    messageId: string;
+    householdId?: string;
+    isDirect?: boolean;
+    emoji: string;
+    userId: string;
+  }): Promise<{ added: boolean; reactions: Record<string, string[]> }> {
+    const { messageId, householdId, isDirect, emoji, userId } = options;
+    const cleanUid = String(userId || "")
+      .replace(/^mem_/, "")
+      .trim();
+    if (!messageId || !cleanUid || !emoji)
+      return { added: false, reactions: {} };
+
+    const docRef = isDirect
+      ? doc(db, "directMessages", messageId)
+      : householdId
+        ? doc(db, `households/${householdId}/messages`, messageId)
+        : doc(db, "directMessages", messageId);
+
+    try {
+      let targetRef = docRef;
+      let snap = await getDoc(targetRef);
+      if (!snap.exists()) {
+        const altRef = householdId
+          ? doc(db, `households/${householdId}/messages`, messageId)
+          : doc(db, "directMessages", messageId);
+        const altSnap = await getDoc(altRef);
+        if (altSnap.exists()) {
+          targetRef = altRef;
+          snap = altSnap;
+        } else {
+          return { added: false, reactions: {} };
+        }
+      }
+
+      const currentReactions: Record<string, string[]> =
+        snap.data()?.reactions || {};
+      const userList: string[] = Array.isArray(currentReactions[emoji])
+        ? [...currentReactions[emoji]]
+        : [];
+      const idx = userList.indexOf(cleanUid);
+      let added = false;
+      if (idx >= 0) {
+        userList.splice(idx, 1);
+      } else {
+        userList.push(cleanUid);
+        added = true;
+      }
+      const updatedReactions = { ...currentReactions };
+      if (userList.length === 0) {
+        delete updatedReactions[emoji];
+      } else {
+        updatedReactions[emoji] = userList;
+      }
+      await updateDoc(targetRef, { reactions: updatedReactions }).catch(
+        () => {},
+      );
+      return { added, reactions: updatedReactions };
+    } catch (e) {
+      console.warn("[toggleMessageReaction] Error:", e);
+      return { added: false, reactions: {} };
+    }
+  },
+
+  /**
    * Deletes an entire conversation and all its messages permanently.
    */
   async deleteConversation(options: {

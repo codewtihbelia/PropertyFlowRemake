@@ -155,7 +155,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   onProfileUpdated,
 }) => {
   const insets = useSafeAreaInsets();
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
 
   // Active top tab: "feed", "reels", or "network"
   const [activeMainTab, setActiveMainTab] = useState<
@@ -1206,7 +1206,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         style={[
           styles.fbPostCard,
           {
-            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            backgroundColor: colors.background,
             borderColor: isDark ? "#334155" : "#E2E8F0",
           },
         ]}
@@ -1214,7 +1214,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         <StatusBar
           barStyle={isDark ? "light-content" : "dark-content"}
           translucent
-          backgroundColor="#FFFFFF"
+          backgroundColor="transparent"
         />
 
         {/* Post Author Header (Facebook style) */}
@@ -1606,7 +1606,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                   styles.fbReactionDock,
                   {
                     backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                    // borderColor: isDark ? "#334155" : "#E2E8F0",
                   },
                 ]}
               >
@@ -1646,8 +1646,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             style={[
               styles.fbActionBar,
               {
-                borderTopColor: isDark ? "#334155" : "#E2E8F0",
-                borderBottomColor: isDark ? "#334155" : "#F1F5F9",
+                // borderTopColor: isDark ? "#334155" : "#E2E8F0",
+                // borderBottomColor: isDark ? "#334155" : "#F1F5F9",
               },
             ]}
           >
@@ -1788,7 +1788,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         style={[
           styles.pymkSectionCard,
           {
-            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            backgroundColor: colors.background,
             borderColor: isDark ? "#334155" : "#E2E8F0",
           },
         ]}
@@ -2116,7 +2116,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         style={[
           styles.reelsShelfCard,
           {
-            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            backgroundColor: colors.background,
             borderColor: isDark ? "#334155" : "#E2E8F0",
           },
         ]}
@@ -2173,7 +2173,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
               styles.shelfReelItemCard,
               styles.shelfCreateReelCard,
               {
-                backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                backgroundColor: colors.background,
                 borderColor: isDark ? "#334155" : "#E2E8F0",
               },
             ]}
@@ -2344,8 +2344,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           style={[
             styles.header,
             {
-              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
-              borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+              backgroundColor: colors.background,
             },
           ]}
         >
@@ -2375,7 +2374,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 { color: isDark ? "#94A3B8" : "#64748B" },
               ]}
             >
-              Social feed & roommate network
+              Feeds & People
             </Text>
           </View>
 
@@ -2428,8 +2427,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           style={[
             styles.mainTabsContainer,
             {
-              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
-              borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
+              backgroundColor: colors.background,
             },
           ]}
         >
@@ -2544,8 +2542,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           contentContainerStyle={[
             styles.feedScrollContent,
             {
-              paddingBottom: insets.bottom + 80,
-              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+              paddingBottom: insets.bottom + 20,
+              backgroundColor: colors.background,
             },
           ]}
           onScrollBeginDrag={() => {
@@ -2566,7 +2564,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             style={[
               styles.quickPostCard,
               {
-                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                backgroundColor: colors.background,
               },
             ]}
           >
@@ -2604,7 +2602,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 style={[
                   styles.quickPostInputFake,
                   {
-                    backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                    backgroundColor: colors.background,
                     borderColor: isDark ? "#334155" : "#CBD5E1",
                   },
                 ]}
@@ -2717,7 +2715,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 style={[
                   styles.createStoryCard,
                   {
-                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    backgroundColor: colors.background,
                     borderColor: isDark ? "#334155" : "#E2E8F0",
                   },
                 ]}
@@ -2922,11 +2920,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                   style={[
                     styles.scopeChip,
                     {
-                      backgroundColor: isActive
-                        ? "#2563EB"
-                        : isDark
-                          ? "#1E293B"
-                          : "#FFFFFF",
+                      backgroundColor: isActive ? "#2563EB" : colors.background,
                       borderColor: isActive
                         ? "#2563EB"
                         : isDark
@@ -2973,9 +2967,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                     {
                       backgroundColor: isSelected
                         ? conf.color
-                        : isDark
-                          ? "#1E293B"
-                          : "#FFFFFF",
+                        : colors.background,
                       borderColor: isSelected
                         ? conf.color
                         : isDark
@@ -3032,8 +3024,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 style={[
                   styles.emptyCard,
                   {
-                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-                    borderColor: isDark ? "#334155" : "#E2E8F0",
+                    backgroundColor: colors.background,
+                    // borderColor: isDark ? "#334155" : "#E2E8F0",
                   },
                 ]}
               >
@@ -3261,7 +3253,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             style={[
               styles.fbFriendsTopBar,
               {
-                backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+                backgroundColor: colors.background,
                 borderBottomColor: isDark ? "#1E293B" : "#E2E8F0",
               },
             ]}
@@ -3392,7 +3384,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 style={[
                   styles.searchBar,
                   {
-                    backgroundColor: isDark ? "#1E293B" : "#F1F5F9",
+                    backgroundColor: colors.background,
                     borderColor: isDark ? "#334155" : "#E2E8F0",
                     marginTop: 10,
                   },
@@ -3429,16 +3421,24 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
 
           {/* Main Content Area */}
           <ScrollView
-            style={styles.networkScrollView}
+            style={[
+              styles.networkScrollView,
+              { backgroundColor: colors.background },
+            ]}
             contentContainerStyle={[
               styles.networkScrollContent,
-              { paddingBottom: insets.bottom + 80 },
+              { paddingBottom: insets.bottom + 20 },
             ]}
             showsVerticalScrollIndicator={false}
           >
             {friendsFilter === "friends" ? (
               /* YOUR FRIENDS VIEW */
-              <View style={styles.fbFriendsSection}>
+              <View
+                style={[
+                  styles.fbFriendsSection,
+                  { backgroundColor: colors.background },
+                ]}
+              >
                 <View style={styles.fbSectionHeaderRow}>
                   <Text
                     style={[
@@ -3534,7 +3534,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                         style={[
                           styles.fbFriendRowCard,
                           {
-                            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                            backgroundColor: colors.background,
                             borderBottomColor: isDark ? "#334155" : "#F1F5F9",
                           },
                         ]}
@@ -3663,9 +3663,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               style={[
                                 styles.fbFriendViewProfileBtn,
                                 {
-                                  backgroundColor: isDark
-                                    ? "#334155"
-                                    : "#E4E6EB",
+                                  backgroundColor: colors.background,
+                                  borderColor: isDark ? "#334155" : "#E4E6EB",
                                 },
                               ]}
                             >
@@ -3697,9 +3696,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                               style={[
                                 styles.fbFriendMoreBtn,
                                 {
-                                  backgroundColor: isDark
-                                    ? "#334155"
-                                    : "#E4E6EB",
+                                  backgroundColor: colors.background,
+                                  borderColor: isDark ? "#334155" : "#E4E6EB",
                                 },
                               ]}
                             >
@@ -3800,7 +3798,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                             style={[
                               styles.fbReqCard,
                               {
-                                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                                backgroundColor: colors.background,
                                 borderBottomColor: isDark
                                   ? "#334155"
                                   : "#F1F5F9",
@@ -3961,7 +3959,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                   <View
                     style={[
                       styles.fbSectionDivider,
-                      { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
+                      { backgroundColor: colors.background },
                     ]}
                   />
                 )}
@@ -4051,7 +4049,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                           style={[
                             styles.fbReqCard,
                             {
-                              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                              backgroundColor: colors.background,
                               borderBottomColor: isDark ? "#334155" : "#F1F5F9",
                             },
                           ]}
@@ -5105,7 +5103,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
   },
   backBtn: {
     padding: 6,
@@ -5175,7 +5172,6 @@ const styles = StyleSheet.create({
   },
   mainTabsContainer: {
     flexDirection: "row",
-    borderBottomWidth: 1,
   },
   mainTabBtn: {
     flex: 1,
@@ -5870,7 +5866,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 36,
-    borderWidth: 1,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.22,
@@ -5914,8 +5909,8 @@ const styles = StyleSheet.create({
   /* Facebook Action Bar */
   fbActionBar: {
     flexDirection: "row",
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    // borderTopWidth: 1,
+    // borderBottomWidth: 1,
     paddingVertical: 3,
   },
   fbActionBtn: {
@@ -6075,7 +6070,6 @@ const styles = StyleSheet.create({
   /* Network Styles */
   networkContainer: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
   },
   networkSubTabs: {
     flexDirection: "row",
@@ -6114,15 +6108,14 @@ const styles = StyleSheet.create({
   searchWrap: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderBottomWidth: 1,
   },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: 100,
     borderWidth: 1,
-    height: 40,
+    height: 48,
     gap: 8,
   },
   searchInput: {
@@ -6276,7 +6269,6 @@ const styles = StyleSheet.create({
   emptyCard: {
     padding: 32,
     borderRadius: 16,
-    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     marginHorizontal: 16,
@@ -6544,9 +6536,10 @@ const styles = StyleSheet.create({
   fbFriendViewProfileBtn: {
     flex: 1,
     height: 34,
-    borderRadius: 6,
+    borderRadius: 100,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
   },
   fbFriendViewProfileText: {
     fontSize: 13,
@@ -6555,7 +6548,8 @@ const styles = StyleSheet.create({
   fbFriendMoreBtn: {
     width: 38,
     height: 34,
-    borderRadius: 6,
+    borderRadius: 100,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -325,6 +325,7 @@ interface WalletScreenProps {
   };
   onNavigateToBills?: () => void;
   onNavigateToSettle?: () => void;
+  onSubViewChange?: (isSubView: boolean) => void;
 }
 
 export function WalletScreen({
@@ -332,10 +333,11 @@ export function WalletScreen({
   currentUser,
   onNavigateToBills,
   onNavigateToSettle,
+  onSubViewChange,
 }: WalletScreenProps) {
   const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
-  const { onScroll, showNav, keyboardHeight } = useNavVisibility();
+  const { onScroll, showNav, hideNav, keyboardHeight } = useNavVisibility();
   const [localKeyboardHeight, setLocalKeyboardHeight] = useState(0);
 
   useEffect(() => {
@@ -378,9 +380,19 @@ export function WalletScreen({
       : { paddingBottom: Math.max(0, insets.bottom) },
   ];
 
+  const [activeWalletView, setActiveWalletView] = useState<
+    "main" | "activity_ledger" | "analytics"
+  >("main");
+
   useEffect(() => {
-    showNav();
-  }, [showNav]);
+    const isSub = activeWalletView !== "main";
+    onSubViewChange?.(isSub);
+    if (isSub) {
+      hideNav();
+    } else {
+      showNav();
+    }
+  }, [activeWalletView, onSubViewChange, hideNav, showNav]);
 
   const [currentUid, setCurrentUid] = useState<string>(() => {
     return propUserId || auth.currentUser?.uid || "guest";
@@ -403,11 +415,6 @@ export function WalletScreen({
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const [hideBalance, setHideBalance] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-
-  // Dedicated Screen Navigation State
-  const [activeWalletView, setActiveWalletView] = useState<
-    "main" | "activity_ledger" | "analytics"
-  >("main");
 
   // Subscriptions & Payment State
   const [showAddSubModal, setShowAddSubModal] = useState<boolean>(false);
@@ -434,6 +441,7 @@ export function WalletScreen({
   const [subSelectedCardId, setSubSelectedCardId] = useState<string>("");
   const [subCategory, setSubCategory] = useState<string>("streaming");
   const [isAddingSub, setIsAddingSub] = useState<boolean>(false);
+  const [isDeletingSub, setIsDeletingSub] = useState<boolean>(false);
 
   // Debts State
   const [debtsTab, setDebtsTab] = useState<"i_owe" | "owed_to_me">("i_owe");
@@ -459,6 +467,7 @@ export function WalletScreen({
   const [settleCustomAmount, setSettleCustomAmount] = useState<string>("");
   const [isSavingDebt, setIsSavingDebt] = useState<boolean>(false);
   const [isSettlingDebt, setIsSettlingDebt] = useState<boolean>(false);
+  const [isDeletingDebt, setIsDeletingDebt] = useState<boolean>(false);
 
   // Modals state
   const [showCashInModal, setShowCashInModal] = useState<boolean>(false);
@@ -2147,6 +2156,7 @@ export function WalletScreen({
 
   const handleDeleteSubscription = async (subId: string) => {
     try {
+      setIsDeletingSub(true);
       const updated = await walletService.deleteSubscription(currentUid, subId);
       setWallet(updated);
       setShowSubDetailModal(false);
@@ -2154,6 +2164,8 @@ export function WalletScreen({
       Alert.alert("Removed", "Subscription has been removed.");
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not delete subscription.");
+    } finally {
+      setIsDeletingSub(false);
     }
   };
 
@@ -2286,12 +2298,16 @@ export function WalletScreen({
 
   const handleDeleteDebt = async (debtId: string) => {
     try {
+      setIsDeletingDebt(true);
       const updated = await walletService.deleteDebt(currentUid, debtId);
       setWallet(updated);
       setShowSettleDebtModal(false);
       setSelectedDebtForSettle(null);
+      Alert.alert("Removed", "Debt record has been removed.");
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Could not delete debt.");
+    } finally {
+      setIsDeletingDebt(false);
     }
   };
 
@@ -2354,8 +2370,11 @@ export function WalletScreen({
     return (
       <ActivityLedgerScreen
         transactions={wallet?.transactions || []}
-        onBack={() => setActiveWalletView("main")}
-        onSelectTransaction={(tx) => setSelectedTx(tx)}
+        onBack={() => {
+          setActiveWalletView("main");
+          onSubViewChange?.(false);
+          showNav();
+        }}
       />
     );
   }
@@ -2369,7 +2388,11 @@ export function WalletScreen({
         pockets={wallet?.pockets || wallet?.savingsPockets || []}
         subscriptions={wallet?.subscriptions || []}
         debts={wallet?.debts || []}
-        onBack={() => setActiveWalletView("main")}
+        onBack={() => {
+          setActiveWalletView("main");
+          onSubViewChange?.(false);
+          showNav();
+        }}
       />
     );
   }
@@ -2379,7 +2402,7 @@ export function WalletScreen({
       style={[
         styles.screen,
         {
-          backgroundColor: isDark ? colors.background : "#F8FAFC",
+          backgroundColor: colors.background,
           paddingBottom: insets.bottom,
         },
       ]}
@@ -2389,7 +2412,7 @@ export function WalletScreen({
         style={[
           styles.header,
           {
-            backgroundColor: isDark ? colors.card : "transparent",
+            backgroundColor: colors.background,
           },
         ]}
       >
@@ -8235,7 +8258,7 @@ export function WalletScreen({
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 24 }}
+              // contentContainerStyle={{ paddingBottom: 24 }}
             >
               {(() => {
                 const isExpense =
@@ -13248,22 +13271,51 @@ export function WalletScreen({
                         borderColor: "#EF4444",
                         backgroundColor: isDark ? "#450A0A" : "#FEF2F2",
                         marginTop: 10,
+                        opacity: isDeletingSub ? 0.7 : 1,
                       },
                     ]}
                     onPress={() =>
                       handleDeleteSubscription(selectedSubDetail.id)
                     }
+                    disabled={isDeletingSub}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                    <Text
-                      style={[
-                        styles.modalSecondaryBtnText,
-                        { color: "#EF4444", fontWeight: "700" },
-                      ]}
-                    >
-                      Delete Subscription
-                    </Text>
+                    {isDeletingSub ? (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <ActivityIndicator size="small" color="#EF4444" />
+                        <Text
+                          style={[
+                            styles.modalSecondaryBtnText,
+                            { color: "#EF4444", fontWeight: "700" },
+                          ]}
+                        >
+                          Deleting Subscription...
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color="#EF4444"
+                        />
+                        <Text
+                          style={[
+                            styles.modalSecondaryBtnText,
+                            { color: "#EF4444", fontWeight: "700" },
+                          ]}
+                        >
+                          Delete Subscription
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
               </>
@@ -14402,24 +14454,52 @@ export function WalletScreen({
                       {
                         borderColor: isDark ? colors.border : "#CBD5E1",
                         marginTop: 10,
+                        opacity: isDeletingDebt ? 0.7 : 1,
                       },
                     ]}
                     onPress={() => handleDeleteDebt(selectedDebtForSettle.id)}
+                    disabled={isDeletingDebt}
                     activeOpacity={0.8}
                   >
-                    <Ionicons
-                      name="trash-outline"
-                      size={16}
-                      color={isDark ? colors.textMuted : "#64748B"}
-                    />
-                    <Text
-                      style={[
-                        styles.modalSecondaryBtnText,
-                        { color: isDark ? colors.textMuted : "#64748B" },
-                      ]}
-                    >
-                      Delete Record
-                    </Text>
+                    {isDeletingDebt ? (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <ActivityIndicator
+                          size="small"
+                          color={isDark ? colors.textMuted : "#64748B"}
+                        />
+                        <Text
+                          style={[
+                            styles.modalSecondaryBtnText,
+                            { color: isDark ? colors.textMuted : "#64748B" },
+                          ]}
+                        >
+                          Deleting Record...
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="trash-outline"
+                          size={16}
+                          color={isDark ? colors.textMuted : "#64748B"}
+                        />
+                        <Text
+                          style={[
+                            styles.modalSecondaryBtnText,
+                            { color: isDark ? colors.textMuted : "#64748B" },
+                          ]}
+                        >
+                          Delete Record
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </ScrollView>
               </>
@@ -16700,6 +16780,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
+    marginTop: 4,
   },
   subDuePillText: {
     fontSize: 10,

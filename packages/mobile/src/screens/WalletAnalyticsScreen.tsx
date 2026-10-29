@@ -212,7 +212,7 @@ export function WalletAnalyticsScreen({
       style={[
         styles.screen,
         {
-          backgroundColor: isDark ? colors.background : "#F8FAFC",
+          backgroundColor: colors.background,
           paddingTop: insets.top,
         },
       ]}
@@ -222,8 +222,8 @@ export function WalletAnalyticsScreen({
         style={[
           styles.headerRow,
           {
-            backgroundColor: isDark ? colors.surface : "#FFFFFF",
-            borderBottomColor: isDark ? colors.border : "#E2E8F0",
+            backgroundColor: colors.background,
+            // borderBottomColor: isDark ? colors.border : "#E2E8F0",
           },
         ]}
       >
@@ -233,9 +233,9 @@ export function WalletAnalyticsScreen({
           activeOpacity={0.7}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Ionicons
-            name="arrow-back"
-            size={22}
+          <Feather
+            name="chevron-left"
+            size={24}
             color={isDark ? colors.text : "#0F172A"}
           />
         </TouchableOpacity>
@@ -255,7 +255,7 @@ export function WalletAnalyticsScreen({
               { color: isDark ? colors.textMuted : "#64748B" },
             ]}
           >
-            Comprehensive spending & balance insights
+            Spending & Balance Insights
           </Text>
         </View>
 
@@ -269,8 +269,8 @@ export function WalletAnalyticsScreen({
         style={[
           styles.periodRow,
           {
-            backgroundColor: isDark ? colors.surface : "#FFFFFF",
-            borderBottomColor: isDark ? colors.border : "#E2E8F0",
+            backgroundColor: colors.background,
+            // borderBottomColor: isDark ? colors.border : "#E2E8F0",
           },
         ]}
       >
@@ -788,7 +788,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 1,
     gap: 12,
   },
   backBtn: {
@@ -824,12 +823,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderBottomWidth: 1,
   },
   periodTab: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 100,
     borderWidth: 1,
     borderColor: "transparent",
   },

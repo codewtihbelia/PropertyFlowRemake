@@ -164,7 +164,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   onOpenReel,
 }) => {
   const insets = useSafeAreaInsets();
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
   const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
   const [activeTab, setActiveTab] = useState<"all" | "reels" | "about">("all");
@@ -698,17 +698,15 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
         style={[
           styles.fbPostCard,
           {
-            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+            backgroundColor: colors.background,
             borderColor: isDark ? "#334155" : "#E2E8F0",
-            // margin: -15,
-            // marginTop: 8,
           },
         ]}
       >
         <StatusBar
           barStyle={isDark ? "light-content" : "dark-content"}
           translucent
-          backgroundColor="#FFFFFF"
+          backgroundColor="transparent"
         />
 
         {/* Post Header */}
@@ -939,13 +937,12 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
   };
 
   return (
-    <View
-      style={[
-        styles.container,
-        { backgroundColor: isDark ? "#0F172A" : "#F8FAFC" },
-      ]}
-    >
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        translucent
+        backgroundColor="transparent"
+      />
 
       {/* Standalone Top Navigation Header */}
       <View
@@ -956,8 +953,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               insets.top,
               Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 12,
             ),
-            backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-            borderBottomColor: isDark ? "#334155" : "#E2E8F0",
+            backgroundColor: colors.background,
+            // borderBottomColor: isDark ? "#334155" : "#E2E8F0",
           },
         ]}
       >
@@ -966,8 +963,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           style={styles.navBackBtn}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons
-            name="arrow-back"
+          <Feather
+            name="chevron-left"
             size={24}
             color={isDark ? "#F8FAFC" : "#0F172A"}
           />
@@ -1030,11 +1027,13 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
       {/* Main Scrollable Profile Content */}
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
         showsVerticalScrollIndicator={false}
       >
         {/* Cover Photo and Profile Picture Header */}
-        <View style={styles.headerArea}>
+        <View
+          style={[styles.headerArea, { backgroundColor: colors.background }]}
+        >
           <Image
             source={{ uri: coverUrl }}
             style={styles.coverImage}
@@ -1043,13 +1042,30 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
 
           {isSelf && (
             <TouchableOpacity
-              style={styles.coverCameraBtn}
+              style={[
+                styles.coverCameraBtn,
+                {
+                  borderColor: isDark ? "#FFFFFF" : "#1E293B",
+                },
+              ]}
               onPress={handleEditCoverPress}
               activeOpacity={0.8}
               accessibilityLabel="Edit Cover Photo"
             >
-              <Feather name="camera" size={14} color="#FFFFFF" />
-              <Text style={styles.coverCameraText}>Edit Cover</Text>
+              <Feather
+                name="camera"
+                size={14}
+                color="#FFFFFF"
+                style={{ color: isDark ? "#FFFFFF" : "#1E293B" }}
+              />
+              <Text
+                style={[
+                  styles.coverCameraText,
+                  { color: isDark ? "#FFFFFF" : "#1E293B" },
+                ]}
+              >
+                Edit Cover
+              </Text>
             </TouchableOpacity>
           )}
 
@@ -1069,7 +1085,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   styles.avatarPlaceholder,
                   {
                     borderColor: isDark ? "#1E293B" : "#FFFFFF",
-                    backgroundColor: isDark ? "#334155" : "#DBEAFE",
+                    backgroundColor: colors.background,
                   },
                 ]}
               >
@@ -1108,8 +1124,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           style={[
             styles.identityCard,
             {
-              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-              borderBottomColor: isDark ? "#334155" : "#E2E8F0",
+              backgroundColor: colors.background,
+              // borderBottomColor: isDark ? "#334155" : "#E2E8F0",
             },
           ]}
         >
@@ -1555,8 +1571,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           style={[
             styles.tabsContainer,
             {
-              backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
-              borderBottomColor: isDark ? "#334155" : "#E2E8F0",
+              backgroundColor: colors.background,
+              // borderBottomColor: isDark ? "#334155" : "#E2E8F0",
             },
           ]}
         >
@@ -1623,7 +1639,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               style={[
                 styles.allTabFriendsCard,
                 {
-                  backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                  backgroundColor: colors.background,
                   // borderBottomColor: isDark ? "#334155" : "#F1F5F9",
                 },
               ]}
@@ -1793,7 +1809,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.profileQuickPostCard,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                      backgroundColor: colors.background,
                       borderColor: isDark ? "#334155" : "#E2E8F0",
                     },
                   ]}
@@ -1841,6 +1857,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                         styles.profileQuickPostInputTrigger,
                         {
                           backgroundColor: isDark ? "#0F172A" : "#F1F5F9",
+                          borderColor: isDark ? "#334155" : "#E2E8F0",
                         },
                       ]}
                       activeOpacity={0.7}
@@ -1956,7 +1973,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.emptyPostsCard,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                      backgroundColor: colors.background,
                     },
                   ]}
                 >
@@ -1992,7 +2009,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
 
         {/* TAB 2: REELS (3-COLUMN GALLERY MODE WITH VIEW COUNTS) */}
         {activeTab === "reels" && (
-          <View style={{ padding: 0, margin: 0 }}>
+          <View style={{ padding: 0, marginTop: 12 }}>
             {loadingReels ? (
               <View style={styles.reelsLoadingBox}>
                 <ActivityIndicator size="large" color="#2563EB" />
@@ -2010,7 +2027,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 style={[
                   styles.emptyPostsCard,
                   {
-                    backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                    backgroundColor: colors.background,
                     borderColor: isDark ? "#334155" : "#E2E8F0",
                   },
                 ]}
@@ -2113,7 +2130,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               style={[
                 styles.sectionCard,
                 {
-                  backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                  backgroundColor: colors.background,
                   // borderColor: isDark ? "#334155" : "#E2E8F0",
                 },
               ]}
@@ -2299,7 +2316,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           style={[
             styles.editModalContainer,
             {
-              backgroundColor: isDark ? "#0F172A" : "#FFFFFF",
+              backgroundColor: colors.background,
               paddingTop: Math.max(
                 insets.top,
                 Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 12,
@@ -2313,7 +2330,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
               styles.editModalHeader,
               {
                 borderBottomColor: isDark ? "#334155" : "#E2E8F0",
-                backgroundColor: isDark ? "#1E293B" : "#FFFFFF",
+                backgroundColor: colors.background,
               },
             ]}
           >
@@ -2358,7 +2375,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
             style={styles.editModalScroll}
             contentContainerStyle={[
               styles.editModalScrollContent,
-              { paddingBottom: insets.bottom + 40 },
+              { paddingBottom: insets.bottom + 20 },
             ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -2600,7 +2617,8 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                 style={[
                   styles.editBioInput,
                   {
-                    backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    // backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                    backgroundColor: colors.background,
                     borderColor: isDark ? "#334155" : "#CBD5E1",
                     color: isDark ? "#F8FAFC" : "#0F172A",
                   },
@@ -2639,7 +2657,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.editTextInput,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      backgroundColor: colors.background,
                       borderColor: isDark ? "#334155" : "#CBD5E1",
                       color: isDark ? "#F8FAFC" : "#0F172A",
                     },
@@ -2665,7 +2683,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.editTextInput,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      backgroundColor: colors.background,
                       borderColor: isDark ? "#334155" : "#CBD5E1",
                       color: isDark ? "#F8FAFC" : "#0F172A",
                     },
@@ -2691,7 +2709,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.editTextInput,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      backgroundColor: colors.background,
                       borderColor: isDark ? "#334155" : "#CBD5E1",
                       color: isDark ? "#F8FAFC" : "#0F172A",
                     },
@@ -2717,7 +2735,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
                   style={[
                     styles.editTextInput,
                     {
-                      backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+                      backgroundColor: colors.background,
                       borderColor: isDark ? "#334155" : "#CBD5E1",
                       color: isDark ? "#F8FAFC" : "#0F172A",
                     },
@@ -3022,7 +3040,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    // borderBottomWidth: StyleSheet.hairlineWidth,
     zIndex: 10,
   },
   navBackBtn: {
@@ -3050,7 +3068,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    // backgroundColor: "#FFFFFF",
   },
   headerArea: {
     position: "relative",
@@ -3098,7 +3116,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    // borderBottomWidth: StyleSheet.hairlineWidth,
   },
   nameRow: {
     flexDirection: "row",
@@ -3209,18 +3227,20 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     flexDirection: "row",
-    borderBottomWidth: 1,
     paddingHorizontal: 16,
   },
   tabBtn: {
-    paddingVertical: 12,
+    alignItems: "center",
+    paddingVertical: 10,
     paddingHorizontal: 16,
     marginRight: 8,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
+    borderWidth: 1,
+    borderColor: "transparent",
+    borderRadius: 100,
   },
   tabBtnActive: {
-    borderBottomColor: "#2563EB",
+    borderColor: "#2563EB",
+    minWidth: 80,
   },
   tabBtnText: {
     fontSize: 14,
@@ -3541,13 +3561,13 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 12,
     right: 14,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 100,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    borderWidth: 1,
   },
   coverCameraText: {
     color: "#FFFFFF",
@@ -3734,7 +3754,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 100,
   },
   editCoverOverlayText: {
     color: "#FFFFFF",
@@ -3788,7 +3808,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   editTextInput: {
-    borderRadius: 10,
+    height: 48,
+    borderRadius: 100,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -3796,7 +3817,7 @@ const styles = StyleSheet.create({
   },
   saveProfileFullBtn: {
     backgroundColor: "#1877F2",
-    borderRadius: 12,
+    borderRadius: 100,
     paddingVertical: 14,
     flexDirection: "row",
     alignItems: "center",
@@ -3817,8 +3838,6 @@ const styles = StyleSheet.create({
   // ─── FRIENDS HORIZONTAL SECTION STYLES (MATCHING USER SCREENSHOT) ───
   allTabFriendsCard: {
     paddingVertical: 8,
-    // paddingHorizontal: 16,
-    // borderBottomWidth: StyleSheet.hairlineWidth,
     marginBottom: 8,
   },
   allTabFriendsHeader: {
@@ -3939,6 +3958,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
+    borderWidth: 1,
   },
   profileQuickPostInputPlaceholder: {
     fontSize: 14,
