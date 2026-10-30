@@ -1686,7 +1686,7 @@ const styles = StyleSheet.create({
   },
   smsNoticeRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 6,
     marginTop: 8,
     paddingHorizontal: 4,

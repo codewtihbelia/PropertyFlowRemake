@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Building2,
   ArrowLeft,
@@ -15,7 +15,10 @@ import {
   Users,
   Receipt,
   HelpCircle,
+  Sun,
+  Moon,
 } from "lucide-react";
+import { useTheme } from "../../contexts/ThemeContext";
 
 interface TermsOfServiceViewProps {
   onBack: () => void;
@@ -154,9 +157,36 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
   onBack,
   onNavigateToPrivacy,
 }) => {
+  const { isDark, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string>("acceptance");
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const lastScrollYRef = useRef(0);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const delta = currentScrollY - lastScrollYRef.current;
+
+      if (currentScrollY < 60) {
+        setIsVisible(true);
+      } else if (delta > 8) {
+        setIsVisible(false);
+      } else if (delta < -8) {
+        setIsVisible(true);
+      }
+
+      lastScrollYRef.current = currentScrollY;
+      setIsScrolled(currentScrollY > 20);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const handleCopyLink = () => {
     if (typeof window !== "undefined") {
@@ -184,81 +214,125 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-brand-500/20 selection:text-brand-900">
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          {/* Left: Back Button & Wordmark */}
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-600/20 selection:text-blue-900 transition-colors">
+      {/* 1. Floating Frosted Glass Capsule Bar matching Main Landing Navbar */}
+      <header
+        className={`fixed top-4 sm:top-6 inset-x-0 z-50 px-3 sm:px-6 pointer-events-none transition-all duration-500 ease-out ${
+          isVisible
+            ? "opacity-100 translate-y-0"
+            : "opacity-0 -translate-y-8 pointer-events-none"
+        }`}
+      >
+        <div className="max-w-6xl mx-auto">
+          <div
+            className={`pointer-events-auto rounded-full px-5 sm:px-7 py-3 sm:py-3.5 min-h-[64px] sm:min-h-[70px] flex items-center justify-between gap-4 transition-all duration-300 ${
+              isScrolled
+                ? "bg-white/88 dark:bg-slate-900/88 backdrop-blur-2xl backdrop-saturate-150 border border-slate-200/50 dark:border-white/[0.08] shadow-[0_16px_40px_-10px_rgba(0,0,0,0.12),0_4px_16px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[0_16px_40px_-10px_rgba(0,0,0,0.55),0_4px_16px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.08)]"
+                : "bg-white/82 dark:bg-slate-900/82 backdrop-blur-xl backdrop-saturate-150 border border-slate-200/40 dark:border-white/[0.06] shadow-[0_10px_30px_-6px_rgba(0,0,0,0.08),0_2px_10px_rgba(0,0,0,0.02),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_10px_30px_-6px_rgba(0,0,0,0.45),0_2px_10px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)]"
+            }`}
+          >
+            {/* Left: Brand Logo & Wordmark */}
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-brand-600 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition cursor-pointer group"
+              className="flex items-center gap-1 text-left cursor-pointer focus:outline-hidden group"
             >
-              <ArrowLeft className="w-4 h-4 text-slate-500 group-hover:-translate-x-0.5 group-hover:text-brand-600 transition-transform" />
-              <span>Back</span>
-            </button>
-
-            <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-                <Building2 className="w-4 h-4" />
+              {/* Custom stylized house emblem with Splitzy #2563EB palette */}
+              <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
+                <img
+                  src="../../favicon.png"
+                  alt="Splitzy Logo"
+                  className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+                />
               </div>
-              <span className="font-extrabold text-base tracking-tight text-slate-900">
-                Splitzy{" "}
-                <span className="text-slate-400 font-normal text-xs ml-1 hidden md:inline">
-                  / Legal
+
+              <div className="flex flex-col">
+                <div className="flex flex-row">
+                  <span className="text-base sm:text-lg font-black tracking-tight text-[#1b2b3f] dark:text-white leading-none">
+                    SPLIT
+                  </span>
+                  <span className="text-base sm:text-lg font-black tracking-tight text-[#2563EB] leading-none">
+                    ZY
+                  </span>
+                </div>
+                <span className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider leading-tight mt-0.5">
+                  Terms of Service
                 </span>
-              </span>
-            </div>
-          </div>
+              </div>
+            </button>
 
-          {/* Right: Actions (Copy Link, Print, Privacy Switch) */}
-          <div className="flex items-center gap-2">
-            {onNavigateToPrivacy && (
+            {/* Center Navigation: Back to Home & Privacy Switch */}
+            <div className="flex items-center gap-2">
               <button
-                onClick={onNavigateToPrivacy}
-                className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-brand-600 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                onClick={onBack}
+                className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:text-[#2563EB] dark:hover:text-blue-400 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-all whitespace-nowrap cursor-pointer"
               >
-                <Shield className="w-3.5 h-3.5" />
-                <span>Privacy Policy</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Return to Home</span>
               </button>
-            )}
 
-            <button
-              onClick={handleCopyLink}
-              title="Copy link to clipboard"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition cursor-pointer"
-            >
-              {copiedLink ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="text-emerald-600">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="hidden sm:inline">Copy Link</span>
-                </>
+              {onNavigateToPrivacy && (
+                <button
+                  onClick={onNavigateToPrivacy}
+                  className="hidden md:inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-[#2563EB] dark:hover:text-blue-400 px-3.5 py-1.5 rounded-full hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition cursor-pointer"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Privacy Policy</span>
+                </button>
               )}
-            </button>
+            </div>
 
-            <button
-              onClick={handlePrint}
-              title="Print document"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-400" />
-              <span className="hidden sm:inline">Print</span>
-            </button>
+            {/* Right: Theme Switcher & Actions */}
+            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-full text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                aria-label="Toggle theme"
+              >
+                {isDark ? (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Moon className="w-4 h-4 text-slate-600" />
+                )}
+              </button>
+
+              <button
+                onClick={handleCopyLink}
+                title="Copy link to clipboard"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      Copied
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="hidden sm:inline">Copy</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handlePrint}
+                title="Print document"
+                className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 text-slate-400" />
+                <span>Print</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-28 sm:pt-36 pb-12">
         {/* Document Header Banner */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-10 mb-8 shadow-xs">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-10 mb-8 shadow-xs">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2 text-xs text-brand-600 font-semibold mb-2">
@@ -319,9 +393,9 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
         {/* Layout: Sidebar Navigation + Sections */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Sticky Table of Contents (Desktop) */}
-          <aside className="hidden lg:block lg:col-span-4 sticky top-24 space-y-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">
+          <aside className="hidden lg:block lg:col-span-4 sticky top-28 sm:top-32 space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs">
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3">
                 Table of Contents
               </h3>
               <nav className="space-y-1">
@@ -332,13 +406,13 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
                       key={sec.id}
                       href={`#${sec.id}`}
                       onClick={() => setActiveSectionId(sec.id)}
-                      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
+                      className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                         isActive
-                          ? "bg-brand-50 text-brand-700 font-bold"
-                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                          ? "bg-blue-50 dark:bg-blue-950/60 text-[#2563EB] dark:text-blue-400 font-bold"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800"
                       }`}
                     >
-                      <span className="text-[11px] text-slate-400 font-mono">
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
                         {sec.number}
                       </span>
                       <span className="truncate">{sec.title}</span>

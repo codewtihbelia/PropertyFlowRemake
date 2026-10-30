@@ -101,7 +101,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const toggleTheme = useCallback(() => {
     setThemeModeState((prev) => {
-      const next: ThemeMode = prev === "dark" ? "light" : "dark";
+      const currentlyDark = prev === "dark" || (prev === "system" && systemIsDark);
+      const next: ThemeMode = currentlyDark ? "light" : "dark";
       try {
         if (typeof window !== "undefined" && window.localStorage) {
           window.localStorage.setItem(THEME_STORAGE_KEY, next);
@@ -111,7 +112,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       return next;
     });
-  }, []);
+  }, [systemIsDark]);
 
   const cycleTheme = useCallback(() => {
     setThemeModeState((prev) => {

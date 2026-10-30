@@ -1,165 +1,209 @@
 import React from "react";
-import { 
-  Calculator, 
-  Droplets, 
-  Receipt, 
-  ShieldCheck, 
-  Users, 
-  FileText, 
-  Sparkles, 
-  Lock, 
-  QrCode, 
-  BellRing,
-  Clock,
-  Layers
+import {
+  Calculator,
+  Droplets,
+  Wallet,
+  Repeat,
+  Users,
+  Video,
+  ShieldCheck,
+  CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 
 export const FeaturesBentoGrid: React.FC = () => {
   return (
-    <section id="features" className="py-16 md:py-24 bg-slate-50 border-b border-slate-200/80">
+    <section
+      id="features"
+      className="py-20 md:py-28 bg-slate-50 dark:bg-slate-950 border-b border-slate-200/80 dark:border-slate-800"
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
         {/* Header */}
-        <div className="text-center max-w-3xl mx-auto space-y-3 mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-200/80 text-slate-700 text-xs font-bold uppercase tracking-wider">
-            <span>Engineered for Shared Living</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-            Everything Required to Run <br />
-            <span className="text-brand-600">A Stress-Free Household</span>
+        <div className="text-center max-w-3xl mx-auto space-y-4 mb-16">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Engineered for Fairness. <br />
+            <span className="text-blue-600 dark:text-blue-400">
+              Zero Math Friction.
+            </span>
           </h2>
-          <p className="text-slate-600 text-base sm:text-lg">
-            From daily drinking water refills to complex end-of-lease reconciliations, PropertyFlow gives every roommate transparency and peace of mind.
+          <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
+            Traditional calculators divide numbers blindly. Splitzy understands
+            that humans live together, travel, have sub-meters, and pay with
+            GCash.
           </p>
         </div>
 
-        {/* Bento Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          {/* Card 1: Centavo Math (Span 2 on MD) */}
-          <div className="md:col-span-2 bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow relative overflow-hidden group">
-            <div className="max-w-md space-y-3 relative z-10">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
-                <Calculator className="w-5 h-5" />
+        {/* Asymmetric Bento Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+          {/* Bento Card 1: Centavo Math Engine (Col-span 7) */}
+          <div className="md:col-span-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-8 shadow-sm flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <Calculator className="w-6 h-6" />
               </div>
-              <span className="text-xs font-bold text-brand-600 uppercase tracking-wider">
-                Financial Foundation
-              </span>
-              <h3 className="text-2xl font-bold text-slate-900">
-                Integer Centavo Math Engine
+              <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
+                Exact Centavo Mathematical Engine
               </h3>
-              <p className="text-slate-600 text-sm leading-relaxed">
-                Standard splitting apps perform floating-point arithmetic, causing 1-centavo drifts that sow distrust in shared apartments. PropertyFlow handles every calculation in exact integer centavos (1 PHP = 100 cents), distributing remainder cents deterministically so the sum always matches the bill exactly.
-              </p>
-            </div>
-            
-            {/* Visual accent badge */}
-            <div className="mt-6 inline-flex items-center gap-3 px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>∑(Individual Roommate Splits) ≡ 100.00% of Utility Invoice</span>
-            </div>
-          </div>
-
-          {/* Card 2: Attendance Redistribution */}
-          <div className="bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Droplets className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-              Fair Living
-            </span>
-            <h3 className="text-xl font-bold text-slate-900">
-              Vacation & Absence Tracking
-            </h3>
-            <p className="text-slate-600 text-sm leading-relaxed">
-              When a roommate travels for vacation or work, water and variable utilities are automatically recalibrated so they never pay for showers or aircon they didn't use.
-            </p>
-          </div>
-
-          {/* Card 3: Receipt Vault */}
-          <div className="bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Receipt className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider">
-              Verification
-            </span>
-            <h3 className="text-xl font-bold text-slate-900">
-              Receipt Vault & Reference Tags
-            </h3>
-            <p className="text-slate-600 text-sm leading-relaxed">
-              Attach high-resolution photos of Meralco electric bills, Manila Water invoices, and GCash confirmation screenshots directly to the billing cycle for immediate review.
-            </p>
-          </div>
-
-          {/* Card 4: Multi-Role Management (Span 2) */}
-          <div className="md:col-span-2 bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow relative overflow-hidden">
-            <div className="space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                <Users className="w-5 h-5" />
-              </div>
-              <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">
-                Role-Based Access
-              </span>
-              <h3 className="text-2xl font-bold text-slate-900">
-                Hosts, Roommates & Co-Living Managers
-              </h3>
-              <p className="text-slate-600 text-sm leading-relaxed max-w-2xl">
-                Every household member gets a tailored interface: Primary leaseholders (Hosts) manage cycles and approve receipts; tenants and roommates see their personal dues and make one-tap settlements; property managers can oversee multiple apartments.
+              <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base leading-relaxed">
+                Dividing ₱800 by 3 payors yields ₱266.6666... In Splitzy, our
+                mathematical floor division allocates ₱266.67 to two payors and
+                ₱266.66 to the third. The sum always matches the exact bill down
+                to the last centavo, eliminating disappearing change.
               </p>
             </div>
 
-            {/* Role Pills */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-5">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-xs font-bold text-slate-900">Household Host</span>
-                <p className="text-[11px] text-slate-500 mt-0.5">Leaseholder, billing admin, settlement verification</p>
+            {/* Visual Formula Simulation */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono text-slate-500 dark:text-slate-400">
+                <span>TOTAL BILL: ₱800.00</span>
+                <span>3 PAYORS</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-xs font-bold text-slate-900">Resident Payor</span>
-                <p className="text-[11px] text-slate-500 mt-0.5">Roommates splitting rent & monthly utilities</p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block">
+                    Roomie 1
+                  </span>
+                  <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">
+                    ₱266.67
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block">
+                    Roomie 2
+                  </span>
+                  <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">
+                    ₱266.67
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block">
+                    Roomie 3
+                  </span>
+                  <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">
+                    ₱266.66
+                  </span>
+                </div>
               </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-xs font-bold text-slate-900">Non-Payor Guest</span>
-                <p className="text-[11px] text-slate-500 mt-0.5">Subtenants or family with zero financial liability</p>
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium text-center pt-1">
+                ✓ Exact Reconciliation: 266.67 + 266.67 + 266.66 = ₱800.00
               </div>
             </div>
           </div>
 
-          {/* Card 5: House Notices */}
-          <div className="bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <BellRing className="w-5 h-5" />
+          {/* Bento Card 2: Water Attendance (Col-span 5) */}
+          <div className="md:col-span-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-8 shadow-sm flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 flex items-center justify-center">
+                <Droplets className="w-6 h-6" />
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
+                Presence-Based Water Billing
+              </h3>
+              <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
+                Why pay for water when you were out of town for 2 weeks? Track
+                presence days on an interactive monthly calendar. The app
+                dynamically redistributes absence shares among present
+                residents.
+              </p>
             </div>
-            <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">
-              Communication
-            </span>
-            <h3 className="text-xl font-bold text-slate-900">
-              Household Noticeboard
+
+            <div className="p-4 rounded-2xl bg-cyan-50/50 dark:bg-cyan-950/20 border border-cyan-200/60 dark:border-cyan-900/40 text-xs text-slate-700 dark:text-slate-300 space-y-1.5">
+              <div className="flex justify-between font-semibold">
+                <span>Active Cycle Rate:</span>
+                <span className="font-mono text-cyan-700 dark:text-cyan-300">
+                  ₱5.66 / day
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                <span>Present 14 Days:</span>
+                <span className="font-mono text-slate-800 dark:text-slate-200">
+                  ₱79.24 Due
+                </span>
+              </div>
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 pt-1">
+                ✓ Non-payor water shares automatically absorbed fairly
+              </div>
+            </div>
+          </div>
+
+          {/* Bento Card 3: Splitzy Digital Wallet & Cards (Col-span 4) */}
+          <div className="md:col-span-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-7 shadow-sm space-y-4">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+              <Wallet className="w-5 h-5" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+              Splitzy Wallet & Cards
             </h3>
-            <p className="text-slate-600 text-sm leading-relaxed">
-              Post maintenance updates, pest control alerts, cleaning duty rosters, and WiFi passwords in a centralized shared feed without getting lost in chat spam.
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              Store available balance, link GCash, Maya, and local bank cards,
+              and simulate everyday coffee, lunch, and grocery expenses with
+              auto-deduction.
             </p>
-          </div>
-
-          {/* Card 6: PDF Statements & Reports */}
-          <div className="bg-white rounded-3xl p-7 border border-slate-200/90 shadow-xs hover:shadow-md transition-shadow space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
-              <FileText className="w-5 h-5" />
+            <div className="flex flex-wrap gap-1.5 pt-2">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                GCash QR
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                Maya Wallet
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                PH Bank Cards
+              </span>
             </div>
-            <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">
-              Audit Ready
-            </span>
-            <h3 className="text-xl font-bold text-slate-900">
-              Downloadable Reports
-            </h3>
-            <p className="text-slate-600 text-sm leading-relaxed">
-              Export month-end settlement statements and annual ledger logs in CSV or print-ready PDF formats to present to your landlord or property manager.
-            </p>
           </div>
 
+          {/* Bento Card 4: Subscriptions & Roomie IOUs (Col-span 4) */}
+          <div className="md:col-span-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-7 shadow-sm space-y-4">
+            <div className="w-11 h-11 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <Repeat className="w-5 h-5" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+              Subscriptions & IOUs
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              Track shared Netflix, Spotify, ChatGPT, and Wi-Fi services. Keep
+              informal roommate loans recorded with a clean 1-tap settlement
+              button.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-2">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                Netflix & Spotify
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                Personal IOUs
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                1-Tap Settlement
+              </span>
+            </div>
+          </div>
+
+          {/* Bento Card 5: Social Feeds, Reels & WebRTC Calling (Col-span 4) */}
+          <div className="md:col-span-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-7 shadow-sm space-y-4">
+            <div className="w-11 h-11 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+              <Video className="w-5 h-5" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+              Community & Messenger
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              Co-living is social. Splitzy includes community discussions,
+              vertical reels, and direct encrypted chat with two-way WebRTC
+              voice and video calls.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-2">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                WebRTC Calls
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                Roomie Reels
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                House Bulletins
+              </span>
+            </div>
+          </div>
         </div>
-
       </div>
     </section>
   );

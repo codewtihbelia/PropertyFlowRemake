@@ -1,546 +1,309 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  Building2,
-  Calculator,
-  Smartphone,
-  Sparkles,
-  Menu,
-  X,
-  ArrowRight,
-  ShieldCheck,
-  LayoutDashboard,
-  LogIn,
-  LogOut,
-  UserCheck,
-  ChevronDown,
-  Workflow,
-  Users,
-  HelpCircle,
-  Sun,
-  Moon,
-  Monitor,
-} from "lucide-react";
-import { useAuth } from "../../contexts/AuthContext";
+import React, { useState, useEffect } from "react";
+import { Rocket, Download, Menu, X, Sun, Moon, Home } from "lucide-react";
 import { useTheme } from "../../contexts/ThemeContext";
 
 interface LandingNavbarProps {
-  onOpenApp: () => void;
-  onOpenAuth?: (mode?: "signin" | "register") => void;
+  onOpenDownloadModal: () => void;
   onScrollTo: (sectionId: string) => void;
+  currentLang?: "EN" | "TL";
+  onToggleLang?: (lang: "EN" | "TL") => void;
 }
 
 export const LandingNavbar: React.FC<LandingNavbarProps> = ({
-  onOpenApp,
-  onOpenAuth,
+  onOpenDownloadModal,
   onScrollTo,
+  currentLang = "EN",
+  onToggleLang,
 }) => {
-  const { currentUser, isAuthenticated, signOut } = useAuth();
-  const { isDark, cycleTheme, themeMode, setThemeMode } = useTheme();
-  const [isScrolled, setIsScrolled] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
+  const [activeSection, setActiveSection] = useState<string>("overview");
+  const [selectedLang, setSelectedLang] = useState<"EN" | "TL">(currentLang);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreDropdownRef = useRef<HTMLDivElement>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const lastScrollYRef = React.useRef(0);
 
+  // Monitor scroll position to highlight active section and track scroll direction
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
+      const currentScrollY = window.scrollY;
+      const delta = currentScrollY - lastScrollYRef.current;
+
+      // Active section highlight
+      const sections = [
+        "overview",
+        "features",
+        "showcase",
+        "guides",
+        "about",
+        "faq",
+      ];
+      const scrollY = currentScrollY + 160;
+
+      for (let i = sections.length - 1; i >= 0; i--) {
+        const el = document.getElementById(sections[i]);
+        if (el && el.offsetTop <= scrollY) {
+          setActiveSection(sections[i]);
+          break;
+        }
+      }
+
+      // Smooth hide on scroll-down, reveal on scroll-up
+      if (currentScrollY < 60) {
+        setIsVisible(true);
+      } else if (delta > 8) {
+        setIsVisible(false);
+        setMobileMenuOpen(false);
+      } else if (delta < -8) {
+        setIsVisible(true);
+      }
+
+      lastScrollYRef.current = currentScrollY;
+      setIsScrolled(currentScrollY > 20);
     };
-    window.addEventListener("scroll", handleScroll);
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Handle outside click and Escape key for More dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        moreDropdownRef.current &&
-        !moreDropdownRef.current.contains(event.target as Node)
-      ) {
-        setMoreMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMoreMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
-
-  const primaryNavItems = [
+  const navLinks = [
+    { label: "Home", target: "overview" },
     { label: "Features", target: "features" },
-    { label: "Split Calculator", target: "calculator" },
-    { label: "Mobile App", target: "mobile-app" },
-  ];
-
-  const moreNavItems = [
-    {
-      label: "How It Works",
-      target: "how-it-works",
-      description: "4-step automated household split cycle",
-      icon: Workflow,
-      iconColor:
-        "text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white",
-    },
-    {
-      label: "Roles & Permissions",
-      target: "roles",
-      description: "Host dashboard vs Resident roommate experience",
-      icon: Users,
-      iconColor:
-        "text-emerald-600 bg-emerald-50 group-hover:bg-emerald-600 group-hover:text-white",
-    },
-    {
-      label: "FAQ",
-      target: "faq",
-      description: "Absence math, payments, and security policies",
-      icon: HelpCircle,
-      iconColor:
-        "text-purple-600 bg-purple-50 group-hover:bg-purple-600 group-hover:text-white",
-    },
+    { label: "Showcase", target: "showcase" },
+    { label: "Guides", target: "guides" },
+    { label: "About", target: "about" },
+    { label: "FAQ", target: "faq" },
   ];
 
   const handleNavClick = (target: string) => {
+    setActiveSection(target);
     setMobileMenuOpen(false);
-    setMoreMenuOpen(false);
     onScrollTo(target);
   };
 
-  const handleSignInClick = () => {
-    if (onOpenAuth) {
-      onOpenAuth("signin");
-    } else {
-      onOpenApp();
-    }
-  };
-
-  const handleRegisterClick = () => {
-    if (onOpenAuth) {
-      onOpenAuth("register");
-    } else {
-      onOpenApp();
+  const handleLangToggle = (lang: "EN" | "TL") => {
+    setSelectedLang(lang);
+    if (onToggleLang) {
+      onToggleLang(lang);
     }
   };
 
   return (
     <header
-      id="landing-navbar"
-      className={`sticky top-0 z-50 transition-all duration-300 ${
-        isScrolled
-          ? "bg-white/95 dark:bg-[#000000]/95 backdrop-blur-md shadow-sm border-b border-slate-200/80 dark:border-white/10 py-3"
-          : "bg-white/80 dark:bg-[#000000]/80 backdrop-blur-sm border-b border-slate-100 dark:border-white/10 py-4"
+      className={`fixed top-4 sm:top-6 inset-x-0 z-50 px-3 sm:px-6 pointer-events-none transition-all duration-500 ease-out ${
+        isVisible
+          ? "opacity-100 translate-y-0"
+          : "opacity-0 -translate-y-8 pointer-events-none"
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
-        {/* Brand Logo */}
+      <div className="max-w-6xl mx-auto">
+        {/* Floating Frosted Glass Capsule Bar with comfortable height and softened border */}
         <div
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex items-center gap-3 cursor-pointer group shrink-0"
+          className={`pointer-events-auto rounded-full px-5 sm:px-7 py-3 sm:py-3.5 min-h-[64px] sm:min-h-[70px] flex items-center justify-between gap-4 transition-all duration-300 ${
+            isScrolled
+              ? "bg-white/88 dark:bg-slate-900/88 backdrop-blur-2xl backdrop-saturate-150 border border-slate-200/50 dark:border-white/[0.08] shadow-[0_16px_40px_-10px_rgba(0,0,0,0.12),0_4px_16px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[0_16px_40px_-10px_rgba(0,0,0,0.55),0_4px_16px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.08)]"
+              : "bg-white/82 dark:bg-slate-900/82 backdrop-blur-xl backdrop-saturate-150 border border-slate-200/40 dark:border-white/[0.06] shadow-[0_10px_30px_-6px_rgba(0,0,0,0.08),0_2px_10px_rgba(0,0,0,0.02),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_10px_30px_-6px_rgba(0,0,0,0.45),0_2px_10px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)]"
+          }`}
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 via-brand-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
-            <Building2 className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-xl tracking-tight text-slate-900">
-                Property<span className="text-brand-600">Flow</span>
-              </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200">
-                Splitzy
-              </span>
-            </div>
-            <span className="text-[11px] text-slate-500 font-medium -mt-0.5 hidden xs:block">
-              Roommate Bill & Attendance Platform
-            </span>
-          </div>
-        </div>
-
-        {/* Desktop Nav Items with Spacious Breathing Room */}
-        <nav className="hidden md:flex items-center gap-1.5 lg:gap-3">
-          {primaryNavItems.map((item) => (
-            <button
-              key={item.target}
-              onClick={() => handleNavClick(item.target)}
-              className="px-3.5 py-2 text-sm font-semibold text-slate-600 hover:text-brand-600 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-            >
-              {item.label}
-            </button>
-          ))}
-
-          {/* "More" Dropdown Menu Container */}
-          <div className="relative" ref={moreDropdownRef}>
-            <button
-              id="nav-more-dropdown-btn"
-              onClick={() => setMoreMenuOpen(!moreMenuOpen)}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold rounded-lg transition-colors cursor-pointer ${
-                moreMenuOpen
-                  ? "text-brand-600 bg-brand-50 shadow-xs"
-                  : "text-slate-600 hover:text-brand-600 hover:bg-slate-50"
-              }`}
-              aria-haspopup="true"
-              aria-expanded={moreMenuOpen}
-            >
-              <span>More</span>
-              <ChevronDown
-                className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                  moreMenuOpen ? "rotate-180 text-brand-600" : ""
-                }`}
-              />
-            </button>
-
-            {/* Dropdown Panel */}
-            {moreMenuOpen && (
-              <div
-                id="nav-more-dropdown-menu"
-                className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-              >
-                <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Platform Sections
-                </div>
-
-                <div className="space-y-1">
-                  {moreNavItems.map((item) => {
-                    const IconComponent = item.icon;
-                    return (
-                      <button
-                        key={item.target}
-                        onClick={() => handleNavClick(item.target)}
-                        className="w-full text-left p-2.5 rounded-xl hover:bg-slate-50 flex items-start gap-3 transition group cursor-pointer"
-                      >
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${item.iconColor}`}
-                        >
-                          <IconComponent className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-bold text-slate-800 group-hover:text-brand-600 transition-colors">
-                            {item.label}
-                          </div>
-                          <div className="text-xs text-slate-500 leading-snug">
-                            {item.description}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Highlighted Interactive Simulator inside More Dropdown */}
-                <div className="mt-1.5 pt-1.5 border-t border-slate-100">
-                  <button
-                    onClick={() => handleNavClick("calculator")}
-                    className="w-full p-2.5 rounded-xl bg-gradient-to-r from-brand-50 via-indigo-50/50 to-brand-50 hover:from-brand-100 hover:to-indigo-100/80 border border-brand-200/70 flex items-center justify-between transition group text-left cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                        <Calculator className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 group-hover:text-brand-700 flex items-center gap-1.5">
-                          <span>Interactive Simulator</span>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-600 text-white leading-none">
-                            Live
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate">
-                          Centavo-accurate split preview
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-brand-600 group-hover:translate-x-0.5 transition-transform shrink-0 ml-2" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </nav>
-
-        {/* Right CTA Actions (Desktop md+) */}
-        <div className="hidden md:flex items-center gap-2.5 lg:gap-3 shrink-0">
-          {/* Quick 3-mode theme cycle button */}
+          {/* Left: Brand Logo & Icon Mark styled with #2563EB blue theme */}
           <button
-            onClick={cycleTheme}
-            className="p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-full transition cursor-pointer"
-            title={`Current Theme: ${
-              themeMode === "light"
-                ? "Light"
-                : themeMode === "dark"
-                  ? "OLED Dark"
-                  : `System Auto (${isDark ? "Dark" : "Light"})`
-            }. Tap to switch mode.`}
-            aria-label="Toggle display theme"
+            onClick={() => handleNavClick("overview")}
+            className="flex items-center gap-1 text-left cursor-pointer focus:outline-hidden group"
           >
-            {themeMode === "light" ? (
-              <Sun className="w-5 h-5 text-amber-500 hover:text-amber-400 transition" />
-            ) : themeMode === "dark" ? (
-              <Moon className="w-5 h-5 text-blue-400 hover:text-blue-300 transition" />
-            ) : (
-              <div className="relative">
-                <Monitor className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-white dark:border-black" />
-              </div>
-            )}
-          </button>
+            {/* Custom stylized house emblem with Splitzy #2563EB palette */}
+            <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
+              <img
+                src="../../favicon.png"
+                alt="Splitzy Logo"
+                className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+              />
+            </div>
 
-          {isAuthenticated ? (
-            <div className="flex items-center gap-2">
-              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-neutral-900 border border-slate-200 dark:border-white/10 text-xs">
-                <div className="w-5 h-5 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-[10px]">
-                  {currentUser.displayName?.charAt(0) || "U"}
-                </div>
-                <span className="font-semibold text-slate-800 dark:text-slate-200 max-w-[110px] truncate">
-                  {currentUser.displayName || "Resident"}
+            <div className="flex flex-col">
+              <div className="flex flex-row">
+                <span className="text-base sm:text-lg font-black tracking-tight text-[#1b2b3f] dark:text-white leading-none">
+                  SPLIT
+                </span>
+                <span className="text-base sm:text-lg font-black tracking-tight text-[#2563EB] leading-none">
+                  ZY
                 </span>
               </div>
-
-              <button
-                id="nav-portal-btn"
-                onClick={onOpenApp}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition-all hover:shadow hover:-translate-y-0.5 cursor-pointer whitespace-nowrap"
-              >
-                <LayoutDashboard className="w-4 h-4" />
-                <span>Dashboard</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => signOut()}
-                title="Sign Out"
-                className="p-2 text-slate-500 dark:text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg border border-slate-200 dark:border-white/10 transition cursor-pointer"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2.5">
-              <button
-                id="nav-signin-btn"
-                onClick={handleSignInClick}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 hover:text-brand-600 dark:hover:text-brand-400 transition cursor-pointer whitespace-nowrap"
-              >
-                <LogIn className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                <span>Sign In</span>
-              </button>
-
-              <button
-                id="nav-register-btn"
-                onClick={handleRegisterClick}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 rounded-lg shadow-sm transition-all hover:shadow hover:-translate-y-0.5 cursor-pointer whitespace-nowrap"
-              >
-                <Sparkles className="w-4 h-4 text-brand-400 dark:text-brand-600" />
-                <span>Get Started</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile & Tablet Header Controls (< md) */}
-        <div className="flex md:hidden items-center gap-2">
-          {/* Quick theme toggle for mobile header */}
-          <button
-            onClick={cycleTheme}
-            className="p-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-lg border border-slate-200/80 dark:border-white/10 transition cursor-pointer"
-            title={`Toggle Theme (${themeMode})`}
-            aria-label="Toggle display theme"
-          >
-            {themeMode === "light" ? (
-              <Sun className="w-4 h-4 text-amber-500" />
-            ) : themeMode === "dark" ? (
-              <Moon className="w-4 h-4 text-blue-400" />
-            ) : (
-              <Monitor className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-            )}
-          </button>
-
-          {isAuthenticated ? (
-            <button
-              onClick={onOpenApp}
-              className="px-3 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-xs flex items-center gap-1.5"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>Dashboard</span>
-            </button>
-          ) : (
-            <button
-              onClick={handleSignInClick}
-              className="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 rounded-lg shadow-xs flex items-center gap-1.5"
-            >
-              <LogIn className="w-3.5 h-3.5 text-brand-400 dark:text-brand-600" />
-              <span>Sign In</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-neutral-900 rounded-lg border border-slate-200/80 dark:border-white/10 transition"
-            aria-label="Toggle navigation menu"
-          >
-            {mobileMenuOpen ? (
-              <X className="w-5 h-5" />
-            ) : (
-              <Menu className="w-5 h-5" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile & Tablet Drawer Menu (< md) */}
-      {mobileMenuOpen && (
-        <div className="md:hidden bg-white/98 dark:bg-[#000000]/98 backdrop-blur-md border-b border-slate-200 dark:border-white/10 px-4 pt-3 pb-6 space-y-4 shadow-xl animate-fadeIn">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3 pb-1">
-              Core Pages
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
-              {primaryNavItems.map((item) => (
-                <button
-                  key={item.target}
-                  onClick={() => handleNavClick(item.target)}
-                  className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-brand-50 hover:text-brand-700 rounded-xl transition-colors flex items-center justify-between"
-                >
-                  <span>{item.label}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-3 pb-1">
-              More Platform Tools
-            </div>
-            <div className="space-y-1">
-              {moreNavItems.map((item) => (
-                <button
-                  key={item.target}
-                  onClick={() => handleNavClick(item.target)}
-                  className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 hover:bg-brand-50 hover:text-brand-700 rounded-xl transition-colors flex items-center justify-between"
-                >
-                  <span>{item.label}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Mobile Drawer 3-Mode Theme Selector */}
-          <div className="pt-2 border-t border-slate-100 dark:border-white/10 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-1">
-              <span>Theme Appearance</span>
-              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-                {themeMode === "dark"
-                  ? "OLED Dark"
-                  : themeMode === "light"
-                    ? "Light"
-                    : "System"}
+              <span className="text-[8px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider leading-tight mt-0.5">
+                Better Living
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-neutral-900 border border-slate-200 dark:border-white/10 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setThemeMode("light")}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  themeMode === "light"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                <Sun className="w-3.5 h-3.5 text-amber-500" />
-                <span>Light</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setThemeMode("dark")}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  themeMode === "dark"
-                    ? "bg-blue-600 text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                <Moon className="w-3.5 h-3.5 text-blue-300" />
-                <span>Dark</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setThemeMode("system")}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  themeMode === "system"
-                    ? "bg-white dark:bg-neutral-800 text-slate-900 dark:text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                <Monitor className="w-3.5 h-3.5" />
-                <span>Auto</span>
-              </button>
-            </div>
-          </div>
+          </button>
 
-          <div className="pt-2 border-t border-slate-100 dark:border-white/10 flex flex-col gap-2.5">
+          {/* Center: Frosted navigation links with crisp contrast */}
+          <nav className="hidden lg:flex items-center gap-2 xl:gap-3 text-sm font-semibold">
+            {navLinks.map((link) => {
+              const isActive = activeSection === link.target;
+              return (
+                <button
+                  key={link.target}
+                  onClick={() => handleNavClick(link.target)}
+                  className={`px-3.5 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? "text-[#2563EB] dark:text-blue-400 font-bold bg-blue-50/80 dark:bg-blue-950/70 shadow-2xs"
+                      : "text-slate-800 dark:text-slate-200 hover:text-[#2563EB] dark:hover:text-blue-400 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+                  }`}
+                >
+                  {link.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Right: Language Pill, Theme Switcher & Floating #2563EB Download APK Button */}
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            {/* Language Switch Capsule [ EN | TL ] matching exact reference layout */}
+            {/* <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-full border border-slate-200 dark:border-slate-700/80 text-xs font-semibold">
+              <button
+                onClick={() => handleLangToggle("EN")}
+                className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
+                  selectedLang === "EN"
+                    ? "bg-[#1E3048] text-white shadow-xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                EN
+              </button>
+              <button
+                onClick={() => handleLangToggle("TL")}
+                className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
+                  selectedLang === "TL"
+                    ? "bg-[#1E3048] text-white shadow-xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                TL
+              </button>
+            </div> */}
+
+            {/* Dark/Light mode toggle */}
             <button
-              onClick={() => handleNavClick("calculator")}
-              className="w-full py-3 px-4 text-sm font-semibold text-center text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/40 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-xl border border-brand-200 dark:border-brand-900/60 flex items-center justify-center gap-2"
+              onClick={toggleTheme}
+              className="p-2 rounded-full text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Toggle theme"
+              title="Toggle theme"
             >
-              <Calculator className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-              <span>Interactive Split Calculator</span>
+              {isDark ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-600" />
+              )}
             </button>
 
-            {isAuthenticated ? (
-              <>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onOpenApp();
-                  }}
-                  className="w-full py-3 px-4 text-sm font-bold text-center text-white bg-brand-600 hover:bg-brand-700 rounded-xl flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <LayoutDashboard className="w-4 h-4" />
-                  <span>Open Application Dashboard</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    signOut();
-                  }}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-center text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 rounded-xl flex items-center justify-center gap-1.5"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>
-                    Sign Out ({currentUser.displayName || "Resident"})
-                  </span>
-                </button>
-              </>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    handleSignInClick();
-                  }}
-                  className="py-2.5 px-3 text-sm font-bold text-center text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-neutral-900 hover:bg-slate-200 dark:hover:bg-neutral-800 rounded-xl flex items-center justify-center gap-2"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Sign In</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    handleRegisterClick();
-                  }}
-                  className="py-2.5 px-3 text-sm font-bold text-center text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 rounded-xl flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <Sparkles className="w-4 h-4 text-brand-400 dark:text-brand-600" />
-                  <span>Get Started</span>
-                </button>
-              </div>
-            )}
+            {/* Primary Download APK Pill Button with #2563EB theme */}
+            <button
+              onClick={onOpenDownloadModal}
+              className="inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-bold text-white bg-[#2563EB] hover:bg-[#1d4ed8] active:bg-[#1e40af] rounded-full shadow-[0_6px_20px_-4px_rgba(37,99,235,0.45)] hover:shadow-[0_8px_24px_-4px_rgba(37,99,235,0.55)] transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-white" />
+              <span>Download APK</span>
+            </button>
+
+            {/* Mobile Hamburger toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-full text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Toggle menu"
+            >
+              {mobileMenuOpen ? (
+                <X className="w-5 h-5" />
+              ) : (
+                <Menu className="w-5 h-5" />
+              )}
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Mobile Dropdown Frosted Glass Card */}
+        {mobileMenuOpen && (
+          <div className="pointer-events-auto mt-2 p-5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-2xl backdrop-saturate-150 rounded-3xl border border-white/70 dark:border-white/10 shadow-[0_24px_50px_-10px_rgba(0,0,0,0.22),inset_0_1px_1px_rgba(255,255,255,0.9)] dark:shadow-[0_24px_50px_-10px_rgba(0,0,0,0.7),inset_0_1px_1px_rgba(255,255,255,0.12)] space-y-4 animate-in fade-in slide-in-from-top-3 duration-200">
+            <div className="grid grid-cols-2 gap-2">
+              {navLinks.map((link) => {
+                const isActive = activeSection === link.target;
+                return (
+                  <button
+                    key={link.target}
+                    onClick={() => handleNavClick(link.target)}
+                    className={`text-left px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                      isActive
+                        ? "bg-blue-50 dark:bg-blue-950/40 text-[#2563EB] dark:text-blue-400 font-bold"
+                        : "text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {link.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                Theme / Tema:
+              </span>
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+              >
+                {isDark ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span>White / Light Mode</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Dark Mode</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                Language / Wika:
+              </span>
+              <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-full border border-slate-200 dark:border-slate-700 text-xs font-semibold">
+                <button
+                  onClick={() => handleLangToggle("EN")}
+                  className={`px-3 py-1 rounded-full ${
+                    selectedLang === "EN"
+                      ? "bg-[#1E3048] text-white"
+                      : "text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  EN
+                </button>
+                <button
+                  onClick={() => handleLangToggle("TL")}
+                  className={`px-3 py-1 rounded-full ${
+                    selectedLang === "TL"
+                      ? "bg-[#1E3048] text-white"
+                      : "text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  TL
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenDownloadModal();
+              }}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-[#2563EB] hover:bg-[#1d4ed8] text-white font-bold text-sm shadow-lg shadow-blue-600/30 cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-white" />
+              <span>Download Splitzy APK</span>
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 };

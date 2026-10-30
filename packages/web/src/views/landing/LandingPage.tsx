@@ -2,20 +2,21 @@ import React from "react";
 import { LandingNavbar } from "../../components/landing/LandingNavbar";
 import { HeroSection } from "../../components/landing/HeroSection";
 import { ProblemsAndSolutions } from "../../components/landing/ProblemsAndSolutions";
-import { LiveSplitCalculator } from "../../components/landing/LiveSplitCalculator";
 import { MobileAppShowcase } from "../../components/landing/MobileAppShowcase";
 import { FeaturesBentoGrid } from "../../components/landing/FeaturesBentoGrid";
-import { HowItWorksSection } from "../../components/landing/HowItWorksSection";
-import { RoleComparisonSection } from "../../components/landing/RoleComparisonSection";
+import { SplitzyGuidesSection } from "../../components/landing/SplitzyGuidesSection";
+import { AboutSplitzySection } from "../../components/landing/AboutSplitzySection";
 import { FaqSection } from "../../components/landing/FaqSection";
 import { DownloadCtaSection } from "../../components/landing/DownloadCtaSection";
 import { LandingFooter } from "../../components/landing/LandingFooter";
+import { ScrollReveal } from "../../components/landing/ScrollReveal";
 
 interface LandingPageProps {
-  onOpenApp: () => void;
+  onOpenApp?: () => void;
   onOpenAuth?: (mode?: "signin" | "register") => void;
   onOpenTerms?: () => void;
   onOpenPrivacy?: () => void;
+  onNavigateToDownload?: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -23,7 +24,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenAuth,
   onOpenTerms,
   onOpenPrivacy,
+  onNavigateToDownload,
 }) => {
+  const handleDownloadClick = () => {
+    if (onNavigateToDownload) {
+      onNavigateToDownload();
+    }
+  };
+
   const handleScrollTo = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) {
@@ -32,54 +40,66 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-brand-500 selection:text-white">
-      {/* Sticky Top Navigation */}
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-600 selection:text-white transition-colors">
+      {/* 1. Sticky Navigation (Strict Top Bar Contract) */}
       <LandingNavbar
-        onOpenApp={onOpenApp}
-        onOpenAuth={onOpenAuth}
+        onOpenDownloadModal={handleDownloadClick}
         onScrollTo={handleScrollTo}
       />
 
       <main>
-        {/* 1. Hero Section with Interactive Mobile Mockup */}
+        {/* 2. Hero Section with Live Splitzy Preview */}
         <HeroSection
-          onOpenCalculator={() => handleScrollTo("calculator")}
-          onOpenMobileShowcase={() => handleScrollTo("mobile-app")}
-          onOpenApp={onOpenApp}
+          onOpenDownloadModal={handleDownloadClick}
+          onScrollToShowcase={() => handleScrollTo("showcase")}
         />
 
-        {/* 2. Roommate Friction Points & Solutions */}
-        <ProblemsAndSolutions />
+        {/* 3. Interactive 3D Device Showcase (Flip Dark & Light with 18 real screenshots) */}
+        <ScrollReveal delay={100}>
+          <MobileAppShowcase
+            onOpenDownloadModal={handleDownloadClick}
+          />
+        </ScrollReveal>
 
-        {/* 3. Interactive Live Bill Split & Absence Simulator */}
-        <LiveSplitCalculator />
+        {/* 4. The Human Problem & Co-Living Friction */}
+        <ScrollReveal delay={100}>
+          <ProblemsAndSolutions />
+        </ScrollReveal>
 
-        {/* 4. Proposed Mobile App Deep Dive (Showcasing /proposedUI) */}
-        <MobileAppShowcase />
+        {/* 5. Core Architectural Bento Grid */}
+        <ScrollReveal delay={100}>
+          <FeaturesBentoGrid />
+        </ScrollReveal>
 
-        {/* 5. Architectural Features Bento Grid */}
-        <FeaturesBentoGrid />
+        {/* 6. Co-Living Practical Guides & Calculation Wisdom */}
+        <ScrollReveal delay={100}>
+          <SplitzyGuidesSection />
+        </ScrollReveal>
 
-        {/* 6. 4-Step How It Works Workflow */}
-        <HowItWorksSection />
-
-        {/* 7. Perspectives: Household Hosts vs Resident Roommates */}
-        <RoleComparisonSection />
+        {/* 7. About Splitzy Story & Pillars */}
+        <ScrollReveal delay={100}>
+          <AboutSplitzySection
+            onOpenDownloadModal={handleDownloadClick}
+          />
+        </ScrollReveal>
 
         {/* 8. Frequently Asked Questions */}
-        <FaqSection />
+        <ScrollReveal delay={100}>
+          <FaqSection />
+        </ScrollReveal>
 
-        {/* 9. High-Conversion Closing Call To Action */}
-        <DownloadCtaSection
-          onOpenApp={onOpenApp}
-          onOpenCalculator={() => handleScrollTo("calculator")}
-        />
+        {/* 9. Final High-Conversion Download Call To Action */}
+        <ScrollReveal delay={100}>
+          <DownloadCtaSection
+            onOpenDownloadModal={handleDownloadClick}
+          />
+        </ScrollReveal>
       </main>
 
-      {/* Footer */}
+      {/* 10. Footer */}
       <LandingFooter
         onScrollTo={handleScrollTo}
-        onOpenApp={onOpenApp}
+        onOpenDownloadModal={handleDownloadClick}
         onOpenTerms={onOpenTerms}
         onOpenPrivacy={onOpenPrivacy}
       />

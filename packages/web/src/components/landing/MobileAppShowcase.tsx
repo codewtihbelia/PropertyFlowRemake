@@ -1,240 +1,523 @@
-import React, { useState } from "react";
-import { 
-  Smartphone, 
-  Sparkles, 
-  CheckCircle2, 
-  ZoomIn, 
-  ShieldCheck, 
-  ArrowRight, 
-  Layers, 
-  Bell, 
-  DollarSign, 
-  Calendar,
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Smartphone,
+  Sun,
+  Moon,
+  Home,
   Receipt,
+  Droplets,
+  Wallet,
+  Repeat,
   Users,
-  Code
+  MessageCircle,
+  Settings,
+  CheckCircle2,
+  Download,
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Eye,
 } from "lucide-react";
-import { CodedOnboarding1Phone } from "./CodedOnboarding1Phone";
-import { CodedAuthScreenPhone } from "./CodedAuthScreenPhone";
+import {
+  listenToMobilePlatformSettings,
+  MobilePlatformSettings,
+  DEFAULT_PLATFORM_SETTINGS,
+} from "../../services/platformSettingsService";
 
-export const MobileAppShowcase: React.FC = () => {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<number>(0);
+import { useTheme } from "../../contexts/ThemeContext";
 
-  const showcaseItems = [
+interface MobileAppShowcaseProps {
+  onOpenDownloadModal: () => void;
+}
+
+type ScreenCategory =
+  | "home"
+  | "bills"
+  | "attendance"
+  | "wallet"
+  | "subscriptions"
+  | "community"
+  | "messages"
+  | "profile";
+
+export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
+  onOpenDownloadModal,
+}) => {
+  const { isDark } = useTheme();
+  const [deviceTheme, setDeviceTheme] = useState<"dark" | "light">(() =>
+    isDark ? "dark" : "light",
+  );
+  const [settings, setSettings] = useState<MobilePlatformSettings>(
+    DEFAULT_PLATFORM_SETTINGS,
+  );
+  const [activeScreen, setActiveScreen] = useState<ScreenCategory>("home");
+
+  // Sync mobile device preview theme when page theme flips
+  useEffect(() => {
+    setDeviceTheme(isDark ? "dark" : "light");
+  }, [isDark]);
+
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = useCallback(() => {
+    if (!tabsRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
+    // Allow small 2px threshold for rounding
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    checkScroll();
+    const handleResize = () => checkScroll();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [checkScroll]);
+
+  const scrollTabs = (direction: "left" | "right") => {
+    if (!tabsRef.current) return;
+    const scrollAmount = 260;
+    tabsRef.current.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+    // Check state shortly after initiating smooth scroll
+    setTimeout(checkScroll, 150);
+    setTimeout(checkScroll, 350);
+  };
+
+  const handleSelectTab = (
+    key: ScreenCategory,
+    e: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    setActiveScreen(key);
+    e.currentTarget.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+    setTimeout(checkScroll, 350);
+  };
+
+  const screensConfig: Record<
+    ScreenCategory,
     {
-      title: "Mobile Auth Screen",
-      subtitle: "Two-tone card with Splitzy branding, segmented Sign In/Up, and Google + Apple OAuth",
-      image: "/auth-screen.png",
-      badge: "Coded Auth UI",
-      features: [
-        "Splitzy dual-color typography & modern geometric icon",
-        "Segmented control toggling Sign In and Sign Up effortlessly",
-        "Clean input fields with @ and lock prefix icons & show/hide toggle",
-        "Curved royal blue footer with Google and Apple sign-in buttons",
+      id: ScreenCategory;
+      label: string;
+      shortTitle: string;
+      icon: React.ElementType;
+      tagline: string;
+      darkImg: string;
+      lightImg: string;
+      humanProblem: string;
+      splitzySolution: string;
+      keyHighlights: string[];
+    }
+  > = {
+    home: {
+      id: "home",
+      label: "Home Hub",
+      shortTitle: "Daily Household Hub",
+      icon: Home,
+      tagline:
+        "Your active billing cycle, wallet balance & quick actions at a glance.",
+      darkImg: "/assets/aistudio/HomeScreenDark_47435b6f.jpg",
+      lightImg: "/assets/aistudio/HomeScreenWhite_4abd9f0d.jpg",
+      humanProblem:
+        "Roommates never know what the current running total is until the electric bill arrives in the door.",
+      splitzySolution:
+        "Real-time overview of the active cycle, upcoming dues, recent updates, and roommate group cards in one glance.",
+      keyHighlights: [
+        "Live Splitzy Wallet balance indicator with fast Cash In access",
+        "Recent updates feed showing exactly who added what bill and your share",
+        "One-tap 'Settle Now' shortcut without calculating or switching apps",
+        "Household group avatars with active member count and total expenses",
       ],
     },
-    {
-      title: "Onboarding Screens (1, 2, 3)",
-      subtitle: "Smart expense sharing, roommate transparency, and stress-free settlement flow",
-      image: "/onboarding-flow.png",
-      badge: "Onboarding UI",
-      features: [
-        "Smart expense sharing with clean orbit graphics",
-        "Clear value proposition for roommate utility & rent splitting",
-        "Seamless horizontal swipe navigation with dark pill pagination",
-        "Fast skip directly to account registration & login",
+    bills: {
+      id: "bills",
+      label: "Bills & Dues",
+      shortTitle: "Itemized Centavo Dues",
+      icon: Receipt,
+      tagline:
+        "Zero math confusion. See your exact share down to the last centavo.",
+      darkImg: "/assets/aistudio/BillsScreenDark_a14c7565.jpg",
+      lightImg: "/assets/aistudio/BillsScreenWhite_4b4b7523.jpg",
+      humanProblem:
+        "Splitting ₱8,319.24 across 3 roommates leads to rounding disputes, awkward reminders, and lost receipts.",
+      splitzySolution:
+        "Itemizes every utility (Electricity, Wi-Fi, Rent, Water Attendance) with fair remainder allocation.",
+      keyHighlights: [
+        "Total Remaining Due card clearly stating total household vs your share",
+        "Individual itemized charges showing who added it and settlement count",
+        "Centavo-accurate floor division with fair remainder allocation (e.g. ₱266.67)",
+        "Direct 'Pay with GCash / Bank' one-tap checkout",
       ],
     },
-    {
-      title: "All-Screen Mobile Flow",
-      subtitle: "Complete mobile architecture across authentication, active cycle, and settlements",
-      image: "/proposed-all-screens.webp",
-      badge: "Full Experience",
-      features: [
-        "Consistent typography & warm neutral theme",
-        "Optimized 44px+ touch targets for fast logging",
-        "Offline-capable data caching with Firebase",
-        "Intuitive bottom navigation & fast status cards",
+    attendance: {
+      id: "attendance",
+      label: "Water Attendance",
+      shortTitle: "Fair Presence Billing",
+      icon: Droplets,
+      tagline:
+        "Never pay for water when you were on vacation or visiting family.",
+      darkImg: "/assets/aistudio/AttendanceScreenDark_6d8cbbd4.jpg",
+      lightImg: "/assets/aistudio/AttendanceScreenWhite_2785f96e.jpg",
+      humanProblem:
+        "Why should a roommate who spent 2 weeks visiting home pay the same water utility as someone who was home every day?",
+      splitzySolution:
+        "Interactive calendar tracking exact days present vs absent, automatically computing fair daily water rates.",
+      keyHighlights: [
+        "Interactive monthly calendar with tap-to-toggle presence days",
+        "Transparent billing rate (e.g. ₱5.66 / day / person)",
+        "Automatic calculation: 14 days present vs 17 absent = exact ₱79.24 due",
+        "Attendance lock mechanism once host finalizes billing to prevent disputes",
       ],
     },
-    {
-      title: "Home Dashboard & Quick Bar",
-      subtitle: "Effortlessly add expenses, initiate dues settlement, and review active cycle total",
-      image: "/mobile-screen-1.webp",
-      badge: "Daily Hub",
-      features: [
-        "One-tap '+ Add Expense' modal for fast receipt capture",
-        "'Settle Dues' shortcut with instant wallet QR display",
-        "Recent activity feed with transparent roommate names",
-        "Active billing cycle countdown and status chips",
+    wallet: {
+      id: "wallet",
+      label: "Digital Wallet",
+      shortTitle: "Integrated Wallet & Cards",
+      icon: Wallet,
+      tagline:
+        "Personal funds, simulated everyday expenses, and Philippine bank cards.",
+      darkImg: "/assets/aistudio/WalletSscreenDark_fdb6a8b1.jpg",
+      lightImg: "/assets/aistudio/WalletSscreenWhite_86d44bdf.jpg",
+      humanProblem:
+        "Transferring funds between banking apps and asking for screenshots creates friction and distrust.",
+      splitzySolution:
+        "Built-in digital wallet holding available balances, linked GCash/Maya cards, and simulated daily expense circles.",
+      keyHighlights: [
+        "Available Balance card with instant Cash In, Pay, and Settle controls",
+        "Quick Actions: Send, Split, Internal Transfer, and QR Code scanner",
+        "Quick Everyday Expense presets (Coffee ₱150, Lunch ₱220, Commute ₱65)",
+        "Integrated Philippine card management with GCash, Maya & local bank support",
       ],
     },
-    {
-      title: "Transparent Member Breakdown",
-      subtitle: "Clean itemized shares showing exact centavos, attendance, and proof verification",
-      image: "/mobile-screen-2.webp",
-      badge: "Zero Ambiguity",
-      features: [
-        "Itemized bill lines: Rent, Power, Water, Internet, Essentials",
-        "Absence credits highlighted with green badges",
-        "Direct proof-of-payment upload via camera or photo library",
-        "Host review and approval confirmation with audit stamps",
+    subscriptions: {
+      id: "subscriptions",
+      label: "Subscriptions & IOUs",
+      shortTitle: "Recurring & Debts Tracker",
+      icon: Repeat,
+      tagline:
+        "Track Netflix, Spotify, shared Wi-Fi, and informal roommate loans.",
+      darkImg: "/assets/aistudio/WalletSscreenSubscriptionDark_ab8b69fb.jpg",
+      lightImg: "/assets/aistudio/WalletSscreenSubscriptionWhite_37a642aa.jpg",
+      humanProblem:
+        "'Can you pay for the takeout, I'll pay you back tomorrow' — and then it's forgotten forever.",
+      splitzySolution:
+        "Double-entry IOU ledger tracking 'I Owe' vs 'Owed to Me' with 1-tap settlement and subscription monitors.",
+      keyHighlights: [
+        "Dedicated Subscriptions hub for Netflix, Spotify, ChatGPT, and cloud tools",
+        "Visual Debts & IOUs cards with color-coded liability indicators",
+        "One-tap debt settlement that credits the payee and updates ledger instantly",
+        "Positive 'You don't owe anyone!' zero-state encouragement",
       ],
     },
-  ];
+    community: {
+      id: "community",
+      label: "Community & Reels",
+      shortTitle: "Social Roommate Feed",
+      icon: Users,
+      tagline:
+        "Short video reels, house announcements, and roommate tips in one feed.",
+      darkImg: "/assets/aistudio/SplitzyCommunityDark_f63d7d1a.jpg",
+      lightImg: "/assets/aistudio/SplitzyCommunityWhite_60c2d55b.jpg",
+      humanProblem:
+        "Important apartment notices get drowned out in cluttered WhatsApp or Messenger group chats.",
+      splitzySolution:
+        "Dedicated social feed with categories for General Chat, Roomie Life Hacks, and vertical video reels.",
+      keyHighlights: [
+        "Community feed categorized by topics (General Chat, Roomie Life Hacks)",
+        "Integrated video reels showcasing co-living clips and cooking tips",
+        "Reactions, comments, and member recognition badges",
+        "Quick post creation modal for house announcements",
+      ],
+    },
+    messages: {
+      id: "messages",
+      label: "Roomie Messenger",
+      shortTitle: "Encrypted Chat & Calls",
+      icon: MessageCircle,
+      tagline:
+        "Direct messaging, voice calls, and video calls built right into the app.",
+      darkImg: "/assets/aistudio/MessagesDark_0831e1a2.jpg",
+      lightImg: "/assets/aistudio/MessagesWhite_1445d772.jpg",
+      humanProblem:
+        "Mixing personal social media with apartment bills and maintenance requests feels intrusive.",
+      splitzySolution:
+        "In-app peer-to-peer messaging with WebRTC voice and video calling, keeping co-living communication organized.",
+      keyHighlights: [
+        "Real-time direct messaging with presence status (e.g. Active 23h ago)",
+        "One-tap voice and video calling without sharing personal phone numbers",
+        "Slide-to-reply and Messenger-grade floating emoji reactions",
+        "Clean, minimalist layout in both dark obsidian and light modes",
+      ],
+    },
+    profile: {
+      id: "profile",
+      label: "Profile & Settings",
+      shortTitle: "Household Governance",
+      icon: Settings,
+      tagline:
+        "Manage your personal credentials, payment methods, and host controls.",
+      darkImg: "/assets/aistudio/ProfileSettingsDark_71208c8c.jpg",
+      lightImg: "/assets/aistudio/ProfileSettingsWhite_cb49aa76.jpg",
+      humanProblem:
+        "Users don't know where their payment proof goes or how to adjust their personal details.",
+      splitzySolution:
+        "Clear profile hub showing settlement percentage (47%), active groups, linked cards, and security PIN setup.",
+      keyHighlights: [
+        "Settlement statistics card: Groups Active, Total Paid, and % Settled",
+        "Direct link to public Community Profile & roomie posts",
+        "Payment Methods manager for linked Visa, GCash & Maya accounts",
+        "Fast switch between Dark Mode and Light Mode with instant preview",
+      ],
+    },
+  };
+
+  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
+    setSettings(newSettings);
+  });
+
+  const current = screensConfig[activeScreen];
+  const activeImage =
+    deviceTheme === "dark" ? current.darkImg : current.lightImg;
 
   return (
-    <section id="mobile-app" className="py-16 md:py-24 bg-white border-b border-slate-200/80">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        {/* Header */}
-        <div className="text-center max-w-3xl mx-auto space-y-3 mb-12">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs font-bold uppercase tracking-wider border border-brand-200">
-            <Smartphone className="w-3.5 h-3.5 text-brand-600" />
-            <span>Mobile App Architecture</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-            Crafted for Smooth Daily Use <br />
-            <span className="text-brand-600">On iOS & Android</span>
+    <section
+      id="showcase"
+      className="py-20 md:py-28 bg-slate-100/70 dark:bg-slate-900 text-slate-900 dark:text-white relative overflow-hidden transition-colors border-b border-slate-200/80 dark:border-slate-800"
+    >
+      {/* Decorative Atmospheric Glow */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[500px] bg-blue-600/5 dark:bg-blue-600/10 blur-[140px] pointer-events-none rounded-full" />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        {/* Section Header */}
+        <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Explore Splitzy in Action. <br />
+            <span className="text-blue-600 dark:text-blue-400">
+              Flip Themes & Test Real Screens.
+            </span>
           </h2>
-          <p className="text-slate-600 text-base sm:text-lg">
-            Inspect the proposed mobile application screens designed for quick utility logging, daily attendance check-ins, and frictionless roommate settlements.
+          <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
+            These are real, live screenshots captured directly from the Splitzy
+            Android application. Toggle between Dark & Light mode and click any
+            feature tab to inspect the UX.
           </p>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
-          {showcaseItems.map((item, index) => (
+        {/* Global Showcase Toolbar: Theme Flip & Category Tabs */}
+        <div className="flex flex-col items-center gap-6 mb-12">
+          {/* Theme Toggle Pill */}
+          <div className="inline-flex items-center p-1 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 shadow-md">
             <button
-              key={index}
-              onClick={() => setActiveTab(index)}
-              className={`px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${
-                activeTab === index
-                  ? "bg-slate-900 text-white shadow-md"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              onClick={() => setDeviceTheme("dark")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                deviceTheme === "dark"
+                  ? "bg-slate-900 text-white shadow-md border border-slate-700"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              <span>{item.title}</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                activeTab === index ? "bg-brand-500 text-white" : "bg-white text-slate-600"
-              }`}>
-                {item.badge}
-              </span>
+              <Moon className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+              <span>Dark Theme</span>
             </button>
-          ))}
+            <button
+              onClick={() => setDeviceTheme("light")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                deviceTheme === "light"
+                  ? "bg-white text-slate-900 shadow-md border border-slate-300"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              <Sun className="w-4 h-4 text-amber-500" />
+              <span>Light Theme</span>
+            </button>
+          </div>
+
+          {/* Horizontal Scrollable Tabs with Chevron Controls */}
+          <div className="w-full max-w-5xl relative flex items-center justify-center px-1">
+            {/* Left Chevron Button */}
+            <button
+              type="button"
+              onClick={() => scrollTabs("left")}
+              disabled={!canScrollLeft}
+              aria-label="Scroll tabs left"
+              className={`shrink-0 z-10 w-9 h-9 mr-1.5 sm:mr-2 rounded-xl flex items-center justify-center transition-all duration-200 ${
+                canScrollLeft
+                  ? "bg-white dark:bg-slate-800/95 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 shadow-md shadow-black/5 dark:shadow-black/20 hover:scale-105 active:scale-95 cursor-pointer backdrop-blur-md"
+                  : "bg-slate-100 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600 border border-slate-200/60 dark:border-slate-800/40 cursor-not-allowed opacity-30 pointer-events-none"
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            {/* Scrollable Tabs Wrapper */}
+            <div
+              ref={tabsRef}
+              onScroll={checkScroll}
+              className="flex-1 overflow-x-auto py-1.5 no-scrollbar scroll-smooth select-none min-w-0"
+              style={{
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
+              }}
+            >
+              <div className="flex items-center gap-2 w-max mx-auto px-1">
+                {(Object.keys(screensConfig) as ScreenCategory[]).map((key) => {
+                  const item = screensConfig[key];
+                  const Icon = item.icon;
+                  const isActive = activeScreen === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={(e) => handleSelectTab(key, e)}
+                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-150 cursor-pointer ${
+                        isActive
+                          ? "bg-blue-600 text-white shadow-md shadow-blue-500/25 scale-[1.02]"
+                          : "bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/50 shadow-2xs"
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Chevron Button */}
+            <button
+              type="button"
+              onClick={() => scrollTabs("right")}
+              disabled={!canScrollRight}
+              aria-label="Scroll tabs right"
+              className={`shrink-0 z-10 w-9 h-9 ml-1.5 sm:mr-2 rounded-xl flex items-center justify-center transition-all duration-200 ${
+                canScrollRight
+                  ? "bg-white dark:bg-slate-800/95 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 shadow-md shadow-black/5 dark:shadow-black/20 hover:scale-105 active:scale-95 cursor-pointer backdrop-blur-md"
+                  : "bg-slate-100 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600 border border-slate-200/60 dark:border-slate-800/40 cursor-not-allowed opacity-30 pointer-events-none"
+              }`}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Showcase Display Area */}
-        <div className="bg-slate-50 rounded-3xl p-6 sm:p-10 border border-slate-200 shadow-sm">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-            
-            {/* Left: Key Screen Features */}
-            <div className="lg:col-span-5 space-y-6">
-              <div className="space-y-2">
-                <span className="text-xs font-bold text-brand-600 uppercase tracking-wider">
-                  {showcaseItems[activeTab].badge}
+        {/* 2-Column Split: Interactive Phone Mockup on Left, Human Feature Story on Right */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
+          {/* Phone Mockup Column */}
+          <div className="lg:col-span-5 flex justify-center">
+            <div className="relative group perspective-1000">
+              {/* Phone Outer Chassis (Realistic Titanium Frame) */}
+              <div className="relative w-[295px] sm:w-[325px] h-[610px] sm:h-[670px] bg-slate-900 dark:bg-slate-950 rounded-[48px] p-3 shadow-2xl shadow-slate-400/20 dark:shadow-blue-950/40 border-[4px] border-slate-400/60 dark:border-slate-700/80 ring-1 ring-black/10 dark:ring-white/10">
+                {/* Side Buttons Simulation */}
+                <div className="absolute -left-[7px] top-32 w-[3px] h-12 bg-slate-500 rounded-l-sm" />
+                <div className="absolute -left-[7px] top-48 w-[3px] h-12 bg-slate-500 rounded-l-sm" />
+                <div className="absolute -right-[7px] top-36 w-[3px] h-16 bg-slate-500 rounded-r-sm" />
+
+                {/* Inner Screen Viewport */}
+                <div className="relative w-full h-full rounded-[38px] overflow-hidden bg-black flex flex-col">
+                  {/* Dynamic Island / Speaker Notch */}
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-30 flex items-center justify-between px-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-900 ring-1 ring-slate-800" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500/40" />
+                  </div>
+
+                  {/* Screen Image with smooth transition */}
+                  <div className="relative w-full h-full overflow-hidden">
+                    <img
+                      key={`${activeScreen}-${deviceTheme}`}
+                      src={activeImage}
+                      alt={`Splitzy ${current.label} screen in ${deviceTheme} mode`}
+                      className="w-full h-full object-cover object-top animate-in fade-in duration-300"
+                      loading="eager"
+                      referrerPolicy="no-referrer"
+                    />
+
+                    {/* Gradient Gloss Reflection Scrim */}
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/10 pointer-events-none" />
+                  </div>
+
+                  {/* Home Indicator Bar */}
+                  <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/40 rounded-full z-30 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Interactive Phone Footer Hint */}
+              <div className="flex items-center justify-center gap-2 mt-4 text-xs text-slate-500 dark:text-slate-400">
+                <Smartphone className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Splitzy v{settings.latestVersion}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Feature Breakdown & Human Story Column */}
+          <div className="lg:col-span-7 space-y-6">
+            {/* Screen Header Info */}
+            <div className="space-y-2">
+              <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                {current.shortTitle}
+              </h3>
+              <p className="text-slate-600 dark:text-slate-300 text-base leading-relaxed">
+                {current.tagline}
+              </p>
+            </div>
+
+            {/* Before & After: The Human Friction vs The Splitzy Solution */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                  The Roommate Friction
                 </span>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-                  {showcaseItems[activeTab].title}
-                </h3>
-                <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
-                  {showcaseItems[activeTab].subtitle}
+                <p className="text-xs sm:text-sm text-rose-950/80 dark:text-slate-300 leading-relaxed">
+                  {current.humanProblem}
                 </p>
               </div>
 
-              {/* Feature Points */}
-              <div className="space-y-3 pt-2">
-                {showcaseItems[activeTab].features.map((feat, idx) => (
-                  <div key={idx} className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-sm font-medium text-slate-700">{feat}</span>
+              <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  The Splitzy Solution
+                </span>
+                <p className="text-xs sm:text-sm text-emerald-950/80 dark:text-slate-300 leading-relaxed">
+                  {current.splitzySolution}
+                </p>
+              </div>
+            </div>
+
+            {/* Key Screen Highlights */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 shadow-xs space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                What You See on Screen
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {current.keyHighlights.map((highlight, index) => (
+                  <div
+                    key={index}
+                    className="flex items-start gap-2 text-xs sm:text-sm text-slate-700 dark:text-slate-300"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                    <span>{highlight}</span>
                   </div>
                 ))}
               </div>
-
-              {/* Action */}
-              <div className="pt-4">
-                <button
-                  onClick={() => setSelectedImage(showcaseItems[activeTab].image)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl shadow-xs transition-all"
-                >
-                  <ZoomIn className="w-4 h-4 text-brand-600" />
-                  <span>Inspect High-Resolution Preview</span>
-                </button>
-              </div>
             </div>
 
-            {/* Right: Screen Graphic Mockup */}
-            <div className="lg:col-span-7 flex justify-center">
-              {activeTab === 0 ? (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">
-                    <Code className="w-3.5 h-3.5" />
-                    <span>100% Coded Vector UI • Auth Screen</span>
-                  </div>
-                  <CodedAuthScreenPhone />
-                </div>
-              ) : activeTab === 1 ? (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">
-                    <Code className="w-3.5 h-3.5" />
-                    <span>100% Coded Vector UI • Onboarding Simulation</span>
-                  </div>
-                  <CodedOnboarding1Phone />
-                </div>
-              ) : (
-                <div 
-                  onClick={() => setSelectedImage(showcaseItems[activeTab].image)}
-                  className="group relative cursor-pointer overflow-hidden rounded-2xl border-4 border-white shadow-2xl bg-slate-900 max-h-[540px] w-full flex items-center justify-center transition-transform hover:scale-[1.01]"
-                >
-                  <img
-                    src={showcaseItems[activeTab].image}
-                    alt={showcaseItems[activeTab].title}
-                    className="w-full h-full object-contain max-h-[500px] p-2"
-                  />
-
-                  {/* Hover Overlay */}
-                  <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-slate-900 text-xs font-bold shadow-lg">
-                      <ZoomIn className="w-4 h-4 text-brand-600" />
-                      <span>Click to Enlarge</span>
-                    </span>
-                  </div>
-                </div>
-              )}
+            {/* Action Row */}
+            <div className="flex flex-wrap items-center gap-4 pt-2">
+              <button
+                onClick={onOpenDownloadModal}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.02] cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download APK to Experience This</span>
+              </button>
             </div>
-
           </div>
         </div>
-
-        {/* Modal Lightbox */}
-        {selectedImage && (
-          <div 
-            onClick={() => setSelectedImage(null)}
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 animate-fadeIn"
-          >
-            <div 
-              onClick={(e) => e.stopPropagation()}
-              className="relative max-w-5xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 shadow-2xl border border-slate-700"
-            >
-              <button
-                onClick={() => setSelectedImage(null)}
-                className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-slate-800/90 text-white flex items-center justify-center hover:bg-slate-700 text-sm font-bold shadow-md"
-              >
-                ✕
-              </button>
-              <img
-                src={selectedImage}
-                alt="Enlarged preview"
-                className="w-full h-auto max-h-[82vh] object-contain rounded-lg"
-              />
-            </div>
-          </div>
-        )}
-
       </div>
     </section>
   );

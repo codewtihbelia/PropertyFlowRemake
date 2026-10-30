@@ -6,28 +6,32 @@ export const FaqSection: React.FC = () => {
 
   const faqs = [
     {
-      q: "How does absence redistribution work if a roommate goes on vacation?",
-      a: "PropertyFlow distinguishes between fixed costs and variable consumption. Fixed commitments like Rent and Internet remain constant, while variable utilities like Water and Electricity can be attendance-weighted. When a roommate marks 10 days away, their utility share is reduced proportionally to their days present, and the remainder is shared across other occupants. No manual spreadsheet formulas needed.",
+      q: "How do I install the Splitzy Android APK published from GitHub?",
+      a: "Tap the 'Download Android APK' button or scan the QR code using your phone camera. When the .apk finishes downloading, open it and tap 'Allow installation from this source' if prompted by Android. Splitzy is a signed release package that runs smoothly on Android 8.0 (Oreo) and above without requiring Google Play Store.",
     },
     {
-      q: "What if our bedrooms have different rental values or en-suite bathrooms?",
-      a: "PropertyFlow allows the household host to set individual room rental rates (e.g., Master En-Suite at ₱14,000, Bedroom 2 at ₱11,000) or choose an equal division. The system automatically preserves these room rent baselines while dynamically calculating the month's changing utility invoices.",
+      q: "Is Splitzy completely free to use?",
+      a: "Yes! Splitzy is 100% free with no monthly subscription fees, no locked features, and no intrusive banner advertisements. It was created as an open, community-driven tool to solve co-living roommate finance.",
     },
     {
-      q: "How do roommates pay and verify their dues?",
-      a: "The host configures their preferred payment method (GCash, Maya, or bank account QR). When a billing cycle opens, roommates tap 'Settle Dues', scan the QR, and upload their transfer confirmation screenshot with the reference number. The host reviews and marks it verified with a single click.",
+      q: "How does the water utility attendance tracking work?",
+      a: "Splitzy tracks presence days on an interactive monthly calendar. When a roommate travels, visits family, or is away on an internship, they mark those days on the calendar. Splitzy automatically divides the total water bill by the total person-days present, so residents only pay for the exact days they consumed water.",
     },
     {
-      q: "Why does PropertyFlow emphasize 'Integer Centavo Math'?",
-      a: "In standard calculators, dividing numbers like ₱1,000.00 by 3 results in ₱333.3333333. If you sum 333.33 x 3, you get ₱999.99, leaving a missing centavo. Over 12 months with 5 utility categories, these rounding errors compound and cause roommate friction. PropertyFlow computes all balances in pure integer centavos and deterministically assigns any remainder centavo, ensuring the sum always equals 100.00% of the invoice.",
+      q: "Can roommates pay with GCash, Maya, or Philippine bank accounts?",
+      a: "Yes! Splitzy has native presets for GCash, Maya, BDO, BPI, UnionBank, RCBC, and LandBank. Hosts can upload their QR code or payment details. Roommates tap 'Pay with GCash / Bank', complete the transfer, and Splitzy reconciles the balance with a digital receipt.",
     },
     {
-      q: "Is there both a mobile app and a web portal?",
-      a: "Yes! PropertyFlow features a companion mobile application (React Native / Expo) designed for quick on-the-go receipt uploads and check-ins, alongside this comprehensive web portal for in-depth billing management and reports. Both synchronize instantly via our secure cloud backend.",
+      q: "Why does Splitzy calculate dues down to the exact centavo?",
+      a: "Standard calculators divide decimals naively, which causes rounding drift (e.g., ₱800 ÷ 3 = ₱266.6666... leaving a missing centavo). Over 12 months with 5 utility categories, these rounding errors cause disputes. Splitzy uses integer centavo math with fair remainder distribution so ₱800 splits cleanly as ₱266.67, ₱266.67, and ₱266.66.",
     },
     {
-      q: "Can I download reports for our landlord or accounting records?",
-      a: "Yes! Every closed billing cycle can be exported as a clean statement or CSV ledger. This provides an indisputable record of when rent was gathered, what utility bills were paid, and proof of payment for your leaseholder records.",
+      q: "Can I use Splitzy if I live in a dorm room or boarding house with sub-meters?",
+      a: "Absolutely. Splitzy is specifically built for Philippine dorms, boarding houses, and apartments. Hosts can input electric sub-meter readings to calculate aircon consumption separately from common area lighting and refrigerators.",
+    },
+    {
+      q: "Is there an iOS version available?",
+      a: "Splitzy's mobile codebase is built with React Native & Expo, supporting both Android and iOS. The Android APK is immediately published on GitHub for direct download. An iOS test flight build is planned as part of the community roadmap.",
     },
   ];
 
@@ -36,20 +40,19 @@ export const FaqSection: React.FC = () => {
   };
 
   return (
-    <section id="faq" className="py-16 md:py-24 bg-white border-b border-slate-200/80">
+    <section
+      id="faq"
+      className="py-20 md:py-28 bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800"
+    >
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        
         {/* Header */}
         <div className="text-center space-y-3 mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider">
-            <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
-            <span>Got Questions?</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
             Frequently Asked Questions
           </h2>
-          <p className="text-slate-600 text-base sm:text-lg">
-            Everything you need to know about setting up your household, splitting bills, and managing roommate dues.
+          <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg">
+            Everything you need to know about setting up your household,
+            downloading the APK, and managing shared roommate dues.
           </p>
         </div>
 
@@ -60,24 +63,28 @@ export const FaqSection: React.FC = () => {
             return (
               <div
                 key={idx}
-                className="bg-slate-50 rounded-2xl border border-slate-200/90 overflow-hidden transition-colors"
+                className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-colors"
               >
                 <button
                   onClick={() => toggle(idx)}
-                  className="w-full px-6 py-5 text-left flex items-center justify-between gap-4 focus:outline-hidden"
+                  className="w-full px-6 py-5 text-left flex items-center justify-between gap-4 focus:outline-hidden cursor-pointer"
                 >
-                  <span className="font-bold text-slate-900 text-base sm:text-lg">
+                  <span className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
                     {faq.q}
                   </span>
-                  <div className={`w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center shrink-0 transition-transform duration-200 ${
-                    isOpen ? "rotate-180 text-brand-600 border-brand-200" : "text-slate-400"
-                  }`}>
+                  <div
+                    className={`w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 transition-transform duration-200 ${
+                      isOpen
+                        ? "rotate-180 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900"
+                        : "text-slate-400"
+                    }`}
+                  >
                     <ChevronDown className="w-4 h-4" />
                   </div>
                 </button>
 
                 {isOpen && (
-                  <div className="px-6 pb-6 pt-1 text-slate-600 text-sm sm:text-base leading-relaxed border-t border-slate-100 animate-fadeIn">
+                  <div className="px-6 pb-6 pt-[20px] text-slate-600 dark:text-slate-300 text-sm sm:text-base leading-relaxed border-t border-slate-100 dark:border-slate-800/80 animate-in fade-in duration-200">
                     {faq.a}
                   </div>
                 )}
@@ -85,7 +92,6 @@ export const FaqSection: React.FC = () => {
             );
           })}
         </div>
-
       </div>
     </section>
   );
