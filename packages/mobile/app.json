@@ -3,7 +3,7 @@
     "name": "Splitzy",
     "slug": "splitzy-mobile",
     "scheme": "splitzy",
-    "version": "2.9.6",
+    "version": "2.10.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -47,8 +47,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "versionCode": 5,
-      "runtimeVersion": "2.9.6"
+      "versionCode": 6,
+      "runtimeVersion": "2.10.0"
     },
     "web": {
       "favicon": "./assets/favicon.png"
