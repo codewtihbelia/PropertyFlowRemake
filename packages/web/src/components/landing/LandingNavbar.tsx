@@ -119,7 +119,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
               />
             </div>
 
-            <div className="flex flex-col">
+            <div className="sm:flex flex-col hidden">
               <div className="flex flex-row">
                 <span className="text-base sm:text-lg font-black tracking-tight text-[#1b2b3f] dark:text-white leading-none">
                   SPLIT

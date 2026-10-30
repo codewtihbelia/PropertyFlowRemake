@@ -245,7 +245,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
                 />
               </div>
 
-              <div className="flex flex-col">
+              <div className="sm:flex hidden flex-col">
                 <div className="flex flex-row">
                   <span className="text-base sm:text-lg font-black tracking-tight text-[#1b2b3f] dark:text-white leading-none">
                     SPLIT
@@ -261,7 +261,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
             </button>
 
             {/* Center Navigation: Back to Home & Privacy Switch */}
-            <div className="flex items-center gap-2">
+            <div className="sm:flex hidden items-center gap-2">
               <button
                 onClick={onBack}
                 className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:text-[#2563EB] dark:hover:text-blue-400 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-all whitespace-nowrap cursor-pointer"

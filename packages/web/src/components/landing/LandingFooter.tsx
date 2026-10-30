@@ -44,7 +44,7 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
                 className="w-10 h-10"
               />
               <div className="flex flex-row">
-                <span className="text-slate-900">Split</span>
+                <span className="text-slate-900 dark:text-white">Split</span>
                 <span className="text-[#2563EB]">zy</span>
               </div>
             </div>
