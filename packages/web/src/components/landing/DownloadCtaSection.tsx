@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Download,
   Smartphone,
@@ -24,9 +24,12 @@ export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
     DEFAULT_PLATFORM_SETTINGS,
   );
 
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
+  useEffect(() => {
+    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
+      setSettings(newSettings);
+    });
+    return () => unsubscribe();
+  }, []);
 
   return (
     <section
