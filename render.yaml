@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: splitzy-landing-page
+    env: static
+    buildCommand: npm install && npm --workspace=/web run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

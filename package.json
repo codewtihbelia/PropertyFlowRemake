@@ -6,15 +6,17 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm --workspace=@propertyflow/web run dev",
-    "build": "npm --workspace=@propertyflow/web run build",
-    "lint": "npm --workspace=@propertyflow/web run build",
-    "dev:web": "npm --workspace=@propertyflow/web run dev",
-    "build:web": "npm --workspace=@propertyflow/web run build",
-    "dev:mobile": "npm --workspace=@propertyflow/mobile run start",
-    "test": "npm --workspace=@propertyflow/shared run test",
-    "build:shared": "npm --workspace=@propertyflow/shared run build",
-    "postinstall": "npm --workspace=@propertyflow/mobile run postinstall || true"
+    "dev": "npm --workspace=/web run dev",
+    "build": "npm --workspace=/web run build",
+    "start": "npm --workspace=/web run preview",
+    "preview": "npm --workspace=/web run preview",
+    "lint": "npm --workspace=/web run build",
+    "dev:web": "npm --workspace=/web run dev",
+    "build:web": "npm --workspace=/web run build",
+    "dev:mobile": "npm --workspace=/mobile run start",
+    "test": "npm --workspace=/shared run test",
+    "build:shared": "npm --workspace=/shared run build",
+    "postinstall": "npm --workspace=/mobile run postinstall || true"
   },
   "devDependencies": {
     "@react-native/babel-plugin-codegen": "^0.86.3",
