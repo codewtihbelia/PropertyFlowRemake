@@ -369,17 +369,6 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
         {/* 4. Real Version Settings & Changes Section (Declared by Super Admin) */}
         <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-5">
-            <div>
-              <div className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
-                <Sparkles className="w-3.5 h-3.5 text-blue-500" />
-                <span>Super Admin Release Log</span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white mt-1">
-                {settings.releaseTitle ||
-                  `What's New in Version ${settings.latestVersion}`}
-              </h2>
-            </div>
-
             <div className="flex items-center gap-2 text-xs font-mono text-slate-500 dark:text-slate-400">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
               <span>Released: {formattedUpdateDate}</span>
@@ -418,10 +407,6 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
 
           {/* Technical Specs Footer in Release Log */}
           <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-slate-400" />
-              <span>Target Build: Release Channel Production</span>
-            </div>
             {settings.minSupportedVersion && (
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-500" />
@@ -436,10 +421,6 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
         {/* 5. Google Play Store & Apple App Store "Coming Soon" Section */}
         <section className="bg-gradient-to-b from-slate-100/80 to-white dark:from-slate-900/60 dark:to-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-6">
           <div className="text-center max-w-2xl mx-auto space-y-2">
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
-              <Clock className="w-4 h-4 text-blue-500" />
-              <span>Official App Stores Roadmap</span>
-            </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
               Coming Soon to Official App Stores
             </h2>
@@ -600,7 +581,7 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
                 03
               </div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Install & Split Bills
+                Install
               </h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                 Tap "Install" on the package dialog. Once finished, open
@@ -617,11 +598,10 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
             <Shield className="w-6 h-6 text-emerald-500 shrink-0" />
             <div className="text-left">
               <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                Clean, Secure & Trusted Build
+                Clean, Secure & Trusted
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Built with Google AI Studio and EAS. All financial math is
-                centavo-accurate and cryptographically protected.
+                Built with React Native Expo, Node.js & Python
               </p>
             </div>
           </div>

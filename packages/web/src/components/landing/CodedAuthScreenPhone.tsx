@@ -49,24 +49,36 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
     <div className="relative mx-auto w-[310px] sm:w-[325px] h-[660px] bg-slate-900 rounded-[44px] p-3 shadow-2xl ring-1 ring-slate-800/80 select-none">
       {/* Phone Screen Canvas */}
       <div className="w-full h-full bg-blue-600 rounded-[36px] overflow-hidden flex flex-col relative shadow-inner">
-        
         {/* Upper White Section */}
         <div className="p-4 pt-3 w-full bg-white flex flex-col items-center">
-          
           {/* Status Bar */}
           <div className="flex items-center justify-between w-full pt-1 pb-1 px-1">
             <span className="text-[11px] font-bold text-slate-800">9:41</span>
-            
+
             {/* Island Notch */}
             <div className="w-20 h-3.5 bg-slate-900 rounded-full mx-auto" />
 
             {/* Status Icons */}
             <div className="flex items-center gap-1.5 text-slate-800">
               <span className="font-bold text-[9px]">5G</span>
-              <svg className="w-3 h-3 text-slate-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+              <svg
+                className="w-3 h-3 text-slate-800"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+                />
               </svg>
-              <svg className="w-3.5 h-3 text-slate-800" fill="currentColor" viewBox="0 0 24 24">
+              <svg
+                className="w-3.5 h-3 text-slate-800"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path d="M17 6H3a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2zm3 5h1a1 1 0 011 1v2a1 1 0 01-1 1h-1v-4z" />
               </svg>
             </div>
@@ -126,7 +138,9 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
                 Email Address
               </label>
               <div className="relative flex items-center">
-                <span className="absolute left-3 text-slate-400 text-xs">@</span>
+                <span className="absolute left-3 text-slate-400 text-xs">
+                  @
+                </span>
                 <input
                   type="email"
                   value={email}
@@ -146,7 +160,9 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
                 {tab === "signin" && (
                   <button
                     type="button"
-                    onClick={() => alert("Password reset link will be sent to your email.")}
+                    onClick={() =>
+                      alert("Password reset link will be sent to your email.")
+                    }
                     className="text-[10px] font-bold text-blue-600 hover:underline"
                   >
                     Forgot?
@@ -155,8 +171,18 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
               </div>
               <div className="relative flex items-center">
                 <span className="absolute left-3 text-slate-400">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    />
                   </svg>
                 </span>
                 <input
@@ -172,13 +198,38 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
                   className="absolute right-2.5 text-slate-400 hover:text-slate-600"
                 >
                   {showPassword ? (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
+                      />
                     </svg>
                   ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      />
                     </svg>
                   )}
                 </button>
@@ -195,7 +246,6 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
               <span className="text-sm font-bold">→</span>
             </button>
           </form>
-
         </div>
 
         {/* ================= Bottom Blue Wave Section ================= */}
@@ -224,72 +274,92 @@ export const CodedAuthScreenPhone: React.FC<CodedAuthScreenPhoneProps> = ({
               <div className="flex-1 h-px bg-white/20" />
             </div>
 
-          {/* Continue with Google */}
-          <button
-            type="button"
-            onClick={() => alert("Google Sign-in connected with Firebase Authentication.")}
-            className="w-full bg-white hover:bg-slate-50 text-slate-900 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-2 transition-transform active:scale-[0.98]"
-          >
-            {/* Google G multi-color icon */}
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.15z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.27a7.2 7.2 0 0 1 0-4.54V6.58H1.25a11.96 11.96 0 0 0 0 10.84l4.03-3.15z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.93 6.72-4.93z"
-              />
-            </svg>
-            <span>Continue with Google</span>
-          </button>
-
-          {/* Continue with Apple */}
-          <button
-            type="button"
-            onClick={() => alert("Apple Sign-In is configured for iOS devices.")}
-            className="w-full bg-slate-950 hover:bg-slate-900 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-3 transition-transform active:scale-[0.98]"
-          >
-            <span className="text-sm"></span>
-            <span>Continue with Apple</span>
-          </button>
-
-          {/* Terms & Privacy */}
-          <p className="text-[9.5px] text-white/75 text-center leading-tight mb-2.5">
-            By continuing, you agree to Splitzy's{" "}
-            <a href="#terms" className="underline font-bold text-white hover:text-white/90">
-              Terms of Service
-            </a>{" "}
-            and{" "}
-            <a href="#privacy" className="underline font-bold text-white hover:text-white/90">
-              Privacy Policy
-            </a>
-            .
-          </p>
-
-          {/* Don't have an account? Sign up */}
-          <div className="text-center text-[11px] text-white/90 font-medium">
-            {tab === "signin" ? "Don't have an account? " : "Already have an account? "}
+            {/* Continue with Google */}
             <button
               type="button"
-              onClick={() => setTab(tab === "signin" ? "signup" : "signin")}
-              className="font-black text-white underline hover:opacity-90 cursor-pointer ml-1"
+              onClick={() =>
+                alert("Google Sign-in connected with Firebase Authentication.")
+              }
+              className="w-full bg-white hover:bg-slate-50 text-slate-900 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-2 transition-transform active:scale-[0.98]"
             >
-              {tab === "signin" ? "Sign up" : "Sign in"}
+              {/* Google G multi-color icon */}
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.15z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.27a7.2 7.2 0 0 1 0-4.54V6.58H1.25a11.96 11.96 0 0 0 0 10.84l4.03-3.15z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.93 6.72-4.93z"
+                />
+              </svg>
+              <span>Continue with Google</span>
             </button>
+
+            {/* Continue with Apple */}
+            <button
+              type="button"
+              onClick={() =>
+                alert("Apple Sign-In is configured for iOS devices.")
+              }
+              className="w-full bg-slate-950 hover:bg-slate-900 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm mb-3 transition-transform active:scale-[0.98]"
+            >
+              <span className="text-sm"></span>
+              <span>Continue with Apple</span>
+            </button>
+
+            {/* Terms & Privacy */}
+            <p className="text-[9.5px] text-white/75 text-center leading-tight mb-2.5">
+              By continuing, you agree to Splitzy's{" "}
+              <a
+                href="/terms"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.history.pushState({ flow: "terms" }, "", "/terms");
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                }}
+                className="underline font-bold text-white hover:text-white/90"
+              >
+                Terms of Service
+              </a>{" "}
+              and{" "}
+              <a
+                href="/privacy"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.history.pushState({ flow: "privacy" }, "", "/privacy");
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                }}
+                className="underline font-bold text-white hover:text-white/90"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
+
+            {/* Don't have an account? Sign up */}
+            <div className="text-center text-[11px] text-white/90 font-medium">
+              {tab === "signin"
+                ? "Don't have an account? "
+                : "Already have an account? "}
+              <button
+                type="button"
+                onClick={() => setTab(tab === "signin" ? "signup" : "signin")}
+                className="font-black text-white underline hover:opacity-90 cursor-pointer ml-1"
+              >
+                {tab === "signin" ? "Sign up" : "Sign in"}
+              </button>
+            </div>
           </div>
-
         </div>
-        </div>
-
       </div>
     </div>
   );

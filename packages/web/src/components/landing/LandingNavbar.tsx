@@ -156,30 +156,6 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
 
           {/* Right: Language Pill, Theme Switcher & Floating #2563EB Download APK Button */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
-            {/* Language Switch Capsule [ EN | TL ] matching exact reference layout */}
-            {/* <div className="inline-flex items-center bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-full border border-slate-200 dark:border-slate-700/80 text-xs font-semibold">
-              <button
-                onClick={() => handleLangToggle("EN")}
-                className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
-                  selectedLang === "EN"
-                    ? "bg-[#1E3048] text-white shadow-xs font-bold"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => handleLangToggle("TL")}
-                className={`px-2.5 py-1 rounded-full transition-all cursor-pointer ${
-                  selectedLang === "TL"
-                    ? "bg-[#1E3048] text-white shadow-xs font-bold"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                TL
-              </button>
-            </div> */}
-
             {/* Dark/Light mode toggle */}
             <button
               onClick={toggleTheme}
@@ -242,7 +218,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
 
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                Theme / Tema:
+                Theme:
               </span>
               <button
                 type="button"
@@ -263,7 +239,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
+            {/* <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                 Language / Wika:
               </span>
@@ -289,7 +265,7 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
                   TL
                 </button>
               </div>
-            </div>
+            </div> */}
 
             <button
               onClick={() => {
