@@ -279,9 +279,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     },
   };
 
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
+  useEffect(() => {
+    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
+      setSettings(newSettings);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const current = screensConfig[activeScreen];
   const activeImage =
