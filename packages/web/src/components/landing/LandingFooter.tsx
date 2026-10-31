@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ArrowUp, Github, Heart, ShieldCheck } from "lucide-react";
 import {
   listenToMobilePlatformSettings,
@@ -27,9 +27,12 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
+  useEffect(() => {
+    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
+      setSettings(newSettings);
+    });
+    return () => unsubscribe();
+  }, []);
 
   return (
     <footer className="bg-slate-100/80 dark:bg-slate-950 text-slate-600 dark:text-slate-400 text-sm border-t border-slate-200 dark:border-slate-800 transition-colors">
