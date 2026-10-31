@@ -1,4 +1,4 @@
-import { doc, onSnapshot, getDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 export interface MobilePlatformSettings {
@@ -29,26 +29,57 @@ export const DEFAULT_PLATFORM_SETTINGS: MobilePlatformSettings = {
   updatedAt: new Date().toISOString(),
 };
 
-/**
- * Listens to real-time platform settings updates configured by the Super Admin in the mobile app.
- * Automatically tries primary `platform_settings/global` and falls back to `systemSettings/platform`.
- */
-export function listenToMobilePlatformSettings(
-  callback: (settings: MobilePlatformSettings) => void
-): () => void {
-  let unsubPrimary: (() => void) | null = null;
-  let unsubSecondary: (() => void) | null = null;
+// Singleton state to avoid multiple duplicate Firestore WebSocket listeners and memory leaks
+let cachedSettings: MobilePlatformSettings = { ...DEFAULT_PLATFORM_SETTINGS };
+const subscribers = new Set<(settings: MobilePlatformSettings) => void>();
+let globalUnsubPrimary: (() => void) | null = null;
+let globalUnsubSecondary: (() => void) | null = null;
+let isListening = false;
+
+function areSettingsEqual(a: MobilePlatformSettings, b: MobilePlatformSettings): boolean {
+  return (
+    a.latestVersion === b.latestVersion &&
+    a.apkDownloadUrl === b.apkDownloadUrl &&
+    a.minSupportedVersion === b.minSupportedVersion &&
+    a.releaseTitle === b.releaseTitle &&
+    a.releaseNotes === b.releaseNotes &&
+    a.forceUpdate === b.forceUpdate &&
+    a.announcementBanner === b.announcementBanner &&
+    a.maintenanceMode === b.maintenanceMode &&
+    a.maintenanceMessage === b.maintenanceMessage &&
+    a.updatedAt === b.updatedAt
+  );
+}
+
+function notifySubscribers(newSettings: MobilePlatformSettings) {
+  if (areSettingsEqual(cachedSettings, newSettings)) {
+    return; // Prevent duplicate re-renders and memory growth
+  }
+  cachedSettings = newSettings;
+  subscribers.forEach((cb) => {
+    try {
+      cb(cachedSettings);
+    } catch (e) {
+      console.error("[platformSettingsService] subscriber callback error:", e);
+    }
+  });
+}
+
+function startGlobalListener() {
+  if (isListening) return;
+  isListening = true;
+
   let hasReceivedPrimary = false;
 
   try {
     const primaryRef = doc(db, "platform_settings", "global");
-    unsubPrimary = onSnapshot(
+    globalUnsubPrimary = onSnapshot(
       primaryRef,
       (snap) => {
         if (snap.exists()) {
           hasReceivedPrimary = true;
           const data = snap.data();
-          callback({
+          notifySubscribers({
             latestVersion: data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
             minSupportedVersion: data.minSupportedVersion || DEFAULT_PLATFORM_SETTINGS.minSupportedVersion,
             releaseTitle: data.releaseTitle || DEFAULT_PLATFORM_SETTINGS.releaseTitle,
@@ -62,7 +93,6 @@ export function listenToMobilePlatformSettings(
             updatedBy: data.updatedBy,
           });
         } else if (!hasReceivedPrimary) {
-          // If primary doesn't exist, try fallback
           trySecondary();
         }
       },
@@ -79,14 +109,15 @@ export function listenToMobilePlatformSettings(
   }
 
   function trySecondary() {
+    if (globalUnsubSecondary) return;
     try {
       const secondaryRef = doc(db, "systemSettings", "platform");
-      unsubSecondary = onSnapshot(
+      globalUnsubSecondary = onSnapshot(
         secondaryRef,
         (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            callback({
+            notifySubscribers({
               latestVersion: data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
               minSupportedVersion: data.minSupportedVersion || DEFAULT_PLATFORM_SETTINGS.minSupportedVersion,
               releaseTitle: data.releaseTitle || DEFAULT_PLATFORM_SETTINGS.releaseTitle,
@@ -100,20 +131,53 @@ export function listenToMobilePlatformSettings(
               updatedBy: data.updatedBy,
             });
           } else {
-            callback(DEFAULT_PLATFORM_SETTINGS);
+            notifySubscribers(DEFAULT_PLATFORM_SETTINGS);
           }
         },
         () => {
-          callback(DEFAULT_PLATFORM_SETTINGS);
+          notifySubscribers(DEFAULT_PLATFORM_SETTINGS);
         }
       );
     } catch {
-      callback(DEFAULT_PLATFORM_SETTINGS);
+      notifySubscribers(DEFAULT_PLATFORM_SETTINGS);
     }
   }
+}
+
+function stopGlobalListener() {
+  if (!isListening) return;
+  if (globalUnsubPrimary) {
+    globalUnsubPrimary();
+    globalUnsubPrimary = null;
+  }
+  if (globalUnsubSecondary) {
+    globalUnsubSecondary();
+    globalUnsubSecondary = null;
+  }
+  isListening = false;
+}
+
+/**
+ * Listens to real-time platform settings updates configured by the Super Admin in the mobile app.
+ * Uses a deduplicated singleton listener to prevent multiple simultaneous WebSocket connections and memory leaks.
+ */
+export function listenToMobilePlatformSettings(
+  callback: (settings: MobilePlatformSettings) => void
+): () => void {
+  // Immediately supply latest cached settings
+  try {
+    callback(cachedSettings);
+  } catch (e) {
+    console.error("[platformSettingsService] initial callback error:", e);
+  }
+
+  subscribers.add(callback);
+  startGlobalListener();
 
   return () => {
-    if (unsubPrimary) unsubPrimary();
-    if (unsubSecondary) unsubSecondary();
+    subscribers.delete(callback);
+    if (subscribers.size === 0) {
+      stopGlobalListener();
+    }
   };
 }
