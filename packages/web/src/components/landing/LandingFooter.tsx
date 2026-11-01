@@ -40,9 +40,10 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
             </div>
 
             <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed max-w-sm">
-              The smart co-living finance app for roommates, dormers, and
-              apartment hosts in the Philippines. Fair water attendance, exact
-              centavo splitting, and digital wallet settlements.
+              A simpler way for roommates, dormers, and apartment hosts in the
+              Philippines to manage shared expenses. Split water bills fairly,
+              keep every centavo accounted for, and settle payments easily
+              through digital wallets.
             </p>
 
             <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-500 pt-1">
@@ -71,7 +72,7 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
                   onClick={() => onScrollTo("showcase")}
                   className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition-colors cursor-pointer"
                 >
-                  Interactive 3D Showcase
+                  Guides & Showcase
                 </button>
               </li>
               <li>
@@ -202,8 +203,7 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
         {/* Bottom Bar */}
         <div className="pt-10 mt-10 border-t border-slate-200 dark:border-slate-900 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <div>
-            © {new Date().getFullYear()} Splitzy. Designed for harmonious
-            co-living in the Philippines.
+            © {new Date().getFullYear()} Splitzy. Designed with ❤️ from Cebu.
           </div>
 
           <div className="flex items-center gap-4">

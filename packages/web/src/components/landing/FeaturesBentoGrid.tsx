@@ -21,15 +21,14 @@ export const FeaturesBentoGrid: React.FC = () => {
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto space-y-4 mb-16">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            Engineered for Fairness. <br />
+            Fair Shares. <br />
             <span className="text-blue-600 dark:text-blue-400">
-              Zero Math Friction.
+              No More Number-Crunching.
             </span>
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
-            Traditional calculators divide numbers blindly. Splitzy understands
-            that humans live together, travel, have sub-meters, and pay with
-            GCash.
+            Sharing expenses isn't always simple. Splitzy understands real
+            roommate life and makes every bill easier and fairer to split.
           </p>
         </div>
 
@@ -42,13 +41,19 @@ export const FeaturesBentoGrid: React.FC = () => {
                 <Calculator className="w-6 h-6" />
               </div>
               <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
-                Exact Centavo Mathematical Engine
+                Every Centavo Counts. Every Split Adds Up.
               </h3>
               <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base leading-relaxed">
-                Dividing ₱800 by 3 payors yields ₱266.6666... In Splitzy, our
-                mathematical floor division allocates ₱266.67 to two payors and
-                ₱266.66 to the third. The sum always matches the exact bill down
-                to the last centavo, eliminating disappearing change.
+                Let's say you're splitting an ₱800 bill with two other
+                roommates. A simple division gives everyone ₱266.666..., which
+                doesn't quite work when you're paying in centavos.
+              </p>
+              <p>
+                Splitzy takes care of that for you. Two roommates pay ₱266.67,
+                while the third pays ₱266.66. That's it—no missing centavos, no
+                confusing calculations, and no wondering where the extra money
+                went. Everyone pays their fair share, and the total always
+                matches the bill.
               </p>
             </div>
 
@@ -97,13 +102,18 @@ export const FeaturesBentoGrid: React.FC = () => {
                 <Droplets className="w-6 h-6" />
               </div>
               <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
-                Presence-Based Water Billing
+                Only Pay for the Days You're Home
               </h3>
               <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
-                Why pay for water when you were out of town for 2 weeks? Track
-                presence days on an interactive monthly calendar. The app
-                dynamically redistributes absence shares among present
-                residents.
+                Been away for a couple of weeks? You shouldn't have to pay the
+                same water share as roommates who stayed home. With Splitzy,
+                simply mark the days you were around using the monthly calendar.
+                We'll take care of the calculations and fairly adjust everyone's
+                share based on who's actually home.
+              </p>
+              <p>
+                No paying for days you're away, no complicated math, and no
+                awkward conversations about the water bill.
               </p>
             </div>
 

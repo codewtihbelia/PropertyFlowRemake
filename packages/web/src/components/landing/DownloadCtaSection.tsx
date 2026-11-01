@@ -28,15 +28,16 @@ export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center space-y-8">
         <h2 className="text-3xl sm:text-5xl font-black tracking-tight text-white max-w-3xl mx-auto leading-tight">
-          Ready to Make Roommate Bills <br />
+          Ready to Make Sharing Bills <br />
           <span className="bg-gradient-to-r from-blue-400 to-indigo-300 bg-clip-text text-transparent">
             Fair, Accurate & Stress-Free?
           </span>
         </h2>
 
         <p className="text-slate-300 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-          Join co-living households, dormers, and apartment hosts who trust
-          Splitzy to manage their shared expenses down to the exact centavo.
+          Join roommates, dormers, and apartment hosts who use Splitzy to keep
+          shared expenses fair, simple, and stress-free down to the last
+          centavo.
         </p>
 
         {/* Action Buttons */}

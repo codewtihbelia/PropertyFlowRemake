@@ -39,8 +39,8 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
   const heroImage =
     heroTheme === "dark"
-      ? "/assets/aistudio/HomeScreenDark_47435b6f.jpg"
-      : "/assets/aistudio/HomeScreenWhite_4abd9f0d.jpg";
+      ? "/assets/HomeScreenDark.png"
+      : "/assets/HomeScreenLight.png";
 
   return (
     <section
@@ -63,37 +63,37 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
             {/* Main Headline */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-[1.12]">
-              Co-living without the <br />
+              Sharing a home without <br />
               <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 bg-clip-text text-transparent">
-                money drama.
+                money stress.
               </span>
             </h1>
 
             {/* Sub-headline */}
             <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-300 font-normal leading-relaxed max-w-2xl">
-              Splitzy automates rent, water utility attendance, electric
-              sub-meters, and shared groceries with centavo-accurate fair
-              splits. Designed specifically for roommates, dormers, and
-              apartment hosts in the Philippines.
+              Splitzy makes sharing a home and splitting expenses easier. From
+              rent and water bills to electricity sub-meter readings and shared
+              groceries, it keeps track of everything and makes sure everyone
+              pays their fair share down to the last centavo.
             </p>
 
             {/* Key Value Proof List */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 text-sm font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>Fair water attendance calculations</span>
+                <span>Only pay for the water you actually used</span>
               </div>
               <div className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 text-sm font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>Zero rounding errors (Exact Centavo Math)</span>
+                <span>Every centavo counts</span>
               </div>
               <div className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 text-sm font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>Integrated GCash, Maya & Philippine cards</span>
+                <span>Pay the way you prefer</span>
               </div>
               <div className="flex items-center gap-2.5 text-slate-700 dark:text-slate-300 text-sm font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>Encrypted roomie chat, reels & WebRTC calls</span>
+                <span>More than just roommates</span>
               </div>
             </div>
 
@@ -112,7 +112,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-semibold text-sm transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
               >
                 <Smartphone className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span>Interactive 3D Showcase ↓</span>
+                <span>Guides & Showcase ↓</span>
               </button>
             </div>
 

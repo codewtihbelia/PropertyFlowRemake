@@ -119,9 +119,9 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
             {/* Custom stylized house emblem with Splitzy #2563EB palette */}
             <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
               <img
-                src="../../favicon.png"
+                src="/favicon.png"
                 alt="Splitzy Logo"
-                className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+                className="w-10 h-10 sm:w-11 sm:h-11 object-contain"
               />
             </div>
 

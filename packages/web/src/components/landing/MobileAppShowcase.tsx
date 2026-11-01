@@ -117,12 +117,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     home: {
       id: "home",
       label: "Home Hub",
-      shortTitle: "Daily Household Hub",
+      shortTitle: "Splitzy Dashboard",
       icon: Home,
       tagline:
-        "Your active billing cycle, wallet balance & quick actions at a glance.",
-      darkImg: "/assets/aistudio/HomeScreenDark_47435b6f.jpg",
-      lightImg: "/assets/aistudio/HomeScreenWhite_4abd9f0d.jpg",
+        "Your active billing cycle, groups, wallet balance & quick actions at a glance.",
+      darkImg: "/assets/HomeScreenDark.png",
+      lightImg: "/assets/HomeScreenLight.png",
       humanProblem:
         "Roommates never know what the current running total is until the electric bill arrives in the door.",
       splitzySolution:
@@ -137,12 +137,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     bills: {
       id: "bills",
       label: "Bills & Dues",
-      shortTitle: "Itemized Centavo Dues",
+      shortTitle: "Bills Screen",
       icon: Receipt,
       tagline:
-        "Zero math confusion. See your exact share down to the last centavo.",
-      darkImg: "/assets/aistudio/BillsScreenDark_a14c7565.jpg",
-      lightImg: "/assets/aistudio/BillsScreenWhite_4b4b7523.jpg",
+        "No more guessing. Just fair, accurate splits down to the last centavo.",
+      darkImg: "/assets/BillsScreenDark.png",
+      lightImg: "/assets/BillsScreenLight.png",
       humanProblem:
         "Splitting ₱8,319.24 across 3 roommates leads to rounding disputes, awkward reminders, and lost receipts.",
       splitzySolution:
@@ -157,12 +157,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     attendance: {
       id: "attendance",
       label: "Water Attendance",
-      shortTitle: "Fair Presence Billing",
+      shortTitle: "Attendance Screen",
       icon: Droplets,
       tagline:
         "Never pay for water when you were on vacation or visiting family.",
-      darkImg: "/assets/aistudio/AttendanceScreenDark_6d8cbbd4.jpg",
-      lightImg: "/assets/aistudio/AttendanceScreenWhite_2785f96e.jpg",
+      darkImg: "/assets/AttendanceScreenDark.png",
+      lightImg: "/assets/AttendanceScreenLight.png",
       humanProblem:
         "Why should a roommate who spent 2 weeks visiting home pay the same water utility as someone who was home every day?",
       splitzySolution:
@@ -181,8 +181,8 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
       icon: Wallet,
       tagline:
         "Personal funds, simulated everyday expenses, and Philippine bank cards.",
-      darkImg: "/assets/aistudio/WalletSscreenDark_fdb6a8b1.jpg",
-      lightImg: "/assets/aistudio/WalletSscreenWhite_86d44bdf.jpg",
+      darkImg: "/assets/WalletScreenDark.png",
+      lightImg: "/assets/WalletScreenLight.png",
       humanProblem:
         "Transferring funds between banking apps and asking for screenshots creates friction and distrust.",
       splitzySolution:
@@ -201,8 +201,8 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
       icon: Repeat,
       tagline:
         "Track Netflix, Spotify, shared Wi-Fi, and informal roommate loans.",
-      darkImg: "/assets/aistudio/WalletSscreenSubscriptionDark_ab8b69fb.jpg",
-      lightImg: "/assets/aistudio/WalletSscreenSubscriptionWhite_37a642aa.jpg",
+      darkImg: "/assets/WalletScreenSubscriptionDark.png",
+      lightImg: "/assets/WalletScreenSubscriptionLight.png",
       humanProblem:
         "'Can you pay for the takeout, I'll pay you back tomorrow' — and then it's forgotten forever.",
       splitzySolution:
@@ -217,12 +217,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     community: {
       id: "community",
       label: "Community & Reels",
-      shortTitle: "Social Roommate Feed",
+      shortTitle: "Feed, Reels & People",
       icon: Users,
       tagline:
         "Short video reels, house announcements, and roommate tips in one feed.",
-      darkImg: "/assets/aistudio/SplitzyCommunityDark_f63d7d1a.jpg",
-      lightImg: "/assets/aistudio/SplitzyCommunityWhite_60c2d55b.jpg",
+      darkImg: "/assets/CommunityScreenDark.png",
+      lightImg: "/assets/CommunityScreenLight.png",
       humanProblem:
         "Important apartment notices get drowned out in cluttered WhatsApp or Messenger group chats.",
       splitzySolution:
@@ -241,8 +241,8 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
       icon: MessageCircle,
       tagline:
         "Direct messaging, voice calls, and video calls built right into the app.",
-      darkImg: "/assets/aistudio/MessagesDark_0831e1a2.jpg",
-      lightImg: "/assets/aistudio/MessagesWhite_1445d772.jpg",
+      darkImg: "/assets/MessagesScreenDark.png",
+      lightImg: "/assets/MessagesScreenLight.png",
       humanProblem:
         "Mixing personal social media with apartment bills and maintenance requests feels intrusive.",
       splitzySolution:
@@ -257,12 +257,12 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     profile: {
       id: "profile",
       label: "Profile & Settings",
-      shortTitle: "Household Governance",
+      shortTitle: "Settings",
       icon: Settings,
       tagline:
         "Manage your personal credentials, payment methods, and host controls.",
-      darkImg: "/assets/aistudio/ProfileSettingsDark_71208c8c.jpg",
-      lightImg: "/assets/aistudio/ProfileSettingsWhite_cb49aa76.jpg",
+      darkImg: "/assets/SettingsScreenDark.png",
+      lightImg: "/assets/SettingsScreenLight.png",
       humanProblem:
         "Users don't know where their payment proof goes or how to adjust their personal details.",
       splitzySolution:
@@ -292,15 +292,14 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            Explore Splitzy in Action. <br />
+            Come On In and Explore. <br />
             <span className="text-blue-600 dark:text-blue-400">
-              Flip Themes & Test Real Screens.
+              Flip Themes & Switch Screens.
             </span>
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
-            These are real, live screenshots captured directly from the Splitzy
-            Android application. Toggle between Dark & Light mode and click any
-            feature tab to inspect the UX.
+            Take a look inside Splitzy! Explore real app screens, switch between
+            Light and Dark mode, and see how everything works.
           </p>
         </div>
 
@@ -463,8 +462,8 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
             {/* Before & After: The Human Friction vs The Splitzy Solution */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
-                  The Roommate Friction
+                <span className="text-xs font-bold tracking-wider text-rose-600 dark:text-rose-400">
+                  The Everyday Roommate Struggles
                 </span>
                 <p className="text-xs sm:text-sm text-rose-950/80 dark:text-slate-300 leading-relaxed">
                   {current.humanProblem}
@@ -472,8 +471,8 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
               </div>
 
               <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                  The Splitzy Solution
+                <span className="text-xs font-bold tracking-wider text-emerald-600 dark:text-emerald-400">
+                  How Splitzy Makes Things Easier
                 </span>
                 <p className="text-xs sm:text-sm text-emerald-950/80 dark:text-slate-300 leading-relaxed">
                   {current.splitzySolution}

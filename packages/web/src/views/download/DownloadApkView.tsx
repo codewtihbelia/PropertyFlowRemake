@@ -141,9 +141,9 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
               {/* Custom stylized house emblem with Splitzy #2563EB palette */}
               <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
                 <img
-                  src="../../favicon.png"
+                  src="/favicon.png"
                   alt="Splitzy Logo"
-                  className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+                  className="w-10 h-10 sm:w-11 sm:h-11 object-contain"
                 />
               </div>
 
@@ -246,7 +246,7 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
                     Package Size
                   </span>
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    ~48.2 MB
+                    ~70+ MB
                   </p>
                 </div>
               </div>
@@ -610,8 +610,7 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
       {/* 8. Quiet Footer */}
       <footer className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 border-t border-slate-200/80 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          © {new Date().getFullYear()} Splitzy. Fair co-living expense
-          splitting.
+          © {new Date().getFullYear()} Splitzy. Designed with ❤️ from Cebu.
         </div>
         <div className="flex items-center gap-6">
           <button

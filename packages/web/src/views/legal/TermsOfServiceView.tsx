@@ -19,6 +19,7 @@ import {
   Moon,
 } from "lucide-react";
 import { useTheme } from "../../contexts/ThemeContext";
+import { useMobilePlatformSettings } from "@/services/platformSettingsService";
 
 interface TermsOfServiceViewProps {
   onBack: () => void;
@@ -159,6 +160,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
 }) => {
   const { isDark, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
+  const settings = useMobilePlatformSettings();
   const [copiedLink, setCopiedLink] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string>("acceptance");
   const [isScrolled, setIsScrolled] = useState(false);
@@ -217,7 +219,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-600/20 selection:text-blue-900 transition-colors">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-600/20 selection:text-blue-900 dark:selection:text-blue-200 transition-colors">
       {/* 1. Floating Frosted Glass Capsule Bar matching Main Landing Navbar */}
       <header
         className={`fixed top-4 sm:top-6 inset-x-0 z-50 px-3 sm:px-6 pointer-events-none transition-all duration-500 ease-out ${
@@ -242,9 +244,9 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
               {/* Custom stylized house emblem with Splitzy #2563EB palette */}
               <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
                 <img
-                  src="../../favicon.png"
+                  src="/favicon.png"
                   alt="Splitzy Logo"
-                  className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+                  className="w-10 h-10 sm:w-11 sm:h-11 object-contain"
                 />
               </div>
 
@@ -335,32 +337,32 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
       {/* Main Content Area */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-28 sm:pt-36 pb-12">
         {/* Document Header Banner */}
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-10 mb-8 shadow-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+        <div className="bg-white dark:bg-slate-900/90 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-10 mb-8 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <div className="flex items-center gap-2 text-xs text-brand-600 font-semibold mb-2">
+              <div className="flex items-center gap-2 text-xs text-[#2563EB] dark:text-blue-400 font-semibold mb-2">
                 <FileText className="w-4 h-4" />
                 <span>Standard Agreement</span>
                 <span aria-hidden="true">·</span>
-                <span>Version 2.4</span>
+                <span>Version {settings.latestVersion}</span>
               </div>
-              <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+              <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                 Terms of Service
               </h1>
-              <p className="text-slate-600 text-sm sm:text-base mt-2 max-w-2xl leading-relaxed">
+              <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base mt-2 max-w-2xl leading-relaxed">
                 Rules, calculation transparency standards, and mutual
                 responsibilities governing the Splitzy roommate bill management
                 system.
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0 text-xs text-slate-500">
+            <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0 text-xs text-slate-500 dark:text-slate-400">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-400" />
+                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" />
                 <span>Last Updated: September 28, 2026</span>
               </div>
               <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-500" />
+                <Shield className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
                 <span>Status: Effective Immediately</span>
               </div>
             </div>
@@ -369,25 +371,25 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
           {/* Quick Search & Summary Callout */}
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="relative w-full sm:max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search clauses (e.g., centavo, attendance, receipts)..."
-                className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20 transition bg-slate-50/50"
+                className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/80 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-[#2563EB] dark:focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                 >
                   Clear
                 </button>
               )}
             </div>
 
-            <div className="text-xs text-slate-500 self-start sm:self-center">
+            <div className="text-xs text-slate-500 dark:text-slate-400 self-start sm:self-center">
               <span>{filteredSections.length} sections documented</span>
             </div>
           </div>
@@ -397,7 +399,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Sticky Table of Contents (Desktop) */}
           <aside className="hidden lg:block lg:col-span-4 sticky top-28 sm:top-32 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs">
+            <div className="bg-white dark:bg-slate-900/90 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs">
               <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3">
                 Table of Contents
               </h3>
@@ -412,7 +414,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                         isActive
                           ? "bg-blue-50 dark:bg-blue-950/60 text-[#2563EB] dark:text-blue-400 font-bold"
-                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/80"
                       }`}
                     >
                       <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
@@ -424,11 +426,11 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
                 })}
               </nav>
 
-              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span>Need support?</span>
                 <a
                   href="mailto:support@splitzy.app"
-                  className="text-brand-600 font-semibold hover:underline"
+                  className="text-[#2563EB] dark:text-blue-400 font-semibold hover:underline"
                 >
                   support@splitzy.app
                 </a>
@@ -444,25 +446,25 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
                 <section
                   key={sec.id}
                   id={sec.id}
-                  className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs scroll-mt-24 transition-all"
+                  className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs scroll-mt-24 transition-all"
                 >
                   {/* Section Title Bar */}
                   <div className="flex items-start gap-4 mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-brand-600 shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-800/50 flex items-center justify-center text-[#2563EB] dark:text-blue-400 shrink-0">
                       <Icon className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="text-[11px] font-mono font-bold text-brand-600 uppercase tracking-wider">
+                      <div className="text-[11px] font-mono font-bold text-[#2563EB] dark:text-blue-400 uppercase tracking-wider">
                         Section {sec.number}
                       </div>
-                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                         {sec.title}
                       </h2>
                     </div>
                   </div>
 
                   {/* Body Paragraphs */}
-                  <div className="space-y-3 text-slate-600 text-sm leading-relaxed">
+                  <div className="space-y-3 text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
                     {sec.paragraphs.map((p, idx) => (
                       <p key={idx}>{p}</p>
                     ))}
@@ -470,17 +472,17 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
 
                   {/* Highlights Box if available */}
                   {sec.keyHighlights && sec.keyHighlights.length > 0 && (
-                    <div className="mt-5 p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    <div className="mt-5 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
                         Core Principles:
                       </div>
                       <ul className="space-y-1.5">
                         {sec.keyHighlights.map((highlight, hIdx) => (
                           <li
                             key={hIdx}
-                            className="flex items-start gap-2 text-xs text-slate-700 font-medium"
+                            className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium"
                           >
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                             <span>{highlight}</span>
                           </li>
                         ))}
@@ -492,18 +494,18 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
             })}
 
             {filteredSections.length === 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-                <Search className="w-8 h-8 text-slate-400 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-slate-900">
+              <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center shadow-xs">
+                <Search className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   No matching sections found
                 </h3>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
                   Try searching with terms like "centavo", "host", "attendance",
                   or "receipt".
                 </p>
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="mt-4 px-4 py-2 bg-brand-50 text-brand-600 font-bold text-xs rounded-xl hover:bg-brand-100 transition cursor-pointer"
+                  className="mt-4 px-4 py-2 bg-blue-50 dark:bg-blue-950/60 text-[#2563EB] dark:text-blue-300 font-bold text-xs rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/60 transition cursor-pointer"
                 >
                   Reset Search Filter
                 </button>
@@ -511,7 +513,7 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
             )}
 
             {/* Bottom Acknowledgment & Contact Card */}
-            <div className="bg-gradient-to-r from-brand-900 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-md">
+            <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-md border border-slate-800 dark:border-slate-700/80">
               <div>
                 <h3 className="text-lg font-bold">
                   Questions Regarding Our Terms?
@@ -524,13 +526,13 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
               <div className="flex items-center gap-3 shrink-0">
                 <a
                   href="mailto:support@splitzy.app"
-                  className="px-4 py-2.5 rounded-xl bg-white text-brand-900 font-bold text-xs hover:bg-slate-100 transition shadow-xs cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-white text-slate-900 font-bold text-xs hover:bg-slate-100 transition shadow-xs cursor-pointer"
                 >
                   Contact Support
                 </a>
                 <button
                   onClick={onBack}
-                  className="px-4 py-2.5 rounded-xl bg-brand-800/80 hover:bg-brand-800 text-white font-bold text-xs border border-brand-700 transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-blue-900/80 hover:bg-blue-800 text-white font-bold text-xs border border-blue-700 transition cursor-pointer"
                 >
                   Return to App
                 </button>
@@ -541,23 +543,18 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({
       </main>
 
       {/* Quiet Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500">
+      <footer className="bg-white dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 py-6 text-xs text-slate-500 dark:text-slate-400">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div>
-            © {new Date().getFullYear()} PropertyFlow (Splitzy). All rights
-            reserved.
+            © {new Date().getFullYear()} Splitzy. Designed with ❤️ from Cebu.
           </div>
           <div className="flex items-center gap-4">
             <button
               onClick={onNavigateToPrivacy}
-              className="hover:text-brand-600 transition cursor-pointer"
+              className="hover:text-[#2563EB] dark:hover:text-blue-400 transition cursor-pointer"
             >
               Privacy Policy
             </button>
-            <span aria-hidden="true">·</span>
-            <span>Integer Centavo Math Engine</span>
-            <span aria-hidden="true">·</span>
-            <span>Security Rules Enforced</span>
           </div>
         </div>
       </footer>

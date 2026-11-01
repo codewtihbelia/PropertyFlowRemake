@@ -225,7 +225,7 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-emerald-600/20 selection:text-emerald-900 transition-colors">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-emerald-600/20 selection:text-emerald-900 dark:selection:text-emerald-200 transition-colors">
       {/* 1. Floating Frosted Glass Capsule Bar matching Main Landing Navbar */}
       <header
         className={`fixed top-4 sm:top-6 inset-x-0 z-50 px-3 sm:px-6 pointer-events-none transition-all duration-500 ease-out ${
@@ -250,9 +250,9 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
               {/* Custom stylized house emblem with Splitzy #2563EB palette */}
               <div className="rounded-xl p-1.5 flex flex-col justify-end items-center relative overflow-hidden shadow-xs">
                 <img
-                  src="../../favicon.png"
+                  src="/favicon.png"
                   alt="Splitzy Logo"
-                  className="w-10 h-10 sm:w-11 sm:h-11 resize-cover"
+                  className="w-10 h-10 sm:w-11 sm:h-11 object-contain"
                 />
               </div>
 
@@ -343,31 +343,31 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
       {/* Main Content Area */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-28 sm:pt-36 pb-12">
         {/* Document Header Banner */}
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-10 mb-8 shadow-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+        <div className="bg-white dark:bg-slate-900/90 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-10 mb-8 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <div className="flex items-center gap-2 text-xs text-emerald-700 font-semibold mb-2">
-                <Shield className="w-4 h-4 text-emerald-600" />
+              <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 font-semibold mb-2">
+                <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Data Protection Commitment</span>
                 <span aria-hidden="true">·</span>
                 <span>GDPR & CCPA Compliant</span>
               </div>
-              <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+              <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                 Privacy Policy
               </h1>
-              <p className="text-slate-600 text-sm sm:text-base mt-2 max-w-2xl leading-relaxed">
+              <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base mt-2 max-w-2xl leading-relaxed">
                 Clear disclosure of how your roommate financial data, utility
                 invoices, and attendance logs are secured and maintained.
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0 text-xs text-slate-500">
+            <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0 text-xs text-slate-500 dark:text-slate-400">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-400" />
+                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" />
                 <span>Last Updated: September 28, 2026</span>
               </div>
               <div className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-emerald-600" />
+                <Lock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Security: Isolated Cloud Storage</span>
               </div>
             </div>
@@ -376,25 +376,25 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
           {/* Quick Search */}
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="relative w-full sm:max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-3" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search privacy topics (e.g., receipts, deletion, cookies)..."
-                className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 transition bg-slate-50/50"
+                className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/80 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                 >
                   Clear
                 </button>
               )}
             </div>
 
-            <div className="text-xs text-slate-500 self-start sm:self-center">
+            <div className="text-xs text-slate-500 dark:text-slate-400 self-start sm:self-center">
               <span>{filteredSections.length} privacy clauses verified</span>
             </div>
           </div>
@@ -404,7 +404,7 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Sticky Table of Contents (Desktop) */}
           <aside className="hidden lg:block lg:col-span-4 sticky top-28 sm:top-32 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs">
+            <div className="bg-white dark:bg-slate-900/90 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs">
               <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3">
                 Privacy Topics
               </h3>
@@ -419,7 +419,7 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                         isActive
                           ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-bold"
-                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800"
+                          : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/80"
                       }`}
                     >
                       <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
@@ -431,11 +431,11 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
                 })}
               </nav>
 
-              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span>Privacy Officer:</span>
                 <a
                   href="mailto:privacy@splitzy.app"
-                  className="text-emerald-700 font-semibold hover:underline"
+                  className="text-emerald-700 dark:text-emerald-400 font-semibold hover:underline"
                 >
                   privacy@splitzy.app
                 </a>
@@ -451,25 +451,25 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
                 <section
                   key={sec.id}
                   id={sec.id}
-                  className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs scroll-mt-24 transition-all"
+                  className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs scroll-mt-24 transition-all"
                 >
                   {/* Section Title Bar */}
                   <div className="flex items-start gap-4 mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800/50 flex items-center justify-center text-emerald-700 dark:text-emerald-400 shrink-0">
                       <Icon className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="text-[11px] font-mono font-bold text-emerald-700 uppercase tracking-wider">
+                      <div className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
                         Topic {sec.number}
                       </div>
-                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                         {sec.title}
                       </h2>
                     </div>
                   </div>
 
                   {/* Body Paragraphs */}
-                  <div className="space-y-3 text-slate-600 text-sm leading-relaxed">
+                  <div className="space-y-3 text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
                     {sec.paragraphs.map((p, idx) => (
                       <p key={idx}>{p}</p>
                     ))}
@@ -477,17 +477,17 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
 
                   {/* Highlights Box if available */}
                   {sec.keyHighlights && sec.keyHighlights.length > 0 && (
-                    <div className="mt-5 p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    <div className="mt-5 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
                         Privacy Guarantees:
                       </div>
                       <ul className="space-y-1.5">
                         {sec.keyHighlights.map((highlight, hIdx) => (
                           <li
                             key={hIdx}
-                            className="flex items-start gap-2 text-xs text-slate-700 font-medium"
+                            className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium"
                           >
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                             <span>{highlight}</span>
                           </li>
                         ))}
@@ -499,18 +499,18 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
             })}
 
             {filteredSections.length === 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-                <Search className="w-8 h-8 text-slate-400 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-slate-900">
+              <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center shadow-xs">
+                <Search className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   No matching privacy topics found
                 </h3>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
                   Try searching with keywords like "retention", "export",
                   "security", or "cloud".
                 </p>
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="mt-4 px-4 py-2 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-xl hover:bg-emerald-100 transition cursor-pointer"
+                  className="mt-4 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-xs rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition cursor-pointer"
                 >
                   Reset Search Filter
                 </button>
@@ -518,7 +518,7 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
             )}
 
             {/* Bottom Contact Card */}
-            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-md">
+            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-md border border-slate-800 dark:border-slate-700/80">
               <div>
                 <h3 className="text-lg font-bold">
                   Have Specific Data Concerns?
@@ -548,23 +548,18 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
       </main>
 
       {/* Quiet Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500">
+      <footer className="bg-white dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 py-6 text-xs text-slate-500 dark:text-slate-400">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div>
-            © {new Date().getFullYear()} PropertyFlow (Splitzy). All rights
-            reserved.
+            © {new Date().getFullYear()} Splitzy. Designed with ❤️ from Cebu.
           </div>
           <div className="flex items-center gap-4">
             <button
               onClick={onNavigateToTerms}
-              className="hover:text-emerald-700 transition cursor-pointer"
+              className="hover:text-emerald-700 dark:hover:text-emerald-400 transition cursor-pointer"
             >
               Terms of Service
             </button>
-            <span aria-hidden="true">·</span>
-            <span>Zero Third-Party Data Sales</span>
-            <span aria-hidden="true">·</span>
-            <span>Encrypted Cloud Storage</span>
           </div>
         </div>
       </footer>

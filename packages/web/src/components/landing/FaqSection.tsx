@@ -51,8 +51,8 @@ export const FaqSection: React.FC = () => {
             Frequently Asked Questions
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg">
-            Everything you need to know about setting up your household,
-            downloading the APK, and managing shared roommate dues.
+            Everything you need to know about setting up your group, downloading
+            the APK, and managing shared roommate dues.
           </p>
         </div>
 

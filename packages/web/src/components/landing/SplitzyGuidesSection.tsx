@@ -22,7 +22,7 @@ export const SplitzyGuidesSection: React.FC = () => {
       title: "The Roommate Travel Equation",
       subtitle:
         "How to handle utility bills when someone goes on vacation or visits home",
-      tldr: "Fixed costs (Rent, Wi-Fi) stay equally split; variable costs (Water, Electricity) adjust strictly based on days present.",
+      tldr: "Fixed costs (Rent, Wi-Fi, Electricity) stay equally split; variable costs (Water) adjust strictly based on days present.",
       scenario:
         "Marco stays in the dorm all 30 days of the month. Rommel visits his family for 16 days and only stayed for 14 days. The total water bill is ₱237.72.",
       theTraditionalMistake:
@@ -89,15 +89,14 @@ export const SplitzyGuidesSection: React.FC = () => {
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            Practical Co-Living Wisdom. <br />
+            Living Together Made Easier. <br />
             <span className="text-blue-600 dark:text-blue-400">
-              Zero Awkward Conversations.
+              Without the Awkward Moments.
             </span>
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
-            Living with roommates is great—until money is involved. We wrote
-            these field-tested guides to solve the most common shared apartment
-            disputes.
+            Sharing a home isn't always easy. Explore our simple guides to make
+            splitting expenses and living with roommates stress-free.
           </p>
         </div>
 

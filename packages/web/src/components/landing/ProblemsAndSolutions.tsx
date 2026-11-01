@@ -56,15 +56,14 @@ export const ProblemsAndSolutions: React.FC = () => {
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-4 mb-16">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            Stop Fighting Over Bills. <br />
+            Less Stress About Bills. <br />
             <span className="text-blue-600 dark:text-blue-400">
-              Start Living Harmoniously.
+              More Joy in Living Together.
             </span>
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg leading-relaxed max-w-2xl mx-auto">
-            Shared housing should bring people together, not strain friendships
-            over utility bills and late reminders. Here is how Splitzy
-            transforms common household friction into clarity.
+            Sharing a home should be fun, not stressful. Splitzy keeps bills
+            organized, payments clear, and roommate life a little easier.
           </p>
         </div>
 

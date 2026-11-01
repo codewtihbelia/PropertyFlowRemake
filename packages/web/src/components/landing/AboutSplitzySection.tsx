@@ -23,7 +23,6 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
       className="py-20 md:py-28 bg-slate-50 dark:bg-slate-950 border-b border-slate-200/80 dark:border-slate-800 relative overflow-hidden"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto space-y-4 mb-16">
           <div className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest">
@@ -31,11 +30,14 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
             <span>Our Story & Mission</span>
           </div>
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            We Built Splitzy Because <br />
-            <span className="text-blue-600 dark:text-blue-400">Money Shouldn't Ruin Friendships.</span>
+            We Created Splitzy <br />
+            <span className="text-blue-600 dark:text-blue-400">
+              So Money Would Never Come Between Friends.
+            </span>
           </h2>
           <p className="text-slate-600 dark:text-slate-400 text-base sm:text-lg max-w-2xl mx-auto">
-            Living with roommates should be an empowering chapter of life. We designed Splitzy to replace awkward money conversations with mathematical certainty and trust.
+            We created Splitzy to make sharing expenses fair and easy, so
+            roommates can worry less about bills and enjoy living together.
           </p>
         </div>
 
@@ -43,16 +45,41 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center mb-16">
           <div className="lg:col-span-6 space-y-5 text-slate-700 dark:text-slate-300 text-base leading-relaxed">
             <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
-              Born in Shared Boarding Houses
+              Splitzy Started With a Simple Problem: Sharing a Home Shouldn't Be
+              This Complicated.
             </h3>
             <p>
-              Splitzy began in student dorms and shared apartments across Cebu and Manila. Every end-of-month was the same: the host stood in the hallway with a paper receipt, someone was away visiting family and complained about paying the water bill, and someone else forgot about the Wi-Fi.
+              Splitzy was inspired by everyday life in student dorms and shared
+              apartments across Cebu. Every month, the same headaches kept
+              coming back. Someone was collecting money with a paper receipt,
+              someone who had been away visiting family wondered why they still
+              had to pay the full water bill, and someone else forgot their
+              share of the Wi-Fi.
+            </p>
+            <p>Sound familiar?</p>
+            <p>
+              We realized that most bill-splitting apps weren't built for the
+              way Filipinos actually live together. They didn't account for
+              things like tracking who's home for the water bill, reading
+              individual electricity sub-meters, paying through{" "}
+              <strong>GCash</strong>, or making sure every centavo was split
+              fairly.
+            </p>
+            <p>So we decided to build something better.</p>
+            <p>
+              We created Splitzy to make sharing a home feel less stressful and
+              a lot fairer. Everyone can see the bills, check the receipts,
+              track attendance, and understand exactly how their share is
+              calculated.
             </p>
             <p>
-              Standard expense tracking apps were built for corporate travel or vacation bar tabs. None of them handled Philippine co-living realities: <strong>daily water utility attendance</strong>, <strong>electric sub-meter readings</strong>, <strong>GCash QR transfers</strong>, or <strong>fair centavo allocation</strong>.
+              No more guessing, chasing payments, or wondering who owes what.
+              Just clear numbers, fair shares, and fewer uncomfortable
+              conversations.
             </p>
             <p>
-              We built Splitzy to give households a transparent, humanized system that treats everyone fairly. When everyone can see the math, the receipts, and the attendance log, there are zero doubts and zero arguments.
+              Because at the end of the day, bills should be shared, not
+              friendships put to the test.
             </p>
           </div>
 
@@ -65,7 +92,9 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
                 Centavo Integrity
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                When dividing ₱800 across 3 payors, we don't round randomly. We distribute ₱266.67, ₱266.67, and ₱266.66 so the ledger matches the bill to the centavo.
+                When dividing ₱800 across 3 payors, we don't round randomly. We
+                distribute ₱266.67, ₱266.67, and ₱266.66 so the ledger matches
+                the bill to the centavo.
               </p>
             </div>
 
@@ -77,7 +106,9 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
                 Radical Transparency
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Every member has equal access to the active billing breakdown, uploaded receipts, attendance logs, and verified proof-of-payment records.
+                Every member has equal access to the active billing breakdown,
+                uploaded receipts, attendance logs, and verified
+                proof-of-payment records.
               </p>
             </div>
 
@@ -89,7 +120,9 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
                 100% Privacy & Zero Ads
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Splitzy has no advertising trackers and will never sell household financial data. Your shared living expenses belong strictly to your home.
+                Splitzy has no advertising trackers and will never sell
+                household financial data. Your shared living expenses belong
+                strictly to your home.
               </p>
             </div>
 
@@ -101,7 +134,9 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
                 Open & Community-Driven
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Published directly on GitHub so developers and residents can audit the cryptographic math, contribute enhancements, and inspect release builds.
+                Published directly on GitHub so developers and residents can
+                audit the cryptographic math, contribute enhancements, and
+                inspect release builds.
               </p>
             </div>
           </div>
@@ -136,7 +171,6 @@ export const AboutSplitzySection: React.FC<AboutSplitzySectionProps> = ({
             </div>
           </div>
         </div>
-
       </div>
     </section>
   );
