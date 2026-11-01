@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev": "npm --workspace=@propertyflow/web run dev",
-    "build": "npm --workspace=@propertyflow/web run build",
+    "build": "npm --workspace=@propertyflow/web run build && node -e \"const fs=require('fs'); if (fs.existsSync('packages/web/dist')) { fs.mkdirSync('dist', {recursive:true}); fs.cpSync('packages/web/dist', 'dist', {recursive:true}); }\"",
     "start": "npm --workspace=@propertyflow/web run preview",
     "preview": "npm --workspace=@propertyflow/web run preview",
     "lint": "npm --workspace=@propertyflow/web run build",
