@@ -1,10 +1,6 @@
-import React, { useState } from "react";
+import React from "react";
 import { ArrowUp, Github, Heart, ShieldCheck } from "lucide-react";
-import {
-  listenToMobilePlatformSettings,
-  MobilePlatformSettings,
-  DEFAULT_PLATFORM_SETTINGS,
-} from "../../services/platformSettingsService";
+import { useMobilePlatformSettings } from "../../services/platformSettingsService";
 
 interface LandingFooterProps {
   onScrollTo: (id: string) => void;
@@ -19,17 +15,11 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
   onOpenTerms,
   onOpenPrivacy,
 }) => {
-  const [settings, setSettings] = useState<MobilePlatformSettings>(
-    DEFAULT_PLATFORM_SETTINGS,
-  );
+  const settings = useMobilePlatformSettings();
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
 
   return (
     <footer className="bg-slate-100/80 dark:bg-slate-950 text-slate-600 dark:text-slate-400 text-sm border-t border-slate-200 dark:border-slate-800 transition-colors">

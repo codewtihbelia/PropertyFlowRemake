@@ -19,11 +19,7 @@ import {
   ShieldCheck,
   Eye,
 } from "lucide-react";
-import {
-  listenToMobilePlatformSettings,
-  MobilePlatformSettings,
-  DEFAULT_PLATFORM_SETTINGS,
-} from "../../services/platformSettingsService";
+import { useMobilePlatformSettings } from "../../services/platformSettingsService";
 
 import { useTheme } from "../../contexts/ThemeContext";
 
@@ -48,14 +44,15 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
   const [deviceTheme, setDeviceTheme] = useState<"dark" | "light">(() =>
     isDark ? "dark" : "light",
   );
-  const [settings, setSettings] = useState<MobilePlatformSettings>(
-    DEFAULT_PLATFORM_SETTINGS,
-  );
+  const settings = useMobilePlatformSettings();
   const [activeScreen, setActiveScreen] = useState<ScreenCategory>("home");
 
   // Sync mobile device preview theme when page theme flips
   useEffect(() => {
-    setDeviceTheme(isDark ? "dark" : "light");
+    setDeviceTheme((prev) => {
+      const target = isDark ? "dark" : "light";
+      return prev === target ? prev : target;
+    });
   }, [isDark]);
 
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -278,10 +275,6 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
       ],
     },
   };
-
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
 
   const current = screensConfig[activeScreen];
   const activeImage =

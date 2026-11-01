@@ -31,7 +31,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
   // Sync hero mockup when user flips light/dark page theme
   useEffect(() => {
-    setHeroTheme(isDark ? "dark" : "light");
+    setHeroTheme((prev) => {
+      const next = isDark ? "dark" : "light";
+      return prev === next ? prev : next;
+    });
   }, [isDark]);
 
   const heroImage =

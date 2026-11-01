@@ -43,23 +43,29 @@ export const LandingNavbar: React.FC<LandingNavbarProps> = ({
       for (let i = sections.length - 1; i >= 0; i--) {
         const el = document.getElementById(sections[i]);
         if (el && el.offsetTop <= scrollY) {
-          setActiveSection(sections[i]);
+          const targetSection = sections[i];
+          setActiveSection((prev) =>
+            prev === targetSection ? prev : targetSection,
+          );
           break;
         }
       }
 
       // Smooth hide on scroll-down, reveal on scroll-up
       if (currentScrollY < 60) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       } else if (delta > 8) {
-        setIsVisible(false);
+        setIsVisible((prev) => (!prev ? prev : false));
         setMobileMenuOpen(false);
       } else if (delta < -8) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       }
 
       lastScrollYRef.current = currentScrollY;
-      setIsScrolled(currentScrollY > 20);
+      setIsScrolled((prev) => {
+        const next = currentScrollY > 20;
+        return prev === next ? prev : next;
+      });
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });

@@ -181,15 +181,18 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({
       const delta = currentScrollY - lastScrollYRef.current;
 
       if (currentScrollY < 60) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       } else if (delta > 8) {
-        setIsVisible(false);
+        setIsVisible((prev) => (!prev ? prev : false));
       } else if (delta < -8) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       }
 
       lastScrollYRef.current = currentScrollY;
-      setIsScrolled(currentScrollY > 20);
+      setIsScrolled((prev) => {
+        const next = currentScrollY > 20;
+        return prev === next ? prev : next;
+      });
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });

@@ -56,13 +56,13 @@ const MainLandingFlow: React.FC = () => {
       const hash = window.location.hash.toLowerCase();
       if (hash.includes("download") || hash.includes("apk")) {
         window.history.replaceState({ flow: "download" }, "", "/download");
-        setWebFlow("download");
+        setWebFlow((prev) => (prev === "download" ? prev : "download"));
       } else if (hash.includes("terms")) {
         window.history.replaceState({ flow: "terms" }, "", "/terms");
-        setWebFlow("terms");
+        setWebFlow((prev) => (prev === "terms" ? prev : "terms"));
       } else if (hash.includes("privacy")) {
         window.history.replaceState({ flow: "privacy" }, "", "/privacy");
-        setWebFlow("privacy");
+        setWebFlow((prev) => (prev === "privacy" ? prev : "privacy"));
       }
     }
   }, []);
@@ -70,7 +70,8 @@ const MainLandingFlow: React.FC = () => {
   // Listen to browser Back / Forward buttons and any history navigation
   useEffect(() => {
     const handleLocationChange = () => {
-      setWebFlow(parseFlowFromLocation());
+      const nextFlow = parseFlowFromLocation();
+      setWebFlow((prev) => (prev === nextFlow ? prev : nextFlow));
     };
 
     window.addEventListener("popstate", handleLocationChange);

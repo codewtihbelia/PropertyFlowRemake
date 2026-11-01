@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Download,
   Smartphone,
@@ -7,11 +7,7 @@ import {
   QrCode,
   Sparkles,
 } from "lucide-react";
-import {
-  listenToMobilePlatformSettings,
-  DEFAULT_PLATFORM_SETTINGS,
-  MobilePlatformSettings,
-} from "../../services/platformSettingsService";
+import { useMobilePlatformSettings } from "../../services/platformSettingsService";
 
 interface DownloadCtaSectionProps {
   onOpenDownloadModal: () => void;
@@ -20,13 +16,7 @@ interface DownloadCtaSectionProps {
 export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
   onOpenDownloadModal,
 }) => {
-  const [settings, setSettings] = useState<MobilePlatformSettings>(
-    DEFAULT_PLATFORM_SETTINGS,
-  );
-
-  const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-    setSettings(newSettings);
-  });
+  const settings = useMobilePlatformSettings();
 
   return (
     <section

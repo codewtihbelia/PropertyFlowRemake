@@ -21,8 +21,7 @@ import {
   SmartphoneNfc,
 } from "lucide-react";
 import {
-  listenToMobilePlatformSettings,
-  MobilePlatformSettings,
+  useMobilePlatformSettings,
   DEFAULT_PLATFORM_SETTINGS,
 } from "../../services/platformSettingsService";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -39,10 +38,7 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
   onOpenPrivacy,
 }) => {
   const { isDark, toggleTheme } = useTheme();
-  const [settings, setSettings] = useState<MobilePlatformSettings>(
-    DEFAULT_PLATFORM_SETTINGS,
-  );
-  const [loading, setLoading] = useState(true);
+  const settings = useMobilePlatformSettings();
   const [copied, setCopied] = useState(false);
   const [downloadMode, setDownloadMode] = useState<"direct" | "qr">("direct");
   const [isScrolled, setIsScrolled] = useState(false);
@@ -58,27 +54,23 @@ export const DownloadApkView: React.FC<DownloadApkViewProps> = ({
       const delta = currentScrollY - lastScrollYRef.current;
 
       if (currentScrollY < 60) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       } else if (delta > 8) {
-        setIsVisible(false);
+        setIsVisible((prev) => (!prev ? prev : false));
       } else if (delta < -8) {
-        setIsVisible(true);
+        setIsVisible((prev) => (prev ? prev : true));
       }
 
       lastScrollYRef.current = currentScrollY;
-      setIsScrolled(currentScrollY > 20);
+      setIsScrolled((prev) => {
+        const next = currentScrollY > 20;
+        return prev === next ? prev : next;
+      });
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
-
-    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-      setSettings(newSettings);
-      setLoading(false);
-    });
-
     return () => {
       window.removeEventListener("scroll", handleScroll);
-      unsubscribe();
     };
   }, []);
 
