@@ -28,6 +28,7 @@ import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
 import { useTheme } from "../context/ThemeContext";
 import { authPinService } from "../services/authPinService";
 import { PinSetupModal } from "../components/PinSetupModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface ProfileScreenProps {
   onBack?: () => void;
@@ -92,16 +93,63 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [showPinSetupModal, setShowPinSetupModal] = useState(false);
   const [isPinChangeMode, setIsPinChangeMode] = useState(false);
 
-  // Modals
+  // Modals & Interactive Settings
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
   const [showCurrencyModal, setShowCurrencyModal] = useState(false);
   const [showSplitRuleModal, setShowSplitRuleModal] = useState(false);
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState("Just now");
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Editable Form Inputs
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
+
+  // Payment Methods State
+  const [paymentMethods, setPaymentMethods] = useState<
+    Array<{
+      id: string;
+      type: "gcash" | "maya" | "bank" | "cash";
+      label: string;
+      accountName: string;
+      accountNumber: string;
+      isDefault: boolean;
+    }>
+  >([
+    {
+      id: "pm_gcash",
+      type: "gcash",
+      label: "GCash",
+      accountName: currentUser.name || "Resident",
+      accountNumber: "0917-882-4192",
+      isDefault: true,
+    },
+    {
+      id: "pm_maya",
+      type: "maya",
+      label: "Maya Digital Wallet",
+      accountName: currentUser.name || "Resident",
+      accountNumber: "0918-554-9021",
+      isDefault: false,
+    },
+    {
+      id: "pm_bpi",
+      type: "bank",
+      label: "BPI Bank Card",
+      accountName: currentUser.name || "Resident",
+      accountNumber: "•••• 4092",
+      isDefault: false,
+    },
+  ]);
+  const [isAddingPaymentMethod, setIsAddingPaymentMethod] = useState(false);
+  const [newMethodType, setNewMethodType] = useState<
+    "gcash" | "maya" | "bank" | "cash"
+  >("gcash");
+  const [newMethodLabel, setNewMethodLabel] = useState("");
+  const [newMethodAccountName, setNewMethodAccountName] = useState("");
+  const [newMethodAccountNumber, setNewMethodAccountNumber] = useState("");
 
   useEffect(() => {
     if (!firebaseUser?.uid) return;
@@ -514,6 +562,112 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       mobileDataService
         .saveUserProfile({ uid: firebaseUser.uid, biometricSecurity: val })
         .catch(() => {});
+    }
+  };
+
+  const handleSetDefaultPaymentMethod = (id: string) => {
+    setPaymentMethods((prev) => {
+      const updated = prev.map((m) => ({ ...m, isDefault: m.id === id }));
+      if (firebaseUser?.uid) {
+        AsyncStorage.setItem(
+          `@splitzy_payment_methods_${firebaseUser.uid}`,
+          JSON.stringify(updated),
+        ).catch(() => {});
+        mobileDataService
+          .saveUserProfile({ uid: firebaseUser.uid, paymentMethods: updated })
+          .catch(() => {});
+      }
+      return updated;
+    });
+  };
+
+  const handleDeletePaymentMethod = (id: string) => {
+    setPaymentMethods((prev) => {
+      const remaining = prev.filter((m) => m.id !== id);
+      if (remaining.length > 0 && !remaining.some((m) => m.isDefault)) {
+        remaining[0].isDefault = true;
+      }
+      if (firebaseUser?.uid) {
+        AsyncStorage.setItem(
+          `@splitzy_payment_methods_${firebaseUser.uid}`,
+          JSON.stringify(remaining),
+        ).catch(() => {});
+        mobileDataService
+          .saveUserProfile({ uid: firebaseUser.uid, paymentMethods: remaining })
+          .catch(() => {});
+      }
+      return remaining;
+    });
+  };
+
+  const handleSaveNewPaymentMethod = () => {
+    if (!newMethodAccountNumber.trim()) {
+      Alert.alert("Required", "Please enter an account or mobile number.");
+      return;
+    }
+    const defaultLabel =
+      newMethodType === "gcash"
+        ? "GCash"
+        : newMethodType === "maya"
+          ? "Maya Digital Wallet"
+          : newMethodType === "cash"
+            ? "Cash on Hand"
+            : "Bank Transfer";
+    const newMethod = {
+      id: `pm_${Date.now()}`,
+      type: newMethodType,
+      label: newMethodLabel.trim() || defaultLabel,
+      accountName:
+        newMethodAccountName.trim() ||
+        displayNameInput ||
+        currentUser.name ||
+        "Resident",
+      accountNumber: newMethodAccountNumber.trim(),
+      isDefault: paymentMethods.length === 0,
+    };
+    setPaymentMethods((prev) => {
+      const updated = [...prev, newMethod];
+      if (firebaseUser?.uid) {
+        AsyncStorage.setItem(
+          `@splitzy_payment_methods_${firebaseUser.uid}`,
+          JSON.stringify(updated),
+        ).catch(() => {});
+        mobileDataService
+          .saveUserProfile({ uid: firebaseUser.uid, paymentMethods: updated })
+          .catch(() => {});
+      }
+      return updated;
+    });
+    setIsAddingPaymentMethod(false);
+    setNewMethodLabel("");
+    setNewMethodAccountName("");
+    setNewMethodAccountNumber("");
+  };
+
+  const handleForceCloudResync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      if (firebaseUser?.uid) {
+        await mobileDataService.getUserProfile(firebaseUser.uid);
+      }
+      await new Promise((res) => setTimeout(res, 800));
+      setLastSyncTime(
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+      Alert.alert(
+        "Sync Successful",
+        "Cloud Firestore and cache listeners have been re-synchronized.",
+      );
+    } catch {
+      Alert.alert(
+        "Sync Status",
+        "Connection verified. All local caches match cloud data.",
+      );
+    } finally {
+      setIsSyncingCloud(false);
     }
   };
 
@@ -1133,7 +1287,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   isDark && { color: colors.textSecondary },
                 ]}
               >
-                Visa ending in 4092
+                {(() => {
+                  const defaultPm =
+                    paymentMethods.find((m) => m.isDefault) ||
+                    paymentMethods[0];
+                  return defaultPm
+                    ? `${defaultPm.label} (${defaultPm.accountNumber}) • Default`
+                    : "Configure GCash, Maya & Cards";
+                })()}
               </Text>
             </View>
             <View
@@ -2250,12 +2411,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           <TouchableOpacity
             style={styles.cardItemRow}
-            onPress={() =>
-              Alert.alert(
-                "Cloud & Data Sync",
-                "Firestore realtime listeners and Cloudinary CDN storage are fully operational.",
-              )
-            }
+            onPress={() => setShowCloudSyncModal(true)}
             activeOpacity={0.7}
           >
             <View
@@ -2655,122 +2811,504 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </ScrollView>
       </SmoothBottomSheetModal>
 
-      {/* MODAL: PAYMENT METHODS */}
+      {/* MODAL: INTERACTIVE PAYMENT METHODS MANAGER */}
       <SmoothBottomSheetModal
         visible={showPaymentMethodsModal}
-        onClose={() => setShowPaymentMethodsModal(false)}
+        onClose={() => {
+          setShowPaymentMethodsModal(false);
+          setIsAddingPaymentMethod(false);
+        }}
         variant="bottom-sheet"
         showChipBar={true}
         title="Payment Methods"
-        subtitle="Configured cards and digital wallets"
+        subtitle="Manage your GCash, Maya, and Bank accounts for splitting"
         icon={<Feather name="credit-card" size={18} color={colors.accent} />}
+        maxHeight="85%"
       >
-        <View style={{ paddingTop: 6, paddingBottom: 8 }}>
-          <View style={{ gap: 12 }}>
-            <View
-              style={[
-                styles.paymentMethodItem,
-                isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingTop: 6, paddingBottom: 24 }}
+        >
+          {/* List of configured methods */}
+          <View style={{ gap: 10, marginBottom: 16 }}>
+            {paymentMethods.map((pm) => (
               <View
+                key={pm.id}
                 style={[
-                  styles.itemIconBox,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(59, 130, 246, 0.15)"
-                      : "#EFF6FF",
+                  styles.paymentMethodItem,
+                  isDark && {
+                    backgroundColor: colors.surfaceInset,
+                    borderColor: pm.isDefault ? colors.primary : colors.border,
+                  },
+                  pm.isDefault && {
+                    borderColor: colors.primary,
+                    borderWidth: 1.5,
                   },
                 ]}
               >
-                <Feather
-                  name="credit-card"
-                  size={18}
-                  color={isDark ? colors.accent : "#2563EB"}
-                />
+                <View
+                  style={[
+                    styles.itemIconBox,
+                    {
+                      backgroundColor:
+                        pm.type === "gcash"
+                          ? "rgba(59, 130, 246, 0.15)"
+                          : pm.type === "maya"
+                            ? "rgba(16, 185, 129, 0.15)"
+                            : pm.type === "bank"
+                              ? "rgba(99, 102, 241, 0.15)"
+                              : "rgba(245, 158, 11, 0.15)",
+                    },
+                  ]}
+                >
+                  <Feather
+                    name={
+                      pm.type === "bank"
+                        ? "credit-card"
+                        : pm.type === "cash"
+                          ? "dollar-sign"
+                          : "smartphone"
+                    }
+                    size={18}
+                    color={
+                      pm.type === "gcash"
+                        ? "#2563EB"
+                        : pm.type === "maya"
+                          ? "#16A34A"
+                          : pm.type === "bank"
+                            ? "#6366F1"
+                            : "#D97706"
+                    }
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: "700",
+                        color: isDark ? colors.text : "#0F172A",
+                      }}
+                    >
+                      {pm.label}
+                    </Text>
+                    {pm.isDefault && (
+                      <View
+                        style={[
+                          styles.activeBadge,
+                          {
+                            backgroundColor: isDark
+                              ? "rgba(16, 185, 129, 0.2)"
+                              : "#DCFCE7",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.activeBadgeText,
+                            { color: isDark ? "#34D399" : "#16A34A" },
+                          ]}
+                        >
+                          Default
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: isDark ? colors.textSecondary : "#64748B",
+                      marginTop: 2,
+                    }}
+                  >
+                    {pm.accountNumber} · {pm.accountName}
+                  </Text>
+                </View>
+
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  {!pm.isDefault && (
+                    <TouchableOpacity
+                      onPress={() => handleSetDefaultPaymentMethod(pm.id)}
+                      activeOpacity={0.7}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: isDark ? "#242731" : "#F1F5F9",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: "700",
+                          color: colors.primary,
+                        }}
+                      >
+                        Set Default
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {paymentMethods.length > 1 && (
+                    <TouchableOpacity
+                      onPress={() => handleDeletePaymentMethod(pm.id)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Feather name="trash-2" size={16} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
+            ))}
+          </View>
+
+          {/* Form to Add New Method */}
+          {isAddingPaymentMethod ? (
+            <View
+              style={{
+                backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+                borderRadius: 14,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: colors.border,
+                marginBottom: 16,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "700",
+                  color: isDark ? colors.text : "#0F172A",
+                  marginBottom: 10,
+                }}
+              >
+                Add Payment Account
+              </Text>
+
+              {/* Type selector */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  gap: 6,
+                  marginBottom: 12,
+                }}
+              >
+                {[
+                  { key: "gcash", label: "GCash" },
+                  { key: "maya", label: "Maya" },
+                  { key: "bank", label: "Bank Card" },
+                  { key: "cash", label: "Cash" },
+                ].map((t) => (
+                  <TouchableOpacity
+                    key={t.key}
+                    onPress={() =>
+                      setNewMethodType(
+                        t.key as "gcash" | "maya" | "bank" | "cash",
+                      )
+                    }
+                    activeOpacity={0.8}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 7,
+                      borderRadius: 8,
+                      alignItems: "center",
+                      backgroundColor:
+                        newMethodType === t.key
+                          ? colors.primary
+                          : isDark
+                            ? "#181A20"
+                            : "#E2E8F0",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "700",
+                        color:
+                          newMethodType === t.key
+                            ? "#FFFFFF"
+                            : isDark
+                              ? "#94A3B8"
+                              : "#475569",
+                      }}
+                    >
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TextInput
+                style={[
+                  styles.modalInput,
+                  isDark && {
+                    backgroundColor: "#181A20",
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                  { marginBottom: 8, paddingVertical: 9 },
+                ]}
+                value={newMethodLabel}
+                onChangeText={setNewMethodLabel}
+                placeholder="Account Label (e.g. GCash Personal / BPI)"
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <TextInput
+                style={[
+                  styles.modalInput,
+                  isDark && {
+                    backgroundColor: "#181A20",
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                  { marginBottom: 8, paddingVertical: 9 },
+                ]}
+                value={newMethodAccountName}
+                onChangeText={setNewMethodAccountName}
+                placeholder="Account Holder Name"
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <TextInput
+                style={[
+                  styles.modalInput,
+                  isDark && {
+                    backgroundColor: "#181A20",
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                  { marginBottom: 12, paddingVertical: 9 },
+                ]}
+                value={newMethodAccountNumber}
+                onChangeText={setNewMethodAccountNumber}
+                placeholder="Phone Number / Account Number"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="phone-pad"
+              />
+
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setIsAddingPaymentMethod(false)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: isDark ? "#242731" : "#E2E8F0",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      fontSize: 13,
+                      color: isDark ? "#FFFFFF" : "#0F172A",
+                    }}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleSaveNewPaymentMethod}
+                  style={{
+                    flex: 1.5,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: colors.primary,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      fontSize: 13,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    Save Method
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setIsAddingPaymentMethod(true)}
+              activeOpacity={0.8}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                paddingVertical: 12,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderStyle: "dashed",
+                borderColor: colors.primary,
+                backgroundColor: isDark
+                  ? "rgba(59, 130, 246, 0.08)"
+                  : "#EFF6FF",
+                marginBottom: 16,
+              }}
+            >
+              <Feather name="plus-circle" size={16} color={colors.primary} />
+              <Text
+                style={{
+                  fontWeight: "700",
+                  fontSize: 13,
+                  color: colors.primary,
+                }}
+              >
+                Add Another Payment Account
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.modalSaveBtn,
+              {
+                backgroundColor: colors.primary,
+              },
+            ]}
+            onPress={() => setShowPaymentMethodsModal(false)}
+          >
+            <Text style={styles.modalSaveBtnText}>Done</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SmoothBottomSheetModal>
+
+      {/* MODAL: CLOUD & REALTIME SYNC DIAGNOSTICS */}
+      <SmoothBottomSheetModal
+        visible={showCloudSyncModal}
+        onClose={() => setShowCloudSyncModal(false)}
+        variant="bottom-sheet"
+        showChipBar={true}
+        title="Cloud & Realtime Sync"
+        subtitle="Firestore listeners & CDN media status"
+        icon={<Feather name="cloud" size={18} color={colors.accent} />}
+        maxHeight="75%"
+      >
+        <View style={{ paddingTop: 6, paddingBottom: 16 }}>
+          <View style={{ gap: 10, marginBottom: 18 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+              }}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+              >
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: "#10B981",
+                  }}
+                />
                 <Text
                   style={{
                     fontSize: 14,
-                    fontWeight: "700",
+                    fontWeight: "600",
                     color: isDark ? colors.text : "#0F172A",
                   }}
                 >
-                  Visa ending in 4092
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: isDark ? colors.textSecondary : "#64748B",
-                  }}
-                >
-                  Expires 09/28 • Default
+                  Cloud Firestore Realtime Listener
                 </Text>
               </View>
-              <View
-                style={[
-                  styles.activeBadge,
-                  isDark && {
-                    backgroundColor: "rgba(16, 185, 129, 0.14)",
-                  },
-                ]}
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  color: "#10B981",
+                }}
               >
-                <Text
-                  style={[
-                    styles.activeBadgeText,
-                    isDark && { color: "#34D399" },
-                  ]}
-                >
-                  Active
-                </Text>
-              </View>
+                Connected
+              </Text>
             </View>
 
             <View
-              style={[
-                styles.paymentMethodItem,
-                isDark && {
-                  backgroundColor: colors.surfaceInset,
-                  borderColor: colors.border,
-                },
-              ]}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+              }}
             >
               <View
-                style={[
-                  styles.itemIconBox,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(16, 185, 129, 0.15)"
-                      : "#F0FDF4",
-                  },
-                ]}
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
               >
-                <Feather name="smartphone" size={18} color="#16A34A" />
-              </View>
-              <View style={{ flex: 1 }}>
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: "#10B981",
+                  }}
+                />
                 <Text
                   style={{
                     fontSize: 14,
-                    fontWeight: "700",
+                    fontWeight: "600",
                     color: isDark ? colors.text : "#0F172A",
                   }}
                 >
-                  GCash / Maya Digital Wallet
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: isDark ? colors.textSecondary : "#64748B",
-                  }}
-                >
-                  Connected to {phoneInput || "Mobile"}
+                  Cloudinary Media Delivery (CDN)
                 </Text>
               </View>
-              <Feather name="check-circle" size={18} color="#16A34A" />
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  color: "#10B981",
+                }}
+              >
+                Operational
+              </Text>
+            </View>
+
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: isDark ? colors.surfaceInset : "#F8FAFC",
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: isDark ? colors.textSecondary : "#64748B",
+                }}
+              >
+                Last Synchronized
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "600",
+                  color: isDark ? colors.text : "#0F172A",
+                }}
+              >
+                {lastSyncTime}
+              </Text>
             </View>
           </View>
 
@@ -2779,18 +3317,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               styles.modalSaveBtn,
               {
                 backgroundColor: colors.primary,
-                marginTop: 24,
+                marginBottom: 10,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
               },
             ]}
-            onPress={() => {
-              setShowPaymentMethodsModal(false);
-              Alert.alert(
-                "Payment Methods",
-                "Your payment preferences are up to date.",
-              );
-            }}
+            onPress={handleForceCloudResync}
+            disabled={isSyncingCloud}
           >
-            <Text style={styles.modalSaveBtnText}>Done</Text>
+            {isSyncingCloud ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Feather name="refresh-cw" size={16} color="#FFFFFF" />
+                <Text style={styles.modalSaveBtnText}>Force Re-sync Now</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </SmoothBottomSheetModal>

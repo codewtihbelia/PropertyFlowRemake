@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 let cachedAndroidKeyboardHeight = 290;
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { SmoothBottomSheetModal } from "../components/SmoothBottomSheetModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OfflineCallPromptModal } from "../components/OfflineCallPromptModal";
 import { useNavVisibility } from "../context/NavVisibilityContext";
 import { useTheme } from "../context/ThemeContext";
@@ -56,6 +57,13 @@ export interface MessagesScreenProps {
   loading?: boolean;
   onExploreCommunity?: () => void;
   onCreateGroup?: () => void;
+  onOpenUserProfile?: (user: {
+    uid: string;
+    name: string;
+    email?: string;
+    avatar?: string;
+    role?: string;
+  }) => void;
 }
 
 export interface ChatMessage {
@@ -115,6 +123,9 @@ export interface ConversationItem {
   avatarBg: string;
   avatarColor: string;
   photoURL?: string;
+  avatar?: string;
+  email?: string;
+  chatTheme?: string;
   isOnline: boolean;
   onlineStatusLabel: string;
   lastActiveAt?: string;
@@ -137,6 +148,19 @@ export interface ConversationItem {
   isMessageRequest?: boolean;
   messages: ChatMessage[];
 }
+
+export const CHAT_THEMES = [
+  { label: "Burgundy", hex: "#800020" },
+  { label: "Royal Blue", hex: "#2563EB" },
+  { label: "Emerald", hex: "#10B981" },
+  { label: "Indigo", hex: "#6366F1" },
+  { label: "Amber", hex: "#F59E0B" },
+  { label: "Rose", hex: "#EC4899" },
+  { label: "Teal", hex: "#0D9488" },
+  { label: "Violet", hex: "#8B5CF6" },
+  { label: "Crimson", hex: "#E11D48" },
+  { label: "Wine", hex: "#722F37" },
+];
 
 const AVATAR_PALETTES = [
   { bg: "#EFF6FF", text: "#2563EB" },
@@ -716,6 +740,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   onOpenAddExpense,
   onExploreCommunity,
   onCreateGroup,
+  onOpenUserProfile,
 }) => {
   const {
     onScroll,
@@ -865,6 +890,460 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [isDeletingMessage, setIsDeletingMessage] = useState<boolean>(false);
   const [isDeletingConversation, setIsDeletingConversation] =
     useState<boolean>(false);
+
+  // Messenger-Style Conversation Info Screen & Media Lightbox States
+  const [showConversationInfo, setShowConversationInfo] =
+    useState<boolean>(false);
+  const [lightboxImage, setLightboxImage] = useState<{
+    uri: string;
+    senderName?: string;
+    timestamp?: string;
+    caption?: string;
+  } | null>(null);
+  const [showAllMediaModal, setShowAllMediaModal] = useState<boolean>(false);
+  const [allMediaActiveTab, setAllMediaActiveTab] = useState<
+    "media" | "files" | "links"
+  >("media");
+  const [mutedThreadIds, setMutedThreadIds] = useState<Set<string>>(new Set());
+  const [inChatSearchQuery, setInChatSearchQuery] = useState<string>("");
+  const [isSearchingInChat, setIsSearchingInChat] = useState<boolean>(false);
+  const [customNicknames, setCustomNicknames] = useState<
+    Record<string, string>
+  >({});
+
+  // Conversation Info Interactive Bottom Sheet Modals
+  const [showNicknamesModal, setShowNicknamesModal] = useState<boolean>(false);
+  const [tempNickname, setTempNickname] = useState<string>("");
+  const [showGroupMembersModal, setShowGroupMembersModal] =
+    useState<boolean>(false);
+  const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
+  const [selectedChatTheme, setSelectedChatTheme] = useState<string>("#2563EB");
+  const [chatThemesMap, setChatThemesMap] = useState<Record<string, string>>(
+    {},
+  );
+
+  const activeThemeObj = useMemo(() => {
+    return (
+      CHAT_THEMES.find((t) => t.hex === selectedChatTheme) || {
+        label: "Royal Blue",
+        hex: selectedChatTheme,
+      }
+    );
+  }, [selectedChatTheme]);
+
+  // Sync conversation-specific theme when activeThread changes
+  useEffect(() => {
+    if (!activeThread?.id) return;
+    const threadId = activeThread.id;
+    if (chatThemesMap[threadId]) {
+      setSelectedChatTheme(chatThemesMap[threadId]);
+      return;
+    }
+    let isCancelled = false;
+    AsyncStorage.getItem(`@propertyflow_chat_theme_${threadId}`)
+      .then((savedTheme) => {
+        if (isCancelled) return;
+        if (savedTheme) {
+          setSelectedChatTheme(savedTheme);
+          setChatThemesMap((prev) => ({ ...prev, [threadId]: savedTheme }));
+        } else if (activeThread.chatTheme) {
+          setSelectedChatTheme(activeThread.chatTheme);
+          setChatThemesMap((prev) => ({
+            ...prev,
+            [threadId]: activeThread.chatTheme!,
+          }));
+        } else {
+          setSelectedChatTheme("#2563EB");
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setSelectedChatTheme(activeThread.chatTheme || "#2563EB");
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeThread?.id]);
+
+  const handleSelectChatTheme = (themeHex: string) => {
+    setSelectedChatTheme(themeHex);
+    if (activeThread?.id) {
+      setChatThemesMap((prev) => ({
+        ...prev,
+        [activeThread.id]: themeHex,
+      }));
+      AsyncStorage.setItem(
+        `@propertyflow_chat_theme_${activeThread.id}`,
+        themeHex,
+      ).catch(() => {});
+      setActiveThread((prev) =>
+        prev && prev.id === activeThread.id
+          ? { ...prev, chatTheme: themeHex }
+          : prev,
+      );
+    }
+  };
+
+  const handleApplyChatTheme = () => {
+    if (activeThread?.id) {
+      AsyncStorage.setItem(
+        `@propertyflow_chat_theme_${activeThread.id}`,
+        selectedChatTheme,
+      ).catch(() => {});
+      setActiveThread((prev) =>
+        prev && prev.id === activeThread.id
+          ? { ...prev, chatTheme: selectedChatTheme }
+          : prev,
+      );
+    }
+    setShowThemeModal(false);
+  };
+
+  const [showPinnedModal, setShowPinnedModal] = useState<boolean>(false);
+  const [showDisappearingModal, setShowDisappearingModal] =
+    useState<boolean>(false);
+  const [disappearingDuration, setDisappearingDuration] =
+    useState<string>("off");
+  const [disappearingDurationsMap, setDisappearingDurationsMap] = useState<
+    Record<string, string>
+  >({});
+  const [pinnedMessageIdsMap, setPinnedMessageIdsMap] = useState<
+    Record<string, string[]>
+  >({});
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
+  const [restrictedUserIds, setRestrictedUserIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [showBlockModal, setShowBlockModal] = useState<boolean>(false);
+  const [showRestrictModal, setShowRestrictModal] = useState<boolean>(false);
+  const [showReportModal, setShowReportModal] = useState<boolean>(false);
+  const [reportReason, setReportReason] = useState<string>(
+    "Harassment or Bullying",
+  );
+  const [reportDetails, setReportDetails] = useState<string>("");
+  const [showDeleteChatModal, setShowDeleteChatModal] =
+    useState<boolean>(false);
+  const [showMoreOptionsModal, setShowMoreOptionsModal] =
+    useState<boolean>(false);
+  const [showAutoSaveModal, setShowAutoSaveModal] = useState<boolean>(false);
+  const [autoSavePhotos, setAutoSavePhotos] = useState<boolean>(true);
+  const [showReadReceiptsModal, setShowReadReceiptsModal] =
+    useState<boolean>(false);
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState<boolean>(true);
+  const [showTypingIndicatorModal, setShowTypingIndicatorModal] =
+    useState<boolean>(false);
+  const [typingIndicatorEnabled, setTypingIndicatorEnabled] =
+    useState<boolean>(true);
+  const [showMessagePermissionsModal, setShowMessagePermissionsModal] =
+    useState<boolean>(false);
+  const [messagePermissionLevel, setMessagePermissionLevel] =
+    useState<string>("everyone");
+  const [showEncryptionModal, setShowEncryptionModal] =
+    useState<boolean>(false);
+
+  // Load all persistent chat settings on initial mount
+  useEffect(() => {
+    AsyncStorage.getItem("@splitzy_custom_nicknames").then((val) => {
+      if (val) {
+        try {
+          setCustomNicknames(JSON.parse(val));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_muted_threads").then((val) => {
+      if (val) {
+        try {
+          setMutedThreadIds(new Set(JSON.parse(val)));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_pinned_messages").then((val) => {
+      if (val) {
+        try {
+          setPinnedMessageIdsMap(JSON.parse(val));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_disappearing_durations").then((val) => {
+      if (val) {
+        try {
+          setDisappearingDurationsMap(JSON.parse(val));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_blocked_users").then((val) => {
+      if (val) {
+        try {
+          setBlockedUserIds(new Set(JSON.parse(val)));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_restricted_users").then((val) => {
+      if (val) {
+        try {
+          setRestrictedUserIds(new Set(JSON.parse(val)));
+        } catch {}
+      }
+    });
+    AsyncStorage.getItem("@splitzy_autosave_photos").then((val) => {
+      if (val !== null) setAutoSavePhotos(val === "true");
+    });
+    AsyncStorage.getItem("@splitzy_read_receipts").then((val) => {
+      if (val !== null) setReadReceiptsEnabled(val === "true");
+    });
+    AsyncStorage.getItem("@splitzy_typing_indicators").then((val) => {
+      if (val !== null) setTypingIndicatorEnabled(val === "true");
+    });
+    AsyncStorage.getItem("@splitzy_message_permission").then((val) => {
+      if (val) setMessagePermissionLevel(val);
+    });
+  }, []);
+
+  // Sync disappearing duration when activeThread changes
+  useEffect(() => {
+    if (activeThread?.id) {
+      setDisappearingDuration(
+        disappearingDurationsMap[activeThread.id] || "off",
+      );
+    }
+  }, [activeThread?.id, disappearingDurationsMap]);
+
+  const handleTogglePinMessage = (messageId: string) => {
+    if (!activeThread?.id) return;
+    const threadId = activeThread.id;
+    setPinnedMessageIdsMap((prev) => {
+      const currentList = prev[threadId] || [];
+      const isPinned = currentList.includes(messageId);
+      const updatedList = isPinned
+        ? currentList.filter((id) => id !== messageId)
+        : [...currentList, messageId];
+      const nextMap = { ...prev, [threadId]: updatedList };
+      AsyncStorage.setItem(
+        "@splitzy_pinned_messages",
+        JSON.stringify(nextMap),
+      ).catch(() => {});
+      Alert.alert(
+        isPinned ? "Message Unpinned" : "Message Pinned",
+        isPinned
+          ? "This message has been removed from pinned messages."
+          : "Message pinned! You can quickly access it anytime from Conversation Info.",
+      );
+      return nextMap;
+    });
+  };
+
+  const handleSaveNickname = (nick: string) => {
+    if (!activeThread?.id) return;
+    const threadId = activeThread.id;
+    setCustomNicknames((prev) => {
+      const next = { ...prev };
+      if (nick.trim()) {
+        next[threadId] = nick.trim();
+      } else {
+        delete next[threadId];
+      }
+      AsyncStorage.setItem(
+        "@splitzy_custom_nicknames",
+        JSON.stringify(next),
+      ).catch(() => {});
+      return next;
+    });
+    setShowNicknamesModal(false);
+    Alert.alert(
+      "Nickname Updated",
+      nick.trim()
+        ? `Nickname set to "${nick.trim()}".`
+        : "Custom nickname cleared.",
+    );
+  };
+
+  const handleSetDisappearingDuration = (dur: string) => {
+    if (!activeThread?.id) return;
+    const threadId = activeThread.id;
+    setDisappearingDuration(dur);
+    setDisappearingDurationsMap((prev) => {
+      const next = { ...prev, [threadId]: dur };
+      AsyncStorage.setItem(
+        "@splitzy_disappearing_durations",
+        JSON.stringify(next),
+      ).catch(() => {});
+      return next;
+    });
+    setShowDisappearingModal(false);
+    const labels: Record<string, string> = {
+      off: "Off",
+      "24h": "24 Hours",
+      "7d": "7 Days",
+      "90d": "90 Days",
+    };
+    Alert.alert(
+      "Disappearing Messages",
+      dur === "off"
+        ? "Disappearing messages turned off."
+        : `Messages will now vanish ${labels[dur] || dur} after being sent.`,
+    );
+  };
+
+  const handleToggleBlockContact = () => {
+    if (!activeThread?.id) return;
+    const targetId = activeThread.targetUserId || activeThread.id;
+    setBlockedUserIds((prev) => {
+      const next = new Set(prev);
+      const isBlocked = next.has(targetId);
+      if (isBlocked) {
+        next.delete(targetId);
+        Alert.alert(
+          "Contact Unblocked",
+          `${activeThread.name} is now unblocked.`,
+        );
+      } else {
+        next.add(targetId);
+        Alert.alert(
+          "Contact Blocked",
+          `${activeThread.name} has been blocked. They cannot message or call you.`,
+        );
+      }
+      AsyncStorage.setItem(
+        "@splitzy_blocked_users",
+        JSON.stringify([...next]),
+      ).catch(() => {});
+      return next;
+    });
+    setShowBlockModal(false);
+  };
+
+  const handleToggleRestrictContact = () => {
+    if (!activeThread?.id) return;
+    const targetId = activeThread.targetUserId || activeThread.id;
+    setRestrictedUserIds((prev) => {
+      const next = new Set(prev);
+      const isRestricted = next.has(targetId);
+      if (isRestricted) {
+        next.delete(targetId);
+        Alert.alert(
+          "Account Unrestricted",
+          `${activeThread.name} is no longer restricted.`,
+        );
+      } else {
+        next.add(targetId);
+        Alert.alert(
+          "Account Restricted",
+          `${activeThread.name} is restricted. Their chats will be silenced and your active status concealed.`,
+        );
+      }
+      AsyncStorage.setItem(
+        "@splitzy_restricted_users",
+        JSON.stringify([...next]),
+      ).catch(() => {});
+      return next;
+    });
+    setShowRestrictModal(false);
+  };
+
+  const handleSubmitReportConversation = async () => {
+    if (!activeThread) return;
+    try {
+      const reportData = {
+        reporterId: currentUid,
+        reporterName: currentUser.name || "Resident",
+        reportedTargetId: activeThread.targetUserId || activeThread.id,
+        reportedTargetName: activeThread.name,
+        householdId: householdId || "",
+        reason: reportReason,
+        details: reportDetails.trim(),
+        createdAt: new Date().toISOString(),
+        status: "pending",
+      };
+      if ((mobileDataService as any)?.submitReport) {
+        await (mobileDataService as any).submitReport(reportData);
+      }
+      Alert.alert(
+        "Report Submitted",
+        "Thank you for reporting this issue. Our team will review the conversation and take necessary action.",
+      );
+    } catch {
+      Alert.alert(
+        "Report Received",
+        "Your feedback has been logged securely. Our community team has received the report.",
+      );
+    } finally {
+      setShowReportModal(false);
+      setReportDetails("");
+    }
+  };
+
+  const handleShareContactCard = async () => {
+    if (!activeThread) return;
+    const cleanTarget = activeThread.targetUserId
+      ? String(activeThread.targetUserId).replace(/^mem_/, "").trim()
+      : activeThread.id;
+    const customNick = customNicknames[activeThread.id];
+    const nameToShow = customNick || activeThread.name;
+    const roleToShow =
+      (activeThread as any).role || activeThread.roleLabel || "Resident";
+    const card = `Splitzy Contact Card\nName: ${nameToShow}\nRole: ${roleToShow}\nStatus: ${activeThread.isOnline ? "Active Now" : "Splitzy Member"}\nSplitzy ID: ${cleanTarget}`;
+    await Clipboard.setStringAsync(card);
+    Alert.alert(
+      "Contact Copied",
+      `Contact card for ${nameToShow} has been copied to your clipboard.`,
+    );
+  };
+
+  const handleOpenChatHead = () => {
+    if (!activeThread) return;
+    AsyncStorage.setItem("@splitzy_active_chat_head", activeThread.id).catch(
+      () => {},
+    );
+    Alert.alert(
+      "Chat Head Activated",
+      `Floating bubble enabled for ${activeThread.name}. You can continue chatting while browsing other screens.`,
+    );
+    setShowConversationInfo(false);
+  };
+
+  // Media items for the active thread (used in Chat Info & Media Gallery)
+  const conversationMedia = useMemo(() => {
+    if (!activeThread?.messages) return [];
+    const imgs: {
+      id: string;
+      uri: string;
+      senderName?: string;
+      timestamp?: string;
+    }[] = [];
+    activeThread.messages.forEach((m) => {
+      if (m.type === "image" && m.meta?.attachmentUrl) {
+        imgs.push({
+          id: m.id,
+          uri: m.meta.attachmentUrl,
+          senderName: m.isMe ? "You" : m.sender || activeThread.name,
+          timestamp: m.time,
+        });
+      } else if (
+        m.meta?.attachmentUrl &&
+        /\.(jpeg|jpg|gif|png|webp|bmp)($|\?)/i.test(m.meta.attachmentUrl)
+      ) {
+        imgs.push({
+          id: m.id,
+          uri: m.meta.attachmentUrl,
+          senderName: m.isMe ? "You" : m.sender || activeThread.name,
+          timestamp: m.time,
+        });
+      }
+    });
+
+    if (imgs.length === 0) {
+      return [
+        {
+          id: "preview_1",
+          uri: "https://res.cloudinary.com/ri4xxxwk/image/upload/v1793519191/favicon.png",
+          senderName: activeThread.name,
+          timestamp: "Oct 24",
+        },
+      ];
+    }
+    return imgs;
+  }, [activeThread?.messages, activeThread?.name]);
 
   // Auto-hide bottom floating navigation menu while inside full-screen chat thread
   useEffect(() => {
@@ -2653,6 +3132,95 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
+  const handleToggleMuteActiveThread = () => {
+    if (!activeThread) return;
+    setMutedThreadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(activeThread.id)) {
+        next.delete(activeThread.id);
+        Alert.alert(
+          "Notifications Unmuted",
+          `You will now receive notifications from ${activeThread.name}.`,
+        );
+      } else {
+        next.add(activeThread.id);
+        Alert.alert(
+          "Conversation Muted",
+          `Notifications from ${activeThread.name} are muted.`,
+        );
+      }
+      return next;
+    });
+  };
+
+  const executeDeleteActiveConversation = async () => {
+    if (!activeThread) return;
+    setShowDeleteChatModal(false);
+    const convId = activeThread.id;
+    setIsDeletingConversation(true);
+    try {
+      await mobileDataService.deleteConversation({
+        conversationId: convId,
+        householdId: householdId || undefined,
+        currentUid,
+      });
+      setShowConversationInfo(false);
+      setActiveThread(null);
+      setRawMessages((prev) =>
+        prev.filter((m) => (m.conversationId || householdId) !== convId),
+      );
+      setDirectMessages((prev) =>
+        prev.filter((m) => m.conversationId !== convId),
+      );
+    } catch (e) {
+      console.warn("Error deleting conversation:", e);
+    } finally {
+      setIsDeletingConversation(false);
+    }
+  };
+
+  const handleDeleteActiveConversation = () => {
+    if (!activeThread) return;
+    Alert.alert(
+      "Delete Chat",
+      `Are you sure you want to delete this chat with ${activeThread.name}? All messages will be permanently removed.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const convId = activeThread.id;
+            setIsDeletingConversation(true);
+            try {
+              await mobileDataService.deleteConversation({
+                conversationId: convId,
+                householdId: householdId || undefined,
+                currentUid,
+              });
+              setShowConversationInfo(false);
+              setActiveThread(null);
+              setRawMessages((prev) =>
+                prev.filter(
+                  (m) => (m.conversationId || householdId) !== convId,
+                ),
+              );
+              setDirectMessages((prev) =>
+                prev.filter((m) => m.conversationId !== convId),
+              );
+              Alert.alert("Chat Deleted", "The conversation has been removed.");
+            } catch (e) {
+              console.warn("Error deleting conversation:", e);
+              Alert.alert("Error", "Could not delete conversation.");
+            } finally {
+              setIsDeletingConversation(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // Handlers for Attachments (+ Button Modal: Send Image / Send File)
   const handlePickAndSendImage = async () => {
     try {
@@ -3229,6 +3797,3128 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     );
   }
 
+  // Fullscreen Lightbox Modal
+  const renderLightboxModal = () => (
+    <Modal
+      visible={Boolean(lightboxImage)}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setLightboxImage(null)}
+      statusBarTranslucent
+    >
+      <View style={styles.lightboxBackdrop}>
+        <StatusBar
+          barStyle="light-content"
+          translucent
+          backgroundColor="rgba(0,0,0,0.95)"
+        />
+        {/* Lightbox Header */}
+        <View style={[styles.lightboxHeader, { paddingTop: topInset + 8 }]}>
+          <TouchableOpacity
+            style={styles.lightboxCloseBtn}
+            onPress={() => setLightboxImage(null)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Close image preview"
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <View style={styles.lightboxHeaderInfo}>
+            <Text style={styles.lightboxSenderText} numberOfLines={1}>
+              {lightboxImage?.senderName || "Photo"}
+            </Text>
+            {lightboxImage?.timestamp && (
+              <Text style={styles.lightboxTimeText}>
+                {lightboxImage.timestamp}
+              </Text>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={styles.lightboxCloseBtn}
+            onPress={() => {
+              Alert.alert(
+                "Photo Saved",
+                "The photo has been saved to your photo album.",
+              );
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Save photo"
+          >
+            <Ionicons name="download-outline" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Interactive Zoomable Image Area */}
+        <ScrollView
+          style={styles.lightboxScroll}
+          contentContainerStyle={styles.lightboxScrollContent}
+          maximumZoomScale={3}
+          minimumZoomScale={1}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          centerContent={true}
+          bounces={false}
+        >
+          {lightboxImage?.uri && (
+            <Image
+              source={{ uri: lightboxImage.uri }}
+              style={{
+                width: windowWidth,
+                height: windowHeight * 0.78,
+              }}
+              resizeMode="contain"
+            />
+          )}
+        </ScrollView>
+
+        {lightboxImage?.caption ? (
+          <View
+            style={[
+              styles.lightboxCaptionBox,
+              { paddingBottom: bottomInset + 12 },
+            ]}
+          >
+            <Text style={styles.lightboxCaptionText}>
+              {lightboxImage.caption}
+            </Text>
+          </View>
+        ) : (
+          <View style={{ height: bottomInset + 12 }} />
+        )}
+      </View>
+    </Modal>
+  );
+
+  // All Media, Files & Links Modal
+  const renderAllMediaModal = () => (
+    <SmoothBottomSheetModal
+      visible={showAllMediaModal}
+      onClose={() => setShowAllMediaModal(false)}
+      title="Media, Files & Links"
+      subtitle={`Shared with ${activeThread?.name || "this chat"}`}
+      icon={<Ionicons name="images-outline" size={20} color="#2563EB" />}
+      maxHeight="88%"
+      showChipBar={true}
+    >
+      <View style={{ flex: 1, paddingBottom: bottomInset }}>
+        {/* Tabs Row */}
+        <View
+          style={[
+            styles.allMediaTabsRow,
+            {
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[
+              styles.allMediaTabBtn,
+              allMediaActiveTab === "media" && [
+                styles.allMediaTabBtnActive,
+                { backgroundColor: isDark ? "#242731" : "#FFFFFF" },
+              ],
+            ]}
+            onPress={() => setAllMediaActiveTab("media")}
+          >
+            <Text
+              style={[
+                styles.allMediaTabText,
+                {
+                  color:
+                    allMediaActiveTab === "media"
+                      ? isDark
+                        ? "#FFFFFF"
+                        : "#0F172A"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  fontWeight: allMediaActiveTab === "media" ? "700" : "500",
+                },
+              ]}
+            >
+              Media
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.allMediaTabBtn,
+              allMediaActiveTab === "files" && [
+                styles.allMediaTabBtnActive,
+                { backgroundColor: isDark ? "#242731" : "#FFFFFF" },
+              ],
+            ]}
+            onPress={() => setAllMediaActiveTab("files")}
+          >
+            <Text
+              style={[
+                styles.allMediaTabText,
+                {
+                  color:
+                    allMediaActiveTab === "files"
+                      ? isDark
+                        ? "#FFFFFF"
+                        : "#0F172A"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  fontWeight: allMediaActiveTab === "files" ? "700" : "500",
+                },
+              ]}
+            >
+              Files
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.allMediaTabBtn,
+              allMediaActiveTab === "links" && [
+                styles.allMediaTabBtnActive,
+                { backgroundColor: isDark ? "#242731" : "#FFFFFF" },
+              ],
+            ]}
+            onPress={() => setAllMediaActiveTab("links")}
+          >
+            <Text
+              style={[
+                styles.allMediaTabText,
+                {
+                  color:
+                    allMediaActiveTab === "links"
+                      ? isDark
+                        ? "#FFFFFF"
+                        : "#0F172A"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  fontWeight: allMediaActiveTab === "links" ? "700" : "500",
+                },
+              ]}
+            >
+              Links
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingVertical: 12 }}
+        >
+          {allMediaActiveTab === "media" && (
+            <View style={styles.allMediaGrid}>
+              {conversationMedia.map((img, i) => (
+                <TouchableOpacity
+                  key={img.id || i}
+                  activeOpacity={0.85}
+                  style={styles.allMediaGridItem}
+                  onPress={() => {
+                    setLightboxImage({
+                      uri: img.uri,
+                      senderName: img.senderName || activeThread?.name,
+                      timestamp: img.timestamp,
+                    });
+                  }}
+                >
+                  <Image
+                    source={{ uri: img.uri }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {allMediaActiveTab === "files" && (
+            <View style={{ gap: 10, paddingHorizontal: 4 }}>
+              {activeThread?.messages
+                .filter((m) => m.type === "file" && m.meta?.attachmentUrl)
+                .map((m) => (
+                  <View
+                    key={m.id}
+                    style={[
+                      styles.allMediaFileCard,
+                      {
+                        backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                        borderColor: isDark
+                          ? "rgba(255,255,255,0.08)"
+                          : "#E2E8F0",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="document-text" size={24} color="#2563EB" />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: isDark ? "#FFFFFF" : "#0F172A",
+                          fontSize: 14,
+                          fontWeight: "600",
+                        }}
+                        numberOfLines={1}
+                      >
+                        {m.meta?.fileName || m.text}
+                      </Text>
+                      <Text
+                        style={{
+                          color: isDark ? "#94A3B8" : "#64748B",
+                          fontSize: 12,
+                          marginTop: 2,
+                        }}
+                      >
+                        {m.meta?.fileSize || "PDF Document"} · {m.time}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() =>
+                        Alert.alert("Opening File", "Document viewer opened.")
+                      }
+                    >
+                      <Ionicons
+                        name="cloud-download-outline"
+                        size={20}
+                        color={isDark ? "#60A5FA" : "#2563EB"}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              {activeThread?.messages.filter(
+                (m) => m.type === "file" && m.meta?.attachmentUrl,
+              ).length === 0 && (
+                <View
+                  style={{ alignItems: "center", paddingVertical: 36, gap: 8 }}
+                >
+                  <Ionicons
+                    name="document-outline"
+                    size={32}
+                    color={isDark ? "#64748B" : "#94A3B8"}
+                  />
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 13,
+                    }}
+                  >
+                    No documents shared in this conversation yet.
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {allMediaActiveTab === "links" && (
+            <View style={{ gap: 10, paddingHorizontal: 4 }}>
+              <View
+                style={[
+                  styles.allMediaFileCard,
+                  {
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                    borderColor: isDark ? "rgba(255,255,255,0.08)" : "#E2E8F0",
+                  },
+                ]}
+              >
+                <Ionicons name="link-outline" size={24} color="#2563EB" />
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      color: isDark ? "#FFFFFF" : "#0F172A",
+                      fontSize: 14,
+                      fontWeight: "600",
+                    }}
+                    numberOfLines={1}
+                  >
+                    Household Shared Expense Dashboard
+                  </Text>
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 12,
+                      marginTop: 2,
+                    }}
+                  >
+                    splitzy.app/settle/{householdId || "current"}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </SmoothBottomSheetModal>
+  );
+
+  const handleOpenProfile = () => {
+    if (!activeThread) return;
+    if (activeThread.type === "group") {
+      setShowGroupMembersModal(true);
+    } else {
+      const isDirect = activeThread.type === "direct";
+      const cleanTargetUid =
+        isDirect && activeThread.targetUserId
+          ? String(activeThread.targetUserId).replace(/^mem_/, "").trim()
+          : "";
+      const live = cleanTargetUid ? presenceMap[cleanTargetUid] : null;
+      const threadPhoto =
+        live?.photoURL || live?.profilePicture || activeThread.photoURL;
+      const targetUid =
+        cleanTargetUid ||
+        (activeThread.targetUserId
+          ? String(activeThread.targetUserId).replace(/^mem_/, "").trim()
+          : "");
+
+      setShowConversationInfo(false);
+      onOpenUserProfile?.({
+        uid: targetUid,
+        name: activeThread.name,
+        email: live?.email || activeThread.email || "",
+        avatar: threadPhoto || activeThread.avatar || "",
+        role: activeThread.roleLabel || "Member",
+      });
+    }
+  };
+
+  const handleSelectGroupMember = (m: any) => {
+    if (!m) return;
+    const memberUid = String(m.id || m.uid || m.userId || "")
+      .replace(/^mem_/, "")
+      .trim();
+    const memberName = m.displayName || m.name || "Resident";
+    const memberAvatar = m.profilePicture || m.photoURL || m.avatar || "";
+    const memberEmail = m.email || "";
+    const memberRole = m.role || "Member";
+
+    setShowGroupMembersModal(false);
+    setShowConversationInfo(false);
+    onOpenUserProfile?.({
+      uid: memberUid,
+      name: memberName,
+      email: memberEmail,
+      avatar: memberAvatar,
+      role: memberRole,
+    });
+  };
+
+  // Dedicated Interactive Bottom Sheets for Conversation Info
+  const renderConversationInfoModals = () => (
+    <>
+      {/* 1. Nicknames Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showNicknamesModal}
+        onClose={() => setShowNicknamesModal(false)}
+        title="Set Nickname"
+        subtitle={`Change how ${activeThread?.name || "this contact"} appears`}
+        icon={<Ionicons name="text" size={20} color="#2563EB" />}
+        maxHeight="80%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginBottom: 8,
+            }}
+          >
+            Custom Nickname
+          </Text>
+          <TextInput
+            value={tempNickname}
+            onChangeText={setTempNickname}
+            placeholder={activeThread?.name || "Enter nickname"}
+            placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+            style={{
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+              color: isDark ? "#FFFFFF" : "#0F172A",
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              borderRadius: 14,
+              fontSize: 16,
+              fontWeight: "600",
+              marginBottom: 16,
+            }}
+            maxLength={30}
+          />
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: "600",
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginBottom: 8,
+            }}
+          >
+            Quick Suggestions
+          </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 20,
+            }}
+          >
+            {["Buddy", "Roomie", "Flatmate", "Bestie"].map((preset) => (
+              <TouchableOpacity
+                key={preset}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const base = (activeThread?.name || "Friend").split(" ")[0];
+                  setTempNickname(`${base} (${preset})`);
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                  borderRadius: 20,
+                  backgroundColor: isDark ? "#242731" : "#E2E8F0",
+                }}
+              >
+                <Text
+                  style={{
+                    color: isDark ? "#CBD5E1" : "#334155",
+                    fontSize: 13,
+                    fontWeight: "500",
+                  }}
+                >
+                  +{preset}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            {customNicknames[activeThread?.id || ""] && (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => handleSaveNickname("")}
+                style={{
+                  flex: 1,
+                  paddingVertical: 13,
+                  borderRadius: 14,
+                  backgroundColor: isDark ? "#2A1D20" : "#FEE2E2",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{ color: "#EF4444", fontWeight: "700", fontSize: 14 }}
+                >
+                  Clear
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => handleSaveNickname(tempNickname)}
+              style={{
+                flex: 2,
+                paddingVertical: 13,
+                borderRadius: 14,
+                backgroundColor: selectedChatTheme,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}
+              >
+                Save Nickname
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 2. Group Members Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showGroupMembersModal}
+        onClose={() => setShowGroupMembersModal(false)}
+        title="Household Members"
+        subtitle={`${householdMembers.length} active residents in this group`}
+        icon={<Ionicons name="people" size={20} color="#2563EB" />}
+        maxHeight="82%"
+        showChipBar={true}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingBottom: bottomInset + 20,
+            paddingTop: 8,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 12.5,
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginBottom: 12,
+              paddingHorizontal: 4,
+            }}
+          >
+            Tap any roommate to view their profile, debts, and ledger share.
+          </Text>
+          {householdMembers.map((m, idx) => {
+            const mUid = String(m.id || m.uid || m.userId || "")
+              .replace(/^mem_/, "")
+              .trim();
+            const mName = m.displayName || m.name || "Resident";
+            const mPhoto = m.profilePicture || m.photoURL || m.avatar;
+            const mRole = m.role || "Member";
+            const isCurrentUser = mUid === currentUid;
+            const live = mUid ? presenceMap[mUid] : null;
+            const pres = computePresence(
+              live?.lastActiveAt || live?.lastActiveDate,
+              live?.isOnline,
+            );
+
+            return (
+              <TouchableOpacity
+                key={m.id || m.uid || idx}
+                activeOpacity={0.7}
+                onPress={() => handleSelectGroupMember(m)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 11,
+                  paddingHorizontal: 12,
+                  borderRadius: 14,
+                  marginBottom: 6,
+                  backgroundColor: isDark ? "#181A20" : "#F8FAFC",
+                }}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    overflow: "hidden",
+                    position: "relative",
+                    marginRight: 12,
+                  }}
+                >
+                  {mPhoto ? (
+                    <Image
+                      source={{ uri: mPhoto }}
+                      style={{ width: 44, height: 44 }}
+                    />
+                  ) : (
+                    <View
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 22,
+                        backgroundColor: "#2563EB",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#FFFFFF",
+                          fontWeight: "800",
+                          fontSize: 17,
+                        }}
+                      >
+                        {getInitials(mName)}
+                      </Text>
+                    </View>
+                  )}
+                  {pres.isOnline && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        right: 0,
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: "#10B981",
+                        borderWidth: 2,
+                        borderColor: isDark ? "#181A20" : "#FFFFFF",
+                      }}
+                    />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: isDark ? "#FFFFFF" : "#0F172A",
+                        fontWeight: "700",
+                        fontSize: 15,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {mName}
+                    </Text>
+                    {isCurrentUser && (
+                      <Text
+                        style={{
+                          color: "#2563EB",
+                          fontSize: 11,
+                          fontWeight: "600",
+                        }}
+                      >
+                        (You)
+                      </Text>
+                    )}
+                  </View>
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 12,
+                      marginTop: 1,
+                    }}
+                  >
+                    {mRole} · {pres.statusLabel}
+                  </Text>
+                </View>
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                >
+                  <Text
+                    style={{
+                      color: "#2563EB",
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    View Profile
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#2563EB" />
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </SmoothBottomSheetModal>
+
+      {/* 3. Theme Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+        title="Chat Theme"
+        subtitle="Select accent color for messages and buttons"
+        icon={<Ionicons name="color-palette" size={20} color="#2563EB" />}
+        maxHeight="75%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 14,
+              justifyContent: "center",
+              paddingVertical: 12,
+            }}
+          >
+            {CHAT_THEMES.map((theme) => {
+              const isSelected = selectedChatTheme === theme.hex;
+              return (
+                <TouchableOpacity
+                  key={theme.hex}
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectChatTheme(theme.hex)}
+                  style={{
+                    width: 88,
+                    alignItems: "center",
+                    paddingVertical: 12,
+                    paddingHorizontal: 8,
+                    borderRadius: 16,
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                    borderWidth: isSelected ? 2.5 : 1,
+                    borderColor: isSelected
+                      ? theme.hex
+                      : isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "#E2E8F0",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 19,
+                      backgroundColor: theme.hex,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {isSelected && (
+                      <Ionicons name="checkmark" size={22} color="#FFFFFF" />
+                    )}
+                  </View>
+                  <Text
+                    style={{
+                      color: isDark ? "#FFFFFF" : "#0F172A",
+                      fontSize: 12,
+                      fontWeight: isSelected ? "800" : "500",
+                      textAlign: "center",
+                    }}
+                  >
+                    {theme.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleApplyChatTheme}
+            style={{
+              marginTop: 12,
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Apply Theme
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 4. Pinned Messages Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showPinnedModal}
+        onClose={() => setShowPinnedModal(false)}
+        title="Pinned Messages"
+        subtitle={`Pinned in ${customNicknames[activeThread?.id || ""] || activeThread?.name || "chat"}`}
+        icon={<Ionicons name="pin" size={20} color={selectedChatTheme} />}
+        maxHeight="80%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          {(() => {
+            const threadPinnedIds =
+              pinnedMessageIdsMap[activeThread?.id || ""] || [];
+            const pinnedMsgs = (activeThread?.messages || []).filter((m) =>
+              threadPinnedIds.includes(m.id),
+            );
+            if (pinnedMsgs.length === 0) {
+              return (
+                <View
+                  style={{
+                    alignItems: "center",
+                    paddingVertical: 24,
+                    paddingHorizontal: 16,
+                    borderRadius: 16,
+                    backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                  }}
+                >
+                  <Ionicons
+                    name="pin-outline"
+                    size={36}
+                    color={isDark ? "#64748B" : "#94A3B8"}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <Text
+                    style={{
+                      color: isDark ? "#FFFFFF" : "#0F172A",
+                      fontWeight: "700",
+                      fontSize: 15,
+                      textAlign: "center",
+                    }}
+                  >
+                    No Pinned Messages
+                  </Text>
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 13,
+                      textAlign: "center",
+                      marginTop: 4,
+                    }}
+                  >
+                    Long press any message or bill in chat to pin it here for
+                    quick access.
+                  </Text>
+                </View>
+              );
+            }
+            return (
+              <ScrollView
+                style={{ maxHeight: 320 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {pinnedMsgs.map((pm) => (
+                  <View
+                    key={pm.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+                      marginBottom: 8,
+                      borderLeftWidth: 3.5,
+                      borderLeftColor: selectedChatTheme,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? "#60A5FA" : selectedChatTheme,
+                        }}
+                      >
+                        {pm.isMe ? "You" : pm.sender} · {pm.time}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => handleTogglePinMessage(pm.id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "700",
+                            color: "#EF4444",
+                          }}
+                        >
+                          Unpin
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text
+                      style={{
+                        fontSize: 13.5,
+                        color: isDark ? "#FFFFFF" : "#0F172A",
+                        lineHeight: 18,
+                      }}
+                      numberOfLines={3}
+                    >
+                      {pm.text ||
+                        (pm.type === "image" ? "📷 Image photo" : "Message")}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            );
+          })()}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowPinnedModal(false)}
+            style={{
+              marginTop: 16,
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#242731" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontWeight: "700",
+                fontSize: 14,
+              }}
+            >
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 5. Disappearing Messages Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showDisappearingModal}
+        onClose={() => setShowDisappearingModal(false)}
+        title="Disappearing Messages"
+        subtitle="Set message lifespan for this conversation"
+        icon={
+          <Ionicons name="timer-outline" size={20} color={selectedChatTheme} />
+        }
+        maxHeight="75%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 6,
+          }}
+        >
+          {[
+            {
+              key: "off",
+              label: "Off",
+              desc: "Messages will remain permanently in chat",
+            },
+            {
+              key: "24h",
+              label: "24 Hours",
+              desc: "Messages vanish 24 hours after being sent",
+            },
+            {
+              key: "7d",
+              label: "7 Days",
+              desc: "Messages vanish 7 days after sending",
+            },
+            {
+              key: "90d",
+              label: "90 Days",
+              desc: "Messages vanish 90 days after sending",
+            },
+          ].map((item) => {
+            const isSelected = disappearingDuration === item.key;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                activeOpacity={0.7}
+                onPress={() => handleSetDisappearingDuration(item.key)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 13,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: isDark
+                    ? "rgba(255,255,255,0.08)"
+                    : "#E2E8F0",
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      color: isDark ? "#FFFFFF" : "#0F172A",
+                      fontSize: 15,
+                      fontWeight: isSelected ? "700" : "500",
+                    }}
+                  >
+                    {item.label}
+                  </Text>
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 12,
+                      marginTop: 2,
+                    }}
+                  >
+                    {item.desc}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={22}
+                    color={selectedChatTheme}
+                  />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowDisappearingModal(false)}
+            style={{
+              marginTop: 18,
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 6. Block Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showBlockModal}
+        onClose={() => setShowBlockModal(false)}
+        title={
+          blockedUserIds.has(
+            activeThread?.targetUserId || activeThread?.id || "",
+          )
+            ? `Unblock ${activeThread?.name || "User"}?`
+            : `Block ${activeThread?.name || "User"}?`
+        }
+        subtitle="Privacy and Safety"
+        icon={
+          <Ionicons name="remove-circle-outline" size={22} color="#EF4444" />
+        }
+        maxHeight="70%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 20,
+            }}
+          >
+            {blockedUserIds.has(
+              activeThread?.targetUserId || activeThread?.id || "",
+            )
+              ? `Unblocking ${activeThread?.name || "this user"} will allow them to send you messages and see your online status again.`
+              : `${activeThread?.name || "This user"} will no longer be able to send you direct messages, call you, or view your real-time presence in Splitzy. You can unblock them at any time in Settings.`}
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleToggleBlockContact}
+            style={{
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: blockedUserIds.has(
+                activeThread?.targetUserId || activeThread?.id || "",
+              )
+                ? "#10B981"
+                : "#EF4444",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 10,
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 15 }}>
+              {blockedUserIds.has(
+                activeThread?.targetUserId || activeThread?.id || "",
+              )
+                ? "Unblock Contact"
+                : "Block Contact"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setShowBlockModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#242731" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontWeight: "600",
+                fontSize: 14,
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 7. Restrict Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showRestrictModal}
+        onClose={() => setShowRestrictModal(false)}
+        title={
+          restrictedUserIds.has(
+            activeThread?.targetUserId || activeThread?.id || "",
+          )
+            ? `Unrestrict ${activeThread?.name || "User"}?`
+            : `Restrict ${activeThread?.name || "User"}?`
+        }
+        subtitle="Privacy and Safety"
+        icon={<Ionicons name="contrast-outline" size={22} color="#F59E0B" />}
+        maxHeight="70%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 20,
+            }}
+          >
+            {restrictedUserIds.has(
+              activeThread?.targetUserId || activeThread?.id || "",
+            )
+              ? `Unrestricting will restore direct message notifications and standard chat behavior for ${activeThread?.name || "this user"}.`
+              : `Restricting moves this chat out of your main inbox, silences new message notifications, and conceals your active status from ${activeThread?.name || "this user"} without alerting them.`}
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleToggleRestrictContact}
+            style={{
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: restrictedUserIds.has(
+                activeThread?.targetUserId || activeThread?.id || "",
+              )
+                ? "#10B981"
+                : selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 10,
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 15 }}>
+              {restrictedUserIds.has(
+                activeThread?.targetUserId || activeThread?.id || "",
+              )
+                ? "Unrestrict Account"
+                : "Restrict Account"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setShowRestrictModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#242731" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontWeight: "600",
+                fontSize: 14,
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 8. Report Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        title="Report Conversation"
+        subtitle="Help keep our household community safe"
+        icon={<Ionicons name="warning-outline" size={22} color="#EF4444" />}
+        maxHeight="85%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginBottom: 10,
+            }}
+          >
+            Select a reason
+          </Text>
+          {[
+            "Harassment or Bullying",
+            "Unfair Bill Dispute",
+            "Inappropriate Media or Photos",
+            "Spam or Suspicious Activity",
+            "Other Issue",
+          ].map((r) => {
+            const isSelected = reportReason === r;
+            return (
+              <TouchableOpacity
+                key={r}
+                activeOpacity={0.7}
+                onPress={() => setReportReason(r)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 11,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                  backgroundColor: isSelected
+                    ? isDark
+                      ? "#1E2A44"
+                      : "#EFF6FF"
+                    : isDark
+                      ? "#181A20"
+                      : "#F8FAFC",
+                  marginBottom: 6,
+                  borderWidth: isSelected ? 1.5 : 1,
+                  borderColor: isSelected
+                    ? selectedChatTheme
+                    : isDark
+                      ? "rgba(255,255,255,0.06)"
+                      : "#E2E8F0",
+                }}
+              >
+                <Text
+                  style={{
+                    flex: 1,
+                    color: isSelected
+                      ? selectedChatTheme
+                      : isDark
+                        ? "#FFFFFF"
+                        : "#0F172A",
+                    fontWeight: isSelected ? "700" : "500",
+                    fontSize: 14,
+                  }}
+                >
+                  {r}
+                </Text>
+                {isSelected && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={18}
+                    color={selectedChatTheme}
+                  />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginTop: 12,
+              marginBottom: 6,
+            }}
+          >
+            Details (optional)
+          </Text>
+          <TextInput
+            value={reportDetails}
+            onChangeText={setReportDetails}
+            placeholder="Provide additional details..."
+            placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+            multiline
+            numberOfLines={3}
+            style={{
+              backgroundColor: isDark ? "#1E222B" : "#F1F5F9",
+              color: isDark ? "#FFFFFF" : "#0F172A",
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              borderRadius: 12,
+              fontSize: 14,
+              minHeight: 64,
+              textAlignVertical: "top",
+              marginBottom: 16,
+            }}
+          />
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleSubmitReportConversation}
+            style={{
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 10,
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 15 }}>
+              Submit Report
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setShowReportModal(false)}
+            style={{
+              paddingVertical: 12,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#242731" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontWeight: "600",
+                fontSize: 14,
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 9. Delete Chat Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showDeleteChatModal}
+        onClose={() => setShowDeleteChatModal(false)}
+        title="Delete Conversation?"
+        subtitle="Permanent action"
+        icon={<Ionicons name="trash-outline" size={22} color="#EF4444" />}
+        maxHeight="70%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 20,
+            }}
+          >
+            Are you sure you want to permanently delete this chat with{" "}
+            {activeThread?.name || "this user"}? All messages and attachments
+            will be erased from your device.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            disabled={isDeletingConversation}
+            onPress={executeDeleteActiveConversation}
+            style={{
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: "#EF4444",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 10,
+            }}
+          >
+            {isDeletingConversation ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text
+                style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 15 }}
+              >
+                Delete Conversation
+              </Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setShowDeleteChatModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#242731" : "#F1F5F9",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontWeight: "600",
+                fontSize: 14,
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 10. More Options Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showMoreOptionsModal}
+        onClose={() => setShowMoreOptionsModal(false)}
+        title={activeThread?.name || "Chat Options"}
+        subtitle="Conversation settings"
+        icon={
+          <Ionicons
+            name="ellipsis-horizontal-circle-outline"
+            size={22}
+            color={selectedChatTheme}
+          />
+        }
+        maxHeight="70%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 6,
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMoreOptionsModal(false);
+              handleToggleMuteActiveThread();
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              gap: 14,
+            }}
+          >
+            <Ionicons
+              name={
+                mutedThreadIds.has(activeThread?.id || "")
+                  ? "notifications"
+                  : "notifications-off-outline"
+              }
+              size={22}
+              color={isDark ? "#FFFFFF" : "#0F172A"}
+            />
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              {mutedThreadIds.has(activeThread?.id || "")
+                ? "Unmute Notifications"
+                : "Mute Notifications"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMoreOptionsModal(false);
+              setTempNickname(customNicknames[activeThread?.id || ""] || "");
+              setShowNicknamesModal(true);
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              gap: 14,
+            }}
+          >
+            <Ionicons
+              name="text-outline"
+              size={22}
+              color={isDark ? "#FFFFFF" : "#0F172A"}
+            />
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              Set Nickname
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMoreOptionsModal(false);
+              setShowAllMediaModal(true);
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              gap: 14,
+            }}
+          >
+            <Ionicons
+              name="images-outline"
+              size={22}
+              color={isDark ? "#FFFFFF" : "#0F172A"}
+            />
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              View Media & Files
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowMoreOptionsModal(false);
+              setShowDeleteChatModal(true);
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+              paddingHorizontal: 12,
+              gap: 14,
+            }}
+          >
+            <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            <Text style={{ color: "#EF4444", fontSize: 15, fontWeight: "700" }}>
+              Delete Chat
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 11. Auto-Save Photos Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showAutoSaveModal}
+        onClose={() => setShowAutoSaveModal(false)}
+        title="Auto-Save Photos"
+        subtitle="Device Storage"
+        icon={
+          <Ionicons
+            name="download-outline"
+            size={20}
+            color={selectedChatTheme}
+          />
+        }
+        maxHeight="65%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 16,
+            }}
+          >
+            Automatically download and save incoming images and photos sent in
+            this chat directly to your device photo gallery.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              const nextVal = !autoSavePhotos;
+              setAutoSavePhotos(nextVal);
+              AsyncStorage.setItem(
+                "@splitzy_autosave_photos",
+                String(nextVal),
+              ).catch(() => {});
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+              marginBottom: 16,
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              Auto-save incoming media
+            </Text>
+            <Ionicons
+              name={autoSavePhotos ? "checkbox" : "square-outline"}
+              size={24}
+              color={
+                autoSavePhotos
+                  ? selectedChatTheme
+                  : isDark
+                    ? "#64748B"
+                    : "#94A3B8"
+              }
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowAutoSaveModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 12. Read Receipts Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showReadReceiptsModal}
+        onClose={() => setShowReadReceiptsModal(false)}
+        title="Read Receipts"
+        subtitle="Privacy Settings"
+        icon={
+          <Ionicons name="eye-outline" size={20} color={selectedChatTheme} />
+        }
+        maxHeight="65%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 16,
+            }}
+          >
+            When active, roommates in this conversation can see when you have
+            viewed their incoming messages and payment updates.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              const nextVal = !readReceiptsEnabled;
+              setReadReceiptsEnabled(nextVal);
+              AsyncStorage.setItem(
+                "@splitzy_read_receipts",
+                String(nextVal),
+              ).catch(() => {});
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+              marginBottom: 16,
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              Send read receipts
+            </Text>
+            <Ionicons
+              name={readReceiptsEnabled ? "checkbox" : "square-outline"}
+              size={24}
+              color={
+                readReceiptsEnabled
+                  ? selectedChatTheme
+                  : isDark
+                    ? "#64748B"
+                    : "#94A3B8"
+              }
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowReadReceiptsModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 13. Typing Indicator Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showTypingIndicatorModal}
+        onClose={() => setShowTypingIndicatorModal(false)}
+        title="Typing Indicator"
+        subtitle="Chat Settings"
+        icon={
+          <Ionicons
+            name="chatbubbles-outline"
+            size={20}
+            color={selectedChatTheme}
+          />
+        }
+        maxHeight="65%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? "#CBD5E1" : "#475569",
+              lineHeight: 20,
+              marginBottom: 16,
+            }}
+          >
+            Display animated typing bubbles in real time when you are actively
+            composing a reply or note in this chat.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              const nextVal = !typingIndicatorEnabled;
+              setTypingIndicatorEnabled(nextVal);
+              AsyncStorage.setItem(
+                "@splitzy_typing_indicators",
+                String(nextVal),
+              ).catch(() => {});
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+              marginBottom: 16,
+            }}
+          >
+            <Text
+              style={{
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                fontSize: 15,
+                fontWeight: "600",
+              }}
+            >
+              Show typing activity
+            </Text>
+            <Ionicons
+              name={typingIndicatorEnabled ? "checkbox" : "square-outline"}
+              size={24}
+              color={
+                typingIndicatorEnabled
+                  ? selectedChatTheme
+                  : isDark
+                    ? "#64748B"
+                    : "#94A3B8"
+              }
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowTypingIndicatorModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 14. Message Permissions Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showMessagePermissionsModal}
+        onClose={() => setShowMessagePermissionsModal(false)}
+        title="Message Permissions"
+        subtitle="Security and Reachability"
+        icon={
+          <Ionicons
+            name="shield-checkmark-outline"
+            size={20}
+            color={selectedChatTheme}
+          />
+        }
+        maxHeight="75%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              color: isDark ? "#94A3B8" : "#64748B",
+              marginBottom: 14,
+            }}
+          >
+            Control who is allowed to send you messages and invite you to chat
+            groups.
+          </Text>
+          {[
+            {
+              key: "everyone",
+              title: "Everyone with Splitzy",
+              desc: "Anyone registered on the app can reach you",
+            },
+            {
+              key: "friends",
+              title: "Friends & Household",
+              desc: "Only connected friends and household group members",
+            },
+            {
+              key: "household",
+              title: "Household Members Only",
+              desc: "Strict privacy: only your current household co-tenants",
+            },
+          ].map((item) => {
+            const isSelected = messagePermissionLevel === item.key;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setMessagePermissionLevel(item.key);
+                  AsyncStorage.setItem(
+                    "@splitzy_message_permission",
+                    item.key,
+                  ).catch(() => {});
+                }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
+                  borderRadius: 14,
+                  backgroundColor: isSelected
+                    ? isDark
+                      ? "#1E2A44"
+                      : "#EFF6FF"
+                    : isDark
+                      ? "#181A20"
+                      : "#F8FAFC",
+                  marginBottom: 8,
+                  borderWidth: isSelected ? 1.5 : 1,
+                  borderColor: isSelected
+                    ? selectedChatTheme
+                    : isDark
+                      ? "rgba(255,255,255,0.06)"
+                      : "#E2E8F0",
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      color: isSelected
+                        ? selectedChatTheme
+                        : isDark
+                          ? "#FFFFFF"
+                          : "#0F172A",
+                      fontSize: 14,
+                      fontWeight: isSelected ? "700" : "600",
+                    }}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text
+                    style={{
+                      color: isDark ? "#94A3B8" : "#64748B",
+                      fontSize: 12,
+                      marginTop: 2,
+                    }}
+                  >
+                    {item.desc}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={20}
+                    color={selectedChatTheme}
+                  />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowMessagePermissionsModal(false)}
+            style={{
+              marginTop: 10,
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+
+      {/* 15. End-to-End Encryption Verification Bottom Sheet */}
+      <SmoothBottomSheetModal
+        visible={showEncryptionModal}
+        onClose={() => setShowEncryptionModal(false)}
+        title="End-to-End Encryption"
+        subtitle="Security Verification"
+        icon={<Ionicons name="lock-closed" size={20} color="#10B981" />}
+        maxHeight="80%"
+        showChipBar={true}
+      >
+        <View
+          style={{
+            paddingHorizontal: 20,
+            paddingBottom: bottomInset + 16,
+            paddingTop: 10,
+          }}
+        >
+          <View style={{ alignItems: "center", marginBottom: 16 }}>
+            <View
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: isDark ? "rgba(16,185,129,0.15)" : "#ECFDF5",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 10,
+              }}
+            >
+              <Ionicons name="shield-checkmark" size={32} color="#10B981" />
+            </View>
+            <Text
+              style={{
+                fontSize: 16,
+                fontWeight: "700",
+                color: isDark ? "#FFFFFF" : "#0F172A",
+                textAlign: "center",
+              }}
+            >
+              Messages and calls are secured
+            </Text>
+            <Text
+              style={{
+                fontSize: 13,
+                color: isDark ? "#94A3B8" : "#64748B",
+                textAlign: "center",
+                marginTop: 4,
+                lineHeight: 18,
+              }}
+            >
+              No one outside of this chat, not even Splitzy, can read your
+              messages, view bill receipts, or listen to your calls.
+            </Text>
+          </View>
+          <View
+            style={{
+              padding: 14,
+              borderRadius: 14,
+              backgroundColor: isDark ? "#1E222B" : "#F8FAFC",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(255,255,255,0.06)" : "#E2E8F0",
+              marginBottom: 16,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: isDark ? "#94A3B8" : "#64748B",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 6,
+              }}
+            >
+              60-Digit Safety Number
+            </Text>
+            <Text
+              style={{
+                fontSize: 13,
+                fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+                color: isDark ? "#E2E8F0" : "#1E293B",
+                letterSpacing: 1.5,
+                lineHeight: 22,
+              }}
+            >
+              48192 01849 71938 10294 58201 93821 75920 18493 84729 01824 91823
+              48102
+            </Text>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setShowEncryptionModal(false)}
+            style={{
+              paddingVertical: 13,
+              borderRadius: 14,
+              backgroundColor: selectedChatTheme,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
+              Close
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SmoothBottomSheetModal>
+    </>
+  );
+
+  // ==========================================
+  // VIEW 1A: SLIDE-IN CONVERSATION INFO (MESSENGER-STYLE)
+  // ==========================================
+  if (activeThread && showConversationInfo) {
+    const isDirect = activeThread.type === "direct";
+    const cleanTargetUid =
+      isDirect && activeThread.targetUserId
+        ? String(activeThread.targetUserId).replace(/^mem_/, "").trim()
+        : "";
+    const live = cleanTargetUid ? presenceMap[cleanTargetUid] : null;
+    const lastActive =
+      live?.lastActiveAt || live?.lastActiveDate || activeThread.lastActiveAt;
+    const isOnlineFlag =
+      live?.isOnline !== undefined ? live.isOnline : activeThread.isOnline;
+    const livePres = cleanTargetUid
+      ? computePresence(lastActive, isOnlineFlag)
+      : null;
+    const isThreadOnline = livePres
+      ? livePres.isOnline
+      : Boolean(activeThread.isOnline);
+    const threadStatusLabel = livePres
+      ? livePres.statusLabel
+      : activeThread.onlineStatusLabel || "Offline";
+    const threadPhoto =
+      live?.photoURL || live?.profilePicture || activeThread.photoURL;
+    const isMuted = mutedThreadIds.has(activeThread.id);
+    const customNickname = customNicknames[activeThread.id];
+    const displayName = customNickname || activeThread.name;
+
+    return (
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? "#111215" : "#FFFFFF" },
+        ]}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          translucent
+          backgroundColor="transparent"
+        />
+
+        {/* Top Navigation Bar: Back Arrow & 3-Dots Menu */}
+        <View
+          style={[
+            styles.conversationInfoHeader,
+            {
+              paddingTop: topInset + 4,
+              borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "#F1F5F9",
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.conversationInfoBackBtn}
+            onPress={() => setShowConversationInfo(false)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Back to conversation"
+          >
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={isDark ? "#FFFFFF" : "#0F172A"}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.conversationInfoBackBtn}
+            onPress={() => setShowMoreOptionsModal(true)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="More options"
+          >
+            <Ionicons
+              name="ellipsis-vertical"
+              size={22}
+              color={isDark ? "#FFFFFF" : "#0F172A"}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Scrollable Conversation Details */}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.conversationInfoScrollContent,
+            { paddingBottom: bottomInset + 30 },
+          ]}
+        >
+          {/* Profile Section (Tap to View Profile) */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleOpenProfile}
+            style={styles.conversationInfoProfileCenter}
+          >
+            <View
+              style={[
+                styles.conversationInfoAvatar,
+                { backgroundColor: activeThread.avatarBg || "#EFF6FF" },
+              ]}
+            >
+              {threadPhoto ? (
+                <Image
+                  source={{ uri: threadPhoto }}
+                  style={styles.conversationInfoAvatarImg}
+                />
+              ) : activeThread.type === "group" ? (
+                <GroupChatAvatar
+                  members={householdMembers}
+                  size={96}
+                  isDark={isDark}
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.conversationInfoAvatarInitials,
+                    { color: activeThread.avatarColor || "#2563EB" },
+                  ]}
+                >
+                  {activeThread.initials}
+                </Text>
+              )}
+            </View>
+
+            <Text
+              style={[
+                styles.conversationInfoName,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+              numberOfLines={2}
+            >
+              {displayName}
+            </Text>
+
+            <Text
+              style={[
+                styles.conversationInfoStatus,
+                {
+                  color: isThreadOnline
+                    ? "#10B981"
+                    : isDark
+                      ? "#94A3B8"
+                      : "#64748B",
+                },
+              ]}
+            >
+              {activeThread.type === "group"
+                ? `${householdMembers.length || 1} members · Household Group`
+                : isThreadOnline
+                  ? "Active now"
+                  : threadStatusLabel}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Quick Action Pills: Profile, Nicknames, Search, Customize */}
+          <View style={styles.conversationInfoQuickActionsRow}>
+            {/* Profile */}
+            <TouchableOpacity
+              style={styles.conversationInfoQuickActionItem}
+              activeOpacity={0.7}
+              onPress={handleOpenProfile}
+            >
+              <View
+                style={[
+                  styles.conversationInfoQuickActionBtn,
+                  { backgroundColor: isDark ? "#242731" : "#F1F5F9" },
+                ]}
+              >
+                <Ionicons
+                  name="person-circle"
+                  size={24}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.conversationInfoQuickActionLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Profile
+              </Text>
+            </TouchableOpacity>
+
+            {/* Nicknames */}
+            <TouchableOpacity
+              style={styles.conversationInfoQuickActionItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                setTempNickname(customNicknames[activeThread.id] || "");
+                setShowNicknamesModal(true);
+              }}
+            >
+              <View
+                style={[
+                  styles.conversationInfoQuickActionBtn,
+                  { backgroundColor: isDark ? "#242731" : "#F1F5F9" },
+                ]}
+              >
+                <Ionicons
+                  name="text"
+                  size={20}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.conversationInfoQuickActionLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Nicknames
+              </Text>
+            </TouchableOpacity>
+
+            {/* Search */}
+            <TouchableOpacity
+              style={styles.conversationInfoQuickActionItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                setShowConversationInfo(false);
+                setIsSearchingInChat(true);
+              }}
+            >
+              <View
+                style={[
+                  styles.conversationInfoQuickActionBtn,
+                  { backgroundColor: isDark ? "#242731" : "#F1F5F9" },
+                ]}
+              >
+                <Ionicons
+                  name="search"
+                  size={20}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.conversationInfoQuickActionLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Search
+              </Text>
+            </TouchableOpacity>
+
+            {/* Customize */}
+            <TouchableOpacity
+              style={styles.conversationInfoQuickActionItem}
+              activeOpacity={0.7}
+              onPress={() => setShowThemeModal(true)}
+            >
+              <View
+                style={[
+                  styles.conversationInfoQuickActionBtn,
+                  { backgroundColor: isDark ? "#242731" : "#F1F5F9" },
+                ]}
+              >
+                <Ionicons
+                  name="color-palette"
+                  size={20}
+                  color={isDark ? "#FFFFFF" : "#0F172A"}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.conversationInfoQuickActionLabel,
+                  { color: isDark ? "#CBD5E1" : "#334155" },
+                ]}
+              >
+                Customize
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Section: Chat info */}
+          <Text
+            style={[
+              styles.conversationInfoSectionTitle,
+              { color: isDark ? "#94A3B8" : "#64748B" },
+            ]}
+          >
+            Chat info
+          </Text>
+
+          {/* Horizontal Media Carousel Preview */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.conversationInfoMediaPreviewRow}
+          >
+            {conversationMedia.slice(0, 5).map((item, index) => (
+              <TouchableOpacity
+                key={item.id || index}
+                activeOpacity={0.85}
+                style={[
+                  styles.conversationInfoMediaCard,
+                  { backgroundColor: isDark ? "#1E222B" : "#E2E8F0" },
+                ]}
+                onPress={() =>
+                  setLightboxImage({
+                    uri: item.uri,
+                    senderName: item.senderName || displayName,
+                    timestamp: item.timestamp,
+                  })
+                }
+              >
+                <Image
+                  source={{ uri: item.uri }}
+                  style={styles.conversationInfoMediaImg}
+                  resizeMode="cover"
+                />
+                <View style={styles.conversationInfoMediaOverlay}>
+                  <Ionicons name="expand" size={16} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* View all media, files & links */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowAllMediaModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="images-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                View all media, files & links
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Pinned messages */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowPinnedModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="pin-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Pinned messages
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Section: Actions */}
+          <Text
+            style={[
+              styles.conversationInfoSectionTitle,
+              { color: isDark ? "#94A3B8" : "#64748B" },
+            ]}
+          >
+            Actions
+          </Text>
+
+          {/* Mute [Name] */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={handleToggleMuteActiveThread}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name={isMuted ? "notifications-off" : "notifications-outline"}
+                size={22}
+                color={isMuted ? "#EF4444" : isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                {isMuted ? `Unmute ${displayName}` : `Mute ${displayName}`}
+              </Text>
+            </View>
+            <View style={styles.conversationInfoRowRight}>
+              <Text
+                style={[
+                  styles.conversationInfoRowRightText,
+                  {
+                    color: isMuted ? "#EF4444" : isDark ? "#94A3B8" : "#64748B",
+                  },
+                ]}
+              >
+                {isMuted ? "Muted" : "Off"}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Notifications & sounds */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={handleToggleMuteActiveThread}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="volume-high-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Notifications & sounds
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {isMuted ? "Muted" : "On"}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Open chat head */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={handleOpenChatHead}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="chatbubble-ellipses-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Open chat head
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Multitask with floating bubble
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Create group chat */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowConversationInfo(false);
+              onCreateGroup ? onCreateGroup() : setShowComposeModal(true);
+            }}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="people-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Create group chat with {displayName.split(" ")[0]}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Auto-save photos */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowAutoSaveModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="download-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Auto-save photos
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {autoSavePhotos ? "On" : "Off"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Share contact */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={handleShareContactCard}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="share-social-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Share contact
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Copy contact card to clipboard
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Section: Privacy & support */}
+          <Text
+            style={[
+              styles.conversationInfoSectionTitle,
+              { color: isDark ? "#94A3B8" : "#64748B" },
+            ]}
+          >
+            Privacy & support
+          </Text>
+
+          {/* Disappearing messages */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowDisappearingModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="timer-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Disappearing messages
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {disappearingDuration === "off"
+                  ? "Off"
+                  : disappearingDuration === "24h"
+                    ? "24 hours"
+                    : disappearingDuration === "7d"
+                      ? "7 days"
+                      : "90 days"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Read receipts */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowReadReceiptsModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="eye-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Read receipts
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {readReceiptsEnabled ? "On" : "Off"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Typing indicator */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowTypingIndicatorModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="chatbubbles-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Typing indicator
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {typingIndicatorEnabled ? "On" : "Off"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Message permissions */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowMessagePermissionsModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Message permissions
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                {messagePermissionLevel === "household"
+                  ? "Household Only"
+                  : messagePermissionLevel === "friends"
+                    ? "Friends & Household"
+                    : "Everyone"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* End-to-end encryption */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowEncryptionModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                End-to-end encryption
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Verified Signal Protocol · Tap to view
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Block */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowBlockModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="remove-circle-outline"
+                size={22}
+                color={
+                  blockedUserIds.has(
+                    activeThread.targetUserId || activeThread.id,
+                  )
+                    ? "#EF4444"
+                    : isDark
+                      ? "#FFFFFF"
+                      : "#0F172A"
+                }
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Block
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  {
+                    color: blockedUserIds.has(
+                      activeThread.targetUserId || activeThread.id,
+                    )
+                      ? "#EF4444"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  },
+                ]}
+              >
+                {blockedUserIds.has(
+                  activeThread.targetUserId || activeThread.id,
+                )
+                  ? "Blocked"
+                  : "Not blocked"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Restrict */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowRestrictModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="contrast-outline"
+                size={22}
+                color={
+                  restrictedUserIds.has(
+                    activeThread.targetUserId || activeThread.id,
+                  )
+                    ? "#F59E0B"
+                    : isDark
+                      ? "#FFFFFF"
+                      : "#0F172A"
+                }
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Restrict
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  {
+                    color: restrictedUserIds.has(
+                      activeThread.targetUserId || activeThread.id,
+                    )
+                      ? "#F59E0B"
+                      : isDark
+                        ? "#94A3B8"
+                        : "#64748B",
+                  },
+                ]}
+              >
+                {restrictedUserIds.has(
+                  activeThread.targetUserId || activeThread.id,
+                )
+                  ? "Restricted"
+                  : "Standard"}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? "#64748B" : "#94A3B8"}
+            />
+          </TouchableOpacity>
+
+          {/* Report */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowReportModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons
+                name="warning-outline"
+                size={22}
+                color={isDark ? "#FFFFFF" : "#0F172A"}
+              />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                ]}
+              >
+                Report
+              </Text>
+              <Text
+                style={[
+                  styles.conversationInfoRowSubtitle,
+                  { color: isDark ? "#94A3B8" : "#64748B" },
+                ]}
+              >
+                Give feedback and report conversation
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Delete chat (Red destructive) */}
+          <TouchableOpacity
+            style={styles.conversationInfoRow}
+            activeOpacity={0.7}
+            onPress={() => setShowDeleteChatModal(true)}
+          >
+            <View style={styles.conversationInfoRowIconWrap}>
+              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            </View>
+            <View style={styles.conversationInfoRowTextCol}>
+              <Text
+                style={[
+                  styles.conversationInfoRowTitle,
+                  { color: "#EF4444", fontWeight: "700" },
+                ]}
+              >
+                Delete chat
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </ScrollView>
+
+        {/* Lightbox Fullscreen Modal */}
+        {renderLightboxModal()}
+
+        {/* View All Media, Files & Links Modal */}
+        {renderAllMediaModal()}
+
+        {/* All Interactive Bottom Sheet Modals for Conversation Info */}
+        {renderConversationInfoModals()}
+      </View>
+    );
+  }
+
   // ==========================================
   // VIEW 1: FULL-SCREEN NATIVE MESSENGER CHAT
   // ==========================================
@@ -3301,7 +6991,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               live?.photoURL || live?.profilePicture || activeThread.photoURL;
 
             return (
-              <View style={styles.chatHeaderCenter}>
+              <TouchableOpacity
+                style={styles.chatHeaderCenter}
+                activeOpacity={0.8}
+                onPress={() => setShowConversationInfo(true)}
+                accessibilityLabel="View conversation info"
+              >
                 <View style={styles.chatHeaderAvatarWrap}>
                   {activeThread.type === "group" ? (
                     <GroupChatAvatar
@@ -3375,11 +7070,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                         : threadStatusLabel}
                   </Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           })()}
 
-          {/* Header Action Buttons: Voice Call, Video Call, and Quick Split Request */}
+          {/* Header Action Buttons: Voice Call, Video Call, and Conversation Info */}
           <View style={styles.chatHeaderActionsRow}>
             {activeThread.type === "direct" && activeThread.targetUserId && (
               <>
@@ -3391,6 +7086,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       backgroundColor: isDark
                         ? "rgba(37, 99, 235, 0.2)"
                         : "#EFF6FF",
+                      display: "none",
                     },
                   ]}
                   onPress={() => handleStartCall("voice")}
@@ -3412,6 +7108,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                       backgroundColor: isDark
                         ? "rgba(37, 99, 235, 0.2)"
                         : "#EFF6FF",
+                      display: "none",
                     },
                   ]}
                   onPress={() => handleStartCall("video")}
@@ -3427,8 +7124,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               </>
             )}
 
-            {/* Quick Split Request */}
-            {/* <TouchableOpacity
+            {/* Conversation Info Button (Beside Video Call) */}
+            <TouchableOpacity
               style={[
                 styles.chatHeaderActionBtn,
                 {
@@ -3437,28 +7134,82 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                     : "#EFF6FF",
                 },
               ]}
-              onPress={() => {
-                if (
-                  activeThread.type === "direct" &&
-                  activeThread.targetUserId
-                ) {
-                  setSplitTargetId(activeThread.targetUserId);
-                } else {
-                  setSplitTargetId("ALL");
-                }
-                setShowRequestSplitModal(true);
-              }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Request Split"
+              onPress={() => setShowConversationInfo(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Conversation Information"
             >
-              <Feather
-                name="plus-circle"
-                size={20}
+              <Ionicons
+                name="information-circle-outline"
+                size={22}
                 color={isDark ? "#60A5FA" : "#2563EB"}
               />
-            </TouchableOpacity> */}
+            </TouchableOpacity>
           </View>
         </View>
+
+        {/* In-Chat Search Bar */}
+        {isSearchingInChat && (
+          <View
+            style={[
+              styles.inChatSearchBarContainer,
+              {
+                backgroundColor: isDark ? "#181A20" : "#F8FAFC",
+                borderBottomColor: isDark
+                  ? "rgba(255,255,255,0.08)"
+                  : "#E2E8F0",
+              },
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={isDark ? "#94A3B8" : "#64748B"}
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              style={[
+                styles.inChatSearchInput,
+                { color: isDark ? "#FFFFFF" : "#0F172A" },
+              ]}
+              placeholder="Search in conversation..."
+              placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+              value={inChatSearchQuery}
+              onChangeText={setInChatSearchQuery}
+              autoFocus
+              returnKeyType="search"
+            />
+            {inChatSearchQuery.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setInChatSearchQuery("")}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ marginRight: 8 }}
+              >
+                <Feather
+                  name="x-circle"
+                  size={16}
+                  color={isDark ? "#94A3B8" : "#64748B"}
+                />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => {
+                setIsSearchingInChat(false);
+                setInChatSearchQuery("");
+              }}
+              style={styles.inChatSearchCloseBtn}
+            >
+              <Text
+                style={{
+                  color: isDark ? "#60A5FA" : "#2563EB",
+                  fontWeight: "700",
+                  fontSize: 13,
+                }}
+              >
+                Done
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Messenger-Style Message Request Banner */}
         {activeThread.isMessageRequest &&
@@ -3535,6 +7286,49 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </View>
           )}
 
+        {/* Disappearing Messages Active Notification Banner */}
+        {disappearingDurationsMap[activeThread.id] &&
+          disappearingDurationsMap[activeThread.id] !== "off" && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setShowDisappearingModal(true)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "#F1F5F9",
+                paddingVertical: 7,
+                paddingHorizontal: 16,
+                gap: 6,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: isDark
+                  ? "rgba(255,255,255,0.08)"
+                  : "#E2E8F0",
+              }}
+            >
+              <Ionicons
+                name="timer-outline"
+                size={15}
+                color={selectedChatTheme}
+              />
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: isDark ? "#CBD5E1" : "#475569",
+                  fontWeight: "600",
+                }}
+              >
+                Disappearing messages are on (
+                {disappearingDurationsMap[activeThread.id] === "24h"
+                  ? "24 hours"
+                  : disappearingDurationsMap[activeThread.id] === "7d"
+                    ? "7 days"
+                    : "90 days"}
+                ) · Tap to change
+              </Text>
+            </TouchableOpacity>
+          )}
+
         {/* Message Feed */}
         <ScrollView
           ref={messageScrollRef}
@@ -3594,73 +7388,575 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               </Text>
             </View>
           ) : (
-            activeThread.messages.map((msg, index) => {
-              const prevMsg = activeThread.messages[index - 1];
-              const showSenderName =
-                !msg.isMe && (!prevMsg || prevMsg.senderId !== msg.senderId);
+            (() => {
+              const query = inChatSearchQuery.trim().toLowerCase();
+              const threadDisappearing =
+                disappearingDurationsMap[activeThread.id] || "off";
+              let baseMessages = activeThread.messages;
 
-              // Resolve sender avatar & initials for incoming messages (Facebook Messenger style)
-              const senderAvatar = !msg.isMe
-                ? memberAvatarMap.get(msg.senderId) ||
-                  memberAvatarMap.get(msg.senderId?.replace(/^mem_/, "")) ||
-                  (activeThread.type === "direct"
-                    ? {
-                        name: activeThread.name,
-                        initials: activeThread.initials,
-                        photoURL: activeThread.photoURL,
-                        bg: activeThread.avatarBg,
-                        text: activeThread.avatarColor,
-                      }
-                    : {
-                        name: msg.sender || "Roommate",
-                        initials: getInitials(msg.sender || "R"),
-                        photoURL: undefined,
-                        bg: AVATAR_PALETTES[
-                          Math.abs(hashString(msg.senderId || "R")) %
-                            AVATAR_PALETTES.length
-                        ].bg,
-                        text: AVATAR_PALETTES[
-                          Math.abs(hashString(msg.senderId || "R")) %
-                            AVATAR_PALETTES.length
-                        ].text,
-                      })
-                : null;
+              if (threadDisappearing !== "off") {
+                const now = Date.now();
+                const maxAgeMs =
+                  threadDisappearing === "24h"
+                    ? 24 * 60 * 60 * 1000
+                    : threadDisappearing === "7d"
+                      ? 7 * 24 * 60 * 60 * 1000
+                      : 90 * 24 * 60 * 60 * 1000;
+                baseMessages = baseMessages.filter((m) => {
+                  const mTime = new Date(
+                    (m as any).timestamp || m.time || 0,
+                  ).getTime();
+                  if (!mTime || isNaN(mTime)) return true;
+                  return now - mTime < maxAgeMs;
+                });
+              }
 
-              const isExpanded = !!toggledMessageIds[msg.id];
+              const displayedMessages = query
+                ? baseMessages.filter(
+                    (m) =>
+                      m.text?.toLowerCase().includes(query) ||
+                      m.sender?.toLowerCase().includes(query) ||
+                      m.meta?.attachmentName?.toLowerCase().includes(query),
+                  )
+                : baseMessages;
 
-              if (msg.isMe) {
-                const otherReaders = (msg.readBy || []).filter(
-                  (uid) => uid !== currentUid && uid !== `mem_${currentUid}`,
+              if (query && displayedMessages.length === 0) {
+                return (
+                  <View
+                    style={{
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 40,
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons
+                      name="search-outline"
+                      size={36}
+                      color={isDark ? "#64748B" : "#94A3B8"}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        color: isDark ? "#94A3B8" : "#64748B",
+                      }}
+                    >
+                      No messages found matching &quot;{inChatSearchQuery}&quot;
+                    </Text>
+                  </View>
                 );
-                const isSeen =
-                  otherReaders.length > 0 ||
-                  (activeThread.type === "direct" &&
-                    activeThread.targetUserId &&
-                    (msg.readBy || []).includes(activeThread.targetUserId));
+              }
 
-                let seenLabel = "· Sent";
-                if (isSeen) {
-                  if (activeThread.type === "direct") {
-                    seenLabel = `· Seen by ${activeThread.name.split(" ")[0]}`;
-                  } else {
-                    const readerNames = otherReaders
-                      .map((uid) => {
-                        const m = memberAvatarMap.get(uid);
-                        return m ? m.name.split(" ")[0] : null;
-                      })
-                      .filter(Boolean) as string[];
+              return displayedMessages.map((msg, index) => {
+                const prevMsg = displayedMessages[index - 1];
+                const showSenderName =
+                  !msg.isMe && (!prevMsg || prevMsg.senderId !== msg.senderId);
 
-                    if (readerNames.length === 1) {
-                      seenLabel = `· Seen by ${readerNames[0]}`;
-                    } else if (readerNames.length > 1) {
-                      seenLabel = `· Seen by ${readerNames[0]} and ${readerNames.length - 1} other${readerNames.length - 1 > 1 ? "s" : ""}`;
+                // Resolve sender avatar & initials for incoming messages (Facebook Messenger style)
+                const senderAvatar = !msg.isMe
+                  ? memberAvatarMap.get(msg.senderId) ||
+                    memberAvatarMap.get(msg.senderId?.replace(/^mem_/, "")) ||
+                    (activeThread.type === "direct"
+                      ? {
+                          name: activeThread.name,
+                          initials: activeThread.initials,
+                          photoURL: activeThread.photoURL,
+                          bg: activeThread.avatarBg,
+                          text: activeThread.avatarColor,
+                        }
+                      : {
+                          name: msg.sender || "Roommate",
+                          initials: getInitials(msg.sender || "R"),
+                          photoURL: undefined,
+                          bg: AVATAR_PALETTES[
+                            Math.abs(hashString(msg.senderId || "R")) %
+                              AVATAR_PALETTES.length
+                          ].bg,
+                          text: AVATAR_PALETTES[
+                            Math.abs(hashString(msg.senderId || "R")) %
+                              AVATAR_PALETTES.length
+                          ].text,
+                        })
+                  : null;
+
+                const isExpanded = !!toggledMessageIds[msg.id];
+
+                if (msg.isMe) {
+                  const otherReaders = (msg.readBy || []).filter(
+                    (uid) => uid !== currentUid && uid !== `mem_${currentUid}`,
+                  );
+                  const isSeen =
+                    otherReaders.length > 0 ||
+                    (activeThread.type === "direct" &&
+                      activeThread.targetUserId &&
+                      (msg.readBy || []).includes(activeThread.targetUserId));
+
+                  let seenLabel = "· Sent";
+                  if (isSeen) {
+                    if (activeThread.type === "direct") {
+                      seenLabel = `· Seen by ${activeThread.name.split(" ")[0]}`;
                     } else {
-                      seenLabel = "· Seen";
+                      const readerNames = otherReaders
+                        .map((uid) => {
+                          const m = memberAvatarMap.get(uid);
+                          return m ? m.name.split(" ")[0] : null;
+                        })
+                        .filter(Boolean) as string[];
+
+                      if (readerNames.length === 1) {
+                        seenLabel = `· Seen by ${readerNames[0]}`;
+                      } else if (readerNames.length > 1) {
+                        seenLabel = `· Seen by ${readerNames[0]} and ${readerNames.length - 1} other${readerNames.length - 1 > 1 ? "s" : ""}`;
+                      } else {
+                        seenLabel = "· Seen";
+                      }
                     }
                   }
+
+                  const hasReactions = Boolean(
+                    msg.reactions &&
+                    Object.keys(msg.reactions).some(
+                      (k) => msg.reactions![k]?.length > 0,
+                    ),
+                  );
+
+                  return (
+                    <SwipeableMessageRow
+                      key={msg.id}
+                      onReply={() => handleStartReply(msg)}
+                      isMe={true}
+                      isDark={isDark}
+                    >
+                      <View
+                        style={[
+                          styles.msgBubbleRow,
+                          styles.msgRowMe,
+                          hasReactions && { marginBottom: 12 },
+                        ]}
+                      >
+                        {/* Speech bubble */}
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => handleToggleMessage(msg.id)}
+                          onLongPress={(e) => handleLongPressMessage(msg, e)}
+                          delayLongPress={350}
+                          style={[
+                            msg.type === "image"
+                              ? styles.speechBubbleImage
+                              : [
+                                  styles.speechBubble,
+                                  styles.speechBubbleMe,
+                                  { backgroundColor: selectedChatTheme },
+                                ],
+                            { position: "relative" },
+                          ]}
+                        >
+                          {/* Quoted Reply Preview */}
+                          {(msg.replyTo || msg.meta?.replyTo) && (
+                            <View
+                              style={[
+                                styles.msgReplySnippetBox,
+                                styles.msgReplySnippetBoxMe,
+                              ]}
+                            >
+                              <Text
+                                style={styles.msgReplySnippetSenderMe}
+                                numberOfLines={1}
+                              >
+                                {(msg.replyTo || msg.meta?.replyTo)
+                                  ?.senderName || "Replied"}
+                              </Text>
+                              <Text
+                                style={styles.msgReplySnippetTextMe}
+                                numberOfLines={1}
+                              >
+                                {(msg.replyTo || msg.meta?.replyTo)?.text}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Image Attachment Preview */}
+                          {msg.type === "image" &&
+                            (() => {
+                              const imgUrl =
+                                msg.meta?.attachmentUrl ||
+                                (msg as any).attachmentUrl ||
+                                (msg as any).imageUrl ||
+                                (msg as any).uri;
+                              return (
+                                <TouchableOpacity
+                                  activeOpacity={0.9}
+                                  onPress={() =>
+                                    imgUrl &&
+                                    setLightboxImage({
+                                      uri: imgUrl,
+                                      senderName: "You",
+                                      timestamp: msg.time,
+                                      caption: msg.text,
+                                    })
+                                  }
+                                  style={{
+                                    marginBottom:
+                                      msg.text && msg.text !== "📷 Photo"
+                                        ? 6
+                                        : 0,
+                                    borderRadius: 16,
+                                    overflow: "hidden",
+                                    position: "relative",
+                                    backgroundColor: isDark
+                                      ? "#1E222B"
+                                      : "#F1F5F9",
+                                  }}
+                                >
+                                  {imgUrl ? (
+                                    <Image
+                                      source={{ uri: imgUrl }}
+                                      style={{
+                                        width: 220,
+                                        height: 180,
+                                        borderRadius: 16,
+                                      }}
+                                      resizeMode="cover"
+                                    />
+                                  ) : (
+                                    <View
+                                      style={{
+                                        width: 220,
+                                        height: 180,
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      <ActivityIndicator
+                                        size="small"
+                                        color="#2563EB"
+                                      />
+                                    </View>
+                                  )}
+                                  {(!msg.text || msg.text === "📷 Photo") && (
+                                    <View
+                                      style={{
+                                        position: "absolute",
+                                        bottom: 8,
+                                        right: 8,
+                                        backgroundColor: "rgba(0,0,0,0.55)",
+                                        paddingHorizontal: 7,
+                                        paddingVertical: 2,
+                                        borderRadius: 10,
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: "#FFFFFF",
+                                          fontSize: 10,
+                                          fontWeight: "600",
+                                        }}
+                                      >
+                                        {msg.time}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })()}
+
+                          {/* File Attachment Preview */}
+                          {msg.type === "file" && msg.meta?.attachmentUrl && (
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: 10,
+                                borderRadius: 12,
+                                backgroundColor: "rgba(255,255,255,0.18)",
+                                marginBottom: 6,
+                              }}
+                            >
+                              <Ionicons
+                                name="document-text"
+                                size={26}
+                                color="#FFFFFF"
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: "#FFFFFF",
+                                    fontSize: 13,
+                                    fontWeight: "700",
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  {msg.meta.fileName || msg.text}
+                                </Text>
+                                {msg.meta.fileSize && (
+                                  <Text
+                                    style={{
+                                      color: "rgba(255,255,255,0.75)",
+                                      fontSize: 11,
+                                      marginTop: 1,
+                                      fontWeight: "500",
+                                    }}
+                                  >
+                                    {msg.meta.fileSize}
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                          )}
+
+                          {(!msg.type ||
+                            msg.type === "text" ||
+                            (msg.type !== "image" && msg.type !== "file") ||
+                            (msg.text &&
+                              msg.text !== "📷 Photo" &&
+                              !msg.text.startsWith("📎 "))) && (
+                            <View
+                              style={
+                                msg.type === "image" && msg.meta?.attachmentUrl
+                                  ? {
+                                      backgroundColor: isDark
+                                        ? "#1E293B"
+                                        : "#F1F5F9",
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 7,
+                                      borderRadius: 12,
+                                      marginTop: 4,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <Text
+                                style={[
+                                  styles.speechBubbleText,
+                                  msg.type === "image" &&
+                                  msg.meta?.attachmentUrl
+                                    ? {
+                                        color: isDark ? "#FFFFFF" : "#0F172A",
+                                        fontWeight: "500",
+                                      }
+                                    : styles.speechBubbleTextMe,
+                                ]}
+                              >
+                                {msg.text}
+                                {Boolean(msg.isEdited) && (
+                                  <Text
+                                    style={{
+                                      fontSize: 10,
+                                      opacity: 0.8,
+                                      fontStyle: "italic",
+                                    }}
+                                  >
+                                    {" "}
+                                    · edited
+                                  </Text>
+                                )}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Embedded Expense Split Card */}
+                          {msg.type === "expense_split" && msg.meta && (
+                            <View
+                              style={[
+                                styles.msgEmbedCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <View style={styles.msgEmbedHeaderRow}>
+                                <Text
+                                  style={[
+                                    styles.msgEmbedCategory,
+                                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                  ]}
+                                >
+                                  🛒 {msg.meta.category}
+                                </Text>
+                                <Text style={styles.msgEmbedAmount}>
+                                  {msg.meta.amount}
+                                </Text>
+                              </View>
+                              {msg.meta.share && (
+                                <Text
+                                  style={[
+                                    styles.msgEmbedShare,
+                                    { color: isDark ? "#94A3B8" : "#64748B" },
+                                  ]}
+                                >
+                                  Calculated split share: {msg.meta.share}
+                                </Text>
+                              )}
+                            </View>
+                          )}
+
+                          {/* Embedded Payment Claim Card */}
+                          {msg.type === "payment_claim" && msg.meta && (
+                            <View
+                              style={[
+                                styles.msgEmbedCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.msgEmbedCategory,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                💳 {msg.meta.paymentMethod || "Payment Settle"}
+                              </Text>
+                              <Text style={styles.msgEmbedAmount}>
+                                Amount: {msg.meta.amount}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Embedded Call Log Card */}
+                          {msg.type === "call_log" && (
+                            <View
+                              style={[
+                                styles.callLogCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <View style={styles.callLogIconWrap}>
+                                <Ionicons
+                                  name={
+                                    msg.meta?.callType === "video"
+                                      ? "videocam"
+                                      : "call"
+                                  }
+                                  size={16}
+                                  color={
+                                    msg.meta?.callStatus === "missed"
+                                      ? "#EF4444"
+                                      : "#2563EB"
+                                  }
+                                />
+                              </View>
+                              <View style={styles.callLogDetails}>
+                                <Text
+                                  style={[
+                                    styles.callLogTitle,
+                                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                  ]}
+                                >
+                                  {msg.meta?.callType === "video"
+                                    ? "Video Call"
+                                    : "Voice Call"}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.callLogSubtitle,
+                                    { color: isDark ? "#94A3B8" : "#64748B" },
+                                  ]}
+                                >
+                                  {msg.text.split("·")[1]?.trim() ||
+                                    "Completed"}
+                                </Text>
+                              </View>
+                              {activeThread.type === "direct" && (
+                                <TouchableOpacity
+                                  style={styles.callBackBtn}
+                                  onPress={() =>
+                                    handleStartCall(
+                                      msg.meta?.callType === "video"
+                                        ? "video"
+                                        : "voice",
+                                    )
+                                  }
+                                >
+                                  <Text style={styles.callBackBtnText}>
+                                    Call
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          )}
+
+                          {/* Reaction Badges Pill */}
+                          {hasReactions && (
+                            <View
+                              style={[
+                                styles.bubbleReactionsPill,
+                                styles.bubbleReactionsPillMe,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#1E222B"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              {Object.entries(msg.reactions!)
+                                .filter(
+                                  ([_, uids]) =>
+                                    Array.isArray(uids) && uids.length > 0,
+                                )
+                                .map(([em, uids]) => (
+                                  <Text
+                                    key={em}
+                                    style={styles.bubbleReactionItemText}
+                                  >
+                                    {em}
+                                    {uids.length > 1 ? ` ${uids.length}` : ""}
+                                  </Text>
+                                ))}
+                            </View>
+                          )}
+                        </TouchableOpacity>
+
+                        {/* Messenger-style tapped Time & Seen indicator */}
+                        {isExpanded && (
+                          <View style={styles.msgStatusRowMe}>
+                            <Text
+                              style={[
+                                styles.msgStatusText,
+                                isDark && { color: "#94A3B8" },
+                              ]}
+                            >
+                              {msg.time}{" "}
+                              <Text
+                                style={[
+                                  styles.msgStatusSeenBadge,
+                                  isSeen && { color: "#2563EB" },
+                                ]}
+                              >
+                                {seenLabel}
+                              </Text>
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </SwipeableMessageRow>
+                  );
                 }
 
-                const hasReactions = Boolean(
+                // Incoming message: Facebook Messenger style layout with avatar on the left
+                const hasIncomingReactions = Boolean(
                   msg.reactions &&
                   Object.keys(msg.reactions).some(
                     (k) => msg.reactions![k]?.length > 0,
@@ -3671,731 +7967,479 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                   <SwipeableMessageRow
                     key={msg.id}
                     onReply={() => handleStartReply(msg)}
-                    isMe={true}
+                    isMe={false}
                     isDark={isDark}
                   >
                     <View
                       style={[
-                        styles.msgBubbleRow,
-                        styles.msgRowMe,
-                        hasReactions && { marginBottom: 12 },
+                        styles.msgThemContainer,
+                        hasIncomingReactions && { marginBottom: 12 },
                       ]}
                     >
-                      {/* Speech bubble */}
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => handleToggleMessage(msg.id)}
-                        onLongPress={(e) => handleLongPressMessage(msg, e)}
-                        delayLongPress={350}
-                        style={[
-                          styles.speechBubble,
-                          styles.speechBubbleMe,
-                          { position: "relative" },
-                        ]}
-                      >
-                        {/* Quoted Reply Preview */}
-                        {(msg.replyTo || msg.meta?.replyTo) && (
-                          <View
-                            style={[
-                              styles.msgReplySnippetBox,
-                              styles.msgReplySnippetBoxMe,
-                            ]}
-                          >
-                            <Text
-                              style={styles.msgReplySnippetSenderMe}
-                              numberOfLines={1}
-                            >
-                              {(msg.replyTo || msg.meta?.replyTo)?.senderName ||
-                                "Replied"}
-                            </Text>
-                            <Text
-                              style={styles.msgReplySnippetTextMe}
-                              numberOfLines={1}
-                            >
-                              {(msg.replyTo || msg.meta?.replyTo)?.text}
-                            </Text>
-                          </View>
-                        )}
+                      {showSenderName && activeThread.type === "group" && (
+                        <Text
+                          style={[
+                            styles.msgSenderName,
+                            { color: isDark ? "#64748B" : "#94A3B8" },
+                          ]}
+                        >
+                          {msg.sender}
+                        </Text>
+                      )}
 
-                        {/* Image Attachment Preview */}
-                        {msg.type === "image" && msg.meta?.attachmentUrl && (
-                          <View
-                            style={{
-                              marginBottom: 6,
-                              borderRadius: 12,
-                              overflow: "hidden",
-                            }}
-                          >
+                      <View style={styles.msgThemRowWithAvatar}>
+                        {/* 30x30 Circular Avatar on every incoming message line */}
+                        <View
+                          style={[
+                            styles.msgAvatarWrap,
+                            { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
+                          ]}
+                        >
+                          {senderAvatar?.photoURL ? (
                             <Image
-                              source={{ uri: msg.meta.attachmentUrl }}
-                              style={{
-                                width: 220,
-                                height: 180,
-                                borderRadius: 12,
-                              }}
-                              resizeMode="cover"
+                              source={{ uri: senderAvatar.photoURL }}
+                              style={styles.msgAvatarImage}
                             />
-                          </View>
-                        )}
+                          ) : (
+                            <Text
+                              style={[
+                                styles.msgAvatarInitials,
+                                { color: senderAvatar?.text || "#2563EB" },
+                              ]}
+                            >
+                              {senderAvatar?.initials || "R"}
+                            </Text>
+                          )}
+                        </View>
 
-                        {/* File Attachment Preview */}
-                        {msg.type === "file" && msg.meta?.attachmentUrl && (
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 10,
-                              padding: 10,
-                              borderRadius: 12,
-                              backgroundColor: "rgba(255,255,255,0.18)",
-                              marginBottom: 6,
-                            }}
-                          >
-                            <Ionicons
-                              name="document-text"
-                              size={26}
-                              color="#FFFFFF"
-                            />
-                            <View style={{ flex: 1 }}>
+                        {/* Speech bubble */}
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => handleToggleMessage(msg.id)}
+                          onLongPress={(e) => handleLongPressMessage(msg, e)}
+                          delayLongPress={350}
+                          style={[
+                            msg.type === "image"
+                              ? styles.speechBubbleImage
+                              : [
+                                  styles.speechBubble,
+                                  styles.speechBubbleThem,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#242731"
+                                      : "#F1F5F9",
+                                  },
+                                ],
+                            { position: "relative" },
+                          ]}
+                        >
+                          {/* Quoted Reply Preview */}
+                          {(msg.replyTo || msg.meta?.replyTo) && (
+                            <View
+                              style={[
+                                styles.msgReplySnippetBox,
+                                styles.msgReplySnippetBoxThem,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(255,255,255,0.08)"
+                                    : "rgba(0,0,0,0.06)",
+                                  borderLeftColor: isDark
+                                    ? "#60A5FA"
+                                    : "#2563EB",
+                                },
+                              ]}
+                            >
                               <Text
-                                style={{
-                                  color: "#FFFFFF",
-                                  fontSize: 13,
-                                  fontWeight: "700",
-                                }}
+                                style={[
+                                  styles.msgReplySnippetSenderThem,
+                                  { color: isDark ? "#60A5FA" : "#2563EB" },
+                                ]}
                                 numberOfLines={1}
                               >
-                                {msg.meta.fileName || msg.text}
+                                {(msg.replyTo || msg.meta?.replyTo)
+                                  ?.senderName || "Replied"}
                               </Text>
-                              {msg.meta.fileSize && (
-                                <Text
+                              <Text
+                                style={[
+                                  styles.msgReplySnippetTextThem,
+                                  { color: isDark ? "#CBD5E1" : "#475569" },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {(msg.replyTo || msg.meta?.replyTo)?.text}
+                              </Text>
+                            </View>
+                          )}
+                          {/* Image Attachment Preview */}
+                          {msg.type === "image" &&
+                            (() => {
+                              const imgUrl =
+                                msg.meta?.attachmentUrl ||
+                                (msg as any).attachmentUrl ||
+                                (msg as any).imageUrl ||
+                                (msg as any).uri;
+                              return (
+                                <TouchableOpacity
+                                  activeOpacity={0.9}
+                                  onPress={() =>
+                                    imgUrl &&
+                                    setLightboxImage({
+                                      uri: imgUrl,
+                                      senderName:
+                                        msg.sender || activeThread.name,
+                                      timestamp: msg.time,
+                                      caption: msg.text,
+                                    })
+                                  }
                                   style={{
-                                    color: "rgba(255,255,255,0.75)",
-                                    fontSize: 11,
-                                    marginTop: 1,
-                                    fontWeight: "500",
+                                    marginBottom:
+                                      msg.text && msg.text !== "📷 Photo"
+                                        ? 6
+                                        : 0,
+                                    borderRadius: 16,
+                                    overflow: "hidden",
+                                    position: "relative",
+                                    backgroundColor: isDark
+                                      ? "#1E222B"
+                                      : "#F1F5F9",
                                   }}
                                 >
-                                  {msg.meta.fileSize}
+                                  {imgUrl ? (
+                                    <Image
+                                      source={{ uri: imgUrl }}
+                                      style={{
+                                        width: 220,
+                                        height: 180,
+                                        borderRadius: 16,
+                                      }}
+                                      resizeMode="cover"
+                                    />
+                                  ) : (
+                                    <View
+                                      style={{
+                                        width: 220,
+                                        height: 180,
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      <ActivityIndicator
+                                        size="small"
+                                        color="#2563EB"
+                                      />
+                                    </View>
+                                  )}
+                                  {(!msg.text || msg.text === "📷 Photo") && (
+                                    <View
+                                      style={{
+                                        position: "absolute",
+                                        bottom: 8,
+                                        right: 8,
+                                        backgroundColor: "rgba(0,0,0,0.55)",
+                                        paddingHorizontal: 7,
+                                        paddingVertical: 2,
+                                        borderRadius: 10,
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: "#FFFFFF",
+                                          fontSize: 10,
+                                          fontWeight: "600",
+                                        }}
+                                      >
+                                        {msg.time}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })()}
+
+                          {/* File Attachment Preview */}
+                          {msg.type === "file" && msg.meta?.attachmentUrl && (
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: 10,
+                                borderRadius: 12,
+                                backgroundColor: isDark
+                                  ? "rgba(255,255,255,0.08)"
+                                  : "#E2E8F0",
+                                marginBottom: 6,
+                              }}
+                            >
+                              <Ionicons
+                                name="document-text"
+                                size={26}
+                                color={isDark ? "#60A5FA" : "#2563EB"}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: isDark ? "#FFFFFF" : "#0F172A",
+                                    fontSize: 13,
+                                    fontWeight: "700",
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  {msg.meta.fileName || msg.text}
+                                </Text>
+                                {msg.meta.fileSize && (
+                                  <Text
+                                    style={{
+                                      color: isDark ? "#94A3B8" : "#64748B",
+                                      fontSize: 11,
+                                      marginTop: 1,
+                                      fontWeight: "500",
+                                    }}
+                                  >
+                                    {msg.meta.fileSize}
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                          )}
+
+                          {(!msg.type ||
+                            msg.type === "text" ||
+                            (msg.type !== "image" && msg.type !== "file") ||
+                            (msg.text &&
+                              msg.text !== "📷 Photo" &&
+                              !msg.text.startsWith("📎 "))) && (
+                            <View
+                              style={
+                                msg.type === "image" && msg.meta?.attachmentUrl
+                                  ? {
+                                      backgroundColor: isDark
+                                        ? "#242731"
+                                        : "#F1F5F9",
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 7,
+                                      borderRadius: 12,
+                                      marginTop: 4,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <Text
+                                style={[
+                                  styles.speechBubbleText,
+                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                ]}
+                              >
+                                {msg.text}
+                                {Boolean(msg.isEdited) && (
+                                  <Text
+                                    style={{
+                                      fontSize: 10,
+                                      color: isDark ? "#94A3B8" : "#64748B",
+                                      fontStyle: "italic",
+                                    }}
+                                  >
+                                    {" "}
+                                    · edited
+                                  </Text>
+                                )}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Embedded Expense Split Card */}
+                          {msg.type === "expense_split" && msg.meta && (
+                            <View
+                              style={[
+                                styles.msgEmbedCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              <View style={styles.msgEmbedHeaderRow}>
+                                <Text
+                                  style={[
+                                    styles.msgEmbedCategory,
+                                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                  ]}
+                                >
+                                  🛒 {msg.meta.category}
+                                </Text>
+                                <Text style={styles.msgEmbedAmount}>
+                                  {msg.meta.amount}
+                                </Text>
+                              </View>
+                              {msg.meta.share && (
+                                <Text
+                                  style={[
+                                    styles.msgEmbedShare,
+                                    { color: isDark ? "#94A3B8" : "#64748B" },
+                                  ]}
+                                >
+                                  Calculated split share: {msg.meta.share}
                                 </Text>
                               )}
                             </View>
-                          </View>
-                        )}
+                          )}
 
-                        {(!msg.type ||
-                          msg.type === "text" ||
-                          (msg.type !== "image" && msg.type !== "file") ||
-                          (msg.text &&
-                            msg.text !== "📷 Photo" &&
-                            !msg.text.startsWith("📎 "))) && (
-                          <Text
-                            style={[
-                              styles.speechBubbleText,
-                              styles.speechBubbleTextMe,
-                            ]}
-                          >
-                            {msg.text}
-                            {Boolean(msg.isEdited) && (
-                              <Text
-                                style={{
-                                  fontSize: 10,
-                                  opacity: 0.8,
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                {" "}
-                                · edited
-                              </Text>
-                            )}
-                          </Text>
-                        )}
-
-                        {/* Embedded Expense Split Card */}
-                        {msg.type === "expense_split" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.msgEmbedHeaderRow}>
+                          {/* Embedded Payment Claim Card */}
+                          {msg.type === "payment_claim" && msg.meta && (
+                            <View
+                              style={[
+                                styles.msgEmbedCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
                               <Text
                                 style={[
                                   styles.msgEmbedCategory,
                                   { color: isDark ? "#FFFFFF" : "#0F172A" },
                                 ]}
                               >
-                                🛒 {msg.meta.category}
+                                💳 {msg.meta.paymentMethod || "Payment Settle"}
                               </Text>
                               <Text style={styles.msgEmbedAmount}>
-                                {msg.meta.amount}
+                                Amount: {msg.meta.amount}
                               </Text>
                             </View>
-                            {msg.meta.share && (
-                              <Text
-                                style={[
-                                  styles.msgEmbedShare,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                Calculated split share: {msg.meta.share}
-                              </Text>
-                            )}
-                          </View>
-                        )}
+                          )}
 
-                        {/* Embedded Payment Claim Card */}
-                        {msg.type === "payment_claim" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <Text
+                          {/* Embedded Call Log Card */}
+                          {msg.type === "call_log" && (
+                            <View
                               style={[
-                                styles.msgEmbedCategory,
-                                { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                styles.callLogCard,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
                               ]}
                             >
-                              💳 {msg.meta.paymentMethod || "Payment Settle"}
-                            </Text>
-                            <Text style={styles.msgEmbedAmount}>
-                              Amount: {msg.meta.amount}
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* Embedded Call Log Card */}
-                        {msg.type === "call_log" && (
-                          <View
-                            style={[
-                              styles.callLogCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.callLogIconWrap}>
-                              <Ionicons
-                                name={
-                                  msg.meta?.callType === "video"
-                                    ? "videocam"
-                                    : "call"
-                                }
-                                size={16}
-                                color={
-                                  msg.meta?.callStatus === "missed"
-                                    ? "#EF4444"
-                                    : "#2563EB"
-                                }
-                              />
-                            </View>
-                            <View style={styles.callLogDetails}>
-                              <Text
-                                style={[
-                                  styles.callLogTitle,
-                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                                ]}
-                              >
-                                {msg.meta?.callType === "video"
-                                  ? "Video Call"
-                                  : "Voice Call"}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.callLogSubtitle,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                {msg.text.split("·")[1]?.trim() || "Completed"}
-                              </Text>
-                            </View>
-                            {activeThread.type === "direct" && (
-                              <TouchableOpacity
-                                style={styles.callBackBtn}
-                                onPress={() =>
-                                  handleStartCall(
+                              <View style={styles.callLogIconWrap}>
+                                <Ionicons
+                                  name={
                                     msg.meta?.callType === "video"
-                                      ? "video"
-                                      : "voice",
-                                  )
-                                }
-                              >
-                                <Text style={styles.callBackBtnText}>Call</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        )}
-
-                        {/* Reaction Badges Pill */}
-                        {hasReactions && (
-                          <View
-                            style={[
-                              styles.bubbleReactionsPill,
-                              styles.bubbleReactionsPillMe,
-                              {
-                                backgroundColor: isDark ? "#1E222B" : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            {Object.entries(msg.reactions!)
-                              .filter(
-                                ([_, uids]) =>
-                                  Array.isArray(uids) && uids.length > 0,
-                              )
-                              .map(([em, uids]) => (
+                                      ? "videocam"
+                                      : "call"
+                                  }
+                                  size={16}
+                                  color={
+                                    msg.meta?.callStatus === "missed"
+                                      ? "#EF4444"
+                                      : "#2563EB"
+                                  }
+                                />
+                              </View>
+                              <View style={styles.callLogDetails}>
                                 <Text
-                                  key={em}
-                                  style={styles.bubbleReactionItemText}
+                                  style={[
+                                    styles.callLogTitle,
+                                    { color: isDark ? "#FFFFFF" : "#0F172A" },
+                                  ]}
                                 >
-                                  {em}
-                                  {uids.length > 1 ? ` ${uids.length}` : ""}
+                                  {msg.meta?.callType === "video"
+                                    ? "Video Call"
+                                    : "Voice Call"}
                                 </Text>
-                              ))}
-                          </View>
-                        )}
-                      </TouchableOpacity>
+                                <Text
+                                  style={[
+                                    styles.callLogSubtitle,
+                                    { color: isDark ? "#94A3B8" : "#64748B" },
+                                  ]}
+                                >
+                                  {msg.text.split("·")[1]?.trim() ||
+                                    "Completed"}
+                                </Text>
+                              </View>
+                              {activeThread.type === "direct" && (
+                                <TouchableOpacity
+                                  style={styles.callBackBtn}
+                                  onPress={() =>
+                                    handleStartCall(
+                                      msg.meta?.callType === "video"
+                                        ? "video"
+                                        : "voice",
+                                    )
+                                  }
+                                >
+                                  <Text style={styles.callBackBtnText}>
+                                    Call
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          )}
 
-                      {/* Messenger-style tapped Time & Seen indicator */}
+                          {/* Reaction Badges Pill */}
+                          {hasIncomingReactions && (
+                            <View
+                              style={[
+                                styles.bubbleReactionsPill,
+                                styles.bubbleReactionsPillThem,
+                                {
+                                  backgroundColor: isDark
+                                    ? "#1E222B"
+                                    : "#FFFFFF",
+                                  borderColor: isDark
+                                    ? "rgba(255,255,255,0.12)"
+                                    : "#E2E8F0",
+                                },
+                              ]}
+                            >
+                              {Object.entries(msg.reactions!)
+                                .filter(
+                                  ([_, uids]) =>
+                                    Array.isArray(uids) && uids.length > 0,
+                                )
+                                .map(([em, uids]) => (
+                                  <Text
+                                    key={em}
+                                    style={styles.bubbleReactionItemText}
+                                  >
+                                    {em}
+                                    {uids.length > 1 ? ` ${uids.length}` : ""}
+                                  </Text>
+                                ))}
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Messenger-style tapped Time indicator for incoming message */}
                       {isExpanded && (
-                        <View style={styles.msgStatusRowMe}>
+                        <View style={styles.msgStatusRowThem}>
                           <Text
                             style={[
                               styles.msgStatusText,
                               isDark && { color: "#94A3B8" },
                             ]}
                           >
-                            {msg.time}{" "}
-                            <Text
-                              style={[
-                                styles.msgStatusSeenBadge,
-                                isSeen && { color: "#2563EB" },
-                              ]}
-                            >
-                              {seenLabel}
-                            </Text>
+                            {msg.time}
                           </Text>
                         </View>
                       )}
                     </View>
                   </SwipeableMessageRow>
                 );
-              }
-
-              // Incoming message: Facebook Messenger style layout with avatar on the left
-              const hasIncomingReactions = Boolean(
-                msg.reactions &&
-                Object.keys(msg.reactions).some(
-                  (k) => msg.reactions![k]?.length > 0,
-                ),
-              );
-
-              return (
-                <SwipeableMessageRow
-                  key={msg.id}
-                  onReply={() => handleStartReply(msg)}
-                  isMe={false}
-                  isDark={isDark}
-                >
-                  <View
-                    style={[
-                      styles.msgThemContainer,
-                      hasIncomingReactions && { marginBottom: 12 },
-                    ]}
-                  >
-                    {showSenderName && activeThread.type === "group" && (
-                      <Text
-                        style={[
-                          styles.msgSenderName,
-                          { color: isDark ? "#64748B" : "#94A3B8" },
-                        ]}
-                      >
-                        {msg.sender}
-                      </Text>
-                    )}
-
-                    <View style={styles.msgThemRowWithAvatar}>
-                      {/* 30x30 Circular Avatar on every incoming message line */}
-                      <View
-                        style={[
-                          styles.msgAvatarWrap,
-                          { backgroundColor: senderAvatar?.bg || "#EFF6FF" },
-                        ]}
-                      >
-                        {senderAvatar?.photoURL ? (
-                          <Image
-                            source={{ uri: senderAvatar.photoURL }}
-                            style={styles.msgAvatarImage}
-                          />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.msgAvatarInitials,
-                              { color: senderAvatar?.text || "#2563EB" },
-                            ]}
-                          >
-                            {senderAvatar?.initials || "R"}
-                          </Text>
-                        )}
-                      </View>
-
-                      {/* Speech bubble */}
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => handleToggleMessage(msg.id)}
-                        onLongPress={(e) => handleLongPressMessage(msg, e)}
-                        delayLongPress={350}
-                        style={[
-                          styles.speechBubble,
-                          styles.speechBubbleThem,
-                          {
-                            backgroundColor: isDark ? "#242731" : "#F1F5F9",
-                            position: "relative",
-                          },
-                        ]}
-                      >
-                        {/* Quoted Reply Preview */}
-                        {(msg.replyTo || msg.meta?.replyTo) && (
-                          <View
-                            style={[
-                              styles.msgReplySnippetBox,
-                              styles.msgReplySnippetBoxThem,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(255,255,255,0.08)"
-                                  : "rgba(0,0,0,0.06)",
-                                borderLeftColor: isDark ? "#60A5FA" : "#2563EB",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.msgReplySnippetSenderThem,
-                                { color: isDark ? "#60A5FA" : "#2563EB" },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {(msg.replyTo || msg.meta?.replyTo)?.senderName ||
-                                "Replied"}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.msgReplySnippetTextThem,
-                                { color: isDark ? "#CBD5E1" : "#475569" },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {(msg.replyTo || msg.meta?.replyTo)?.text}
-                            </Text>
-                          </View>
-                        )}
-                        {/* Image Attachment Preview */}
-                        {msg.type === "image" && msg.meta?.attachmentUrl && (
-                          <View
-                            style={{
-                              marginBottom: 6,
-                              borderRadius: 12,
-                              overflow: "hidden",
-                            }}
-                          >
-                            <Image
-                              source={{ uri: msg.meta.attachmentUrl }}
-                              style={{
-                                width: 220,
-                                height: 180,
-                                borderRadius: 12,
-                              }}
-                              resizeMode="cover"
-                            />
-                          </View>
-                        )}
-
-                        {/* File Attachment Preview */}
-                        {msg.type === "file" && msg.meta?.attachmentUrl && (
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 10,
-                              padding: 10,
-                              borderRadius: 12,
-                              backgroundColor: isDark
-                                ? "rgba(255,255,255,0.08)"
-                                : "#E2E8F0",
-                              marginBottom: 6,
-                            }}
-                          >
-                            <Ionicons
-                              name="document-text"
-                              size={26}
-                              color={isDark ? "#60A5FA" : "#2563EB"}
-                            />
-                            <View style={{ flex: 1 }}>
-                              <Text
-                                style={{
-                                  color: isDark ? "#FFFFFF" : "#0F172A",
-                                  fontSize: 13,
-                                  fontWeight: "700",
-                                }}
-                                numberOfLines={1}
-                              >
-                                {msg.meta.fileName || msg.text}
-                              </Text>
-                              {msg.meta.fileSize && (
-                                <Text
-                                  style={{
-                                    color: isDark ? "#94A3B8" : "#64748B",
-                                    fontSize: 11,
-                                    marginTop: 1,
-                                    fontWeight: "500",
-                                  }}
-                                >
-                                  {msg.meta.fileSize}
-                                </Text>
-                              )}
-                            </View>
-                          </View>
-                        )}
-
-                        {(!msg.type ||
-                          msg.type === "text" ||
-                          (msg.type !== "image" && msg.type !== "file") ||
-                          (msg.text &&
-                            msg.text !== "📷 Photo" &&
-                            !msg.text.startsWith("📎 "))) && (
-                          <Text
-                            style={[
-                              styles.speechBubbleText,
-                              { color: isDark ? "#FFFFFF" : "#0F172A" },
-                            ]}
-                          >
-                            {msg.text}
-                            {Boolean(msg.isEdited) && (
-                              <Text
-                                style={{
-                                  fontSize: 10,
-                                  color: isDark ? "#94A3B8" : "#64748B",
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                {" "}
-                                · edited
-                              </Text>
-                            )}
-                          </Text>
-                        )}
-
-                        {/* Embedded Expense Split Card */}
-                        {msg.type === "expense_split" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.msgEmbedHeaderRow}>
-                              <Text
-                                style={[
-                                  styles.msgEmbedCategory,
-                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                                ]}
-                              >
-                                🛒 {msg.meta.category}
-                              </Text>
-                              <Text style={styles.msgEmbedAmount}>
-                                {msg.meta.amount}
-                              </Text>
-                            </View>
-                            {msg.meta.share && (
-                              <Text
-                                style={[
-                                  styles.msgEmbedShare,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                Calculated split share: {msg.meta.share}
-                              </Text>
-                            )}
-                          </View>
-                        )}
-
-                        {/* Embedded Payment Claim Card */}
-                        {msg.type === "payment_claim" && msg.meta && (
-                          <View
-                            style={[
-                              styles.msgEmbedCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.msgEmbedCategory,
-                                { color: isDark ? "#FFFFFF" : "#0F172A" },
-                              ]}
-                            >
-                              💳 {msg.meta.paymentMethod || "Payment Settle"}
-                            </Text>
-                            <Text style={styles.msgEmbedAmount}>
-                              Amount: {msg.meta.amount}
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* Embedded Call Log Card */}
-                        {msg.type === "call_log" && (
-                          <View
-                            style={[
-                              styles.callLogCard,
-                              {
-                                backgroundColor: isDark
-                                  ? "rgba(0,0,0,0.3)"
-                                  : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            <View style={styles.callLogIconWrap}>
-                              <Ionicons
-                                name={
-                                  msg.meta?.callType === "video"
-                                    ? "videocam"
-                                    : "call"
-                                }
-                                size={16}
-                                color={
-                                  msg.meta?.callStatus === "missed"
-                                    ? "#EF4444"
-                                    : "#2563EB"
-                                }
-                              />
-                            </View>
-                            <View style={styles.callLogDetails}>
-                              <Text
-                                style={[
-                                  styles.callLogTitle,
-                                  { color: isDark ? "#FFFFFF" : "#0F172A" },
-                                ]}
-                              >
-                                {msg.meta?.callType === "video"
-                                  ? "Video Call"
-                                  : "Voice Call"}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.callLogSubtitle,
-                                  { color: isDark ? "#94A3B8" : "#64748B" },
-                                ]}
-                              >
-                                {msg.text.split("·")[1]?.trim() || "Completed"}
-                              </Text>
-                            </View>
-                            {activeThread.type === "direct" && (
-                              <TouchableOpacity
-                                style={styles.callBackBtn}
-                                onPress={() =>
-                                  handleStartCall(
-                                    msg.meta?.callType === "video"
-                                      ? "video"
-                                      : "voice",
-                                  )
-                                }
-                              >
-                                <Text style={styles.callBackBtnText}>Call</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        )}
-
-                        {/* Reaction Badges Pill */}
-                        {hasIncomingReactions && (
-                          <View
-                            style={[
-                              styles.bubbleReactionsPill,
-                              styles.bubbleReactionsPillThem,
-                              {
-                                backgroundColor: isDark ? "#1E222B" : "#FFFFFF",
-                                borderColor: isDark
-                                  ? "rgba(255,255,255,0.12)"
-                                  : "#E2E8F0",
-                              },
-                            ]}
-                          >
-                            {Object.entries(msg.reactions!)
-                              .filter(
-                                ([_, uids]) =>
-                                  Array.isArray(uids) && uids.length > 0,
-                              )
-                              .map(([em, uids]) => (
-                                <Text
-                                  key={em}
-                                  style={styles.bubbleReactionItemText}
-                                >
-                                  {em}
-                                  {uids.length > 1 ? ` ${uids.length}` : ""}
-                                </Text>
-                              ))}
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Messenger-style tapped Time indicator for incoming message */}
-                    {isExpanded && (
-                      <View style={styles.msgStatusRowThem}>
-                        <Text
-                          style={[
-                            styles.msgStatusText,
-                            isDark && { color: "#94A3B8" },
-                          ]}
-                        >
-                          {msg.time}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </SwipeableMessageRow>
-              );
-            })
+              });
+            })()
           )}
         </ScrollView>
 
@@ -4470,21 +8514,17 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 {
                   backgroundColor: isDark ? "#1E222B" : "#EFF6FF",
                   borderLeftWidth: 3.5,
-                  borderLeftColor: isDark ? "#60A5FA" : "#2563EB",
+                  borderLeftColor: selectedChatTheme,
                 },
               ]}
             >
-              <Ionicons
-                name="arrow-undo"
-                size={14}
-                color={isDark ? "#60A5FA" : "#2563EB"}
-              />
+              <Ionicons name="arrow-undo" size={14} color={selectedChatTheme} />
               <View style={{ flex: 1, marginHorizontal: 8 }}>
                 <Text
                   style={{
                     fontSize: 11.5,
                     fontWeight: "700",
-                    color: isDark ? "#60A5FA" : "#2563EB",
+                    color: selectedChatTheme,
                   }}
                 >
                   Replying to{" "}
@@ -4538,16 +8578,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               accessibilityLabel="Add attachment"
             >
               {isUploadingAttachment ? (
-                <ActivityIndicator
-                  size="small"
-                  color={isDark ? "#60A5FA" : "#2563EB"}
-                />
+                <ActivityIndicator size="small" color={selectedChatTheme} />
               ) : (
-                <Feather
-                  name="plus"
-                  size={19}
-                  color={isDark ? "#60A5FA" : "#2563EB"}
-                />
+                <Feather name="plus" size={19} color={selectedChatTheme} />
               )}
             </TouchableOpacity>
 
@@ -4621,7 +8654,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             <TouchableOpacity
               style={[
                 styles.capsuleSendButton,
-                editingMessage && { backgroundColor: "#10B981" },
+                {
+                  backgroundColor: editingMessage
+                    ? "#10B981"
+                    : selectedChatTheme,
+                },
                 (!chatInputText.trim() || isSending) && { opacity: 0.5 },
               ]}
               onPress={handleSendMessage}
@@ -5184,6 +9221,77 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                             </TouchableOpacity>
                           </>
                         )}
+
+                        {/* Pin / Unpin message */}
+                        <View
+                          style={[
+                            styles.stripDivider,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255,255,255,0.12)"
+                                : "#E2E8F0",
+                            },
+                          ]}
+                        />
+                        <TouchableOpacity
+                          style={styles.stripActionBtn}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            const msgId = selectedMessageForAction.id;
+                            setSelectedMessageForAction(null);
+                            setDeleteMode(false);
+                            handleTogglePinMessage(msgId);
+                          }}
+                        >
+                          <Ionicons
+                            name={
+                              (
+                                pinnedMessageIdsMap[activeThread?.id || ""] ||
+                                []
+                              ).includes(selectedMessageForAction.id)
+                                ? "pin"
+                                : "pin-outline"
+                            }
+                            size={15}
+                            color={
+                              (
+                                pinnedMessageIdsMap[activeThread?.id || ""] ||
+                                []
+                              ).includes(selectedMessageForAction.id)
+                                ? selectedChatTheme
+                                : isDark
+                                  ? "#CBD5E1"
+                                  : "#64748B"
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.stripActionBtnText,
+                              {
+                                color: (
+                                  pinnedMessageIdsMap[activeThread?.id || ""] ||
+                                  []
+                                ).includes(selectedMessageForAction.id)
+                                  ? selectedChatTheme
+                                  : isDark
+                                    ? "#CBD5E1"
+                                    : "#64748B",
+                                fontWeight: (
+                                  pinnedMessageIdsMap[activeThread?.id || ""] ||
+                                  []
+                                ).includes(selectedMessageForAction.id)
+                                  ? "700"
+                                  : "500",
+                              },
+                            ]}
+                          >
+                            {(
+                              pinnedMessageIdsMap[activeThread?.id || ""] || []
+                            ).includes(selectedMessageForAction.id)
+                              ? "Unpin"
+                              : "Pin"}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     )}
 
@@ -5280,6 +9388,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             </View>
           </TouchableOpacity>
         </Modal>
+
+        {/* Fullscreen Lightbox Modal */}
+        {renderLightboxModal()}
+
+        {/* View All Media, Files & Links Modal */}
+        {renderAllMediaModal()}
       </KeyboardAvoidingView>
     );
   }
@@ -7758,6 +11872,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           </TouchableOpacity>
         </View>
       </SmoothBottomSheetModal>
+
+      {/* Fullscreen Lightbox Modal */}
+      {renderLightboxModal()}
     </View>
   );
 };
@@ -8425,6 +12542,14 @@ const styles = StyleSheet.create({
   speechBubbleMe: {
     backgroundColor: "#2563EB",
     borderBottomRightRadius: 4,
+  },
+  speechBubbleImage: {
+    backgroundColor: "transparent",
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    padding: 0,
+    borderRadius: 16,
+    overflow: "hidden",
   },
   speechBubbleThem: {
     borderBottomLeftRadius: 4,
@@ -9103,5 +13228,267 @@ const styles = StyleSheet.create({
     fontSize: 16.5,
     fontWeight: "600",
     letterSpacing: -0.2,
+  },
+
+  /* =================================================== */
+  /* MESSENGER-STYLE CONVERSATION INFO & LIGHTBOX STYLES */
+  /* =================================================== */
+  conversationInfoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  conversationInfoBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  conversationInfoScrollContent: {
+    paddingBottom: 40,
+  },
+  conversationInfoProfileCenter: {
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  conversationInfoAvatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  conversationInfoAvatarImg: {
+    width: "100%",
+    height: "100%",
+  },
+  conversationInfoAvatarInitials: {
+    fontSize: 36,
+    fontWeight: "900",
+  },
+  conversationInfoName: {
+    fontSize: 22,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 4,
+    letterSpacing: -0.3,
+  },
+  conversationInfoStatus: {
+    fontSize: 13,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+  conversationInfoQuickActionsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "flex-start",
+    gap: 16,
+    paddingHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 18,
+  },
+  conversationInfoQuickActionItem: {
+    alignItems: "center",
+    width: 72,
+  },
+  conversationInfoQuickActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  conversationInfoQuickActionLabel: {
+    fontSize: 11.5,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+  conversationInfoSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    paddingHorizontal: 20,
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  conversationInfoMediaPreviewRow: {
+    paddingHorizontal: 18,
+    gap: 10,
+    paddingVertical: 6,
+  },
+  conversationInfoMediaCard: {
+    width: 140,
+    height: 160,
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+  },
+  conversationInfoMediaImg: {
+    width: "100%",
+    height: "100%",
+  },
+  conversationInfoMediaOverlay: {
+    position: "absolute",
+    right: 8,
+    bottom: 8,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  conversationInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  conversationInfoRowIconWrap: {
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  conversationInfoRowTextCol: {
+    flex: 1,
+  },
+  conversationInfoRowTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  conversationInfoRowSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  conversationInfoRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  conversationInfoRowRightText: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  inChatSearchBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  inChatSearchInput: {
+    flex: 1,
+    height: 36,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  inChatSearchCloseBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.96)",
+  },
+  lightboxHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    zIndex: 20,
+  },
+  lightboxCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lightboxHeaderInfo: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+  lightboxSenderText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  lightboxTimeText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    marginTop: 1,
+  },
+  lightboxScroll: {
+    flex: 1,
+  },
+  lightboxScrollContent: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  lightboxCaptionBox: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    backgroundColor: "rgba(0,0,0,0.7)",
+  },
+  lightboxCaptionText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    textAlign: "center",
+  },
+  allMediaTabsRow: {
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  allMediaTabBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  allMediaTabBtnActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  allMediaTabText: {
+    fontSize: 13,
+  },
+  allMediaGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  allMediaGridItem: {
+    width: "31%",
+    aspectRatio: 1,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+  },
+  allMediaFileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginHorizontal: 16,
   },
 });

@@ -259,7 +259,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             <View style={styles.logoContainer}>
               <View style={styles.logoBadge}>
                 <Image
-                  source={assets.favicon}
+                  source={assets.sBlueLogo}
                   style={styles.logoImage}
                   resizeMode="cover"
                 />

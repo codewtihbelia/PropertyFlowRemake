@@ -32,6 +32,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
+import * as AuthSession from "expo-auth-session";
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { authPinService } from "../services/authPinService";
 
@@ -477,8 +478,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         } catch {}
       }
 
-      const AuthSession = require("expo-auth-session");
-
       // For browser-based OAuth endpoints, Google requires a Web Client ID.
       const clientId =
         googleWebClientId ||
@@ -489,50 +488,68 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         Constants.appOwnership === "expo" ||
         Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
-      // Determine returnUrl dynamically based on runtime environment
+      // Primary relay URL: solely use Splitzy's own Firebase Hosting OAuth callback URL
+      const relayUri =
+        process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI?.trim() ||
+        "https://splitzy-d429d.firebaseapp.com/oauth-callback.html";
+
       let returnUrl: string;
+      let redirectUri: string;
+      let startUrl: string;
+
+      const nonce = Math.random().toString(36).substring(2, 12);
+      const rawState = Math.random().toString(36).substring(2, 12);
+
       if (Platform.OS === "web") {
         returnUrl = AuthSession.makeRedirectUri();
-      } else if (isExpoGo) {
-        // In Expo Go sandbox, makeRedirectUri() yields the exp:// URL recognized by Expo Go
-        returnUrl = AuthSession.makeRedirectUri();
-      } else {
-        // In standalone APK build, use custom scheme splitzy://
-        returnUrl = AuthSession.makeRedirectUri({
-          scheme: "splitzy",
-          path: "oauthredirect",
+        redirectUri = returnUrl;
+        const googleParams = new URLSearchParams({
+          client_id: clientId!,
+          redirect_uri: redirectUri,
+          response_type: "id_token",
+          scope: "openid profile email",
+          nonce,
+          state: rawState,
+          prompt: "select_account",
         });
+        startUrl = `https://accounts.google.com/o/oauth2/v2/auth?${googleParams.toString()}`;
+      } else {
+        // Mobile (both Standalone APK & Expo environment):
+        // Solely use Splitzy's dedicated Firebase callback: https://splitzy-d429d.firebaseapp.com/oauth-callback.html
+        redirectUri = relayUri;
+
+        // In standalone APK, standard scheme is splitzy://oauthredirect.
+        // In Expo Go, returnUrl points to the current active client deep link.
+        returnUrl = isExpoGo
+          ? AuthSession.makeRedirectUri()
+          : AuthSession.makeRedirectUri({
+              scheme: "splitzy",
+              path: "oauthredirect",
+            }) || "splitzy://oauthredirect";
+
         if (returnUrl === "splitzy://" || returnUrl === "splitzy:/") {
           returnUrl = "splitzy://oauthredirect";
         }
+
+        // Encode state with returnUrl so oauth-callback.html knows where to return the user
+        let statePayload = rawState;
+        try {
+          statePayload = btoa(JSON.stringify({ s: rawState, r: returnUrl }));
+        } catch {
+          statePayload = rawState;
+        }
+
+        const googleParams = new URLSearchParams({
+          client_id: clientId!,
+          redirect_uri: redirectUri,
+          response_type: "id_token",
+          scope: "openid profile email",
+          nonce,
+          state: statePayload,
+          prompt: "select_account",
+        });
+        startUrl = `https://accounts.google.com/o/oauth2/v2/auth?${googleParams.toString()}`;
       }
-
-      // Proxy redirect URI registered in Google Cloud Console
-      const proxyRedirectUri =
-        process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI?.trim() ||
-        "https://auth.expo.io/@splitzy01/splitzy-mobile";
-
-      const redirectUri = Platform.OS === "web" ? returnUrl : proxyRedirectUri;
-
-      const nonce = Math.random().toString(36).substring(2, 12);
-      const state = Math.random().toString(36).substring(2, 12);
-
-      const googleParams = new URLSearchParams({
-        client_id: clientId!,
-        redirect_uri: redirectUri,
-        response_type: "id_token",
-        scope: "openid profile email",
-        nonce,
-        state,
-        prompt: "select_account",
-      });
-      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${googleParams.toString()}`;
-
-      // On native mobile, route through the proxy /start endpoint
-      const startUrl =
-        Platform.OS === "web"
-          ? googleAuthUrl
-          : `${proxyRedirectUri}/start?authUrl=${encodeURIComponent(googleAuthUrl)}&returnUrl=${encodeURIComponent(returnUrl)}`;
 
       // One-flight executor to process redirect callback and auto-close browser tab immediately
       const processAuthRedirectUrl = async (urlToParse: string) => {
@@ -548,25 +565,46 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             } catch {}
           }
 
-          const hashIndex = urlToParse.indexOf("#");
-          const queryIndex = urlToParse.indexOf("?");
+          const hashPart = urlToParse.includes("#")
+            ? urlToParse.substring(urlToParse.indexOf("#") + 1)
+            : "";
+          const queryPart = urlToParse.includes("?")
+            ? urlToParse.substring(urlToParse.indexOf("?") + 1).split("#")[0]
+            : "";
 
-          const paramsString =
-            hashIndex !== -1
-              ? urlToParse.substring(hashIndex + 1)
-              : queryIndex !== -1
-                ? urlToParse.substring(queryIndex + 1)
-                : "";
+          const hashParams = new URLSearchParams(hashPart);
+          const queryParams = new URLSearchParams(queryPart);
 
-          const params = new URLSearchParams(paramsString);
+          const errorParam =
+            hashParams.get("error") || queryParams.get("error");
+          const errorDesc =
+            hashParams.get("error_description") ||
+            queryParams.get("error_description");
 
-          if (params.get("errorCode") === "cookies-disabled") {
+          if (errorParam || errorDesc) {
+            if (errorParam === "access_denied") {
+              // User cancelled account selection
+              setGoogleLoading(false);
+              return;
+            }
+            throw new Error(
+              errorDesc ||
+                errorParam ||
+                "Sign-in was cancelled or encountered an error.",
+            );
+          }
+
+          if (
+            hashParams.get("errorCode") === "cookies-disabled" ||
+            queryParams.get("errorCode") === "cookies-disabled"
+          ) {
             throw new Error(
               "Cookies appear to be disabled in your mobile browser. Please enable cookies in your browser settings to complete Google Sign-In, or use Email & Password.",
             );
           }
 
-          const idToken = params.get("id_token");
+          const idToken =
+            hashParams.get("id_token") || queryParams.get("id_token");
           if (!idToken) {
             throw new Error(
               "Google authentication completed, but no ID token was received.",
@@ -593,7 +631,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           event?.url &&
           (event.url.includes("id_token") ||
             event.url.includes("oauthredirect") ||
-            event.url.includes("auth.expo.io"))
+            event.url.includes("oauth-callback") ||
+            event.url.includes("splitzy://") ||
+            event.url.includes("auth.expo.io") ||
+            event.url.includes("expo-auth-session"))
         ) {
           try {
             await processAuthRedirectUrl(event.url);
@@ -629,11 +670,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         if (
           initialUrl &&
           (initialUrl.includes("id_token") ||
-            initialUrl.includes("oauthredirect"))
+            initialUrl.includes("oauthredirect") ||
+            initialUrl.includes("expo-auth-session"))
         ) {
           await processAuthRedirectUrl(initialUrl);
         } else {
-          // User genuinely closed the browser without choosing an account
+          // User closed the browser without choosing an account
           setGoogleLoading(false);
         }
       }
@@ -1686,7 +1728,7 @@ const styles = StyleSheet.create({
   },
   smsNoticeRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 6,
     marginTop: 8,
     paddingHorizontal: 4,

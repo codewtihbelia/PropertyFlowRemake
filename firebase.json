@@ -6,6 +6,28 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "hosting": {
+    "public": "packages/web/dist",
+    "predeploy": ["npm --workspace=@propertyflow/web run build"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/oauth-callback.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
   "functions": [
     {
       "source": "packages/functions",
@@ -38,4 +60,3 @@
     "singleProjectMode": true
   }
 }
-

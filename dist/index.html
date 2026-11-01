@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splitzy | Mobile App</title>
+    <meta
+      name="description"
+      content="Manage, split bills, and track group expenses effortlessly with centavo-accurate fair splits and water utility attendance."
+    />
+    <meta property="og:title" content="Splitzy | Mobile App" />
+    <meta
+      property="og:description"
+      content="Manage, split bills, and track group expenses effortlessly with centavo-accurate fair splits and water utility attendance."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("splitzy_theme_mode");
+          var supportDark = window.matchMedia(
+            "(prefers-color-scheme: dark)",
+          ).matches;
+          if (mode === "dark" || (mode === "system" && supportDark)) {
+            document.documentElement.classList.add("dark");
+            document.documentElement.style.colorScheme = "dark";
+          } else {
+            document.documentElement.classList.remove("dark");
+            document.documentElement.style.colorScheme = "light";
+          }
+        } catch (e) {}
+
+        // If Google OAuth response lands on the root domain, forward seamlessly to oauth-callback.html
+        try {
+          var h = window.location.hash || "";
+          var q = window.location.search || "";
+          if (
+            (h.indexOf("id_token=") !== -1 || q.indexOf("id_token=") !== -1) &&
+            !window.location.pathname.includes("oauth-callback")
+          ) {
+            window.location.replace("/oauth-callback.html" + (h || q));
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DYN2SWNM.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CCwEQ2JW.css">
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased font-sans">
+    <div id="root"></div>
+  </body>
+</html>

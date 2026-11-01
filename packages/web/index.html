@@ -35,6 +35,18 @@
             document.documentElement.style.colorScheme = "light";
           }
         } catch (e) {}
+
+        // If Google OAuth response lands on the root domain, forward seamlessly to oauth-callback.html
+        try {
+          var h = window.location.hash || "";
+          var q = window.location.search || "";
+          if (
+            (h.indexOf("id_token=") !== -1 || q.indexOf("id_token=") !== -1) &&
+            !window.location.pathname.includes("oauth-callback")
+          ) {
+            window.location.replace("/oauth-callback.html" + (h || q));
+          }
+        } catch (e) {}
       })();
     </script>
   </head>

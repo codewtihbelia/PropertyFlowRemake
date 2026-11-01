@@ -14,6 +14,7 @@
     "dev:web": "npm --workspace=@propertyflow/web run dev",
     "build:web": "npm --workspace=@propertyflow/web run build",
     "dev:mobile": "npm --workspace=@propertyflow/mobile run start",
+    "deploy:hosting": "npm --workspace=@propertyflow/web run build && npx firebase deploy --only hosting",
     "test": "npm --workspace=@propertyflow/shared run test",
     "build:shared": "npm --workspace=@propertyflow/shared run build",
     "postinstall": "npm --workspace=@propertyflow/mobile run postinstall || true"

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node -e \"const fs=require('fs'); if (fs.existsSync('dist')) { fs.mkdirSync('../../dist', {recursive:true}); fs.cpSync('dist', '../../dist', {recursive:true}); }\"",
+    "deploy:hosting": "npm run build && npx firebase deploy --only hosting --config ../../firebase.json",
     "preview": "vite preview"
   },
   "dependencies": {

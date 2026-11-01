@@ -3,6 +3,7 @@
     "module": "commonjs",
     "noImplicitReturns": true,
     "noUnusedLocals": false,
+    "rootDir": "src",
     "outDir": "dist",
     "sourceMap": true,
     "strict": true,
@@ -12,4 +13,3 @@
   "compileOnSave": true,
   "include": ["src"]
 }
-

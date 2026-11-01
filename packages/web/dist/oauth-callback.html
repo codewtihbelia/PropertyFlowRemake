@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splitzy - Sign In</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+      }
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        color: #f8fafc;
+        padding: 24px;
+      }
+      .card {
+        background: rgba(30, 41, 59, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 20px;
+        padding: 40px 32px;
+        max-width: 420px;
+        width: 100%;
+        text-align: center;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+      .logo-container {
+        width: 72px;
+        height: 72px;
+        margin: 0 auto 24px auto;
+        border-radius: 18px;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
+        overflow: hidden;
+      }
+      .logo-container img {
+        width: 52px;
+        height: 52px;
+        object-fit: contain;
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 8px;
+        color: #ffffff;
+      }
+      p.subtitle {
+        font-size: 14px;
+        color: #94a3b8;
+        line-height: 1.5;
+        margin-bottom: 28px;
+      }
+      .spinner {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 24px auto;
+        border: 3.5px solid rgba(37, 99, 235, 0.2);
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 0.9s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #60a5fa;
+        background: rgba(37, 99, 235, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        padding: 6px 14px;
+        border-radius: 9999px;
+        margin-bottom: 24px;
+      }
+      .btn {
+        display: inline-block;
+        width: 100%;
+        background: #2563eb;
+        color: #ffffff;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 14px 20px;
+        border-radius: 12px;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: none;
+        box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+      }
+      .btn:hover {
+        background: #1d4ed8;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+      }
+      .btn:active {
+        transform: translateY(0);
+      }
+      .hint {
+        margin-top: 16px;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo-container">
+        <img src="/sBlueLogo.png" alt="Splitzy Logo" />
+      </div>
+      <div class="spinner" id="spinner"></div>
+      <h1 id="title">Signing in to Splitzy</h1>
+      <p class="subtitle" id="message">
+        Please wait while we complete your authentication and return you to the
+        app...
+      </p>
+
+      <div class="status-badge" id="statusBadge">
+        <span>●</span> Connecting to Splitzy
+      </div>
+
+      <div id="actionArea" class="hidden">
+        <a id="deepLinkBtn" href="#" class="btn">Open Splitzy App</a>
+        <p class="hint">
+          If the app did not open automatically, tap the button above.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var hash = window.location.hash || "";
+        var search = window.location.search || "";
+        var payload = hash || search;
+
+        // Parse parameters from hash or search query
+        var rawString = hash
+          ? hash.substring(1)
+          : search
+            ? search.substring(1)
+            : "";
+        var params = new URLSearchParams(rawString);
+        var error = params.get("error") || params.get("error_description");
+        var stateRaw = params.get("state");
+
+        var titleEl = document.getElementById("title");
+        var messageEl = document.getElementById("message");
+        var spinnerEl = document.getElementById("spinner");
+        var actionArea = document.getElementById("actionArea");
+        var statusBadge = document.getElementById("statusBadge");
+        var deepLinkBtn = document.getElementById("deepLinkBtn");
+
+        if (error) {
+          spinnerEl.classList.add("hidden");
+          titleEl.textContent = "Sign-In Cancelled";
+          messageEl.textContent =
+            error === "access_denied"
+              ? "You cancelled the sign-in request. You can close this window and try again."
+              : "Authentication issue: " + error;
+          statusBadge.textContent = "Cancelled";
+          statusBadge.style.color = "#F87171";
+          statusBadge.style.borderColor = "rgba(239, 68, 68, 0.3)";
+          statusBadge.style.background = "rgba(239, 68, 68, 0.15)";
+        }
+
+        // Check if opened as popup or iframe communicating via postMessage
+        if (window.opener && typeof window.opener.postMessage === "function") {
+          try {
+            window.opener.postMessage(
+              {
+                type: "SPLITZY_OAUTH_RESPONSE",
+                hash: hash,
+                search: search,
+              },
+              "*",
+            );
+          } catch (e) {}
+        }
+
+        // Determine returnUrl: inspect state or return_to query parameter
+        var targetBase = "splitzy://oauthredirect";
+        if (params.get("return_to")) {
+          targetBase = decodeURIComponent(params.get("return_to"));
+        } else if (stateRaw) {
+          try {
+            var decodedStr = "";
+            if (stateRaw.indexOf("{") === 0) {
+              decodedStr = stateRaw;
+            } else {
+              try {
+                decodedStr = atob(stateRaw);
+              } catch (err) {
+                decodedStr = decodeURIComponent(stateRaw);
+              }
+            }
+            var parsedObj = JSON.parse(decodedStr);
+            if (parsedObj && (parsedObj.r || parsedObj.returnUrl)) {
+              targetBase = parsedObj.r || parsedObj.returnUrl;
+            }
+          } catch (e) {}
+        }
+
+        // Build target deep link URL appending hash payload
+        var cleanPayload = payload.replace(/^[#?]/, "");
+        var deepLinkUrl = targetBase;
+        if (cleanPayload) {
+          var delimiter = targetBase.indexOf("#") !== -1 ? "&" : "#";
+          deepLinkUrl = targetBase + delimiter + cleanPayload;
+        }
+
+        deepLinkBtn.href = deepLinkUrl;
+
+        // Automatically trigger native deep link navigation
+        try {
+          window.location.replace(deepLinkUrl);
+        } catch (e) {
+          window.location.href = deepLinkUrl;
+        }
+
+        // Show manual fallback button after brief timeout in case browser requires explicit user gesture
+        setTimeout(function () {
+          actionArea.classList.remove("hidden");
+          statusBadge.textContent = "Ready to launch";
+        }, 1000);
+
+        // Second attempt to ensure browser triggers deep link
+        setTimeout(function () {
+          if (!document.hidden) {
+            window.location.href = deepLinkUrl;
+          }
+        }, 1500);
+      })();
+    </script>
+  </body>
+</html>

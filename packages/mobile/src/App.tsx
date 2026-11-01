@@ -301,6 +301,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const [pendingAttendanceLeave, setPendingAttendanceLeave] = useState<
     (() => void) | null
   >(null);
+  const [isWalletInSubView, setIsWalletInSubView] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<{
     name: string;
     role: string;
@@ -354,7 +355,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const [userProfileOverlayConfig, setUserProfileOverlayConfig] = useState<{
     user: UserProfileInfo;
     initialEditMode?: boolean;
-    fromScreen?: "profile" | "community";
+    fromScreen?: "profile" | "community" | "messages";
   } | null>(null);
 
   const handleProfileUpdated = (updated: UserProfileInfo) => {
@@ -1302,6 +1303,8 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         onBack={() => {
           if (userProfileOverlayConfig.fromScreen === "community") {
             setOverlayScreen("community");
+          } else if (userProfileOverlayConfig.fromScreen === "messages") {
+            setOverlayScreen("messages");
           } else {
             setOverlayScreen("none");
           }
@@ -1354,6 +1357,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               userProfile?.photoURL ||
               auth.currentUser?.photoURL ||
               undefined,
+          }}
+          onOpenUserProfile={(targetUser) => {
+            setUserProfileOverlayConfig({
+              user: targetUser as UserProfileInfo,
+              fromScreen: "messages",
+            });
+            setOverlayScreen("user_profile");
           }}
           onOpenSettleDues={handleOpenSettleDues}
           onOpenAddExpense={
@@ -1469,6 +1479,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
               setCurrentTab("bills");
             }}
             onNavigateToSettle={handleOpenSettleDues}
+            onSubViewChange={setIsWalletInSubView}
           />
         );
       case "bills":
@@ -1506,6 +1517,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
                 userProfile?.photoURL ||
                 auth.currentUser?.photoURL ||
                 undefined,
+            }}
+            onOpenUserProfile={(targetUser) => {
+              setUserProfileOverlayConfig({
+                user: targetUser as UserProfileInfo,
+                fromScreen: "messages",
+              });
+              setOverlayScreen("user_profile");
             }}
             onOpenSettleDues={handleOpenSettleDues}
             onOpenAddExpense={
@@ -1675,11 +1693,12 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         {renderTabContent()}
       </View>
 
-      {currentTab !== "groups" && (
+      {currentTab !== "groups" && !isWalletInSubView && (
         <FloatingNavBar
           currentTab={currentTab}
           onSelectTab={(tab) => {
             showNav();
+            setIsWalletInSubView(false);
             if (
               currentTab === "attendance" &&
               tab !== "attendance" &&
@@ -1710,6 +1729,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
 
       {/* Floating draggable messages widget, floating and draggable across the screen for all logged-in users */}
       {currentTab !== "messages" &&
+        !isWalletInSubView &&
         overlayScreen === "none" &&
         Boolean(auth.currentUser?.uid) &&
         userProfile?.joinRequestStatus !== "REJECTED" && (
