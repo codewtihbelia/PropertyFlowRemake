@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import React from "react";
+=======
+import React, { useState, useEffect } from "react";
+>>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
 import {
   Download,
   Smartphone,
@@ -16,7 +20,20 @@ interface DownloadCtaSectionProps {
 export const DownloadCtaSection: React.FC<DownloadCtaSectionProps> = ({
   onOpenDownloadModal,
 }) => {
+<<<<<<< HEAD
   const settings = useMobilePlatformSettings();
+=======
+  const [settings, setSettings] = useState<MobilePlatformSettings>(
+    DEFAULT_PLATFORM_SETTINGS,
+  );
+
+  useEffect(() => {
+    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
+      setSettings(newSettings);
+    });
+    return () => unsubscribe();
+  }, []);
+>>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
 
   return (
     <section
