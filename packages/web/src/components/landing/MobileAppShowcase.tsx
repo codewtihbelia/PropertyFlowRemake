@@ -276,16 +276,6 @@ export const MobileAppShowcase: React.FC<MobileAppShowcaseProps> = ({
     },
   };
 
-<<<<<<< HEAD
-=======
-  useEffect(() => {
-    const unsubscribe = listenToMobilePlatformSettings((newSettings) => {
-      setSettings(newSettings);
-    });
-    return () => unsubscribe();
-  }, []);
-
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
   const current = screensConfig[activeScreen];
   const activeImage =
     deviceTheme === "dark" ? current.darkImg : current.lightImg;

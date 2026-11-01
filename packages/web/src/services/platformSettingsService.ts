@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 import { useSyncExternalStore } from "react";
-=======
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 
@@ -94,49 +91,6 @@ function startGlobalListener() {
   if (isListening) return;
   isListening = true;
 
-<<<<<<< HEAD
-=======
-// Singleton state to avoid multiple duplicate Firestore WebSocket listeners and memory leaks
-let cachedSettings: MobilePlatformSettings = { ...DEFAULT_PLATFORM_SETTINGS };
-const subscribers = new Set<(settings: MobilePlatformSettings) => void>();
-let globalUnsubPrimary: (() => void) | null = null;
-let globalUnsubSecondary: (() => void) | null = null;
-let isListening = false;
-
-function areSettingsEqual(a: MobilePlatformSettings, b: MobilePlatformSettings): boolean {
-  return (
-    a.latestVersion === b.latestVersion &&
-    a.apkDownloadUrl === b.apkDownloadUrl &&
-    a.minSupportedVersion === b.minSupportedVersion &&
-    a.releaseTitle === b.releaseTitle &&
-    a.releaseNotes === b.releaseNotes &&
-    a.forceUpdate === b.forceUpdate &&
-    a.announcementBanner === b.announcementBanner &&
-    a.maintenanceMode === b.maintenanceMode &&
-    a.maintenanceMessage === b.maintenanceMessage &&
-    a.updatedAt === b.updatedAt
-  );
-}
-
-function notifySubscribers(newSettings: MobilePlatformSettings) {
-  if (areSettingsEqual(cachedSettings, newSettings)) {
-    return; // Prevent duplicate re-renders and memory growth
-  }
-  cachedSettings = newSettings;
-  subscribers.forEach((cb) => {
-    try {
-      cb(cachedSettings);
-    } catch (e) {
-      console.error("[platformSettingsService] subscriber callback error:", e);
-    }
-  });
-}
-
-function startGlobalListener() {
-  if (isListening) return;
-  isListening = true;
-
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
   let hasReceivedPrimary = false;
 
   try {
@@ -148,7 +102,6 @@ function startGlobalListener() {
           hasReceivedPrimary = true;
           const data = snap.data();
           notifySubscribers({
-<<<<<<< HEAD
             latestVersion:
               data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
             minSupportedVersion:
@@ -160,13 +113,6 @@ function startGlobalListener() {
               data.releaseNotes || DEFAULT_PLATFORM_SETTINGS.releaseNotes,
             apkDownloadUrl:
               data.apkDownloadUrl || DEFAULT_PLATFORM_SETTINGS.apkDownloadUrl,
-=======
-            latestVersion: data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
-            minSupportedVersion: data.minSupportedVersion || DEFAULT_PLATFORM_SETTINGS.minSupportedVersion,
-            releaseTitle: data.releaseTitle || DEFAULT_PLATFORM_SETTINGS.releaseTitle,
-            releaseNotes: data.releaseNotes || DEFAULT_PLATFORM_SETTINGS.releaseNotes,
-            apkDownloadUrl: data.apkDownloadUrl || DEFAULT_PLATFORM_SETTINGS.apkDownloadUrl,
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
             forceUpdate: Boolean(data.forceUpdate),
             announcementBanner: data.announcementBanner || "",
             maintenanceMode: Boolean(data.maintenanceMode),
@@ -205,7 +151,6 @@ function startGlobalListener() {
           if (snap.exists()) {
             const data = snap.data();
             notifySubscribers({
-<<<<<<< HEAD
               latestVersion:
                 data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
               minSupportedVersion:
@@ -217,13 +162,6 @@ function startGlobalListener() {
                 data.releaseNotes || DEFAULT_PLATFORM_SETTINGS.releaseNotes,
               apkDownloadUrl:
                 data.apkDownloadUrl || DEFAULT_PLATFORM_SETTINGS.apkDownloadUrl,
-=======
-              latestVersion: data.latestVersion || DEFAULT_PLATFORM_SETTINGS.latestVersion,
-              minSupportedVersion: data.minSupportedVersion || DEFAULT_PLATFORM_SETTINGS.minSupportedVersion,
-              releaseTitle: data.releaseTitle || DEFAULT_PLATFORM_SETTINGS.releaseTitle,
-              releaseNotes: data.releaseNotes || DEFAULT_PLATFORM_SETTINGS.releaseNotes,
-              apkDownloadUrl: data.apkDownloadUrl || DEFAULT_PLATFORM_SETTINGS.apkDownloadUrl,
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
               forceUpdate: Boolean(data.forceUpdate),
               announcementBanner: data.announcementBanner || "",
               maintenanceMode: Boolean(data.maintenanceMode),
@@ -239,11 +177,7 @@ function startGlobalListener() {
         },
         () => {
           notifySubscribers(DEFAULT_PLATFORM_SETTINGS);
-<<<<<<< HEAD
         },
-=======
-        }
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
       );
     } catch {
       notifySubscribers(DEFAULT_PLATFORM_SETTINGS);
@@ -264,7 +198,6 @@ function stopGlobalListener() {
   isListening = false;
 }
 
-<<<<<<< HEAD
 export function subscribeMobilePlatformSettings(
   onStoreChange: () => void,
 ): () => void {
@@ -273,27 +206,6 @@ export function subscribeMobilePlatformSettings(
 
   return () => {
     subscribers.delete(onStoreChange);
-=======
-/**
- * Listens to real-time platform settings updates configured by the Super Admin in the mobile app.
- * Uses a deduplicated singleton listener to prevent multiple simultaneous WebSocket connections and memory leaks.
- */
-export function listenToMobilePlatformSettings(
-  callback: (settings: MobilePlatformSettings) => void
-): () => void {
-  // Immediately supply latest cached settings
-  try {
-    callback(cachedSettings);
-  } catch (e) {
-    console.error("[platformSettingsService] initial callback error:", e);
-  }
-
-  subscribers.add(callback);
-  startGlobalListener();
-
-  return () => {
-    subscribers.delete(callback);
->>>>>>> cfb5e4d7c49ba50c9437e1a33c8b1ceca90a69ad
     if (subscribers.size === 0) {
       stopGlobalListener();
     }
