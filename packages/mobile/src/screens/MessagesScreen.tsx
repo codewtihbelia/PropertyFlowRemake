@@ -52,6 +52,7 @@ export interface MessagesScreenProps {
     photoURL?: string;
   };
   initialTargetUserId?: string;
+  onCloseDirectChat?: () => void;
   onOpenSettleDues?: () => void;
   onOpenAddExpense?: () => void;
   loading?: boolean;
@@ -736,6 +737,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   householdId,
   currentUser = { name: "Resident", avatar: "R" },
   initialTargetUserId,
+  onCloseDirectChat,
   onOpenSettleDues,
   onOpenAddExpense,
   onExploreCommunity,
@@ -2595,9 +2597,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   }, [conversations]);
 
-  // Auto-focus thread if initialTargetUserId is supplied (or initialize new direct thread if first time messaging)
+  const autoFocusedTargetRef = useRef<string | null>(null);
+
+  // Auto-focus thread if initialTargetUserId is supplied (run only once per target user to prevent back-loop)
   useEffect(() => {
-    if (initialTargetUserId && !activeThread) {
+    if (
+      initialTargetUserId &&
+      autoFocusedTargetRef.current !== initialTargetUserId
+    ) {
+      autoFocusedTargetRef.current = initialTargetUserId;
       const match = conversations.find(
         (c) => c.targetUserId === initialTargetUserId,
       );
@@ -2651,7 +2659,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         };
       }
     }
-  }, [initialTargetUserId, conversations, activeThread, currentUid]);
+  }, [initialTargetUserId, conversations, currentUid]);
 
   // Track message IDs marked read in memory to prevent repetitive Firestore writes
   const markedReadMessageIdsRef = useRef<Set<string>>(new Set());
@@ -6952,7 +6960,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           {/* Back chevron */}
           <TouchableOpacity
             style={styles.chatHeaderBackBtn}
-            onPress={() => setActiveThread(null)}
+            onPress={() => {
+              if (initialTargetUserId && onCloseDirectChat) {
+                onCloseDirectChat();
+              } else if (initialTargetUserId && onBack) {
+                onBack();
+              } else {
+                setActiveThread(null);
+              }
+            }}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             accessibilityLabel="Back to conversation list"
           >

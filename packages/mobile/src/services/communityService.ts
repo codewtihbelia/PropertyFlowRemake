@@ -888,33 +888,91 @@ class CommunityService {
         ? data.viewerDetails
         : [];
 
-      const cleanViewerName = formatAuthorDisplayName(
-        viewer.name,
-        viewer.email,
-      );
-      const isAlreadyInViews = existingViews.includes(viewer.uid);
-      const isAlreadyInDetails = existingDetails.some(
+      let cleanViewerName = formatAuthorDisplayName(viewer.name, viewer.email);
+      let viewerAvatar = viewer.avatar || "";
+      let viewerEmail = viewer.email || "";
+
+      // If viewer name is empty, generic, or avatar is missing, look up real profile in Firestore users collection
+      if (
+        !viewer.name ||
+        cleanViewerName === "Splitzy Member" ||
+        cleanViewerName === "Community Member" ||
+        !viewerAvatar
+      ) {
+        try {
+          const rawUid = viewer.uid.replace(/^mem_/, "").trim();
+          const userSnap = await getDoc(doc(db, "users", rawUid));
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const realName =
+              userData.displayName ||
+              userData.fullName ||
+              userData.name ||
+              (userData.email ? userData.email.split("@")[0] : "");
+            if (realName && realName.trim()) {
+              cleanViewerName = realName.trim();
+            }
+            if (
+              !viewerAvatar &&
+              (userData.photoURL || userData.profilePicture || userData.avatar)
+            ) {
+              viewerAvatar =
+                userData.photoURL || userData.profilePicture || userData.avatar;
+            }
+            if (!viewerEmail && userData.email) {
+              viewerEmail = userData.email;
+            }
+          }
+        } catch (fetchErr) {
+          console.log("Viewer profile lookup notice:", fetchErr);
+        }
+      }
+
+      const existingEntryIndex = existingDetails.findIndex(
         (d) => d.uid === viewer.uid,
       );
+      const isAlreadyInViews = existingViews.includes(viewer.uid);
 
-      if (isAlreadyInViews && isAlreadyInDetails) {
-        return; // Already recorded
+      // If already recorded with rich profile, skip
+      if (
+        isAlreadyInViews &&
+        existingEntryIndex !== -1 &&
+        existingDetails[existingEntryIndex].name !== "Splitzy Member" &&
+        existingDetails[existingEntryIndex].name !== "Community Member" &&
+        existingDetails[existingEntryIndex].avatar
+      ) {
+        return; // Already recorded with full identity
       }
 
       const updatedViews = isAlreadyInViews
         ? existingViews
         : [...existingViews, viewer.uid];
+
       const newViewerEntry: StoryViewerInfo = {
         uid: viewer.uid,
         name: cleanViewerName,
-        avatar: viewer.avatar || "",
-        email: viewer.email || "",
+        avatar: viewerAvatar,
+        email: viewerEmail,
         viewedAt: new Date().toISOString(),
       };
 
-      const updatedDetails = isAlreadyInDetails
-        ? existingDetails
-        : [...existingDetails, newViewerEntry];
+      let updatedDetails: StoryViewerInfo[];
+      if (existingEntryIndex !== -1) {
+        // Upgrade previously stored generic viewer entry with real identity
+        updatedDetails = [...existingDetails];
+        updatedDetails[existingEntryIndex] = {
+          ...existingDetails[existingEntryIndex],
+          name:
+            cleanViewerName !== "Splitzy Member"
+              ? cleanViewerName
+              : existingDetails[existingEntryIndex].name,
+          avatar:
+            viewerAvatar || existingDetails[existingEntryIndex].avatar || "",
+          email: viewerEmail || existingDetails[existingEntryIndex].email || "",
+        };
+      } else {
+        updatedDetails = [...existingDetails, newViewerEntry];
+      }
 
       await updateDoc(storyRef, {
         views: updatedViews,

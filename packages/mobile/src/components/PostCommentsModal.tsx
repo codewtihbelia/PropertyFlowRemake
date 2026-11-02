@@ -211,7 +211,7 @@ export const PostCommentsModal: React.FC<PostCommentsModalProps> = ({
               height: keyboardHeight > 0 ? "52%" : "82%",
               marginBottom:
                 Platform.OS === "android" && keyboardHeight > 0
-                  ? Math.max(keyboardHeight, 320) + Math.max(insets.bottom, 28)
+                  ? Math.max(keyboardHeight, 320) + Math.max(insets.bottom, 8)
                   : 0,
             },
           ]}

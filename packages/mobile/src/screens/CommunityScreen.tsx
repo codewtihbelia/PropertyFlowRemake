@@ -145,6 +145,57 @@ const CATEGORIES: CommunityCategory[] = [
   "bills_advice",
 ];
 
+const WARM_STORY_PROMPTS = [
+  {
+    id: "dinner",
+    title: "Dinner & Food",
+    prompt: "Cooked something good? Share tonight's table!",
+    icon: "restaurant-outline",
+    badge: "Food",
+    tint: "#F59E0B",
+    bgLight: "#FFFBEB",
+    bgDark: "#1E222D",
+    borderColorLight: "#FDE68A",
+    borderColorDark: "rgba(245, 158, 11, 0.25)",
+  },
+  {
+    id: "roomie",
+    title: "Roomie Life",
+    prompt: "Snap a cozy flat moment with your roommates!",
+    icon: "home-outline",
+    badge: "Home",
+    tint: "#3B82F6",
+    bgLight: "#EFF6FF",
+    bgDark: "#1E2536",
+    borderColorLight: "#BFDBFE",
+    borderColorDark: "rgba(59, 130, 246, 0.25)",
+  },
+  {
+    id: "questions",
+    title: "Ask Roommates",
+    prompt: "Need advice or borrowing tools? Ask in a story!",
+    icon: "help-circle-outline",
+    badge: "Q&A",
+    tint: "#10B981",
+    bgLight: "#ECFDF5",
+    bgDark: "#162B26",
+    borderColorLight: "#A7F3D0",
+    borderColorDark: "rgba(16, 185, 129, 0.25)",
+  },
+  {
+    id: "vibes",
+    title: "Daily Vibes",
+    prompt: "Listening to good tracks or out in Cebu?",
+    icon: "musical-notes-outline",
+    badge: "Music",
+    tint: "#8B5CF6",
+    bgLight: "#F5F3FF",
+    bgDark: "#231F38",
+    borderColorLight: "#DDD6FE",
+    borderColorDark: "rgba(139, 92, 246, 0.25)",
+  },
+];
+
 export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   onBack,
   currentUser = {},
@@ -2897,6 +2948,96 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                   </TouchableOpacity>
                 );
               })}
+
+              {/* Warm Community Story Prompts (prevents empty white space and inspires sharing) */}
+              {(displayStories.length === 0
+                ? WARM_STORY_PROMPTS
+                : displayStories.length < 3
+                  ? WARM_STORY_PROMPTS.slice(0, 2)
+                  : []
+              ).map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[
+                    styles.storyCard,
+                    styles.storyPromptCard,
+                    {
+                      backgroundColor: isDark ? p.bgDark : p.bgLight,
+                      borderColor: isDark
+                        ? p.borderColorDark
+                        : p.borderColorLight,
+                    },
+                  ]}
+                  onPress={() => setCreateStoryVisible(true)}
+                  activeOpacity={0.85}
+                >
+                  {/* Top Prompt Badge */}
+                  <View style={styles.promptBadgeRow}>
+                    <View
+                      style={[
+                        styles.promptBadgePill,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(255,255,255,0.08)"
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      <Ionicons name={p.icon as any} size={11} color={p.tint} />
+                      <Text
+                        style={[styles.promptBadgePillText, { color: p.tint }]}
+                      >
+                        {p.badge}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Middle Content */}
+                  <View style={styles.promptBodyWrap}>
+                    <View
+                      style={[
+                        styles.promptIconRound,
+                        {
+                          backgroundColor: isDark
+                            ? "rgba(255,255,255,0.06)"
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      <Ionicons name={p.icon as any} size={20} color={p.tint} />
+                    </View>
+                    <Text
+                      style={[
+                        styles.promptTitleText,
+                        { color: isDark ? "#F8FAFC" : "#0F172A" },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {p.title}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.promptDescText,
+                        { color: isDark ? "#94A3B8" : "#64748B" },
+                      ]}
+                      numberOfLines={3}
+                    >
+                      {p.prompt}
+                    </Text>
+                  </View>
+
+                  {/* Bottom Action Pill */}
+                  <View
+                    style={[
+                      styles.promptActionFooter,
+                      { backgroundColor: p.tint },
+                    ]}
+                  >
+                    <Ionicons name="add" size={12} color="#FFFFFF" />
+                    <Text style={styles.promptActionFooterText}>Share</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
 
@@ -3685,7 +3826,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                                   `Connection with ${friendCleanName}`,
                                   [
                                     {
-                                      text: "Remove Friend",
+                                      text: "Unfriend",
                                       style: "destructive",
                                       onPress: () => handleDeclineRequest(f.id),
                                     },
@@ -4646,6 +4787,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           viewingArchiveList.length > 0 ? viewingArchiveList : displayStories
         }
         initialIndex={selectedStoryIndex}
+        currentUser={currentUser}
         currentUserId={currentUid}
         onClose={() => {
           setStoryViewerVisible(false);
@@ -4656,6 +4798,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           setEditingStory(story);
         }}
         onDeleteStory={handleDeleteStory}
+        onOpenDirectChat={onOpenDirectChat}
       />
 
       <EditStoryModal
@@ -5368,6 +5511,77 @@ const styles = StyleSheet.create({
     position: "relative",
     justifyContent: "space-between",
     padding: 8,
+  },
+  storyPromptCard: {
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
+  promptBadgeRow: {
+    width: "100%",
+    alignItems: "flex-start",
+  },
+  promptBadgePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    gap: 3,
+  },
+  promptBadgePillText: {
+    fontSize: 9,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  promptBodyWrap: {
+    alignItems: "center",
+    width: "100%",
+    paddingHorizontal: 2,
+  },
+  promptIconRound: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  promptTitleText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  promptDescText: {
+    fontSize: 9,
+    fontWeight: "500",
+    lineHeight: 12,
+    textAlign: "center",
+  },
+  promptActionFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 3.5,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    gap: 2,
+    width: "92%",
+  },
+  promptActionFooterText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
   storyImageBg: {
     position: "absolute",

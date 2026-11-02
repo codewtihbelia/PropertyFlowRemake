@@ -564,7 +564,7 @@ export const UserProfileScreen: React.FC<UserProfileScreenProps> = ({
           [
             { text: "Cancel", style: "cancel" },
             {
-              text: "Remove Friend",
+              text: "Unfriend",
               style: "destructive",
               onPress: async () => {
                 if (user.friendshipId && onDeclineOrCancelRequest) {
@@ -3426,7 +3426,7 @@ const styles = StyleSheet.create({
   fbPostCard: {
     borderBottomWidth: 1,
     borderTopWidth: 1,
-    marginBottom: 14,
+    marginBottom: 0,
     margin: -15,
     marginTop: 0,
     padding: 8,

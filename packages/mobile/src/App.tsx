@@ -295,6 +295,9 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
   const [activeDirectChatUserId, setActiveDirectChatUserId] = useState<
     string | null
   >(null);
+  const [messagesOpenedFrom, setMessagesOpenedFrom] = useState<
+    "community" | "user_profile" | "none"
+  >("none");
   const [selectedExpense, setSelectedExpense] = useState<any>(null);
   const [attendanceHasUnsavedChanges, setAttendanceHasUnsavedChanges] =
     useState<boolean>(false);
@@ -1250,6 +1253,7 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         onOpenDirectChat={(targetUserId) => {
           setCommunityInitialTarget(null);
           setActiveDirectChatUserId(targetUserId);
+          setMessagesOpenedFrom("community");
           setOverlayScreen("messages");
         }}
         onProfileUpdated={handleProfileUpdated}
@@ -1318,8 +1322,13 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         }}
         onProfileUpdated={handleProfileUpdated}
         onOpenDirectChat={(targetUserId) => {
+          const fromScreen =
+            userProfileOverlayConfig.fromScreen === "community"
+              ? "community"
+              : "user_profile";
           setUserProfileOverlayConfig(null);
           setActiveDirectChatUserId(targetUserId);
+          setMessagesOpenedFrom(fromScreen);
           setOverlayScreen("messages");
         }}
         onNavigateToSplitzyProfile={() => {
@@ -1346,7 +1355,17 @@ function MainAppContent({ rootFlow, setRootFlow }: MainAppContentProps) {
         <MessagesScreen
           onBack={() => {
             setActiveDirectChatUserId(null);
-            setOverlayScreen("none");
+            const returnScreen =
+              messagesOpenedFrom === "community" ? "community" : "none";
+            setMessagesOpenedFrom("none");
+            setOverlayScreen(returnScreen);
+          }}
+          onCloseDirectChat={() => {
+            setActiveDirectChatUserId(null);
+            const returnScreen =
+              messagesOpenedFrom === "community" ? "community" : "none";
+            setMessagesOpenedFrom("none");
+            setOverlayScreen(returnScreen);
           }}
           householdId={householdId}
           initialTargetUserId={activeDirectChatUserId || undefined}

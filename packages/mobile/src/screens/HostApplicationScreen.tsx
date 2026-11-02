@@ -102,10 +102,40 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
       setLoading(false);
     }, 2000);
 
+    let allHouseholdsList: any[] = [];
+    let currentProfile: UserProfile | null = null;
+
+    const filterUserHouseholds = (list: any[], prof: UserProfile | null) => {
+      if (!currentUser?.uid) return [];
+      return (list || []).filter((hh: any) => {
+        const isHost = hh.hostId === currentUser.uid;
+        const isMemberId =
+          Array.isArray(hh.memberIds) && hh.memberIds.includes(currentUser.uid);
+        const isMemberObj =
+          Array.isArray(hh.members) &&
+          hh.members.some(
+            (m: any) =>
+              m.userId === currentUser.uid ||
+              m.id === currentUser.uid ||
+              m.uid === currentUser.uid,
+          );
+        const isProfileHh =
+          prof?.householdId &&
+          (hh.id === prof.householdId || hh.householdId === prof.householdId);
+        return Boolean(isHost || isMemberId || isMemberObj || isProfileHh);
+      });
+    };
+
     // Fetch user profile (to inspect existing role, do not force-fill text inputs)
     mobileDataService.getUserProfile(currentUser.uid).then((p) => {
       if (p) {
+        currentProfile = p as UserProfile;
         setProfile(p as UserProfile);
+        if (allHouseholdsList.length > 0) {
+          setHouseholds(
+            filterUserHouseholds(allHouseholdsList, currentProfile),
+          );
+        }
       }
     });
 
@@ -119,9 +149,10 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
       },
     );
 
-    // Listen to existing households in Firestore
+    // Listen to households in Firestore - ONLY show households where applicant actually belongs
     const unsubscribeHh = mobileDataService.listenToHouseholds((list) => {
-      setHouseholds(list || []);
+      allHouseholdsList = list || [];
+      setHouseholds(filterUserHouseholds(allHouseholdsList, currentProfile));
     });
 
     return () => {
@@ -284,7 +315,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: Math.max(100, insets.bottom + 48) },
+            { paddingBottom: Math.max(40, insets.bottom + 30) },
           ]}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets={true}
@@ -586,11 +617,11 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 </View>
 
                 <Text style={styles.heroTitle}>
-                  Become an Apartment{"\n"}Lead Host
+                  Become an Apartment{"\n"}Group Host
                 </Text>
                 <Text style={styles.heroSubtitle}>
-                  Manage roommate utility cycles, automate bill splits, and
-                  collect payments seamlessly.
+                  Manage group utility cycles, automate bill splits, and collect
+                  payments seamlessly.
                 </Text>
               </View>
 
@@ -838,205 +869,251 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                 </View>
 
                 {households.length === 0 ? (
-                  /* Empty State: No groups created yet */
-                  <View
-                    style={[
-                      styles.emptyGroupCard,
-                      isDark && {
-                        backgroundColor: colors.card,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
+                  /* New Applicant: Input to type proposed group name */
+                  <View>
                     <View
                       style={[
-                        styles.emptyIconCircle,
+                        styles.inputWithIcon,
                         isDark && {
-                          backgroundColor: "rgba(255, 255, 255, 0.08)",
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
                         },
                       ]}
                     >
                       <Feather
-                        name="users"
-                        size={20}
-                        color={isDark ? colors.textSecondary : "#64748B"}
+                        name="home"
+                        size={17}
+                        color={isDark ? colors.textMuted : "#94A3B8"}
+                        style={{ marginRight: 10 }}
                       />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
+                      <TextInput
                         style={[
-                          styles.emptyGroupTitle,
+                          styles.textInputStyle,
                           isDark && { color: colors.text },
                         ]}
-                      >
-                        No Roommate Groups Available
-                      </Text>
-                      <Text
-                        style={[
-                          styles.emptyGroupSubtitle,
-                          isDark && { color: colors.textSecondary },
-                        ]}
-                      >
-                        Non-hosts cannot create groups yet. You can submit
-                        without a group and create your household once approved
-                        as a Host.
-                      </Text>
+                        value={roommateGroupName}
+                        onChangeText={setRoommateGroupName}
+                        placeholder="e.g. Sunshine Residences Room 302"
+                        placeholderTextColor={
+                          isDark ? colors.textMuted : "#94A3B8"
+                        }
+                      />
                     </View>
+                    <Text
+                      style={[
+                        styles.emptyGroupSubtitle,
+                        { marginTop: 6, marginLeft: 2 },
+                        isDark && { color: colors.textSecondary },
+                      ]}
+                    >
+                      As a new applicant, enter the name of the apartment or
+                      household group you plan to manage once approved.
+                    </Text>
                   </View>
                 ) : (
-                  /* Horizontal Scrollable or Card list of existing groups */
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.groupCardsScroll}
-                  >
-                    {households.map((hh, idx) => {
-                      const hhId = hh.householdId || hh.id;
-                      const isSelected = selectedGroupId === hhId;
-                      const membersCount = Array.isArray(hh.members)
-                        ? hh.members.length
-                        : typeof hh.memberCount === "number"
-                          ? hh.memberCount
-                          : 1;
-                      const groupTitle =
-                        hh.householdName ||
-                        hh.apartmentName ||
-                        "Roommate Group";
-                      const subtitle = hh.unit
-                        ? `Unit ${hh.unit} • ${membersCount} Members`
-                        : `${membersCount} Members`;
+                  <View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.groupCardsScroll}
+                    >
+                      {households.map((hh, idx) => {
+                        const hhId = hh.householdId || hh.id;
+                        const isSelected = selectedGroupId === hhId;
+                        const membersCount = Array.isArray(hh.members)
+                          ? hh.members.length
+                          : typeof hh.memberCount === "number"
+                            ? hh.memberCount
+                            : 1;
+                        const groupTitle =
+                          hh.householdName ||
+                          hh.apartmentName ||
+                          "Roommate Group";
+                        const subtitle = hh.unit
+                          ? `Unit ${hh.unit} • ${membersCount} Members`
+                          : `${membersCount} Members`;
 
-                      return (
-                        <TouchableOpacity
-                          key={hhId}
-                          style={[
-                            styles.groupCard,
-                            isSelected
-                              ? styles.groupCardSelected
-                              : [
-                                  styles.groupCardUnselected,
-                                  isDark && {
-                                    backgroundColor: colors.card,
-                                    borderColor: colors.border,
-                                  },
-                                ],
-                          ]}
-                          onPress={() => handleSelectGroup(hh)}
-                          activeOpacity={0.88}
-                        >
-                          <View style={styles.groupCardTop}>
-                            <Text
-                              style={[
-                                styles.groupTagText,
-                                isSelected
-                                  ? styles.groupTagTextSelected
-                                  : [
-                                      styles.groupTagTextUnselected,
-                                      isDark && { color: colors.textMuted },
-                                    ],
-                              ]}
-                            >
-                              {idx === 0 ? "Primary Group" : "Available Group"}
-                            </Text>
-                            {isSelected ? (
-                              <View style={styles.checkCircleFilled}>
-                                <Ionicons
-                                  name="checkmark"
-                                  size={13}
-                                  color="#2563EB"
-                                />
-                              </View>
-                            ) : (
-                              <View
-                                style={[
-                                  styles.radioOutline,
-                                  isDark && { borderColor: colors.border },
-                                ]}
-                              />
-                            )}
-                          </View>
-
-                          <Text
+                        return (
+                          <TouchableOpacity
+                            key={hhId}
                             style={[
-                              styles.groupCardTitle,
+                              styles.groupCard,
                               isSelected
-                                ? styles.groupCardTitleSelected
+                                ? styles.groupCardSelected
                                 : [
-                                    styles.groupCardTitleUnselected,
-                                    isDark && { color: colors.text },
+                                    styles.groupCardUnselected,
+                                    isDark && {
+                                      backgroundColor: colors.card,
+                                      borderColor: colors.border,
+                                    },
                                   ],
                             ]}
-                            numberOfLines={1}
+                            onPress={() => handleSelectGroup(hh)}
+                            activeOpacity={0.88}
                           >
-                            {groupTitle}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.groupCardSub,
-                              isSelected
-                                ? styles.groupCardSubSelected
-                                : [
-                                    styles.groupCardSubUnselected,
-                                    isDark && { color: colors.textSecondary },
-                                  ],
-                            ]}
-                          >
-                            {subtitle}
-                          </Text>
-
-                          <View style={styles.avatarRow}>
-                            <View style={styles.avatarStack}>
-                              {[0, 1, 2]
-                                .slice(0, Math.min(membersCount, 3))
-                                .map((mIdx) => (
-                                  <View
-                                    key={mIdx}
-                                    style={[
-                                      styles.avatarCircle,
-                                      {
-                                        backgroundColor:
-                                          AVATAR_COLORS[
-                                            (idx + mIdx) % AVATAR_COLORS.length
-                                          ],
-                                        left: mIdx * 14,
-                                        zIndex: 3 - mIdx,
-                                      },
-                                      isDark && {
-                                        borderColor: isSelected
-                                          ? "#2563EB"
-                                          : colors.card,
-                                      },
-                                    ]}
-                                  >
-                                    <Text style={styles.avatarInitials}>
-                                      {groupTitle.substring(0, 1).toUpperCase()}
-                                      {mIdx + 1}
-                                    </Text>
-                                  </View>
-                                ))}
-                            </View>
-                            {membersCount > 3 && (
+                            <View style={styles.groupCardTop}>
                               <Text
                                 style={[
-                                  styles.moreCountText,
+                                  styles.groupTagText,
                                   isSelected
-                                    ? styles.moreCountTextSelected
+                                    ? styles.groupTagTextSelected
                                     : [
-                                        styles.moreCountTextUnselected,
-                                        isDark && {
-                                          color: colors.textSecondary,
-                                        },
+                                        styles.groupTagTextUnselected,
+                                        isDark && { color: colors.textMuted },
                                       ],
                                 ]}
                               >
-                                +{membersCount - 3} more
+                                {idx === 0
+                                  ? "Primary Group"
+                                  : "Available Group"}
                               </Text>
-                            )}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
+                              {isSelected ? (
+                                <View style={styles.checkCircleFilled}>
+                                  <Ionicons
+                                    name="checkmark"
+                                    size={13}
+                                    color="#2563EB"
+                                  />
+                                </View>
+                              ) : (
+                                <View
+                                  style={[
+                                    styles.radioOutline,
+                                    isDark && { borderColor: colors.border },
+                                  ]}
+                                />
+                              )}
+                            </View>
+
+                            <Text
+                              style={[
+                                styles.groupCardTitle,
+                                isSelected
+                                  ? styles.groupCardTitleSelected
+                                  : [
+                                      styles.groupCardTitleUnselected,
+                                      isDark && { color: colors.text },
+                                    ],
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {groupTitle}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.groupCardSub,
+                                isSelected
+                                  ? styles.groupCardSubSelected
+                                  : [
+                                      styles.groupCardSubUnselected,
+                                      isDark && { color: colors.textSecondary },
+                                    ],
+                              ]}
+                            >
+                              {subtitle}
+                            </Text>
+
+                            <View style={styles.avatarRow}>
+                              <View style={styles.avatarStack}>
+                                {[0, 1, 2]
+                                  .slice(0, Math.min(membersCount, 3))
+                                  .map((mIdx) => (
+                                    <View
+                                      key={mIdx}
+                                      style={[
+                                        styles.avatarCircle,
+                                        {
+                                          backgroundColor:
+                                            AVATAR_COLORS[
+                                              (idx + mIdx) %
+                                                AVATAR_COLORS.length
+                                            ],
+                                          left: mIdx * 14,
+                                          zIndex: 3 - mIdx,
+                                        },
+                                        isDark && {
+                                          borderColor: isSelected
+                                            ? "#2563EB"
+                                            : colors.card,
+                                        },
+                                      ]}
+                                    >
+                                      <Text style={styles.avatarInitials}>
+                                        {groupTitle
+                                          .substring(0, 1)
+                                          .toUpperCase()}
+                                        {mIdx + 1}
+                                      </Text>
+                                    </View>
+                                  ))}
+                              </View>
+                              {membersCount > 3 && (
+                                <Text
+                                  style={[
+                                    styles.moreCountText,
+                                    isSelected
+                                      ? styles.moreCountTextSelected
+                                      : [
+                                          styles.moreCountTextUnselected,
+                                          isDark && {
+                                            color: colors.textSecondary,
+                                          },
+                                        ],
+                                  ]}
+                                >
+                                  +{membersCount - 3} more
+                                </Text>
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    <View style={{ marginTop: 10 }}>
+                      <Text
+                        style={[
+                          styles.emptyGroupSubtitle,
+                          { marginBottom: 6 },
+                          isDark && { color: colors.textSecondary },
+                        ]}
+                      >
+                        Or propose a new group name:
+                      </Text>
+                      <View
+                        style={[
+                          styles.inputWithIcon,
+                          isDark && {
+                            backgroundColor: colors.card,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="home"
+                          size={17}
+                          color={isDark ? colors.textMuted : "#94A3B8"}
+                          style={{ marginRight: 10 }}
+                        />
+                        <TextInput
+                          style={[
+                            styles.textInputStyle,
+                            isDark && { color: colors.text },
+                          ]}
+                          value={roommateGroupName}
+                          onChangeText={(txt) => {
+                            setRoommateGroupName(txt);
+                            if (txt && selectedGroupId) {
+                              setSelectedGroupId("");
+                            }
+                          }}
+                          placeholder="e.g. Sunshine Residences Room 302"
+                          placeholderTextColor={
+                            isDark ? colors.textMuted : "#94A3B8"
+                          }
+                        />
+                      </View>
+                    </View>
+                  </View>
                 )}
               </View>
 
@@ -1106,6 +1183,7 @@ export const HostApplicationScreen: React.FC<HostApplicationScreenProps> = ({
                       isDark && { color: colors.text },
                       !managementType && {
                         color: isDark ? colors.textMuted : "#94A3B8",
+                        paddingVertical: 12,
                       },
                     ]}
                     numberOfLines={1}
@@ -1784,13 +1862,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 14,
+    borderRadius: 100,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 3,
+    paddingVertical: 4,
   },
   textInputStyle: {
     flex: 1,

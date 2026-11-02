@@ -17,6 +17,8 @@ import {
 } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { doc, getDoc } from "firebase/firestore";
+import { db, auth } from "../firebase/config";
 import {
   communityService,
   CommunityStory,
@@ -108,21 +110,34 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
 
   const currentStory = stories[currentIndex] || stories[0] || null;
 
+  // Enriched viewer profiles resolved from Firestore users collection
+  const [enrichedProfiles, setEnrichedProfiles] = useState<
+    Record<string, { name: string; avatar?: string }>
+  >({});
+
   // Record this member viewing the story automatically
   useEffect(() => {
     if (!visible || !currentStory?.id || !resolvedUserId) return;
     const authorName =
-      currentUser?.displayName || currentUser?.name || undefined;
+      currentUser?.displayName ||
+      currentUser?.name ||
+      auth.currentUser?.displayName ||
+      undefined;
     const authorAvatar =
-      currentUser?.photoURL || currentUser?.profilePicture || undefined;
+      currentUser?.photoURL ||
+      currentUser?.profilePicture ||
+      auth.currentUser?.photoURL ||
+      undefined;
+    const authorEmail =
+      currentUser?.email || auth.currentUser?.email || undefined;
 
     communityService.recordStoryView(currentStory.id, {
       uid: resolvedUserId,
       name: authorName,
       avatar: authorAvatar,
-      email: currentUser?.email,
+      email: authorEmail,
     });
-  }, [visible, currentStory?.id, resolvedUserId]);
+  }, [visible, currentStory?.id, resolvedUserId, currentUser]);
 
   // Parse rich viewer details (with fallback for legacy view UIDs)
   // MUST be called unconditionally before early return to obey React Rules of Hooks
@@ -155,6 +170,63 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
 
     return list;
   }, [currentStory, resolvedUserId]);
+
+  // Asynchronously resolve real identity and avatar from Firestore users collection for any viewers with placeholder/generic names
+  useEffect(() => {
+    if (!visible || !showViewersModal || !currentStory) return;
+
+    const uidsToResolve = displayViewers
+      .filter((v) => {
+        const cached = enrichedProfiles[v.uid];
+        if (cached) return false;
+        return (
+          !v.name ||
+          v.name === "Splitzy Member" ||
+          v.name === "Community Member" ||
+          v.name === "You" ||
+          !v.avatar
+        );
+      })
+      .map((v) => v.uid);
+
+    if (uidsToResolve.length === 0) return;
+
+    let isMounted = true;
+    (async () => {
+      const updates: Record<string, { name: string; avatar?: string }> = {};
+      for (const rawId of uidsToResolve) {
+        try {
+          const cleanId = rawId.replace(/^mem_/, "").trim();
+          const uSnap = await getDoc(doc(db, "users", cleanId));
+          if (uSnap.exists()) {
+            const data = uSnap.data();
+            const realName =
+              data.displayName ||
+              data.fullName ||
+              data.name ||
+              (data.email ? data.email.split("@")[0] : "");
+            const realAvatar =
+              data.photoURL || data.profilePicture || data.avatar || "";
+            if (realName || realAvatar) {
+              updates[rawId] = {
+                name: realName || "Splitzy Member",
+                avatar: realAvatar,
+              };
+            }
+          }
+        } catch (e) {
+          console.log("Error enriching viewer profile:", e);
+        }
+      }
+      if (isMounted && Object.keys(updates).length > 0) {
+        setEnrichedProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [visible, showViewersModal, currentStory, displayViewers]);
 
   if (!visible || stories.length === 0 || !currentStory) return null;
 
@@ -634,19 +706,46 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
                       currentStory.likes?.includes(`mem_${viewer.uid}`),
                     );
 
+                    const enriched = enrichedProfiles[viewer.uid];
+                    const rawName =
+                      enriched?.name ||
+                      (isSelfViewer
+                        ? currentUser?.displayName ||
+                          currentUser?.name ||
+                          auth.currentUser?.displayName ||
+                          viewer.name
+                        : viewer.name);
+                    const displayName =
+                      rawName &&
+                      rawName !== "Splitzy Member" &&
+                      rawName !== "Community Member"
+                        ? rawName
+                        : isSelfViewer
+                          ? "You"
+                          : "Roommate";
+
+                    const displayAvatar =
+                      enriched?.avatar ||
+                      (isSelfViewer
+                        ? currentUser?.photoURL ||
+                          currentUser?.profilePicture ||
+                          auth.currentUser?.photoURL ||
+                          viewer.avatar
+                        : viewer.avatar);
+
                     return (
                       <View key={viewer.uid || vIdx} style={styles.viewerRow}>
                         {/* Avatar */}
                         <View style={styles.viewerAvatarWrap}>
-                          {viewer.avatar ? (
+                          {displayAvatar ? (
                             <Image
-                              source={{ uri: viewer.avatar }}
+                              source={{ uri: displayAvatar }}
                               style={styles.viewerAvatarImg}
                             />
                           ) : (
                             <View style={styles.viewerAvatarPlaceholder}>
                               <Text style={styles.viewerAvatarInitial}>
-                                {viewer.name.charAt(0).toUpperCase()}
+                                {(displayName || "U").charAt(0).toUpperCase()}
                               </Text>
                             </View>
                           )}
@@ -666,8 +765,8 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
                           <View style={styles.viewerNameRow}>
                             <Text style={styles.viewerName} numberOfLines={1}>
                               {isSelfViewer
-                                ? `${viewer.name} (You)`
-                                : viewer.name}
+                                ? `${displayName} (You)`
+                                : displayName}
                             </Text>
                             {isLikedByViewer && (
                               <Text style={styles.viewerLikedTag}>Liked</Text>
@@ -688,8 +787,8 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
                               onClose();
                               onOpenDirectChat(
                                 viewer.uid,
-                                viewer.name,
-                                viewer.avatar,
+                                displayName,
+                                displayAvatar,
                               );
                             }}
                             style={styles.viewerChatBtn}
